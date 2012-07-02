@@ -1,0 +1,4 @@
+ebin
+*.beam
+*.sw*
+.DS_Store
