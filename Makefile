@@ -3,18 +3,18 @@
 all: deps compile
 
 compile:
-	@./rebar compile
+	@rebar compile
 
 deps:
-	@./rebar get-deps
+	@rebar get-deps
 
 doc:
 	@rebar doc	
 	
 clean: 
-	@./rebar clean
+	@rebar clean
 	@rm -f doc/*.html doc/*.css doc/edoc-info doc/*.png
 
 distclean: clean
-	@./rebar delete-deps
+	@rebar delete-deps
 	@rm -rf deps
