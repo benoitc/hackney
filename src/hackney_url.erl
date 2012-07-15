@@ -17,16 +17,23 @@ parse_url(<<"http://", Rest/binary>>) ->
                                          scheme=http});
 parse_url(<<"https://", Rest/binary>>) ->
     parse_url(Rest, #hackney_url{transport=hackney_ssl_transport,
-                                         scheme=https});
+                                 scheme=https});
 parse_url(URL) ->
     parse_url(URL, #hackney_url{transport=hackney_tcp_transport,
                                         scheme=http}).
 parse_url(URL, S) ->
     case binary:split(URL, <<"/">>) of
         [Addr] ->
-            parse_addr(Addr, S#hackney_url{path = <<"/">> });
+            Path = <<"/">>,
+            parse_addr(Addr, S#hackney_url{raw_path = Path,
+                                           path = Path });
         [Addr, Path] ->
-            parse_addr(Addr, S#hackney_url{path = <<"/", Path/binary>>})
+            RawPath =  <<"/", Path/binary>>,
+            {Path, Query, Fragment} = parse_path(Path),
+            parse_addr(Addr, S#hackney_url{raw_path = RawPath,
+                                           path = Path,
+                                           qs = Query,
+                                           fragment = Fragment})
     end.
 
 %% @private
@@ -70,6 +77,25 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
         [Host, Port] ->
             S#hackney_url{host=binary_to_list(Host),
                           port=list_to_integer(binary_to_list(Port))}
+    end.
+
+
+parse_path(Path) ->
+    case binary:split(Path, <<"?">>) of
+        [_Path] ->
+            {Path1, Fragment} = parse_fragment(Path),
+            {Path1, <<>>, Fragment};
+        [Path1, Query] ->
+            {Query1, Fragment} = parse_fragment(Query),
+            {Path1, Query1, Fragment}
+    end.
+
+parse_fragment(S) ->
+    case binary:split(S, <<"#">>) of
+        [_S] ->
+            {S, <<>>};
+        [S1, F] ->
+            {S1, F}
     end.
 
 
