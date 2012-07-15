@@ -3,8 +3,8 @@
 
 {application, hackney,
  [
-  {description, ""},
-  {vsn, "1"},
+  {description, "simple HTTP client"},
+  {vsn, "0.1.0"},
   {registered, []},
   {applications, [
                   kernel,

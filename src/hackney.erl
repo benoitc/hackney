@@ -67,25 +67,25 @@ set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
 
 
 %% @doc make a request
--spec request(binary())
+-spec request(binary()|list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(URL) ->
     request(get, URL).
 
 %% @doc make a request
--spec request(term(), binary())
+-spec request(term(), binary()|list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, URL) ->
     request(Method, URL, [], <<>>, []).
 
 %% @doc make a request
--spec request(term(), binary(), list())
+-spec request(term(), binary()|list(), list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, URL, Headers) ->
     request(Method, URL, Headers, <<>>, []).
 
 %% @doc make a request
--spec request(term(), binary(), list(), term())
+-spec request(term(), binary()|list(), list(), term())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, URL, Headers, Body) ->
     request(Method, URL, Headers, Body).
@@ -97,12 +97,13 @@ request(Method, URL, Headers, Body) ->
 %% <li><em>Method</em>: method used for the request (get, post,
 %% ...)</li>
 %% <li><em>Url</em>: full url of the request</li>
-%% <li><em>Headers</em></li> Proplists </li>
+%% <li><em>Headers</em> Proplists </li>
 %% <li><em>Body</em>:
 %%      <ul>
 %%      <li>{form, [{K, V}, ...]}: send a form</li>
-%%      <li>{file, <<"/path/to/file">>}: to send a file</li>
+%%      <li>{file, "/path/to/file"}: to send a file</li>
 %%      <li>Bin: binary or iolist</li>
+%%      </ul>
 %%  </li>
 %%  </ul>
 -spec request(term(), binary(), list(), term(), list())

@@ -1,25 +1,11 @@
-%%==============================================================================
-%% Copyright 2012 Benoît Chesneau
-%%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
-%%
-%% http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
-%%==============================================================================
 
 
-@copyright 2012 Benoît Chesneau.
-@version 0.1
-@title hackney - simple HTTP client in Erlang
+#hackney - simple HTTP client in Erlang#
 
-@doc
+
+Copyright (c) 2012 Benoît Chesneau.
+
+__Version:__ 0.1
 
 # hackney
 
@@ -28,7 +14,7 @@
 Main features:
 
 - no message passing: response is directly streamed to the current
-  process and a state is kept in a `#client{}' record.
+  process and a state is kept in a `#client{}` record.
 - Keepalive handling
 - basic authentication
 - stream binary bodies
@@ -36,11 +22,7 @@ Main features:
 - Chunked encoding support
 - Used parse transform for shorcut methods calls:
 
-ex:
-
-```
-hackney:get("https://friendpaste.com")
-'''
+ex:<pre>hackney:get("https://friendpaste.com")</pre>
 
 hackney is based on some code from
 [cowboy](http://github.com/extend/cownboy) for the HTTP parsing. This is
@@ -50,12 +32,7 @@ informations on what still need to be done.
 
 ## Examples
 
-
-Quick usage example without pool:
-
-
-```
-application:start(crypto),
+Quick usage example without pool:<pre>application:start(crypto),
 application:start(public_key),
 application:start(ssl),
 
@@ -72,8 +49,6 @@ io:format("body: ~p~n~n", [Body]),
 {ok, Body1, Client3} = hackney:body(Client2),
 
 io:format("body: ~p~n~n", [Body1]),
-
-
 ReqBody = << "{
      \"id\": \"some_paste_id\",
      \"rev\": \"some_revision_id\",
@@ -96,16 +71,27 @@ ReqBody1 = {file, "./examples/test.json"},
 {ok, Body3, Client7} = hackney:body(Client6),
 io:format("body: ~p~n~n", [Body3]),
 
-hackney:close(Client7).
-'''
+hackney:close(Client7).</pre>
 
-See the [example][http://github.com/benoitc/hackney/blob/master/examples/test.ebin).
-
-
-Contribute
+See the [example][Contribute
 ----------
-For issues, comments or feedback please [create an issue!] [1]
+For issues, comments or feedback please [create an issue!](http://github.com/benoitc/hackney/blob/master/examples/test.ebin).) [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"
 
-[1]: http://github.com/benoitc/hackney/issues "hackney issues"
 
-@end
+##Modules##
+
+
+<table width="100%" border="0" summary="list of modules">
+<tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
+<tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="hackney_form.md" class="module">hackney_form</a></td></tr>
+<tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
+<tr><td><a href="hackney_response.md" class="module">hackney_response</a></td></tr>
+<tr><td><a href="hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
+<tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
+<tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="hackney_transform.md" class="module">hackney_transform</a></td></tr>
+<tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
+<tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
+
