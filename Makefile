@@ -1,20 +1,21 @@
-.PHONY: deps doc
+REBAR?=./rebar
 
-all: deps compile
-
-compile:
-	@rebar compile
-
-deps:
-	@rebar get-deps
+all: build
 
 doc:
-	@rebar doc	
-	
-clean: 
-	@rebar clean
-	@rm -f doc/*.html doc/*.css doc/edoc-info doc/*.png
+	$(REBAR) doc
+
+clean:
+	$(REBAR) clean
 
 distclean: clean
-	@rebar delete-deps
 	@rm -rf deps
+
+build: deps
+	$(REBAR) compile
+
+deps:
+	$(REBAR) get-deps
+
+
+.PHONY: doc deps
