@@ -6,16 +6,16 @@
          stream_status/1,
          stream_headers/1, stream_header/1,
          stream_body/1,
-         stream_multipart/1, multipart_skip/1,
-         body/1, body/2, skip_body/1]).
+         body/1, body/2, skip_body/1,
+         close/1]).
 
 %% @doc init response
 init(Client) ->
      case stream_status(Client) of
-        {ok, Status, Reason, Client1} ->
+        {ok, Status, _Reason, Client1} ->
             case stream_headers(Client1) of
                 {ok, Headers, Client2} ->
-                    {ok, Status, Reason, Headers, Client2};
+                    {ok, Status, Headers, Client2};
                 Error ->
                     Error
             end;
@@ -84,7 +84,6 @@ stream_header(#client{buffer=Buf}=Client, Acc) ->
                     NewBuf = << Buf/binary, Data/binary >>,
                     stream_header(Client#client{buffer=NewBuf}, Acc);
                 {error, Reason} ->
-                    io:format("ici", []),
                     {error, Reason, Acc}
             end
     end.
@@ -98,6 +97,10 @@ parse_header(Line, Client) ->
             Client#client{clen=CLen};
         <<"transfer-encoding">> ->
             Client#client{te=hackney_util:to_lower(Value)};
+        <<"connection">> ->
+            Client#client{connection=hackney_util:to_lower(Value)};
+        <<"content-type">> ->
+            Client#client{ctype=hackney_util:to_lower(Value)};
         _ ->
             Client
     end,
@@ -159,65 +162,6 @@ skip_body(Client) ->
 	end.
 
 
-%% @doc Return data from the multipart parser.
-%%
-%% Use this function for multipart streaming. For each part in the request,
-%% this function returns <em>{headers, Headers}</em> followed by a sequence of
-%% <em>{body, Data}</em> tuples and finally <em>end_of_part</em>. When there
-%% is no part to parse anymore, <em>eof</em> is returned.
-%%
-%% If the request Content-Type is not a multipart one, <em>{error, badarg}</em>
-%% is returned.
--spec stream_multipart(#client{})
-		-> {{headers, cowboy_http:headers()}
-				| {body, binary()} | end_of_part | eof,
-			#client{}}.
-stream_multipart(Client=#client{body_state=waiting}) ->
-	{{<<"multipart">>, _SubType, Params}, Client2} =
-		parse_header('Content-Type', Client),
-	{_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
-	{Length, Client3} = parse_header('Content-Length', Client2),
-	stream_multipart(Client3, Length, {more, cowboy_multipart:parser(Boundary)});
-stream_multipart(Client=#client{body_state={multipart, Length, Cont}}) ->
-	stream_multipart(Client, Length, Cont());
-stream_multipart(Client=#client{body_state=done}) ->
-	{eof, Client}.
-
-stream_multipart(Client, Length, {headers, Headers, Cont}) ->
-	{{headers, Headers}, Client#client{body_state={multipart, Length, Cont}}};
-stream_multipart(Client, Length, {body, Data, Cont}) ->
-	{{body, Data}, Client#client{body_state={multipart, Length, Cont}}};
-stream_multipart(Client, Length, {end_of_part, Cont}) ->
-	{end_of_part, Client#client{body_state={multipart, Length, Cont}}};
-stream_multipart(Client, 0, eof) ->
-	{eof, Client#client{body_state=done}};
-stream_multipart(Client=#client{socket=Socket, transport=Transport},
-		Length, eof) ->
-	%% We just want to skip so no need to stream data here.
-	{ok, _Data} = Transport:recv(Socket, Length, 5000),
-	{eof, Client#client{body_state=done}};
-stream_multipart(Client, Length, {more, Parser}) when Length > 0 ->
-	case stream_body(Client) of
-		{ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
-			stream_multipart(Client2#client{buffer=Buffer}, 0, Parser(Data));
-		{ok, Data, Client2} ->
-			stream_multipart(Client2, Length - byte_size(Data), Parser(Data))
-	end.
-
-%% @doc Skip a part returned by the multipart parser.
-%%
-%% This function repeatedly calls <em>stream_multipart/1</em> until
-%% <em>end_of_part</em> or <em>eof</em> is parsed.
-multipart_skip(Client) ->
-	case stream_multipart(Client) of
-		{end_of_part, Client2} -> {ok, Client2};
-		{eof, Client2} -> {ok, Client2};
-		{_Other, Client2} -> multipart_skip(Client2)
-	end.
-
-
-
-
 -spec transfer_decode(binary(), #client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
 transfer_decode(Data, Client=#client{
@@ -233,15 +177,28 @@ transfer_decode(Data, Client=#client{
 		%% @todo {header(s) for chunked
 		more ->
 			stream_body_recv(Client#client{buffer=Data});
-		{done, _Length, Rest} ->
-			{done, Client#client{body_state=done, buffer=Rest}};
-		{done, Data2, _Length, Rest} ->
-			content_decode(ContentDecode, Data2,
-                           Client#client{body_state=done,
-                                         buffer=Rest});
+		{done, Length, Rest} ->
+            Client2 = transfer_decode_done(Length, Rest, Client),
+			{done, Client2};
+		{done, Data2, Length, Rest} ->
+            Client2 = transfer_decode_done(Length, Rest, Client),
+			content_decode(ContentDecode, Data2, Client2);
 		{error, Reason} ->
 			{error, Reason}
 	end.
+
+
+transfer_decode_done(_Length, Rest, Client0) ->
+    Client = Client0#client{response_state=done,
+                            body_state=done,
+                            buffer=Rest},
+
+    case maybe_close(Client) of
+        true ->
+            close(Client);
+        false ->
+            Client
+    end.
 
 %% @todo Probably needs a Rest.
 -spec content_decode(fun(), binary(), #client{})
@@ -251,6 +208,7 @@ content_decode(ContentDecode, Data, Client) ->
 		{ok, Data2} -> {ok, Data2, Client};
 		{error, Reason} -> {error, Reason}
 	end.
+
 
 
 
@@ -266,6 +224,14 @@ read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 			{error, Reason}
 	end.
 
+
+maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
+    case Connection of
+        <<"close">> -> true;
+        <<"keepalive">> -> false;
+        _ when Min =< 0 orelse Maj < 1 -> true;
+        _ -> false
+    end.
 
 
 %% @doc Decode a stream of chunks.
@@ -316,4 +282,6 @@ recv(#client{transport=Transport, socket=Skt}) ->
     Transport:recv(Skt, 0).
 
 
-
+close(#client{transport=Transport, socket=Skt}=Client) ->
+    Transport:close(Skt),
+    Client#client{state = closed, socket=nil}.

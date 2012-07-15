@@ -1,0 +1,51 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -pa ./ebin -pa ./deps/mimetypes/ebin
+
+-module(test).
+
+
+
+main(_) ->
+    application:start(crypto),
+    application:start(public_key),
+    application:start(ssl),
+
+    {ok, _, _, Client} = hackney:request(<<"https://friendpaste.com">>),
+    {ok, Body, Client1} = hackney:body(Client),
+
+    io:format("body: ~p~n~n", [Body]),
+
+    {ok, _, _, Client2} = hackney:send_request(Client1, {get,
+                                                         <<"/_all_languages">>,
+                                                         [],
+                                                         <<>>}),
+
+    {ok, Body1, Client3} = hackney:body(Client2),
+
+    io:format("body: ~p~n~n", [Body1]),
+
+
+    ReqBody = << "{
+         \"id\": \"some_paste_id\",
+         \"rev\": \"some_revision_id\",
+         \"changeset\": \"changeset in unidiff format\"
+    }" >>,
+
+    ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
+
+    {ok, _, _, Client4} = hackney:send_request(Client3, {post, <<"/">>,
+                                                         ReqHeaders,
+                                                         ReqBody}),
+    {ok, Body2, Client5} = hackney:body(Client4),
+    io:format("body: ~p~n~n", [Body2]),
+
+    ReqBody1 = {file, "./examples/test.json"},
+
+    {ok, _, _, Client6} = hackney:send_request(Client5, {post, <<"/">>,
+                                                         ReqHeaders,
+                                                         ReqBody1}),
+    {ok, Body3, Client7} = hackney:body(Client6),
+    io:format("body: ~p~n~n", [Body3]),
+
+    hackney:close(Client7).

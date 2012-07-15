@@ -1,0 +1,5 @@
+{
+ "id": "some_paste_id",
+ "rev": "some_revision_id",
+ "changeset": "changeset in unidiff format"
+}

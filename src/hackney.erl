@@ -1,35 +1,48 @@
 -module(hackney).
 
--export([connect/3,
-         connect/4,
+-export([connect/1, connect/3, connect/4,
          close/1,
-         setopts/2,
-         request/2, request/3, request/4, request/6]).
+         set_sockopts/2,
+         request/1, request/2, request/3, request/4, request/5,
+         send_request/2,
+         stream_body/1,
+         body/1, body/2, skip_body/1]).
 
 -include("hackney.hrl").
 
--define(USER_AGENT, <<"hackney/0.1">>).
+
+connect(#client{state=connected}=Client) ->
+    Client;
+
+connect(#client{state=closed}=Client) ->
+    #client{transport=Transport, host=Host, port=Port} = Client,
+    connect(Transport, Host, Port, Client).
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, #client{options=[]}).
 
+
 connect(_Transport, _Host, _Port, #client{state=connected}=Client) ->
     {ok, Client};
-connect(Transport, Host, Port, #client{options=Options0,
+connect(Transport, Host, Port, #client{options=Options,
                                        socket=Skt0}=Client)
         when is_list(Host), is_integer(Port), Skt0 =:= nil ->
 
+    ConnectOpts0 = proplists:get_value(connect_options, Options, []),
+
     %% handle ipv6
-    Options = case hackney_util:is_ipv6(Host) of
+    ConnectOpts = case hackney_util:is_ipv6(Host) of
         true ->
-            [inet6 | Options0];
+            [inet6 | ConnectOpts0];
         false ->
-            Options0
+            ConnectOpts0
     end,
 
-    case Transport:connect(Host, Port, Options) of
+    case Transport:connect(Host, Port, ConnectOpts) of
         {ok, Skt} ->
             {ok, Client#client{transport=Transport,
+                               host=Host,
+                               port=Port,
                                socket=Skt,
                                state = connected}};
         Error ->
@@ -38,99 +51,116 @@ connect(Transport, Host, Port, #client{options=Options0,
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     connect(Transport, Host, Port, #client{options=Options}).
 
-close(#client{transport=Transport, socket=Skt}=Client) ->
-    Transport:close(Skt),
-    Client#client{state = closed, socket=nil}.
+close(Client) ->
+    hackney_response:close(Client).
 
-setopts(#client{transport=Transport, socket=Skt}, Options) ->
+set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
     Transport:setopts(Skt, Options).
 
+
+%% @doc make a request
+-spec request(binary())
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
+request(URL) ->
+    request(get, URL).
+
+%% @doc make a request
+-spec request(term(), binary())
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, URL) ->
-    request(Method, URL, [], <<>>, [], #client{}).
+    request(Method, URL, [], <<>>, []).
 
-request(Method, URL, Client) ->
-    request(Method, URL, [], <<>>, [], Client).
+%% @doc make a request
+-spec request(term(), binary(), list())
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
+request(Method, URL, Headers) ->
+    request(Method, URL, Headers, <<>>, []).
 
-request(Method, URL, Headers, Client) ->
-    request(Method, URL, Headers, <<>>, [], Client).
+%% @doc make a request
+-spec request(term(), binary(), list(), term())
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
+request(Method, URL, Headers, Body) ->
+    request(Method, URL, Headers, Body).
 
-request(Method, #hackney_url{}=URL, Headers, Body, Options, Client) ->
-    io:format("method ~p~n, url:~p~n", [Method, URL]),
-
+%% @doc make a request
+%%
+%% Args:
+%% <ul>
+%% <li><em>Method</em>: method used for the request (get, post,
+%% ...)</li>
+%% <li><em>Url</em>: full url of the request</li>
+%% <li><em>Headers</em></li> Proplists </li>
+%% <li><em>Body</em>:
+%%      <ul>
+%%      <li>{form, [{K, V}, ...]}: send a form</li>
+%%      <li>{file, <<"/path/to/file">>}: to send a file</li>
+%%      <li>Bin: binary or iolist</li>
+%%  </li>
+%%  </ul>
+-spec request(term(), binary(), list(), term(), list())
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
+request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
     #hackney_url{transport=Transport,
                  host = Host,
-                 port = Port} = URL,
+                 port = Port,
+                 user = User,
+                 password = Password,
+                 raw_path = Path} = URL,
 
-    case connect(Transport, Host, Port, Client) of
-        {ok, Client1} ->
-            perform(Method, URL, Headers, Body, Options, Client1);
+    Options = case User of
+        nil ->
+            Options0;
+        _ ->
+            lists:keystore(basic_auth, 1, Options0,
+                             {basic_auth, {User, Password}})
+    end,
+
+    case connect(Transport, Host, Port, Options) of
+        {ok, Client} ->
+            send_request(Client, {Method, Path, Headers, Body});
         Error ->
             Error
     end;
-request(Method, URL, Headers, Body, Options, Client)
+request(Method, URL, Headers, Body, Options)
         when is_binary(URL) orelse is_list(URL) ->
-    request(Method, hackney_url:parse_url(URL), Headers, Body, Options,
-            Client).
+    request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
 
 
+send_request(#client{response_state=done}=Client0 ,
+             {Method, Path, Headers, Body}) ->
+    Client = Client0#client{response_state=on_status,
+                           body_state=waiting},
+    send_request(Client, {Method, Path, Headers, Body});
 
-%% @private
+send_request(Client, {Method, Path, Headers, Body}) ->
 
-perform(Method0, URL, Headers0, Body0, _Options, Client) ->
-    #hackney_url{host =Host,
-                 path = Path,
-                 user = User,
-                 password = Pwd} = URL,
-
-    Method = hackney_util:to_upper(hackney_util:to_binary(Method0)),
-
-    %% make header dict
-    DefaultHeaders0 = [{<<"Host">>, list_to_binary(Host)},
-                      {<<"User-Agent">>, ?USER_AGENT}],
-
-    %% basic authorization handling
-    DefaultHeaders = case User of
-        nil ->
-            DefaultHeaders0;
+    case {Client#client.response_state, Client#client.body_state} of
+        {on_status, waiting} ->
+            hackney_request:perform(connect(Client),
+                                    {Method, Path, Headers, Body});
         _ ->
-            Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
-            DefaultHeaders0 ++ [{<<"Authorization">>, Credentials}]
-    end,
-
-    HeadersDict = hackney_headers:update(hackney_headers:new(DefaultHeaders),
-                                         Headers0),
-    %% build headers with the body.
-    {HeaderDict1, Body} = case Body0 of
-        <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-            hackney_request:handle_body(HeadersDict, Body0);
-        <<>> ->
-            {HeadersDict, Body0};
-        _ ->
-            hackney_request:handle_body(HeadersDict, Body0)
-    end,
-
-    HeadersLines = hackney_headers:fold(fun({K, V}, Lines) ->
-                    V1 = hackney_util:to_binary(V),
-                    [ << K/binary, ": ", V1/binary, "\r\n" >> | Lines]
-            end, [], HeaderDict1),
-
-    HeadersData = iolist_to_binary([
-                << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
-                HeadersLines,
-                <<"\r\n">>]),
-
-    %% send headers data
-    case hackney_request:send(Client, HeadersData) of
-        ok ->
-            %% send body
-            Result = hackney_request:stream_body(Body, Client),
-
-            case Result of
-                {error, _Reason}=E ->
-                    E;
-                _ ->
-                    hackney_response:init(Client)
-            end;
-        Error ->
-            Error
+            {error, bad_response_state}
     end.
+
+
+%% @doc Stream the response body.
+stream_body(Client) ->
+    hackney_response:stream_body(Client).
+
+%% @doc Return the full body sent with the response.
+-spec body(#client{}) -> {ok, binary(), #client{}} | {error, atom()}.
+body(Client) ->
+    hackney_response:body(Client).
+
+%% @doc Return the full body sent with the response as long as the body
+%% length doesn't go over MaxLength.
+-spec body(non_neg_integer() | infinity, #client{})
+	-> {ok, binary(), #client{}} | {error, atom()}.
+body(MaxLength, Client) ->
+    hackney_response:body(MaxLength, Client).
+
+
+%% @doc skip the full body. (read all the body if needed).
+-spec skip_body(#client{}) -> {ok, #client{}} | {error, atom()}.
+skip_body(Client) ->
+    hackney_response:skip_body(Client).

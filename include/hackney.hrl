@@ -37,6 +37,9 @@
 
 -record(client, {
         transport,
+        host,
+        port,
+        netloc = netloc,
         options = [],
         socket = nil,
         timeout = infinity,
@@ -47,7 +50,9 @@
         buffer = <<>>,
         version,
         clen = nil,
-        te = nil}).
+        te = nil,
+        connection = nil,
+        ctype = nil}).
 
 -record(hackney_url, {
         transport,

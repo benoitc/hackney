@@ -7,6 +7,7 @@
          insert/3,
          fold/3]).
 
+
 new() ->
     dict:new().
 
