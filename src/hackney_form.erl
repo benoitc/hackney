@@ -2,7 +2,8 @@
 
 -module(hackney_form).
 
--export([encode_form/1]).
+-export([encode_form/1,
+         decode_form/1]).
 
 %% @doc encode a list of properties in a form.
 encode_form(KVs) ->
@@ -28,5 +29,5 @@ decode_form(Bin) ->
             [T] ->
                 {hackney_url:urldecode(T), true};
             [Name, Value] ->
-                {hackney_url:urldecode(K), hackney_url:urldecode(V)}
-        end || T <- Tokens].
+                {hackney_url:urldecode(Name), hackney_url:urldecode(Value)}
+        end || Token <- Tokens].

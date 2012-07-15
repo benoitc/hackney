@@ -76,7 +76,7 @@ request(Method, URL, Headers, Body, Options, Client)
 
 %% @private
 
-perform(Method0, URL, Headers0, Body0, Options, Client) ->
+perform(Method0, URL, Headers0, Body0, _Options, Client) ->
     #hackney_url{host =Host,
                  path = Path,
                  user = User,
@@ -102,11 +102,11 @@ perform(Method0, URL, Headers0, Body0, Options, Client) ->
     %% build headers with the body.
     {HeaderDict1, Body} = case Body0 of
         <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-            handle_request_body(HeadersDict, Body0);
+            hackney_request:handle_body(HeadersDict, Body0);
         <<>> ->
             {HeadersDict, Body0};
         _ ->
-            handle_request_body(HeadersDict, Body0)
+            hackney_request:handle_body(HeadersDict, Body0)
     end,
 
     HeadersLines = hackney_headers:fold(fun({K, V}, Lines) ->
@@ -123,7 +123,7 @@ perform(Method0, URL, Headers0, Body0, Options, Client) ->
     case hackney_request:send(Client, HeadersData) of
         ok ->
             %% send body
-            Result = hackney_request:stream_body(Body),
+            Result = hackney_request:stream_body(Body, Client),
 
             case Result of
                 {error, _Reason}=E ->

@@ -4,7 +4,10 @@
 
 -export([init/1,
          stream_status/1,
-         stream_headers/1, stream_header/1]).
+         stream_headers/1, stream_header/1,
+         stream_body/1,
+         stream_multipart/1, multipart_skip/1,
+         body/1, body/2, skip_body/1]).
 
 %% @doc init response
 init(Client) ->
@@ -101,87 +104,40 @@ parse_header(Line, Client) ->
     {header, {Key, Value}, Client1}.
 
 
-stream_body(Req=#client{body_state=waiting, te=TE, clen=Length}) ->
+stream_body(Client=#client{body_state=waiting, te=TE, clen=Length}) ->
 	case TE of
 		<<"chunked">> ->
-			stream_body(Req#client{body_state=
+			stream_body(Client#client{body_state=
 				{stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
 		_ when Length =:= 0 ->
-            {done, Req#client{body_state=done}};
-        _ >
-		    stream_body(Req#client{body_state=
+            {done, Client#client{body_state=done}};
+        _ ->
+		    stream_body(Client#client{body_state=
 						{stream, fun te_identity/2, {0, Length},
 						 fun ce_identity/1}})
 	end;
-stream_body(Req=#client{buffer=Buffer, body_state={stream, _, _, _}})
+stream_body(Client=#client{buffer=Buffer, body_state={stream, _, _, _}})
 		when Buffer =/= <<>> ->
 	transfer_decode(Buffer, Client#client{buffer= <<>>});
-stream_body(Req=#client{body_state={stream, _, _, _}}) ->
-	stream_body_recv(Req);
-stream_body(Req=#client{body_state=done}) ->
-	{done, Req}.
+stream_body(Client=#client{body_state={stream, _, _, _}}) ->
+	stream_body_recv(Client);
+stream_body(Client=#client{body_state=done}) ->
+	{done, Client}.
 
 -spec stream_body_recv(#client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
-stream_body_recv(Req=#client{
+stream_body_recv(Client=#client{
 		transport=Transport, socket=Socket, buffer=Buffer}) ->
 	case Transport:recv(Socket, 0, 5000) of
-		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>, Req);
+		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>, Client);
 		{error, Reason} -> {error, Reason}
 	end.
 
--spec transfer_decode(binary(), #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
-transfer_decode(Data, Req=#client{
-		body_state={stream, TransferDecode, TransferState, ContentDecode}}) ->
-	case TransferDecode(Data, TransferState) of
-		{ok, Data2, TransferState2} ->
-			content_decode(ContentDecode, Data2, Req#client{body_state=
-				{stream, TransferDecode, TransferState2, ContentDecode}});
-		{ok, Data2, Rest, TransferState2} ->
-			content_decode(ContentDecode, Data2, Req#client{
-				buffer=Rest, body_state=
-				{stream, TransferDecode, TransferState2, ContentDecode}});
-		%% @todo {header(s) for chunked
-		more ->
-			stream_body_recv(Req#client{buffer=Data});
-		{done, Length, Rest} ->
-			Req2 = transfer_decode_done(Length, Rest, Req),
-			{done, Req2};
-		{done, Data2, Length, Rest} ->
-			Req2 = transfer_decode_done(Length, Rest, Req),
-			content_decode(ContentDecode, Data2, Req2);
-		{error, Reason} ->
-			{error, Reason}
-	end.
-
--spec transfer_decode_done(non_neg_integer(), binary(), #client{})
-	-> #client{}.
-transfer_decode_done(Length, Rest, Req=#client{
-		headers=Headers, p_headers=PHeaders}) ->
-	Headers2 = lists:keystore('Content-Length', 1, Headers,
-		{'Content-Length', list_to_binary(integer_to_list(Length))}),
-	%% At this point we just assume TEs were all decoded.
-	Headers3 = lists:keydelete('Transfer-Encoding', 1, Headers2),
-	PHeaders2 = lists:keystore('Content-Length', 1, PHeaders,
-		{'Content-Length', Length}),
-	PHeaders3 = lists:keydelete('Transfer-Encoding', 1, PHeaders2),
-	Req#client{buffer=Rest, body_state=done,
-		headers=Headers3, p_headers=PHeaders3}.
-
-%% @todo Probably needs a Rest.
--spec content_decode(fun(), binary(), #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
-content_decode(ContentDecode, Data, Req) ->
-	case ContentDecode(Data) of
-		{ok, Data2} -> {ok, Data2, Req};
-		{error, Reason} -> {error, Reason}
-	end.
 
 %% @doc Return the full body sent with the request.
 -spec body(#client{}) -> {ok, binary(), #client{}} | {error, atom()}.
-body(Req) ->
-	read_body(infinity, Req, <<>>).
+body(Client) ->
+	read_body(infinity, Client, <<>>).
 
 %% @doc Return the full body sent with the request as long as the body
 %% length doesn't go over MaxLength.
@@ -191,26 +147,14 @@ body(Req) ->
 %% not expecting it.
 -spec body(non_neg_integer() | infinity, #client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
-body(MaxLength, Req) ->
-	read_body(MaxLength, Req, <<>>).
-
--spec read_body(non_neg_integer() | infinity, #client{}, binary())
-	-> {ok, binary(), #client{}} | {error, atom()}.
-read_body(MaxLength, Req, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Req) of
-		{ok, Data, Req2} ->
-			read_body(MaxLength, Req2, << Acc/binary, Data/binary >>);
-		{done, Req2} ->
-			{ok, Acc, Req2};
-		{error, Reason} ->
-			{error, Reason}
-	end.
+body(MaxLength, Client) ->
+	read_body(MaxLength, Client, <<>>).
 
 -spec skip_body(#client{}) -> {ok, #client{}} | {error, atom()}.
-skip_body(Req) ->
-	case stream_body(Req) of
-		{ok, _, Req2} -> skip_body(Req2);
-		{done, Req2} -> {ok, Req2};
+skip_body(Client) ->
+	case stream_body(Client) of
+		{ok, _, Client2} -> skip_body(Client2);
+		{done, Client2} -> {ok, Client2};
 		{error, Reason} -> {error, Reason}
 	end.
 
@@ -224,52 +168,105 @@ skip_body(Req) ->
 %%
 %% If the request Content-Type is not a multipart one, <em>{error, badarg}</em>
 %% is returned.
--spec multipart_data(#client{})
+-spec stream_multipart(#client{})
 		-> {{headers, cowboy_http:headers()}
 				| {body, binary()} | end_of_part | eof,
 			#client{}}.
-multipart_data(Req=#client{body_state=waiting}) ->
-	{{<<"multipart">>, _SubType, Params}, Req2} =
-		parse_header('Content-Type', Req),
+stream_multipart(Client=#client{body_state=waiting}) ->
+	{{<<"multipart">>, _SubType, Params}, Client2} =
+		parse_header('Content-Type', Client),
 	{_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
-	{Length, Req3} = parse_header('Content-Length', Req2),
-	multipart_data(Req3, Length, {more, cowboy_multipart:parser(Boundary)});
-multipart_data(Req=#client{body_state={multipart, Length, Cont}}) ->
-	multipart_data(Req, Length, Cont());
-multipart_data(Req=#client{body_state=done}) ->
-	{eof, Req}.
+	{Length, Client3} = parse_header('Content-Length', Client2),
+	stream_multipart(Client3, Length, {more, cowboy_multipart:parser(Boundary)});
+stream_multipart(Client=#client{body_state={multipart, Length, Cont}}) ->
+	stream_multipart(Client, Length, Cont());
+stream_multipart(Client=#client{body_state=done}) ->
+	{eof, Client}.
 
-multipart_data(Req, Length, {headers, Headers, Cont}) ->
-	{{headers, Headers}, Req#client{body_state={multipart, Length, Cont}}};
-multipart_data(Req, Length, {body, Data, Cont}) ->
-	{{body, Data}, Req#client{body_state={multipart, Length, Cont}}};
-multipart_data(Req, Length, {end_of_part, Cont}) ->
-	{end_of_part, Req#client{body_state={multipart, Length, Cont}}};
-multipart_data(Req, 0, eof) ->
-	{eof, Req#client{body_state=done}};
-multipart_data(Req=#client{socket=Socket, transport=Transport},
+stream_multipart(Client, Length, {headers, Headers, Cont}) ->
+	{{headers, Headers}, Client#client{body_state={multipart, Length, Cont}}};
+stream_multipart(Client, Length, {body, Data, Cont}) ->
+	{{body, Data}, Client#client{body_state={multipart, Length, Cont}}};
+stream_multipart(Client, Length, {end_of_part, Cont}) ->
+	{end_of_part, Client#client{body_state={multipart, Length, Cont}}};
+stream_multipart(Client, 0, eof) ->
+	{eof, Client#client{body_state=done}};
+stream_multipart(Client=#client{socket=Socket, transport=Transport},
 		Length, eof) ->
 	%% We just want to skip so no need to stream data here.
 	{ok, _Data} = Transport:recv(Socket, Length, 5000),
-	{eof, Req#client{body_state=done}};
-multipart_data(Req, Length, {more, Parser}) when Length > 0 ->
-	case stream_body(Req) of
-		{ok, << Data:Length/binary, Buffer/binary >>, Req2} ->
-			multipart_data(Req2#client{buffer=Buffer}, 0, Parser(Data));
-		{ok, Data, Req2} ->
-			multipart_data(Req2, Length - byte_size(Data), Parser(Data))
+	{eof, Client#client{body_state=done}};
+stream_multipart(Client, Length, {more, Parser}) when Length > 0 ->
+	case stream_body(Client) of
+		{ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
+			stream_multipart(Client2#client{buffer=Buffer}, 0, Parser(Data));
+		{ok, Data, Client2} ->
+			stream_multipart(Client2, Length - byte_size(Data), Parser(Data))
 	end.
 
 %% @doc Skip a part returned by the multipart parser.
 %%
-%% This function repeatedly calls <em>multipart_data/1</em> until
+%% This function repeatedly calls <em>stream_multipart/1</em> until
 %% <em>end_of_part</em> or <em>eof</em> is parsed.
-multipart_skip(Req) ->
-	case multipart_data(Req) of
-		{end_of_part, Req2} -> {ok, Req2};
-		{eof, Req2} -> {ok, Req2};
-		{_Other, Req2} -> multipart_skip(Req2)
+multipart_skip(Client) ->
+	case stream_multipart(Client) of
+		{end_of_part, Client2} -> {ok, Client2};
+		{eof, Client2} -> {ok, Client2};
+		{_Other, Client2} -> multipart_skip(Client2)
 	end.
+
+
+
+
+-spec transfer_decode(binary(), #client{})
+	-> {ok, binary(), #client{}} | {error, atom()}.
+transfer_decode(Data, Client=#client{
+		body_state={stream, TransferDecode, TransferState, ContentDecode}}) ->
+	case TransferDecode(Data, TransferState) of
+		{ok, Data2, TransferState2} ->
+			content_decode(ContentDecode, Data2, Client#client{body_state=
+				{stream, TransferDecode, TransferState2, ContentDecode}});
+		{ok, Data2, Rest, TransferState2} ->
+			content_decode(ContentDecode, Data2, Client#client{
+				buffer=Rest, body_state=
+				{stream, TransferDecode, TransferState2, ContentDecode}});
+		%% @todo {header(s) for chunked
+		more ->
+			stream_body_recv(Client#client{buffer=Data});
+		{done, _Length, Rest} ->
+			{done, Client#client{body_state=done, buffer=Rest}};
+		{done, Data2, _Length, Rest} ->
+			content_decode(ContentDecode, Data2,
+                           Client#client{body_state=done,
+                                         buffer=Rest});
+		{error, Reason} ->
+			{error, Reason}
+	end.
+
+%% @todo Probably needs a Rest.
+-spec content_decode(fun(), binary(), #client{})
+	-> {ok, binary(), #client{}} | {error, atom()}.
+content_decode(ContentDecode, Data, Client) ->
+	case ContentDecode(Data) of
+		{ok, Data2} -> {ok, Data2, Client};
+		{error, Reason} -> {error, Reason}
+	end.
+
+
+
+-spec read_body(non_neg_integer() | infinity, #client{}, binary())
+	-> {ok, binary(), #client{}} | {error, atom()}.
+read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
+	case stream_body(Client) of
+		{ok, Data, Client2} ->
+			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
+		{done, Client2} ->
+			{ok, Acc, Client2};
+		{error, Reason} ->
+			{error, Reason}
+	end.
+
+
 
 %% @doc Decode a stream of chunks.
 -spec te_chunked(binary(), {non_neg_integer(), non_neg_integer()})
@@ -282,7 +279,7 @@ te_chunked(<< "0\r\n\r\n", Rest/binary >>, {0, Streamed}) ->
 	{done, Streamed, Rest};
 te_chunked(Data, {0, Streamed}) ->
 	%% @todo We are expecting an hex size, not a general token.
-	token(Data,
+	hackney_util:token(Data,
 		fun (Rest, _) when byte_size(Rest) < 4 ->
 				more;
 			(<< "\r\n", Rest/binary >>, BinLen) ->
@@ -317,3 +314,6 @@ ce_identity(Data) ->
 
 recv(#client{transport=Transport, socket=Skt}) ->
     Transport:recv(Skt, 0).
+
+
+

@@ -5,7 +5,7 @@
          to_lower/1, to_upper/1,
          char_to_lower/1, char_to_upper/1,
          join/2,
-         token/2]).
+         token_ci/2, token/2]).
 
 
 is_ipv6(Host) ->
@@ -123,6 +123,13 @@ join([S | Rest], Separator, []) ->
 join([S | Rest], Separator, Acc) ->
     join(Rest, Separator, [S, Separator, Acc]).
 
+%% @doc Parse a case-insensitive token.
+%%
+%% Changes all characters to lowercase.
+-spec token_ci(binary(), fun()) -> any().
+token_ci(Data, Fun) ->
+	token(Data, Fun, ci, <<>>).
+
 %% @doc Parse a token.
 -spec token(binary(), fun()) -> any().
 token(Data, Fun) ->
@@ -139,7 +146,7 @@ token(Data = << C, _Rest/binary >>, Fun, _Case, Acc)
 			 C < 32; C =:= 127 ->
 	Fun(Data, Acc);
 token(<< C, Rest/binary >>, Fun, Case = ci, Acc) ->
-	C2 = cowboy_bstr:char_to_lower(C),
+	C2 = char_to_lower(C),
 	token(Rest, Fun, Case, << Acc/binary, C2 >>);
 token(<< C, Rest/binary >>, Fun, Case, Acc) ->
 	token(Rest, Fun, Case, << Acc/binary, C >>).

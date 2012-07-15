@@ -2,6 +2,7 @@
 -module(hackney_url).
 
 -export([parse_url/1,
+         unparse_url/1,
          urldecode/1, urldecode/2,
          urlencode/1, urlencode/2]).
 
@@ -35,6 +36,42 @@ parse_url(URL, S) ->
                                            qs = Query,
                                            fragment = Fragment})
     end.
+
+
+unparse_url(#hackney_url{}=Url) ->
+    #hackney_url{scheme = Scheme,
+                 netloc = Netloc,
+                 path = Path,
+                 qs = Qs,
+                 fragment = Fragment,
+                 user = User,
+                 password = Password} = Url,
+
+    Scheme1 = case Scheme of
+        http -> <<"http://">>;
+        https -> <<"https://">>
+    end,
+
+    Netloc1 = case User of
+        <<>> ->
+            Netloc;
+        _ when Password /= <<>>, Password /= <<"">> ->
+            << User/binary, ":", Password/binary, "@", Netloc/binary >>;
+        _ ->
+            << User/binary, "@", Netloc/binary >>
+    end,
+
+    Qs1 = case Qs of
+        <<>> -> <<>>;
+        _ -> << "?", Qs/binary >>
+    end,
+
+    Fragment1 = case Fragment of
+        <<>> -> <<>>;
+        _ -> << "#", Fragment/binary >>
+    end,
+
+    iolist_to_binary([Scheme1, Netloc1, Path, Qs1, Fragment1]).
 
 %% @private
 parse_addr(Addr, S) ->
@@ -72,7 +109,7 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
     case binary:split(Netloc, <<":">>) of
         [Host] when Transport =:= hackney_tcp_transport ->
             S#hackney_url{host=binary_to_list(Host), port=80};
-        [Host] when Transport =:= hackney_tcp_transport ->
+        [Host] when Transport =:= hackney_ssl_transport ->
             S#hackney_url{host=binary_to_list(Host), port=443};
         [Host, Port] ->
             S#hackney_url{host=binary_to_list(Host),
