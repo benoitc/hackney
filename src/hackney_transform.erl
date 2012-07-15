@@ -1,3 +1,10 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of hackney released under the Apache 2 license.
+%%% See the NOTICE for more information.
+%%%
+%%% Copyright (c) 2012 Benoît Chesneau <benoitc@e-engura.org>
+
 %% @doc The parse transform used for hackney request
 %% This parse tansform rewrite functions calls to lager:Method/1,2,3 in
 %% to lager:request(Method, ...).

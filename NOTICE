@@ -1,0 +1,10 @@
+hackney
+-------
+
+2012 (c) Benoît Chesneau <benoitc@e-engura.org>
+
+hackney is released under the Apache 2 license. See the LICENSE file for
+the complete license.
+
+Some part of the code from the cowboy project:
+Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
