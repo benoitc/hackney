@@ -143,6 +143,7 @@ send_request(Client0, {Method, Path, Headers, Body}) ->
                 {on_status, waiting} ->
                     hackney_request:perform(Client,
                                             {Method, Path, Headers, Body});
+
                 _ ->
                     {error, bad_response_state}
             end;
