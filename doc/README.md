@@ -81,9 +81,9 @@ or `{error, Reason}`.
 If you enable the **parse_transform**, you can also do:<pre>hackney:get(URL, Headers, Payload, Options)</pre>
 
 To enable parse transform add the following option to the erlang
-compiler flags:<pre>    {parse_transform, hackney_transform}</pre>
+compiler flags:<pre>{parse_transform, hackney_transform}</pre>
 
-Alternately, you can add it to the module you wish to compile:<pre>    -compile([{parse_transform, hackney_transform}]).</pre>
+Alternately, you can add it to the module you wish to compile:<pre>-compile([{parse_transform, hackney_transform}]).</pre>
 
 ### Read the body<pre>{ok, Body, Client1} = hackney:body(Client).</pre>
 
