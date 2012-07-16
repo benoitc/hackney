@@ -123,13 +123,13 @@ To enable parse transform add the following option to the erlang
 compiler flags:
 
 ```
-    {parse_transform, hackney_transform}
+{parse_transform, hackney_transform}
 '''
 
 Alternately, you can add it to the module you wish to compile:
 
 ```
-    -compile([{parse_transform, hackney_transform}]).
+-compile([{parse_transform, hackney_transform}]).
 '''
 
 ### Read the body
