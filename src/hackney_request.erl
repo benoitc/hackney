@@ -135,6 +135,8 @@ stream_body(Body, #client{req_chunk_size=ChunkSize}=Client)
         _ ->
             send(Client, Body)
     end;
+stream_body(Body, Client) when is_list(Body) ->
+    send(Client, Body);
 stream_body({file, FileName}, Client) ->
     case sendfile(FileName, Client) of
         {ok, _BytesSent} ->
