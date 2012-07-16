@@ -59,21 +59,21 @@ application:start(crypto),
 application:start(public_key),
 application:start(ssl),
 
+%% make a simple cnnection
 {ok, _, _, Client} = hackney:request(<<"https://friendpaste.com">>),
 {ok, Body, Client1} = hackney:body(Client),
 
 io:format("body: ~p~n~n", [Body]),
 
+%% connection is kept alive, launch a new request
 {ok, _, _, Client2} = hackney:send_request(Client1, {get,
                                                      <<"/_all_languages">>,
                                                      [],
                                                      <<>>}),
-
 {ok, Body1, Client3} = hackney:body(Client2),
-
 io:format("body: ~p~n~n", [Body1]),
 
-
+%% do the same but with a post. Create a paste
 ReqBody = << "{
      \"id\": \"some_paste_id\",
      \"rev\": \"some_revision_id\",
@@ -81,21 +81,21 @@ ReqBody = << "{
 }" >>,
 
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
-
 {ok, _, _, Client4} = hackney:send_request(Client3, {post, <<"/">>,
                                                      ReqHeaders,
                                                      ReqBody}),
 {ok, Body2, Client5} = hackney:body(Client4),
 io:format("body: ~p~n~n", [Body2]),
 
+%% same as above but using a dile
 ReqBody1 = {file, "./examples/test.json"},
-
 {ok, _, _, Client6} = hackney:send_request(Client5, {post, <<"/">>,
                                                      ReqHeaders,
                                                      ReqBody1}),
 {ok, Body3, Client7} = hackney:body(Client6),
 io:format("body: ~p~n~n", [Body3]),
 
+%% finally close the client (close the socket)
 hackney:close(Client7).
 '''
 
