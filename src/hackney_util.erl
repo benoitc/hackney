@@ -12,6 +12,7 @@
          to_lower/1, to_upper/1,
          char_to_lower/1, char_to_upper/1,
          join/2,
+         to_hex/1,
          token_ci/2, token/2]).
 
 
@@ -129,6 +130,18 @@ join([S | Rest], Separator, []) ->
     join(Rest, Separator, [S]);
 join([S | Rest], Separator, Acc) ->
     join(Rest, Separator, [S, Separator, Acc]).
+
+to_hex([]) ->
+    [];
+to_hex(Bin) when is_binary(Bin) ->
+    to_hex(binary_to_list(Bin));
+to_hex([H|T]) ->
+    [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
+
+to_digit(N) when N < 10 -> $0 + N;
+to_digit(N)             -> $a + N-10.
+
+
 
 %% @doc Parse a case-insensitive token.
 %%

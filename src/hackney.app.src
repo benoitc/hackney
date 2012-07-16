@@ -5,9 +5,8 @@
  [
   {description, "simple HTTP client"},
   {vsn, "0.1.0"},
-  {registered, []},
+  {registered, [hackney_pool]},
   {applications, [kernel, stdlib, crypto, public_key, ssl]},
-  {env, []},
-  {mod, { hackney_app, []}},
-  {env, []}
+  {mod, { hackney_app, nil}},
+  {env, [{timeout, 150000}, {pool_size, 50}]}
  ]}.

@@ -14,7 +14,8 @@
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          stream_body/1,
-         body/1, body/2, skip_body/1]).
+         body/1, body/2, skip_body/1,
+         pool/1]).
 
 -include("hackney.hrl").
 
@@ -29,9 +30,8 @@ start() ->
 stop() ->
     application:stop(hackney).
 
-
 connect(#client{state=connected}=Client) ->
-    Client;
+    {ok, Client};
 
 connect(#client{state=closed}=Client) ->
     #client{transport=Transport, host=Host, port=Port} = Client,
@@ -43,29 +43,13 @@ connect(Transport, Host, Port) ->
 
 connect(_Transport, _Host, _Port, #client{state=connected}=Client) ->
     {ok, Client};
-connect(Transport, Host, Port, #client{options=Options,
-                                       socket=Skt0}=Client)
-        when is_list(Host), is_integer(Port), Skt0 =:= nil ->
-
-    ConnectOpts0 = proplists:get_value(connect_options, Options, []),
-
-    %% handle ipv6
-    ConnectOpts = case hackney_util:is_ipv6(Host) of
-        true ->
-            [inet6 | ConnectOpts0];
-        false ->
-            ConnectOpts0
-    end,
-
-    case Transport:connect(Host, Port, ConnectOpts) of
-        {ok, Skt} ->
-            {ok, Client#client{transport=Transport,
-                               host=Host,
-                               port=Port,
-                               socket=Skt,
-                               state = connected}};
-        Error ->
-            Error
+connect(Transport, Host, Port, #client{socket=Skt}=Client)
+        when is_list(Host), is_integer(Port), Skt =:= nil ->
+    case pool(Client) of
+        undefined ->
+            do_connect(Transport, Host, Port, Client);
+        Pool ->
+            socket_from_pool(Pool, {Transport, Host, Port}, Client)
     end;
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     connect(Transport, Host, Port, #client{options=Options}).
@@ -152,14 +136,18 @@ send_request(#client{response_state=done}=Client0 ,
                            body_state=waiting},
     send_request(Client, {Method, Path, Headers, Body});
 
-send_request(Client, {Method, Path, Headers, Body}) ->
-
-    case {Client#client.response_state, Client#client.body_state} of
-        {on_status, waiting} ->
-            hackney_request:perform(connect(Client),
-                                    {Method, Path, Headers, Body});
-        _ ->
-            {error, bad_response_state}
+send_request(Client0, {Method, Path, Headers, Body}) ->
+    case connect(Client0) of
+        {ok, Client} ->
+            case {Client#client.response_state, Client#client.body_state} of
+                {on_status, waiting} ->
+                    hackney_request:perform(Client,
+                                            {Method, Path, Headers, Body});
+                _ ->
+                    {error, bad_response_state}
+            end;
+        Error ->
+            Error
     end.
 
 
@@ -184,3 +172,50 @@ body(MaxLength, Client) ->
 -spec skip_body(#client{}) -> {ok, #client{}} | {error, atom()}.
 skip_body(Client) ->
     hackney_response:skip_body(Client).
+
+
+%% @doc get current pool pid or name used by a client if needed
+pool(#client{options=Opts}) ->
+    case proplists:get_value(pool, Opts) of
+        undefined ->
+            undefined;
+        default ->
+            whereis(hackney_pool);
+        Pool ->
+            Pool
+    end.
+
+
+socket_from_pool(Pool, {Transport, Host, Port}=Key, Client) ->
+    case hackney_pool:socket(Pool, Key) of
+        {ok, Skt} ->
+            {ok, Client#client{transport=Transport,
+                               host=Host,
+                               port=Port,
+                               socket=Skt,
+                               state = connected}};
+        no_socket ->
+            do_connect(Transport, Host, Port, Client)
+    end.
+
+do_connect(Transport, Host, Port, #client{options=Options}=Client) ->
+    ConnectOpts0 = proplists:get_value(connect_options, Options, []),
+
+    %% handle ipv6
+    ConnectOpts = case hackney_util:is_ipv6(Host) of
+        true ->
+            [inet6 | ConnectOpts0];
+        false ->
+            ConnectOpts0
+    end,
+
+    case Transport:connect(Host, Port, ConnectOpts) of
+        {ok, Skt} ->
+            {ok, Client#client{transport=Transport,
+                               host=Host,
+                               port=Port,
+                               socket=Skt,
+                               state = connected}};
+        Error ->
+            Error
+    end.

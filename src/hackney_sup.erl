@@ -24,5 +24,9 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, []} }.
+    PoolOptions = [{name, hackney_pool}],
+    DefaultPool = {hackney_pool,
+                   {hackney_pool, start_link, [PoolOptions]},
+                   permanent, 10000, worker, [hackney_pool]},
+    {ok, { {one_for_one, 10, 1}, [DefaultPool]}}.
 
