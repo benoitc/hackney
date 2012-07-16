@@ -8,7 +8,10 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  crypto,
+                  public_key,
+                  ssl
                  ]},
   {mod, { hackney_app, []}},
   {env, []}
