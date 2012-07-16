@@ -94,10 +94,12 @@ application:start(ssl),
 application:start(hackney).
 '''
 
-Or add hackney to the applications membe rof your relase an app
+Or add hackney to the applications member of your relase an app
 
 
 ### Simple request without pool
+
+Do a simple a requet that will return a client state:
 
 ```
 Method = get,
@@ -105,8 +107,9 @@ URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [],
-{ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
-                                                        Payload, Options).
+{ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL,
+                                                        Headers, Payload,
+                                                        Options).
 '''
 
 The request method return the tupple `{ok, StatusCode, Headers, Client}'
