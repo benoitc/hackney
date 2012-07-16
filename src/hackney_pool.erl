@@ -3,7 +3,8 @@
 %%% This file is part of hackney released under the Apache 2 license.
 %%% See the NOTICE for more information.
 %%%
-%%% Copyright (c) 2012 Benoît Chesneau <benoitc@e-engura.org>
+%%% Copyright (c) 2009, Erlang Training and Consulting Ltd.
+%%% Copyright (c) 2012, Benoît Chesneau <benoitc@e-engura.org>
 
 %% @doc pool of sockets connections
 %%
