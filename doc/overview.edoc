@@ -190,7 +190,7 @@ the request body:
 
 To reuse a connection globally in your application you can also use a
 socket pool. On startup, hackney launch a pool named default. To use it
-do the following
+do the following:
 
 ```
 Method = get,
@@ -202,7 +202,7 @@ Options = [{pool, default}],
                                                         Payload, Options).
 '''
 
-By adding the tuple `{pool, default}` to the options, hackney will use
+By adding the tuple `{pool, default}' to the options, hackney will use
 the connections stored in that pool.
 
 You can also use different pools in your application which will allows
