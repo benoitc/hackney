@@ -31,7 +31,7 @@ Main features:
   process and a state is kept in a `#client{}' record.
 - Keepalive handling
 - basic authentication
-- stream binary bodies
+- stream the response
 - Can send files using the sendfile API
 - Chunked encoding support
 - Used parse transform for shorcut methods calls:
