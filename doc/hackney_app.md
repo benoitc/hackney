@@ -10,12 +10,19 @@ __Behaviours:__ [`application`](application.md).<a name="index"></a>
 ##Function Index##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr><tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ensure_deps_started-0">ensure_deps_started/0</a></td><td></td></tr><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr><tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
 
 ##Function Details##
+
+<a name="ensure_deps_started-0"></a>
+
+###ensure_deps_started/0##
+
+
+`ensure_deps_started() -> any()`
 
 <a name="start-2"></a>
 

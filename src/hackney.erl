@@ -7,7 +7,7 @@
 %%%
 
 -module(hackney).
-
+-export([start/0, stop/0]).
 -export([connect/1, connect/3, connect/4,
          close/1,
          set_sockopts/2,
@@ -17,6 +17,17 @@
          body/1, body/2, skip_body/1]).
 
 -include("hackney.hrl").
+
+%% @doc Start the couchbeam process. Useful when testing using the shell.
+start() ->
+    hackney_deps:ensure(),
+    application:load(hackney),
+    hackney_app:ensure_deps_started(),
+    application:start(hackney).
+
+%% @doc Stop the couchbeam process. Useful when testing using the shell.
+stop() ->
+    application:stop(hackney).
 
 
 connect(#client{state=connected}=Client) ->

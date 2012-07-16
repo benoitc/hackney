@@ -6,13 +6,8 @@
   {description, "simple HTTP client"},
   {vsn, "0.1.0"},
   {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib,
-                  crypto,
-                  public_key,
-                  ssl
-                 ]},
+  {applications, [kernel, stdlib, crypto, public_key, ssl]},
+  {env, []},
   {mod, { hackney_app, []}},
   {env, []}
  ]}.

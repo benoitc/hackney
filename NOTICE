@@ -6,5 +6,5 @@ hackney
 hackney is released under the Apache 2 license. See the LICENSE file for
 the complete license.
 
-Some part of the code from the cowboy project:
+Some part of the code from the cowboy project under ISC license:
 Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>

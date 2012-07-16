@@ -10,20 +10,24 @@
 -behaviour(application).
 
 %% Application callbacks
--export([start/2, stop/1]).
+-export([start/2, stop/1, ensure_deps_started/0]).
 
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    {ok, Deps} = application:get_key(hackney, applications),
-    true = lists:all(fun ensure_started/1, Deps),
+    hackney_deps:ensure(),
+    ensure_deps_started(),
     hackney_sup:start_link().
 
 stop(_State) ->
     ok.
 
+
+ensure_deps_started() ->
+    {ok, Deps} = application:get_key(hackney, applications),
+    true = lists:all(fun ensure_started/1, Deps).
 
 ensure_started(App) ->
     case application:start(App) of

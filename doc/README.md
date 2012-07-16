@@ -17,7 +17,7 @@ Main features:
   process and a state is kept in a `#client{}` record.
 - Keepalive handling
 - basic authentication
-- stream binary bodies
+- stream the response
 - Can send files using the sendfile API
 - Chunked encoding support
 - Used parse transform for shorcut methods calls:
@@ -32,48 +32,84 @@ informations on what still need to be done.
 
 ## Examples
 
-Quick usage example without pool:<pre>application:start(crypto),
-application:start(public_key),
-application:start(ssl),
+Make a simple request without pool:<pre>1> hackney:start().
+ok
+2> {ok, StatusCode, Headers, Client} = hackney:request(<<"https://friendpaste.com">>).
+{ok,200,
+    [{<<"Server">>,<<"nginx/0.7.62">>},
+     {<<"Date">>,<<"Mon, 16 Jul 2012 08:12:39 GMT">>},
+     {<<"Content-Type">>,<<"text/html; charset=utf-8">>},
+     {<<"Transfer-Encoding">>,<<"chunked">>},
+     {<<"Connection">>,<<"keep-alive">>}],
+    {client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+            [],
+            {sslsocket,new_ssl,<0.52.0>},
+            infinity,connected,on_body,waiting,4096,
+            <<"eee\r\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n   "...>>,
+            {1,1},
+            nil,<<"chunked">>,<<"keep-alive">>,
+            <<"text/html; charset=utf-8">>}}
+3>  {ok, Body, Client1} = hackney:body(Client).
+{ok,<<"<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"utf-8\"/>\n    <title>Friendpaste - Welcome</title>"...>>,
+    {client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+            [],
+            {sslsocket,new_ssl,<0.52.0>},
+            infinity,connected,done,done,4096,<<>>,
+            {1,1},
+            nil,<<"chunked">>,<<"keep-alive">>,
+            <<"text/html; charset=utf-8">>}}
+4> hackney:close(Client1).
+{client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+        [],nil,infinity,closed,done,done,4096,<<>>,
+        {1,1},
+        nil,<<"chunked">>,<<"keep-alive">>,
+        <<"text/html; charset=utf-8">>}</pre>
 
-%% make a simple connection
-{ok, _, _, Client} = hackney:request(<<"https://friendpaste.com">>),
-{ok, Body, Client1} = hackney:body(Client),
-
-io:format("body: ~p~n~n", [Body]),
-
-%% connection is kept alive, launch a new request
-{ok, _, _, Client2} = hackney:send_request(Client1, {get,
-                                                     <<"/_all_languages">>,
-                                                     [],
-                                                     <<>>}),
-{ok, Body1, Client3} = hackney:body(Client2),
-io:format("body: ~p~n~n", [Body1]),
-
-%% do the same but with a post. Create a paste
-ReqBody = << "{
-     \"id\": \"some_paste_id\",
-     \"rev\": \"some_revision_id\",
-     \"changeset\": \"changeset in unidiff format\"
-}" >>,
-
-ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
-{ok, _, _, Client4} = hackney:send_request(Client3, {post, <<"/">>,
-                                                     ReqHeaders,
-                                                     ReqBody}),
-{ok, Body2, Client5} = hackney:body(Client4),
-io:format("body: ~p~n~n", [Body2]),
-
-%% same as above but using a dile
-ReqBody1 = {file, "./examples/test.json"},
-{ok, _, _, Client6} = hackney:send_request(Client5, {post, <<"/">>,
-                                                     ReqHeaders,
-                                                     ReqBody1}),
-{ok, Body3, Client7} = hackney:body(Client6),
-io:format("body: ~p~n~n", [Body3]),
-
-%% finally close the client (close the socket)
-hackney:close(Client7).</pre>
+Quick usage example with keepalive:<pre>1> hackney:start().
+ok
+2> {ok, _, _, Client} = hackney:request(<<"https://friendpaste.com/_all_languages">>),
+2> {ok, Body, Client1} = hackney:body(Client).
+{ok,<<"[[\"Cucumber\", \"Gherkin\"], [\"abap\", \"ABAP\"], [\"ada\", \"Ada\"], [\"ahk\", \"autohotkey\"], [\"antlr\", \"ANTLR\"], [\"ant"...>>,
+    {client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+            [],
+            {sslsocket,new_ssl,<0.52.0>},
+            infinity,connected,done,done,4096,<<>>,
+            {1,1},
+            nil,<<"chunked">>,<<"keep-alive">>,<<"application/json">>}}
+3>
+3> ReqBody = << "{
+3>      \"id\": \"some_paste_id\",
+3>      \"rev\": \"some_revision_id\",
+3>      \"changeset\": \"changeset in unidiff format\"
+3> }" >>,
+3> ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
+3> {ok, _, _, Client2} = hackney:send_request(Client1, {post, <<"/">>, ReqHeaders, ReqBody}).
+{ok,200,
+    [{<<"Server">>,<<"nginx/0.7.62">>},
+     {<<"Date">>,<<"Mon, 16 Jul 2012 08:18:52 GMT">>},
+     {<<"Content-Type">>,<<"application/json">>},
+     {<<"Transfer-Encoding">>,<<"chunked">>},
+     {<<"Connection">>,<<"keep-alive">>}],
+    {client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+            [],
+            {sslsocket,new_ssl,<0.52.0>},
+            infinity,connected,on_body,waiting,4096,
+            <<"7c\r\n{\"url\": \"https://friendpaste.com/2kF2g0nQpVE"...>>,
+            {1,1},
+            nil,<<"chunked">>,<<"keep-alive">>,<<"application/json">>}}
+4> {ok, Body2, Client3} = hackney:body(Client2).
+{ok,<<"{\"url\": \"https://friendpaste.com/2kF2g0nQpVE0GzrKaEubiY\", \"rev\": \"333732656130\", \"ok\": true, \"id\": \"2kF2g0nQ"...>>,
+    {client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+            [],
+            {sslsocket,new_ssl,<0.52.0>},
+            infinity,connected,done,done,4096,<<>>,
+            {1,1},
+            nil,<<"chunked">>,<<"keep-alive">>,<<"application/json">>}}
+5> hackney:close(Client3).
+{client,hackney_ssl_transport,"friendpaste.com",443,netloc,
+        [],nil,infinity,closed,done,done,4096,<<>>,
+        {1,1},
+        nil,<<"chunked">>,<<"keep-alive">>,<<"application/json">>}</pre>
 
 Contribute
 ----------
@@ -86,8 +122,10 @@ For issues, comments or feedback please [create an issue!] [1][1]: http://github
 <table width="100%" border="0" summary="list of modules">
 <tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="hackney_form.md" class="module">hackney_form</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_pool_sup.md" class="module">hackney_pool_sup</a></td></tr>
 <tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
 <tr><td><a href="hackney_response.md" class="module">hackney_response</a></td></tr>
 <tr><td><a href="hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
