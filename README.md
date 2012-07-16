@@ -24,9 +24,7 @@ Main features:
 
 ex:<pre>hackney:get("https://friendpaste.com")</pre>
 
-hackney is based on some code from
-[cowboy](http://github.com/extend/cownboy) for the HTTP parsing. This is
-a work in progress, see the
+Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
 informations on what still need to be done.
 
