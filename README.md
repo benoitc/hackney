@@ -36,7 +36,7 @@ Quick usage example without pool:<pre>application:start(crypto),
 application:start(public_key),
 application:start(ssl),
 
-%% make a simple cnnection
+%% make a simple connection
 {ok, _, _, Client} = hackney:request(<<"https://friendpaste.com">>),
 {ok, Body, Client1} = hackney:body(Client),
 
@@ -75,9 +75,9 @@ io:format("body: ~p~n~n", [Body3]),
 %% finally close the client (close the socket)
 hackney:close(Client7).</pre>
 
-See the [example][Contribute
+Contribute
 ----------
-For issues, comments or feedback please [create an issue!](http://github.com/benoitc/hackney/blob/master/examples/test.ebin).) [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"
+For issues, comments or feedback please [create an issue!] [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"
 
 
 ##Modules##
