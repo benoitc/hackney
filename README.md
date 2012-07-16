@@ -126,6 +126,36 @@ the request body:
 - `{file, File}` : To send a file
 - Bin: To send a binary
 
+### Use a pool
+
+To reuse a connection globally in your application you can also use a
+socket pool. On startup, hackney launch a pool named default. To use it
+do the following<pre>Method = get,
+URL = <<"https://friendpaste.com">>,
+Headers = [],
+Payload = <<>>,
+Options = [{pool, default}],
+{ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
+                                                        Payload, Options).</pre>
+
+By adding the tuple `{pool, default}` to the options, hackney will use
+the connections stored in that pool.
+
+You can also use different pools in your application which will allows
+you to maintain some kind of group of connections.
+
+```
+PoolName = mypool,
+Options = [{timeout, 150000}, {pool_size, 100}],
+{ok, Pid} = hackney:start_pool(PoolName, Options),`''
+
+`timeout` is the time we keep alive the conneciton in the pool,
+`pool_size` is the number of connections maintained in the pool. Each
+connection in a pool is monitored and closed connections are removed
+automatically.
+
+To close a pool do:<pre>hackney:stop_pool(PoolName).</pre>
+
 Contribute
 ----------
 For issues, comments or feedback please [create an issue!] [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"

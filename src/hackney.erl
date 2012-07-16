@@ -11,6 +11,7 @@
 -export([connect/1, connect/3, connect/4,
          close/1,
          set_sockopts/2,
+         start_pool/2, stop_pool/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          stream_body/1,
@@ -30,6 +31,7 @@ start() ->
 stop() ->
     application:stop(hackney).
 
+%% @doc connect a socket and create a client state.
 connect(#client{state=connected}=Client) ->
     {ok, Client};
 
@@ -54,11 +56,22 @@ connect(Transport, Host, Port, #client{socket=Skt}=Client)
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     connect(Transport, Host, Port, #client{options=Options}).
 
+
+%% @doc close the client
 close(Client) ->
     hackney_response:close(Client).
 
+%% @doc add set sockets options in the client
 set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
     Transport:setopts(Skt, Options).
+
+%% @doc start a pool
+start_pool(Name, Options) ->
+    hackney_pool:start_pool(Name, Options).
+
+%% @doc stop a pool
+stop_pool(Name) ->
+    hackney_pool:stop_pool(Name).
 
 
 %% @doc make a request
@@ -187,6 +200,9 @@ pool(#client{options=Opts}) ->
     end.
 
 
+
+%% internal functions
+%%
 socket_from_pool(Pool, {Transport, Host, Port}=Key, Client) ->
     case hackney_pool:socket(Pool, Key) of
         {ok, Skt} ->

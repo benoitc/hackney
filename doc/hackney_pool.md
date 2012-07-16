@@ -13,14 +13,23 @@ __Behaviours:__ [`gen_server`](gen_server.md).<a name="index"></a>
 ##Function Index##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#pool_size-1">pool_size/1</a></td><td></td></tr><tr><td valign="top"><a href="#pool_size-2">pool_size/2</a></td><td></td></tr><tr><td valign="top"><a href="#release-3">release/3</a></td><td></td></tr><tr><td valign="top"><a href="#socket-2">socket/2</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#child_spec-2">child_spec/2</a></td><td>return a child spec suitable for embeding your pool in the
+supervisor.</td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#max_poolsize-1">max_poolsize/1</a></td><td>get max pool size.</td></tr><tr><td valign="top"><a href="#pool_size-1">pool_size/1</a></td><td>get total pool size.</td></tr><tr><td valign="top"><a href="#pool_size-2">pool_size/2</a></td><td>get the pool size for <code>{Transport, Host0, Port}</code></td></tr><tr><td valign="top"><a href="#release-3">release/3</a></td><td>release a socket in the pool.</td></tr><tr><td valign="top"><a href="#set_poolsize-2">set_poolsize/2</a></td><td>change the pool size.</td></tr><tr><td valign="top"><a href="#set_timeout-2">set_timeout/2</a></td><td>change the connection timeout.</td></tr><tr><td valign="top"><a href="#socket-2">socket/2</a></td><td>fetch a socket from the pool.</td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr><tr><td valign="top"><a href="#timeout-1">timeout/1</a></td><td>get timeout.</td></tr></table>
 
 
 <a name="functions"></a>
 
 ##Function Details##
 
-<a name="code_change-3"></a>
+<a name="child_spec-2"></a>
+
+###child_spec/2##
+
+
+`child_spec(Name, Options0) -> any()`
+
+return a child spec suitable for embeding your pool in the
+supervisor<a name="code_change-3"></a>
 
 ###code_change/3##
 
@@ -55,27 +64,49 @@ __Behaviours:__ [`gen_server`](gen_server.md).<a name="index"></a>
 
 `init(Options) -> any()`
 
-<a name="pool_size-1"></a>
+<a name="max_poolsize-1"></a>
+
+###max_poolsize/1##
+
+
+`max_poolsize(PidOrName) -> any()`
+
+get max pool size<a name="pool_size-1"></a>
 
 ###pool_size/1##
 
 
 `pool_size(PidOrName) -> any()`
 
-<a name="pool_size-2"></a>
+get total pool size<a name="pool_size-2"></a>
 
 ###pool_size/2##
 
 
 `pool_size(PidOrName, X2) -> any()`
 
-<a name="release-3"></a>
+get the pool size for `{Transport, Host0, Port}`<a name="release-3"></a>
 
 ###release/3##
 
 
 `release(PidOrName, X2, Socket) -> any()`
 
+release a socket in the pool<a name="set_poolsize-2"></a>
+
+###set_poolsize/2##
+
+
+`set_poolsize(PidOrName, NewSize) -> any()`
+
+change the pool size<a name="set_timeout-2"></a>
+
+###set_timeout/2##
+
+
+`set_timeout(PidOrName, NewTimeout) -> any()`
+
+change the connection timeout
 <a name="socket-2"></a>
 
 ###socket/2##
@@ -83,7 +114,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).<a name="index"></a>
 
 `socket(PidOrName, X2) -> any()`
 
-<a name="start_link-0"></a>
+fetch a socket from the pool<a name="start_link-0"></a>
 
 ###start_link/0##
 
@@ -97,10 +128,32 @@ __Behaviours:__ [`gen_server`](gen_server.md).<a name="index"></a>
 
 `start_link(Options0) -> any()`
 
-<a name="terminate-2"></a>
+<a name="start_pool-2"></a>
+
+###start_pool/2##
+
+
+`start_pool(Name, Options) -> any()`
+
+start a pool<a name="stop_pool-1"></a>
+
+###stop_pool/1##
+
+
+`stop_pool(Name) -> any()`
+
+stop a pool<a name="terminate-2"></a>
 
 ###terminate/2##
 
 
 `terminate(Reason, State) -> any()`
 
+<a name="timeout-1"></a>
+
+###timeout/1##
+
+
+`timeout(PidOrName) -> any()`
+
+get timeout

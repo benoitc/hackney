@@ -13,7 +13,10 @@
 
 -export([start_link/0, start_link/1]).
 -export([socket/2, release/3,
-         pool_size/1, pool_size/2]).
+         pool_size/1, pool_size/2,
+         max_poolsize/1, set_poolsize/2,
+         timeout/1, set_timeout/2,
+         child_spec/2, start_pool/2, stop_pool/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -25,23 +28,68 @@
         connections = dict:new(),
         sockets = dict:new()}).
 
-
+%% @doc fetch a socket from the pool
 socket(PidOrName, {Transport, Host0, Port}) ->
     Host = string:to_lower(Host0),
     Pid = self(),
     gen_server:call(PidOrName, {socket, {Transport, Host, Port}, Pid}).
 
+%% @doc release a socket in the pool
 release(PidOrName, {Transport, Host0, Port}, Socket) ->
     Host = string:to_lower(Host0),
     gen_server:call(PidOrName, {release, {Transport, Host, Port}, Socket}).
 
-
+%% @doc get total pool size
 pool_size(PidOrName) ->
     gen_server:call(PidOrName, pool_size).
 
+%% @doc get the pool size for `{Transport, Host0, Port}'
 pool_size(PidOrName, {Transport, Host0, Port}) ->
     Host = string:to_lower(Host0),
     gen_server:call(PidOrName, {pool_size, {Transport, Host, Port}}).
+
+%% @doc get max pool size
+max_poolsize(PidOrName) ->
+    gen_server:call(PidOrName, max_poolsize).
+
+%% @doc change the pool size
+set_poolsize(default, NewSize) ->
+    set_poolsize(whereis(hackney_pool), NewSize);
+set_poolsize(PidOrName, NewSize) ->
+    gen_server:cast(PidOrName, {set_poolsize, NewSize}).
+
+%% @doc get timeout
+timeout(PidOrName) ->
+    gen_server:call(PidOrName, timeout).
+
+%% @doc change the connection timeout
+%%
+set_timeout(PidOrName, NewTimeout) ->
+    gen_server:cast(PidOrName, {set_timeout, NewTimeout}).
+
+
+
+%% @doc return a child spec suitable for embeding your pool in the
+%% supervisor
+child_spec(Name, Options0) ->
+    Options = [{name, Name} | Options0],
+    {Name, {hackney_pool, start_link, [Options]},
+      permanent, 10000, worker, [Name]}.
+
+%% @doc start a pool
+start_pool(Name, Options) ->
+    Spec = child_spec(Name, Options),
+    supervisor:start_child(hackney_sup, Spec).
+
+%% @doc stop a pool
+stop_pool(Name) ->
+    case supervisor:terminate_child(hackney_sup, Name) of
+        ok ->
+            supervisor:delete_child(hackney_sup, Name);
+        Error ->
+            Error
+    end.
+
 
 start_link() ->
     start_link([]).
@@ -60,7 +108,10 @@ init(Options) ->
     Timeout = proplists:get_value(timeout, Options),
     {ok, #state{pool_size=PoolSize, timeout=Timeout}}.
 
-
+handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
+    {reply, Timeout, State};
+handle_call(max_poolsize, _From, #state{pool_size=Size}=State) ->
+    {reply, Size, State};
 handle_call({socket, Key, Pid}, _From, State) ->
     {Reply, NewState} = find_connection(Key, Pid, State),
     {reply, Reply, NewState};
@@ -77,6 +128,11 @@ handle_call({pool_size, Key}, _From, #state{connections=Conns}=State) ->
             0
     end,
     {ok, Size, State}.
+
+handle_cast({set_poolsize, NewSize}, State) ->
+    {noreply, State#state{pool_size=NewSize}};
+handle_cast({set_timeout, NewTimeout}, State) ->
+    {noreply, State#state{timeout=NewTimeout}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -102,7 +158,7 @@ code_change(_OldVsn, State, _Extra) ->
    {ok, State}.
 
 terminate(_Reason, #state{sockets=Sockets}) ->
-    lists:foreach(fun(Socket, {{Transport, _, _}, Timer}) ->
+    lists:foreach(fun({Socket, {{Transport, _, _}, Timer}}) ->
                 cancel_timer(Socket, Timer),
                 Transport:close(Socket)
         end, dict:to_list(Sockets)),

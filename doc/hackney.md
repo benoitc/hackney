@@ -11,7 +11,7 @@
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the response.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the response as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td></td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#pool-1">pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td></td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#pool-1">pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td>add set sockets options in the client.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -44,14 +44,14 @@ length doesn't go over MaxLength.<a name="close-1"></a>
 
 `close(Client) -> any()`
 
-<a name="connect-1"></a>
+close the client<a name="connect-1"></a>
 
 ###connect/1##
 
 
 `connect(Client) -> any()`
 
-<a name="connect-3"></a>
+connect a socket and create a client state.<a name="connect-3"></a>
 
 ###connect/3##
 
@@ -154,7 +154,7 @@ Args:
 
 `set_sockopts(Client, Options) -> any()`
 
-<a name="skip_body-1"></a>
+add set sockets options in the client<a name="skip_body-1"></a>
 
 ###skip_body/1##
 
@@ -170,14 +170,28 @@ skip the full body. (read all the body if needed).<a name="start-0"></a>
 
 `start() -> any()`
 
-Start the couchbeam process. Useful when testing using the shell.<a name="stop-0"></a>
+Start the couchbeam process. Useful when testing using the shell.<a name="start_pool-2"></a>
+
+###start_pool/2##
+
+
+`start_pool(Name, Options) -> any()`
+
+start a pool<a name="stop-0"></a>
 
 ###stop/0##
 
 
 `stop() -> any()`
 
-Stop the couchbeam process. Useful when testing using the shell.<a name="stream_body-1"></a>
+Stop the couchbeam process. Useful when testing using the shell.<a name="stop_pool-1"></a>
+
+###stop_pool/1##
+
+
+`stop_pool(Name) -> any()`
+
+stop a pool<a name="stream_body-1"></a>
 
 ###stream_body/1##
 

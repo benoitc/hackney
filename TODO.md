@@ -2,7 +2,6 @@
 
 todo of hackney
 
-- Add multiple connexions pool support
 - Add multipart support
 - Add Websockets support
 - Add SPDY support
