@@ -80,7 +80,7 @@ stream_header(#client{buffer=Buf}=Client, Acc) ->
                                              response_state=on_body}};
         [<< " ", Line/binary >>, Rest] ->
             stream_header(Client#client{buffer=Rest}, [ Line | Acc ]);
-        [<< "\t", Line >>, Rest] ->
+        [<< "\t", Line/binary >>, Rest] ->
             stream_header(Client#client{buffer=Rest}, [ Line | Acc ]);
         [_Line, _Rest] when Acc /= []->
             parse_header(iolist_to_binary(lists:reverse(Acc)), Client);
