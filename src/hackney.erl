@@ -14,6 +14,8 @@
          start_pool/2, stop_pool/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
+         start_response/1,
+         stream_request_body/2,
          stream_body/1,
          body/1, body/2, skip_body/1,
          pool/1]).
@@ -143,6 +145,7 @@ request(Method, URL, Headers, Body, Options)
     request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
 
 
+%% @doc send a request using the current client state
 send_request(#client{response_state=done}=Client0 ,
              {Method, Path, Headers, Body}) ->
     Client = Client0#client{response_state=on_status,
@@ -163,6 +166,21 @@ send_request(Client0, {Method, Path, Headers, Body}) ->
         Error ->
             Error
     end.
+
+%% @doc stream the request body. It isued after sending a request using
+%% the `request' and `send_request' functions.
+-spec stream_request_body(term(), #client{})
+    -> {ok, #client{}} | {error, term()}.
+stream_request_body(Body, Client) ->
+    hackney_request:stream_body(Body, Client).
+
+%% @doc start a response.
+%% Useful if you stream the body by yourself. It will fetch the status
+%% and headers of the response. and return
+-spec start_response(#client{})
+    -> {ok, integer(), list(), #client{}} | {error, term()}.
+start_response(Client) ->
+    hackney_response:start_response(Client).
 
 
 %% @doc Stream the response body.

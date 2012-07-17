@@ -8,7 +8,7 @@
 
 -include("hackney.hrl").
 
--export([perform/2, send/2, sendfile/2]).
+-export([perform/2, send/2, sendfile/2, stream_body/2]).
 
 
 perform(Client, {Method0, Path, Headers0, Body0}) ->
@@ -33,10 +33,13 @@ perform(Client, {Method0, Path, Headers0, Body0}) ->
 
     HeadersDict = hackney_headers:update(hackney_headers:new(DefaultHeaders),
                                          Headers0),
+
     %% build headers with the body.
     {HeaderDict1, Body} = case Body0 of
+        stream ->
+            {HeadersDict, stream};
         <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-            hackney_request:handle_body(HeadersDict, Body0);
+            handle_body(HeadersDict, Body0);
         <<>> ->
             {HeadersDict, Body0};
         _ ->
@@ -55,16 +58,52 @@ perform(Client, {Method0, Path, Headers0, Body0}) ->
 
     %% send headers data
     case hackney_request:send(Client, HeadersData) of
+        ok when Body =:= stream ->
+            {ok, Client#client{response_state=stream}};
         ok ->
-            %% send body
-            Result = stream_body(Body, Client),
-
-            case Result of
+            case stream_body(Body, Client) of
                 {error, _Reason}=E ->
                     E;
-                _ ->
-                    hackney_response:init(Client)
+                {ok, Client1} ->
+                    hackney_response:start_response(Client1)
             end;
+        Error ->
+            Error
+    end.
+
+stream_body(<<>>, Client) ->
+    {ok, Client#client{response_state=waiting}};
+stream_body(Body, #client{req_chunk_size=ChunkSize}=Client)
+        when is_binary(Body) ->
+
+    case Body of
+        _ when byte_size(Body) >= ChunkSize ->
+            << Data:ChunkSize/binary, Rest/binary >> = Body,
+            case send(Client, Data) of
+                ok ->
+                    stream_body(Rest, Client);
+                Error ->
+                    Error
+            end;
+        _ ->
+            case send(Client, Body) of
+                ok ->
+                    {ok, Client#client{response_state=waiting}};
+                Error ->
+                    Error
+            end
+    end;
+stream_body(Body, Client) when is_list(Body) ->
+    case send(Client, Body) of
+        ok ->
+            {ok, Client#client{response_state=waiting}};
+        Error ->
+            Error
+    end;
+stream_body({file, FileName}, Client) ->
+    case sendfile(FileName, Client) of
+        {ok, _BytesSent} ->
+            {ok, Client#client{response_state=waiting}};
         Error ->
             Error
     end.
@@ -88,7 +127,6 @@ sendfile(FileName, Client) ->
 
 
 %% internal
-
 handle_body(Headers, Body0) ->
     {CLen, CType, Body} = case Body0 of
         {form, KVs} ->
@@ -117,33 +155,6 @@ handle_body(Headers, Body0) ->
                     {<<"Content-Length">>, CLen}],
     NewHeaders = hackney_headers:update(Headers, NewHeadersKV),
     {NewHeaders, Body}.
-
-stream_body(<<>>, _Client) ->
-    ok;
-stream_body(Body, #client{req_chunk_size=ChunkSize}=Client)
-        when is_binary(Body) ->
-
-    case Body of
-        _ when byte_size(Body) >= ChunkSize ->
-            << Data:ChunkSize/binary, Rest/binary >> = Body,
-            case send(Client, Data) of
-                ok ->
-                    stream_body(Rest, Client);
-                Error ->
-                    Error
-            end;
-        _ ->
-            send(Client, Body)
-    end;
-stream_body(Body, Client) when is_list(Body) ->
-    send(Client, Body);
-stream_body({file, FileName}, Client) ->
-    case sendfile(FileName, Client) of
-        {ok, _BytesSent} ->
-            ok;
-        Error ->
-            Error
-    end.
 
 sendfile_fallback(Fd, Client) ->
     {ok, CurrPos} = file:position(Fd, {cur, 0}),

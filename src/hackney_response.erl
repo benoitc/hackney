@@ -10,15 +10,15 @@
 
 -include("hackney.hrl").
 
--export([init/1,
+-export([start_response/1,
          stream_status/1,
          stream_headers/1, stream_header/1,
          stream_body/1,
          body/1, body/2, skip_body/1,
          close/1]).
 
-%% @doc init response
-init(Client) ->
+%% @doc Start the response It parse the request lines and headers.
+start_response(#client{response_state=waiting} = Client) ->
      case stream_status(Client) of
         {ok, Status, _Reason, Client1} ->
             case stream_headers(Client1) of
@@ -29,9 +29,11 @@ init(Client) ->
             end;
         Error ->
             Error
-    end.
+    end;
+start_response(_) ->
+    {error, invalide_state}.
 
-
+%% @doc parse the status line
 stream_status(#client{buffer=Buf}=Client) ->
     case binary:split(Buf, <<"\r\n">>) of
         [Line, Rest] ->
@@ -55,7 +57,7 @@ parse_status(<< "HTTP/", High, ".", Low, " ", Status/binary >>, Client)
     {ok, StatusInt, Reason, Client#client{version=Version,
                                           response_state=on_header}}.
 
-
+%% @doc fetch all headers
 stream_headers(Client) ->
     stream_headers(Client, []).
 
