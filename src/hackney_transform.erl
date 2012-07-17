@@ -6,8 +6,8 @@
 %%% Copyright (c) 2012 Benoît Chesneau <benoitc@e-engura.org>
 
 %% @doc The parse transform used for hackney request
-%% This parse tansform rewrite functions calls to lager:Method/1,2,3 in
-%% to lager:request(Method, ...).
+%% This parse tansform rewrite functions calls to hackney:Method
+%% calls into hackney:request(Method, ...).
 %%
 -module(hackney_transform).
 
