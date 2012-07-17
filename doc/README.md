@@ -127,7 +127,7 @@ the request body:
 
 - `{form, PropList}` : To send a form
 - `{file, File}` : To send a file
-- Bin: To send a binary
+- Bin: To send a binary or an iolist
 
 ### Use a pool
 
