@@ -148,20 +148,19 @@ request(Method, URL, Headers, Body, Options)
 %% @doc send a request using the current client state
 send_request(#client{response_state=done}=Client0 ,
              {Method, Path, Headers, Body}) ->
-    Client = Client0#client{response_state=on_status,
-                           body_state=waiting},
+    Client = Client0#client{response_state=start, body_state=waiting},
     send_request(Client, {Method, Path, Headers, Body});
 
 send_request(Client0, {Method, Path, Headers, Body}) ->
     case connect(Client0) of
         {ok, Client} ->
             case {Client#client.response_state, Client#client.body_state} of
-                {on_status, waiting} ->
+                {start, waiting} ->
                     hackney_request:perform(Client,
                                             {Method, Path, Headers, Body});
 
                 _ ->
-                    {error, bad_response_state}
+                    {error, invalide_state}
             end;
         Error ->
             Error
@@ -216,7 +215,6 @@ pool(#client{options=Opts}) ->
         Pool ->
             Pool
     end.
-
 
 
 %% internal functions

@@ -19,7 +19,7 @@
 
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=waiting} = Client) ->
-     case stream_status(Client) of
+     case stream_status(Client#client{response_state=on_status}) of
         {ok, Status, _Reason, Client1} ->
             case stream_headers(Client1) of
                 {ok, Headers, Client2} ->
@@ -42,7 +42,8 @@ stream_status(#client{buffer=Buf}=Client) ->
              case recv(Client) of
                 {ok, Data} ->
                     NewBuf = << Buf/binary, Data/binary >>,
-                    stream_status(Client#client{buffer=NewBuf});
+                    stream_status(Client#client{buffer=NewBuf,
+                                                response_state=on_status});
                 Error  ->
                     Error
             end

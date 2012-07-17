@@ -12,6 +12,7 @@
          to_list/1,
          get_value/2, get_value/3,
          insert/3,
+         delete/2,
          fold/3]).
 
 
@@ -49,6 +50,9 @@ get_value(Key, Headers, Default) ->
 
 insert(Key, Value, Headers) ->
     dict:store(hackney_util:to_lower(Key), {Key, Value}, Headers).
+
+delete(Key, Headers) ->
+    dict:erase(hackney_util:to_lower(Key), Headers).
 
 fold(Fun, Acc0, Headers) ->
     Wrapper = fun(_K, KV, Acc) ->
