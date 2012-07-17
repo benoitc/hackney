@@ -11,7 +11,7 @@
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the request.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the request as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td>init response.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_header-1">stream_header/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_headers-1">stream_headers/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_status-1">stream_status/1</a></td><td></td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_header-1">stream_header/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_headers-1">stream_headers/1</a></td><td>fetch all headers.</td></tr><tr><td valign="top"><a href="#stream_status-1">stream_status/1</a></td><td>parse the status line.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -50,14 +50,7 @@ not expecting it.<a name="close-1"></a>
 
 `close(Client) -> any()`
 
-<a name="init-1"></a>
-
-###init/1##
-
-
-`init(Client) -> any()`
-
-init response<a name="skip_body-1"></a>
+<a name="skip_body-1"></a>
 
 ###skip_body/1##
 
@@ -66,7 +59,14 @@ init response<a name="skip_body-1"></a>
 <br></br>
 
 
-<a name="stream_body-1"></a>
+<a name="start_response-1"></a>
+
+###start_response/1##
+
+
+`start_response(Client) -> any()`
+
+Start the response It parse the request lines and headers.<a name="stream_body-1"></a>
 
 ###stream_body/1##
 
@@ -87,10 +87,11 @@ init response<a name="skip_body-1"></a>
 
 `stream_headers(Client) -> any()`
 
-<a name="stream_status-1"></a>
+fetch all headers<a name="stream_status-1"></a>
 
 ###stream_status/1##
 
 
 `stream_status(Client) -> any()`
 
+parse the status line

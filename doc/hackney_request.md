@@ -10,7 +10,7 @@
 ##Function Index##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-2">sendfile/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-2">sendfile/2</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-2">stream_body/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -37,4 +37,11 @@
 
 
 `sendfile(FileName, Client) -> any()`
+
+<a name="stream_body-2"></a>
+
+###stream_body/2##
+
+
+`stream_body(Body, Client) -> any()`
 
