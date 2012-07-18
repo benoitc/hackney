@@ -130,7 +130,7 @@ the request body:
 - Bin: To send a binary or an iolist
 
 > Note: to send a chunked request, just add the `Transfer-Encoding: chunked`
-> header to your headers. Binary and Iolist bodies will be then sent using 
+> header to your headers. Binary and Iolist bodies will be then sent using
 > the chunked encoding.
 
 #### Send the body by yourself
@@ -192,6 +192,29 @@ To close a pool do:<pre>hackney:stop_pool(PoolName).</pre>
 > by setting the hackney application environment key `use_default_pool`
 > to true .
 
+### Automatically follow a redirection.
+
+If the option `{follow_redirect, true}` is given to the request, the
+client will be abble to automatically follow the redirection and
+retrieve the body. The maximum number of connection can be set using the
+`{max_redirect, Max}` option. Default is 5.
+
+The client will follow redirection on 301, 302 & 307 if the method is
+get or head. If another method is used the tuple
+`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It
+only follow 303 redirection (see other) if the method is a POST.
+
+Last Location is stored in the client state in the `location` property.
+
+ex:<pre>Method = get,
+URL = "http://friendpaste.com/",
+ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
+ReqBody = <<>>,
+Options = [{follow_redirect, true}, {max_redirect, true}],
+{ok, S, H, Client} = hackney:request(Method, URL, ReqHeaders,
+                                     ReqBody, Options),
+{ok, Body, Client1} = hackney:body(Client).</pre>
+
 Contribute
 ----------
 For issues, comments or feedback please [create an issue!] [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"
@@ -201,18 +224,18 @@ For issues, comments or feedback please [create an issue!] [1][1]: http://github
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_transform.md" class="module">hackney_transform</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney.md" class="module">hackney</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_transform.md" class="module">hackney_transform</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/0.2.0/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

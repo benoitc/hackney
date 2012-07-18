@@ -130,7 +130,7 @@ the request body:
 - Bin: To send a binary or an iolist
 
 > Note: to send a chunked request, just add the `Transfer-Encoding: chunked`
-> header to your headers. Binary and Iolist bodies will be then sent using 
+> header to your headers. Binary and Iolist bodies will be then sent using
 > the chunked encoding.
 
 #### Send the body by yourself
@@ -191,6 +191,29 @@ To close a pool do:<pre>hackney:stop_pool(PoolName).</pre>
 > without having to set the client option each time. You can now do this
 > by setting the hackney application environment key `use_default_pool`
 > to true .
+
+### Automatically follow a redirection.
+
+If the option `{follow_redirect, true}` is given to the request, the
+client will be abble to automatically follow the redirection and
+retrieve the body. The maximum number of connection can be set using the
+`{max_redirect, Max}` option. Default is 5.
+
+The client will follow redirection on 301, 302 & 307 if the method is
+get or head. If another method is used the tuple
+`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It
+only follow 303 redirection (see other) if the method is a POST.
+
+Last Location is stored in the client state in the `location` property.
+
+ex:<pre>Method = get,
+URL = "http://friendpaste.com/",
+ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
+ReqBody = <<>>,
+Options = [{follow_redirect, true}, {max_redirect, true}],
+{ok, S, H, Client} = hackney:request(Method, URL, ReqHeaders,
+                                     ReqBody, Options),
+{ok, Body, Client1} = hackney:body(Client).</pre>
 
 Contribute
 ----------
