@@ -193,7 +193,7 @@ find_connection({Transport, _Host, _Port}=Key, Pid,
 
 remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     case dict:find(Socket, Sockets) of
-        {Key, Timer} ->
+        {ok, {Key, Timer}} ->
             cancel_timer(Socket, Timer),
             ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
             NewConns = update_connections(ConnSockets, Key, Conns),
@@ -214,7 +214,6 @@ store_connection({Transport, _, _} = Key, Socket,
             [Socket | OldSockets];
         error -> [Socket]
     end,
-
     State#state{connections = dict:store(Key, ConnSockets, Conns),
                 sockets = dict:store(Socket, {Key, Timer}, Sockets)}.
 

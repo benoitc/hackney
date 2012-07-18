@@ -34,12 +34,29 @@ stop() ->
     application:stop(hackney).
 
 %% @doc connect a socket and create a client state.
-connect(#client{state=connected}=Client) ->
+connect(#client{state=connected, redirect=nil}=Client) ->
     {ok, Client};
 
-connect(#client{state=closed}=Client) ->
+connect(#client{state=connected, redirect=Redirect}=Client) ->
+    #client{host=Host, port=Port, transport=Transport,
+                    socket=Socket}=Client,
+
+     case pool(Client) of
+        undefined ->
+            close(Client);
+        Pool ->
+            hackney_pool:release(Pool, {Transport, Host, Port}, Socket)
+    end,
+    connect(Redirect);
+connect(#client{state=closed, redirect=nil}=Client) ->
     #client{transport=Transport, host=Host, port=Port} = Client,
-    connect(Transport, Host, Port, Client).
+    connect(Transport, Host, Port, Client);
+
+connect(#client{state=closed, redirect=Redirect}) ->
+    connect(Redirect);
+
+connect({Transport, Host, Port, Options}) ->
+    connect(Transport, Host, Port, #client{options=Options}).
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, #client{options=[]}).
@@ -151,13 +168,16 @@ send_request(#client{response_state=done}=Client0 ,
     Client = Client0#client{response_state=start, body_state=waiting},
     send_request(Client, {Method, Path, Headers, Body});
 
-send_request(Client0, {Method, Path, Headers, Body}) ->
+send_request(Client0, {Method, Path, Headers, Body}=Req) ->
     case connect(Client0) of
         {ok, Client} ->
             case {Client#client.response_state, Client#client.body_state} of
                 {start, waiting} ->
-                    hackney_request:perform(Client,
-                                            {Method, Path, Headers, Body});
+                     Resp = hackney_request:perform(Client, {Method,
+                                                             Path,
+                                                             Headers,
+                                                             Body}),
+                     maybe_redirect(Resp, Req, 0);
 
                 _ ->
                     {error, invalide_state}
@@ -219,20 +239,27 @@ pool(#client{options=Opts}) ->
 
 %% internal functions
 %%
-socket_from_pool(Pool, {Transport, Host, Port}=Key, Client) ->
+
+socket_from_pool(Pool, {Transport, Host, Port}=Key,
+                 #client{options=Opts}=Client) ->
     case hackney_pool:socket(Pool, Key) of
         {ok, Skt} ->
+            FollowRedirect = proplists:get_value(follow_redirect,
+                                                 Opts, false),
+            MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
                                socket=Skt,
-                               state = connected}};
+                               state = connected,
+                               follow_redirect=FollowRedirect,
+                               max_redirect=MaxRedirect}};
         no_socket ->
             do_connect(Transport, Host, Port, Client)
     end.
 
-do_connect(Transport, Host, Port, #client{options=Options}=Client) ->
-    ConnectOpts0 = proplists:get_value(connect_options, Options, []),
+do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
+    ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
 
     %% handle ipv6
     ConnectOpts = case hackney_util:is_ipv6(Host) of
@@ -244,11 +271,109 @@ do_connect(Transport, Host, Port, #client{options=Options}=Client) ->
 
     case Transport:connect(Host, Port, ConnectOpts) of
         {ok, Skt} ->
+            FollowRedirect = proplists:get_value(follow_redirect,
+                                                 Opts, false),
+            MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
                                socket=Skt,
-                               state = connected}};
+                               state = connected,
+                               follow_redirect=FollowRedirect,
+                               max_redirect=MaxRedirect}};
         Error ->
             Error
     end.
+
+maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
+    Resp;
+maybe_redirect({ok, S, H, #client{follow_redirect=true,
+                                  max_redirect=Max}=Client}=Resp, Req, Tries)
+        when Tries < Max ->
+
+    {Method, _Path, Headers, Body} = Req,
+    case lists:member(S, [301, 302, 307]) of
+        true ->
+            Location = redirect_location(H),
+            %% redirect the location if possible. If the method is
+            %% different from  get or head it will return
+            %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
+            %% the  user make his choice.
+            case {Location, lists:member(Method, [get, head])} of
+                {undefined, _} ->
+                    {error, {invalid_redirection, Resp}};
+                {_, true} ->
+                        NewReq = {Method, Location, Headers, Body},
+                        maybe_redirect(redirect(Client, NewReq), Req,
+                                       Tries+1);
+                {_, _} ->
+                    {ok, {maybe_redirect, S, H, Client}}
+            end;
+        false when S =:= 303 ->
+            %% see other. If methos is not POST we consider it as an
+            %% invalid redirection
+            Location = redirect_location(H),
+            case {Location, Method} of
+                {undefined, _} ->
+                    {error, {invalid_redirection, Resp}};
+                {_, post} ->
+                    NewReq = {get, Location, [], <<>>},
+                    maybe_redirect(redirect(Client, NewReq), Req, Tries+1);
+                {_, _} ->
+
+                    {error, {invalid_redirection, Resp}}
+            end;
+        _ ->
+            Resp
+    end;
+maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
+               _Req, _Tries) ->
+    case lists:member(S, [301, 302, 303, 307]) of
+        true ->
+            {error, {max_redirect_overflow, Resp}};
+        false ->
+            Resp
+    end;
+maybe_redirect(Resp, _Req, _Tries) ->
+    Resp.
+
+
+
+redirect(Client0, {Method, NewLocation, Headers, Body}) ->
+    %% skip the body
+    {ok, Client} = skip_body(Client0),
+
+
+    %% close the connection if we don't use a pool
+    Client1 = case Client#client.state of
+        closed -> Client;
+        _ -> close(Client)
+    end,
+
+    %% make a request without any redirection
+    #client{transport=Transport,
+            host=Host,
+            port=Port,
+            options=Opts0,
+            redirect=Redirect} = Client1,
+    Opts = lists:keystore(follow_redirect, 1, Opts0,
+                          {follow_redirect, false}),
+
+
+    case request(Method, NewLocation, Headers, Body, Opts) of
+        {ok,  S, H, RedirectClient} when Redirect /= nil ->
+            NewClient = RedirectClient#client{redirect=Redirect,
+                                              options=Opts0},
+            {ok, S, H, NewClient};
+        {ok, S, H, RedirectClient} ->
+            NewRedirect = {Transport, Host, Port, Opts0},
+            NewClient = RedirectClient#client{redirect=NewRedirect,
+                                              options=Opts0},
+            {ok, S, H, NewClient};
+
+        Error ->
+            Error
+    end.
+
+redirect_location(Headers) ->
+    hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).

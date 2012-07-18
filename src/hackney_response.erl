@@ -73,29 +73,26 @@ stream_headers(Client, Headers) ->
     end.
 
 
-stream_header(Client) ->
-    stream_header(Client, []).
-
-stream_header(#client{buffer=Buf}=Client, Acc) ->
+stream_header(#client{buffer=Buf}=Client) ->
     case binary:split(Buf, <<"\r\n">>) of
         [<<>>, Rest] ->
             {headers_complete, Client#client{buffer=Rest,
                                              response_state=on_body}};
         [<< " ", Line/binary >>, Rest] ->
-            stream_header(Client#client{buffer=Rest}, [ Line | Acc ]);
+            NewBuf = iolist_to_binary([Line, Rest]),
+            stream_header(Client#client{buffer=NewBuf});
         [<< "\t", Line/binary >>, Rest] ->
-            stream_header(Client#client{buffer=Rest}, [ Line | Acc ]);
-        [_Line, _Rest] when Acc /= []->
-            parse_header(iolist_to_binary(lists:reverse(Acc)), Client);
-        [Line, Rest] ->
-            stream_header(Client#client{buffer=Rest}, [Line]);
+            NewBuf = iolist_to_binary([Line, Rest]),
+            stream_header(Client#client{buffer=NewBuf});
+        [Line, Rest]->
+            parse_header(Line, Client#client{buffer=Rest});
         [Buf] ->
             case recv(Client) of
                 {ok, Data} ->
                     NewBuf = << Buf/binary, Data/binary >>,
-                    stream_header(Client#client{buffer=NewBuf}, Acc);
+                    stream_header(Client#client{buffer=NewBuf});
                 {error, Reason} ->
-                    {error, Reason, Acc}
+                    {error, Reason, Buf}
             end
     end.
 
@@ -112,6 +109,8 @@ parse_header(Line, Client) ->
             Client#client{connection=hackney_util:to_lower(Value)};
         <<"content-type">> ->
             Client#client{ctype=hackney_util:to_lower(Value)};
+        <<"location">> ->
+            Client#client{location=Value};
         _ ->
             Client
     end,
