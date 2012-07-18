@@ -145,7 +145,7 @@ Args:
 ###send_request/2##
 
 
-`send_request(Client, X2) -> any()`
+`send_request(Client, Req) -> any()`
 
 send a request using the current client state<a name="set_sockopts-2"></a>
 

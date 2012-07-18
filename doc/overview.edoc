@@ -189,6 +189,41 @@ the request body:
 - `{file, File}' : To send a file
 - Bin: To send a binary or an iolist
 
+> Note: to send a chunked request, just add the `Transfer-Encoding: chunked'  
+> header to your headers. Binary and Iolist bodies will be then sent using 
+> the chunked encoding.
+
+#### Send the body by yourself
+
+While the default is to diretcly send the request and fetch the status
+and headers if the body is set as the atom `stream` the request and
+send_request function will return {ok, Client}. Then you can use the
+function `hackney:stream_request_body/2' to stream the request body and
+`hackney:start_response/1' to initialize the respone.
+
+The function `hackney:start_response/1' is waiting a Client with
+theresponse state equal to the atom `waiting'.
+
+ex:
+
+```
+ReqBody = << "{
+      \"id\": \"some_paste_id2\",
+      \"rev\": \"some_revision_id\",
+      \"changeset\": \"changeset in unidiff format\"
+}" >>,
+ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
+Path = <<"https://friendpaste.com/">>,
+Method = post,
+{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream,
+                               []),
+
+{ok, Client1} = hackney:stream_request_body(ReqBody, Client),
+{ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
+{ok, Body, Client3} = hackney:body(Client2),
+hackney:close(Client3).
+'''
+
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
@@ -228,6 +263,12 @@ To close a pool do:
 ```
 hackney:stop_pool(PoolName).
 '''
+
+> Note: Sometimes you want to always use the default pool in your app
+> without having to set the client option each time. You can now do this
+> by setting the hackney application environment key `use_default_pool'
+> to true .
+
 
 
 Contribute

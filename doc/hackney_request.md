@@ -10,7 +10,7 @@
 ##Function Index##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-2">sendfile/2</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-2">stream_body/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#send_chunk-2">send_chunk/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-2">sendfile/2</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-2">stream_body/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -22,7 +22,7 @@
 ###perform/2##
 
 
-`perform(Client, X2) -> any()`
+`perform(Client0, X2) -> any()`
 
 <a name="send-2"></a>
 
@@ -30,6 +30,13 @@
 
 
 `send(Client, Data) -> any()`
+
+<a name="send_chunk-2"></a>
+
+###send_chunk/2##
+
+
+`send_chunk(Client, Data) -> any()`
 
 <a name="sendfile-2"></a>
 
