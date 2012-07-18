@@ -41,7 +41,7 @@ connect(#client{state=connected, redirect=Redirect}=Client) ->
     #client{host=Host, port=Port, transport=Transport,
                     socket=Socket}=Client,
 
-     case pool(Client) of
+    case pool(Client) of
         undefined ->
             close(Client);
         Pool ->
@@ -64,9 +64,14 @@ connect(Transport, Host, Port) ->
 
 connect(_Transport, _Host, _Port, #client{state=connected}=Client) ->
     {ok, Client};
-connect(Transport, Host, Port, #client{socket=Skt}=Client)
+connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
         when is_list(Host), is_integer(Port), Skt =:= nil ->
+    UseDefaultPool = use_default_pool(),
     case pool(Client) of
+        undefined when UseDefaultPool == true ->
+            Opts1 = [{pool, default} | Opts],
+            socket_from_pool(default, {Transport, Host, Port},
+                             Client#client{options=Opts1});
         undefined ->
             do_connect(Transport, Host, Port, Client);
         Pool ->
@@ -377,3 +382,11 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
 
 redirect_location(Headers) ->
     hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).
+
+use_default_pool() ->
+    case application:get_env(hackney, use_default_pool) of
+        {ok, true} ->
+            true;
+        _ ->
+            false
+    end.
