@@ -132,7 +132,8 @@ request(Method, URL, Headers, Body) ->
 %% <li><em>Headers</em> Proplists </li>
 %% <li><em>Body</em>:
 %%      <ul>
-%%      <li>{form, [{K, V}, ...]}: send a form</li>
+%%      <li>{form, [{K, V}, ...]}: send a form url encoded</li>
+%%      <li>{multipart, [{K, V}, ...]}: send a form using multipart</li>
 %%      <li>{file, "/path/to/file"}: to send a file</li>
 %%      <li>Bin: binary or iolist</li>
 %%      </ul>
