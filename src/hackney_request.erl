@@ -151,6 +151,8 @@ handle_body(Headers, ReqType0, Body0) ->
     {CLen, CType, Body} = case Body0 of
         {form, KVs} ->
             hackney_form:encode_form(KVs);
+        {multipart, KVs} ->
+            hackney_multipart:encode_form(KVs);
         {file, FileName} ->
             S= filelib:file_size(FileName),
             CT = case mimetypes:filename(FileName) of
