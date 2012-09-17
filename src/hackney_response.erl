@@ -173,32 +173,37 @@ skip_body(Client) ->
 
 
 -spec transfer_decode(binary(), #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
+                     -> {ok, binary(), #client{}} | {error, atom()}.
 transfer_decode(Data, Client=#client{
-		body_state={stream, TransferDecode, TransferState, ContentDecode}}) ->
-	case TransferDecode(Data, TransferState) of
-		{ok, Data2, TransferState2} ->
-			content_decode(ContentDecode, Data2, Client#client{body_state=
-				{stream, TransferDecode, TransferState2, ContentDecode}});
-		{ok, Data2, Rest, TransferState2} ->
-			content_decode(ContentDecode, Data2, Client#client{
-				buffer=Rest, body_state=
-				{stream, TransferDecode, TransferState2, ContentDecode}});
-		%% @todo {header(s) for chunked
-		more ->
-			stream_body_recv(Client#client{buffer=Data});
-		{done, Length, Rest} ->
-            Client2 = transfer_decode_done(Length, Rest, Client),
-			{done, Client2};
-		{done, Data2, Length, Rest} ->
-            Client2 = transfer_decode_done(Length, Rest, Client),
-			content_decode(ContentDecode, Data2, Client2);
-		{error, Reason} ->
-			{error, Reason}
-	end.
+                        body_state={stream, TransferDecode, TransferState, ContentDecode}}) ->
+    case TransferDecode(Data, TransferState) of
+        {ok, Data2, TransferState2} ->
+            content_decode(ContentDecode, Data2, Client#client{body_state=
+                                                                   {stream, TransferDecode, TransferState2, ContentDecode}});
+        {ok, Data2, Rest, TransferState2} ->
+            content_decode(ContentDecode, Data2, Client#client{
+                                                   buffer=Rest, body_state=
+                                                       {stream, TransferDecode, TransferState2, ContentDecode}});
+        %% @todo {header(s) for chunked
+        {chunk_ok, Chunk, Rest} ->
+            {ok, Chunk, Client#client{buffer=Rest}};
+        more ->
+            stream_body_recv(Client#client{buffer=Data});
+        {done, Rest} ->
+            Client2 = transfer_decode_done(Rest, Client),
+            {done, Client2};
+        {done, Data2, Rest} ->
+            Client2 = transfer_decode_done(Rest, Client),
+            content_decode(ContentDecode, Data2, Client2);
+        done ->
+            Client2 = transfer_decode_done(<<>>, Client),
+            {done, Client2};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 
-transfer_decode_done(_Length, Rest, Client0) ->
+transfer_decode_done(Rest, Client0) ->
     Client = Client0#client{response_state=done,
                             body_state=done,
                             buffer=Rest},
@@ -225,9 +230,6 @@ content_decode(ContentDecode, Data, Client) ->
 		{error, Reason} -> {error, Reason}
 	end.
 
-
-
-
 -spec read_body(non_neg_integer() | infinity, #client{}, binary())
 	-> {ok, binary(), #client{}} | {error, atom()}.
 read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
@@ -251,31 +253,26 @@ maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
 
 
 %% @doc Decode a stream of chunks.
--spec te_chunked(binary(), {non_neg_integer(), non_neg_integer()})
-	-> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
-	| {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
-	| {done, non_neg_integer(), binary()} | {error, badarg}.
+-spec te_chunked(binary(), any())
+                -> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
+                       | {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
+                       | {done, non_neg_integer(), binary()} | {error, badarg}.
 te_chunked(<<>>, _) ->
-	more;
-te_chunked(<< "0\r\n\r\n", Rest/binary >>, {0, Streamed}) ->
-	{done, Streamed, Rest};
-te_chunked(Data, {0, Streamed}) ->
-	%% @todo We are expecting an hex size, not a general token.
-	hackney_util:token(Data,
-		fun (Rest, _) when byte_size(Rest) < 4 ->
-				more;
-			(<< "\r\n", Rest/binary >>, BinLen) ->
-				Len = list_to_integer(binary_to_list(BinLen), 16),
-				te_chunked(Rest, {Len, Streamed});
-			(_, _) ->
-				{error, badarg}
-		end);
-te_chunked(Data, {ChunkRem, Streamed}) when byte_size(Data) >= ChunkRem + 2 ->
-	<< Chunk:ChunkRem/binary, "\r\n", Rest/binary >> = Data,
-	{ok, Chunk, Rest, {0, Streamed + byte_size(Chunk)}};
-te_chunked(Data, {ChunkRem, Streamed}) ->
-	Size = byte_size(Data),
-	{ok, Data, {ChunkRem - Size, Streamed + Size}}.
+    done;
+te_chunked(Data, _) ->
+    case read_size(Data) of
+        {ok, 0, Rest} ->
+            {done, Rest};
+        {ok, Size, Rest} ->
+            case read_chunk(Rest, Size) of
+                {ok, Chunk, Rest1} ->
+                    {chunk_ok, Chunk, Rest1};
+                eof ->
+                    more
+            end;
+        eof ->
+            more
+    end.
 
 %% @doc Decode an identity stream.
 -spec te_identity(binary(), {non_neg_integer(), non_neg_integer()})
@@ -303,3 +300,45 @@ close(#client{socket=nil}=Client) ->
 close(#client{transport=Transport, socket=Skt}=Client) ->
     Transport:close(Skt),
     Client#client{state = closed, socket=nil}.
+
+%%%%%%%%%%%%%%%%%
+
+read_size(Data) ->
+    case read_size(Data, [], true) of
+        {ok, Line, Rest} ->
+            case io_lib:fread("~16u", Line) of
+                {ok, [Size], []} ->
+                    {ok, Size, Rest};
+                _ ->
+                    {error, {poorly_formatted_size, Line}} 
+            end;
+        Err ->
+            Err
+    end.
+
+read_size(<<>>, _, _) ->
+    eof;
+
+read_size(<<"\r\n", Rest/binary>>, Acc, _) ->
+    {ok, lists:reverse(Acc), Rest};
+
+read_size(<<$;, Rest/binary>>, Acc, _) ->
+    read_size(Rest, Acc, false);
+
+read_size(<<C, Rest/binary>>, Acc, AddToAcc) ->
+    case AddToAcc of
+        true ->
+            read_size(Rest, [C|Acc], AddToAcc);
+        false ->
+            read_size(Rest, Acc, AddToAcc)
+    end.
+
+read_chunk(Data, Size) ->
+    case Data of
+        <<Chunk:Size/binary, "\r\n", Rest/binary>> ->
+            {ok, Chunk, Rest};
+        <<_Chunk:Size/binary, _Rest/binary>> when size(_Rest) >= 2 ->
+            {error, poorly_formatted_chunked_size};
+        _ ->
+            eof
+    end.
