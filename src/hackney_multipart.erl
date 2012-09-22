@@ -41,11 +41,12 @@ unique(Size, Acc) ->
 
 encode({Id, {file, Name, Content}}, Boundary) ->
     Field = atom_to_binary(Id, utf8),
+    CType = hackney_util:content_type(Name),
     Parts = [
         <<"--", Boundary/binary>>,
         <<"Content-Disposition: form-data; name=\"",
             Field/binary, "\"; filename=\"", Name/binary, "\"">>,
-        <<"Content-Type: application/octet-stream">>,
+        <<"Content-Type: ", CType/binary >>,
         <<>>, Content, <<>>],
     hackney_util:join(Parts, "\r\n");
 encode({Id, Value}, Boundary) ->

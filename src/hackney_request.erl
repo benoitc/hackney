@@ -155,12 +155,7 @@ handle_body(Headers, ReqType0, Body0) ->
             hackney_multipart:encode_form(KVs);
         {file, FileName} ->
             S= filelib:file_size(FileName),
-            CT = case mimetypes:filename(FileName) of
-                [CT0 | _] ->
-                    CT0;
-                CT0 when is_binary(CT0) ->
-                    CT0
-            end,
+            CT = hackney_util:content_type(FileName),
             {S, CT, Body0};
         _ when is_list(Body0) -> % iolist case
             S = erlang:length(Body0),

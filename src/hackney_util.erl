@@ -13,7 +13,8 @@
          char_to_lower/1, char_to_upper/1,
          join/2,
          to_hex/1,
-         token_ci/2, token/2]).
+         token_ci/2, token/2,
+         content_type/1]).
 
 
 is_ipv6(Host) ->
@@ -170,3 +171,15 @@ token(<< C, Rest/binary >>, Fun, Case = ci, Acc) ->
 	token(Rest, Fun, Case, << Acc/binary, C2 >>);
 token(<< C, Rest/binary >>, Fun, Case, Acc) ->
 	token(Rest, Fun, Case, << Acc/binary, C >>).
+
+
+%% get content type
+%%
+%%
+content_type(Name) ->
+    case mimetypes:filename(Name) of
+        [CT | _] ->
+            CT;
+        CT when is_binary(CT) ->
+            CT
+    end.
