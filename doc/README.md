@@ -229,6 +229,7 @@ For issues, comments or feedback please [create an issue!] [1][1]: http://github
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="hackney_form.md" class="module">hackney_form</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
 <tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
 <tr><td><a href="hackney_response.md" class="module">hackney_response</a></td></tr>

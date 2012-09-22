@@ -132,7 +132,9 @@ Args:
 
 * _Body_:
 
-* {form, [{K, V}, ...]}: send a form
+* {form, [{K, V}, ...]}: send a form url encoded
+
+* {multipart, [{K, V}, ...]}: send a form using multipart
 
 * {file, "/path/to/file"}: to send a file
 
