@@ -215,6 +215,13 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
                                      ReqBody, Options),
 {ok, Body, Client1} = hackney:body(Client).</pre>
 
+### Proxy a connection
+
+For now only HTTP tunneling is supported. To use an HTTP tunnel add the
+option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
+`{Host, Port}` tuple. If you need to authetnicate set the option
+`{proxy_auth, {User, Password}}`.
+
 ## Contribute
 
 For issues, comments or feedback please [create an
