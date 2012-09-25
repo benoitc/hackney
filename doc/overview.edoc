@@ -186,6 +186,8 @@ hackney helps you send different payload by passing different terms as
 the request body:
 
 - `{form, PropList}' : To send a form
+- `{multipart, KVs}' : to send you body using the multipart API. KVs can
+  be under the form `{file, Name, Content}' or `Value'
 - `{file, File}' : To send a file
 - Bin: To send a binary or an iolist
 
