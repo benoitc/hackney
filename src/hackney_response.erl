@@ -184,7 +184,11 @@ transfer_decode(Data, Client=#client{
             content_decode(ContentDecode, Data2, Client#client{
                                                    buffer=Rest, body_state=
                                                        {stream, TransferDecode, TransferState2, ContentDecode}});
-        %% @todo {header(s) for chunked
+        {chunk_done, Rest} ->
+            {ok, _, Client1} = stream_headers(Client#client{buffer=Rest}),
+            Client2 = transfer_decode_done(<<>>, Client1),
+            {done, Client2};
+
         {chunk_ok, Chunk, Rest} ->
             {ok, Chunk, Client#client{buffer=Rest}};
         more ->
@@ -262,7 +266,7 @@ te_chunked(<<>>, _) ->
 te_chunked(Data, _) ->
     case read_size(Data) of
         {ok, 0, Rest} ->
-            {done, Rest};
+            {chunk_done, Rest};
         {ok, Size, Rest} ->
             case read_chunk(Rest, Size) of
                 {ok, Chunk, Rest1} ->
@@ -310,7 +314,7 @@ read_size(Data) ->
                 {ok, [Size], []} ->
                     {ok, Size, Rest};
                 _ ->
-                    {error, {poorly_formatted_size, Line}} 
+                    {error, {poorly_formatted_size, Line}}
             end;
         Err ->
             Err
