@@ -215,9 +215,10 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
                                      ReqBody, Options),
 {ok, Body, Client1} = hackney:body(Client).</pre>
 
-## ContributeFor issues, comments or feedback please [create an
-issue](http://github.com/benoitc/hackney/issues).
+## Contribute
 
+For issues, comments or feedback please [create an
+issue](http://github.com/benoitc/hackney/issues).
 
 ##Modules##
 
