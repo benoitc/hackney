@@ -213,11 +213,9 @@ ReqBody = <<>>,
 Options = [{follow_redirect, true}, {max_redirect, true}],
 {ok, S, H, Client} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
-{ok, Body, Client1} = hackney:body(Client).</pre>
-
-Contribute
+{ok, Body, Client1} = hackney:body(Client).</pre>Contribute
 ----------
-For issues, comments or feedback please [create an issue!] [1][1]: http://github.com/benoitc/hackney/issues "hackney issues"
+For issues, comments or feedback please [create an issue!](http://github.com/benoitc/hackney/issues).
 
 
 ##Modules##

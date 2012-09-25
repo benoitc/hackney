@@ -299,8 +299,6 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 Contribute
 ----------
-For issues, comments or feedback please [create an issue!] [1]
-
-[1]: http://github.com/benoitc/hackney/issues "hackney issues"
+For issues, comments or feedback please [create an issue!](http://github.com/benoitc/hackney/issues).
 
 @end
