@@ -142,7 +142,8 @@ stream_body(Client=#client{body_state=done}) ->
 stream_body_recv(Client=#client{
 		transport=Transport, socket=Socket, buffer=Buffer}) ->
 	case Transport:recv(Socket, 0, 5000) of
-		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>, Client);
+		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>,
+                                Client);
 		{error, Reason} -> {error, Reason}
 	end.
 
@@ -175,15 +176,22 @@ skip_body(Client) ->
 -spec transfer_decode(binary(), #client{})
                      -> {ok, binary(), #client{}} | {error, atom()}.
 transfer_decode(Data, Client=#client{
-                        body_state={stream, TransferDecode, TransferState, ContentDecode}}) ->
+                        body_state={stream, TransferDecode,
+                                    TransferState, ContentDecode}}) ->
     case TransferDecode(Data, TransferState) of
         {ok, Data2, TransferState2} ->
-            content_decode(ContentDecode, Data2, Client#client{body_state=
-                                                                   {stream, TransferDecode, TransferState2, ContentDecode}});
+            content_decode(ContentDecode, Data2,
+                           Client#client{body_state= {stream,
+                                                      TransferDecode,
+                                                      TransferState2,
+                                                      ContentDecode}});
         {ok, Data2, Rest, TransferState2} ->
-            content_decode(ContentDecode, Data2, Client#client{
-                                                   buffer=Rest, body_state=
-                                                       {stream, TransferDecode, TransferState2, ContentDecode}});
+            content_decode(ContentDecode, Data2,
+                           Client#client{buffer=Rest,
+                                         body_state={stream,
+                                                     TransferDecode,
+                                                     TransferState2,
+                                                     ContentDecode}});
         {chunk_done, Rest} ->
             {ok, _, Client1} = stream_headers(Client#client{buffer=Rest}),
             Client2 = transfer_decode_done(<<>>, Client1),
