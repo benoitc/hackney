@@ -16,7 +16,7 @@
 
 
 @copyright 2012 Benoît Chesneau.
-@version 0.2
+@version 0.3
 @title hackney - simple HTTP client in Erlang
 
 @doc
