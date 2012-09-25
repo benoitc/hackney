@@ -1,5 +1,12 @@
 # NEWS
 
+0.3.0 - 2012/09/26
+------------------
+
+- Add Multipart support
+- Add HTTP Proxy tunneling support
+- Fix Chuncked Response decoding
+
 0.2.0 - 2012/07/18
 ------------------
 
