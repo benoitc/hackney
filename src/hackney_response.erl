@@ -207,6 +207,9 @@ transfer_decode(Data, Client=#client{
         {done, Data2, Rest} ->
             Client2 = transfer_decode_done(Rest, Client),
             content_decode(ContentDecode, Data2, Client2);
+        {done, Data2, _Length, Rest} ->
+            Client2 = transfer_decode_done(Rest, Client),
+            content_decode(ContentDecode, Data2, Client2);
         done ->
             Client2 = transfer_decode_done(<<>>, Client),
             {done, Client2};
