@@ -297,8 +297,9 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 {ok, Body, Client1} = hackney:body(Client).
 '''
 
-Contribute
-----------
-For issues, comments or feedback please [create an issue!](http://github.com/benoitc/hackney/issues).
+## Contribute
+
+For issues, comments or feedback please [create an
+issue](http://github.com/benoitc/hackney/issues).
 
 @end
