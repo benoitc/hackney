@@ -66,6 +66,7 @@ connect(_Transport, _Host, _Port, #client{state=connected}=Client) ->
     {ok, Client};
 connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
         when is_list(Host), is_integer(Port), Skt =:= nil ->
+
     UseDefaultPool = use_default_pool(),
     case pool(Client) of
         undefined when UseDefaultPool == true ->
@@ -79,7 +80,6 @@ connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
     end;
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     connect(Transport, Host, Port, #client{options=Options}).
-
 
 %% @doc close the client
 close(Client) ->
@@ -157,7 +157,7 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
                              {basic_auth, {User, Password}})
     end,
 
-    case connect(Transport, Host, Port, Options) of
+    case maybe_proxy(Transport, Host, Port, Options) of
         {ok, Client} ->
             send_request(Client, {Method, Path, Headers, Body});
         Error ->
@@ -245,6 +245,47 @@ pool(#client{options=Opts}) ->
 
 %% internal functions
 %%
+maybe_proxy(Transport, Host, Port, Options)
+        when is_list(Host), is_integer(Port), is_list(Options) ->
+
+    case proplists:get_value(proxy, Options) of
+        Url when is_binary(Url) orelse is_list(Url) ->
+            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
+                                                          Options)}],
+            #hackney_url{transport=PTransport} = hackney_url:parse_url(Url),
+
+            if PTransport =/= Transport ->
+                    {error, invalid_proxy_transport};
+                true ->
+                    connect_proxy(Url, Host, Port, ProxyOpts, Options)
+            end;
+        {ProxyHost, ProxyPort} ->
+            Netloc = iolist_to_binary([ProxyHost, ":",
+                                       integer_to_list(ProxyPort)]),
+            Scheme = hackney_url:transport_scheme(Transport),
+            Url = #hackney_url{scheme=Scheme, netloc=Netloc},
+            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
+                                                          Options)}],
+            connect_proxy(hackney_url:unparse_url(Url), Host, Port, ProxyOpts,
+                          Options);
+
+        _ ->
+            connect(Transport, Host, Port, Options)
+    end.
+
+connect_proxy(ProxyUrl, Host, Port, ProxyOpts, Options) ->
+    Host = iolist_to_binary([Host, ":", integer_to_list(Port)]),
+    Headers = [{<<"Host">>, Host}],
+    case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
+        {ok, 200, _, Client0} ->
+            Client = skip_body(Client0),
+            {ok, Client#client{options=Options}};
+        {ok, S, H, Client} ->
+            Body = body(Client),
+            {error, {proxy_connection, S, H, Body}};
+        Error ->
+            {error, {proxy_connection, Error}}
+    end.
 
 socket_from_pool(Pool, {Transport, Host, Port}=Key,
                  #client{options=Opts}=Client) ->
@@ -342,7 +383,6 @@ maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
     end;
 maybe_redirect(Resp, _Req, _Tries) ->
     Resp.
-
 
 
 redirect(Client0, {Method, NewLocation, Headers, Body}) ->

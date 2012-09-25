@@ -12,6 +12,7 @@
 -module(hackney_url).
 
 -export([parse_url/1,
+         transport_scheme/1,
          unparse_url/1,
          urldecode/1, urldecode/2,
          urlencode/1, urlencode/2]).
@@ -47,6 +48,11 @@ parse_url(URL, S) ->
                                            fragment = Fragment})
     end.
 
+
+transport_scheme(hackney_tcp_transport) ->
+    http;
+transport_scheme(hackney_ssl_transport) ->
+    https.
 
 unparse_url(#hackney_url{}=Url) ->
     #hackney_url{scheme = Scheme,
