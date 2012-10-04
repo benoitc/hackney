@@ -321,13 +321,16 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
             FollowRedirect = proplists:get_value(follow_redirect,
                                                  Opts, false),
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
+            ForceRedirect = proplists:get_value(force_redirect, Opts,
+                                                false),
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
                                socket=Skt,
                                state = connected,
                                follow_redirect=FollowRedirect,
-                               max_redirect=MaxRedirect}};
+                               max_redirect=MaxRedirect,
+                               force_redirect=ForceRedirect}};
         Error ->
             Error
     end.
@@ -335,8 +338,9 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
     Resp;
 maybe_redirect({ok, S, H, #client{follow_redirect=true,
-                                  max_redirect=Max}=Client}=Resp, Req, Tries)
-        when Tries < Max ->
+                                  max_redirect=Max,
+                                  force_redirect=ForceRedirect}=Client}=Resp,
+               Req, Tries) when Tries < Max ->
 
     {Method, _Path, Headers, Body} = Req,
     case lists:member(S, [301, 302, 307]) of
@@ -350,6 +354,10 @@ maybe_redirect({ok, S, H, #client{follow_redirect=true,
                 {undefined, _} ->
                     {error, {invalid_redirection, Resp}};
                 {_, true} ->
+                        NewReq = {Method, Location, Headers, Body},
+                        maybe_redirect(redirect(Client, NewReq), Req,
+                                       Tries+1);
+                {_, _} when ForceRedirect =:= true ->
                         NewReq = {Method, Location, Headers, Body},
                         maybe_redirect(redirect(Client, NewReq), Req,
                                        Tries+1);

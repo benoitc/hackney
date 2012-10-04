@@ -45,6 +45,7 @@
         timeout = infinity,
         follow_redirect = false,
         max_redirect = 5,
+        force_redirect = false,
         redirect = nil,
         location,
         state,
