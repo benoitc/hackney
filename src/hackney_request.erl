@@ -31,7 +31,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             DefaultHeaders0;
         {User, Pwd} ->
             Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
-            DefaultHeaders0 ++ [{<<"Authorization">>, Credentials}]
+            DefaultHeaders0 ++ [{<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
     end,
 
     HeadersDict = hackney_headers:update(hackney_headers:new(DefaultHeaders),
