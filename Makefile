@@ -2,8 +2,10 @@ REBAR?=./rebar
 
 all: build
 
-doc:
-	$(REBAR) doc
+dev: devbuild
+
+doc: devclean dev
+	$(REBAR) -C rebar_dev.config doc
 
 clean:
 	$(REBAR) clean
@@ -16,6 +18,18 @@ build: deps
 
 deps:
 	$(REBAR) get-deps
+
+
+# development
+#
+devclean:
+	$(REBAR) -C rebar_dev.config clean
+
+devbuild: devdeps
+	$(REBAR) -C rebar_dev.config compile
+
+devdeps:
+	$(REBAR) -C rebar_dev.config get-deps
 
 
 .PHONY: doc deps

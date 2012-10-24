@@ -126,6 +126,8 @@ hackney helps you send different payload by passing different terms as
 the request body:
 
 - `{form, PropList}` : To send a form
+- `{multipart, KVs}` : to send you body using the multipart API. KVs can
+  be under the form `{file, Name, Content}` or `Value`
 - `{file, File}` : To send a file
 - Bin: To send a binary or an iolist
 
@@ -226,6 +228,13 @@ option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
 
 For issues, comments or feedback please [create an
 issue](http://github.com/benoitc/hackney/issues).
+
+### Notes for developer
+
+If you want to contribute patches or improve the doc, you will need to
+build hackney using the `rebar_dev.config`  file. It can also be built
+using the **Makefile**:<pre>$ make dev ; # compile & get deps
+$ make devclean ; # clean all files</pre>
 
 ##Modules##
 
