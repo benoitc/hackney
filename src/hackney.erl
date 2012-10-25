@@ -120,7 +120,7 @@ request(Method, URL, Headers) ->
 -spec request(term(), binary()|list(), list(), term())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, URL, Headers, Body) ->
-    request(Method, URL, Headers, Body).
+    request(Method, URL, Headers, Body, []).
 
 %% @doc make a request
 %%
