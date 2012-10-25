@@ -98,7 +98,10 @@ stream_header(#client{buffer=Buf}=Client) ->
 
 
 parse_header(Line, Client) ->
-    [Key, Value] = binary:split(Line, <<": ">>, [trim]),
+    [Key, Value] = case binary:split(Line, <<": ">>, [trim]) of
+        [K] -> [K, <<>>];
+        [K, V] -> [K, V]
+    end,
     Client1 = case hackney_util:to_lower(Key) of
         <<"content-length">> ->
             CLen = list_to_integer(binary_to_list(Value)),
