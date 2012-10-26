@@ -229,7 +229,7 @@ option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
 For issues, comments or feedback please [create an
 issue](http://github.com/benoitc/hackney/issues).
 
-### Notes for developer
+### Notes for developers
 
 If you want to contribute patches or improve the doc, you will need to
 build hackney using the `rebar_dev.config`  file. It can also be built
