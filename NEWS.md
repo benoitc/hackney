@@ -1,5 +1,19 @@
 # NEWS
 
+0.4.0 - 2012/10/26
+------------------
+
+- Allows to stream a multipart request
+- Add `insecure` option to connect via ssl without verifying an SSL
+  certificate
+- Handle empty headers values
+- Add `force_redirect` option
+- Add expm support
+- Fix body streaming
+- Fix SSL handling
+- Fix hackney:request/3 (no more loop)
+
+
 0.3.0 - 2012/09/26
 ------------------
 

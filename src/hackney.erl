@@ -249,9 +249,9 @@ end_stream_request_body(Client) ->
 %% **start**</li>
 %% <li>`{data, eof}`: stop sending an arbitary content. It doesn't stop
 %% the multipart request</li>
-%% <li>`{Id, {file, Filename, Content}`: send a full content as a
+%% <li>`{Id, {file, Filename, Content}': send a full content as a
 %% boundary</li>
-%% <li>`{Id, Value}: send an arbitrary value as a boundary. Filename and
+%% <li>`{Id, Value}': send an arbitrary value as a boundary. Filename and
 %% Id are identique</li>
 %% </ul>
 stream_multipart_request(Body, Client) ->

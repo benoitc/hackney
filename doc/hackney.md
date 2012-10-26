@@ -11,7 +11,22 @@
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the response.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the response as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#pool-1">pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td>add set sockets options in the client.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_request_body-2">stream_request_body/2</a></td><td>stream the request body.</td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#end_stream_request_body-1">end_stream_request_body/1</a></td><td>end streaming the request body.</td></tr><tr><td valign="top"><a href="#pool-1">pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td>add set sockets options in the client.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart_request-2">stream_multipart_request/2</a></td><td>stream a multipart request until eof
+Possible value are :
+<ul>
+<li><code>eof</code>: end the multipart request</li>
+<li><code>{Id, {File, FileName}}</code>: to stream a file</li>
+<li><code>{data, {start, Id, DileName, ContentType}}</code>: to start to stream
+arbitrary binary content</li>
+<li><code>{data, Bin}`: send a binary. Use it only after emitting a
+**start**</li>
+<li>`{data, eof}`: stop sending an arbitary content. It doesn</code>t stop
+the multipart request</li>
+<li><code>{Id, {file, Filename, Content}</code>: send a full content as a
+boundary</li>
+<li><code>{Id, Value}</code>: send an arbitrary value as a boundary. Filename and
+Id are identique</li>
+</ul></td></tr><tr><td valign="top"><a href="#stream_request_body-2">stream_request_body/2</a></td><td>stream the request body.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -65,7 +80,14 @@ connect a socket and create a client state.<a name="connect-3"></a>
 
 `connect(Transport, Host, Port, Client) -> any()`
 
-<a name="pool-1"></a>
+<a name="end_stream_request_body-1"></a>
+
+###end_stream_request_body/1##
+
+
+`end_stream_request_body(Client) -> any()`
+
+end streaming the request body.<a name="pool-1"></a>
 
 ###pool/1##
 
@@ -260,7 +282,35 @@ stop a pool<a name="stream_body-1"></a>
 
 `stream_body(Client) -> any()`
 
-Stream the response body.<a name="stream_request_body-2"></a>
+Stream the response body.<a name="stream_multipart_request-2"></a>
+
+###stream_multipart_request/2##
+
+
+`stream_multipart_request(Body, Client) -> any()`
+
+stream a multipart request until eof
+Possible value are :
+
+* `eof`: end the multipart request
+
+* `{Id, {File, FileName}}`: to stream a file
+
+* `{data, {start, Id, DileName, ContentType}}`: to start to stream
+arbitrary binary content
+
+* `{data, Bin}`: send a binary. Use it only after emitting a
+**start**</li>
+<li>`{data, eof}`: stop sending an arbitary content. It doesn`t stop
+the multipart request
+
+* `{Id, {file, Filename, Content}`: send a full content as a
+boundary
+
+* `{Id, Value}`: send an arbitrary value as a boundary. Filename and
+Id are identique
+
+<a name="stream_request_body-2"></a>
 
 ###stream_request_body/2##
 
