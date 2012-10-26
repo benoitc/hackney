@@ -126,11 +126,11 @@ request(Method, URL, Headers, Body) ->
 %%
 %% Args:
 %% <ul>
-%% <li><em>Method</em>: method used for the request (get, post,
+%% <li><strong>>Method</strong>>: method used for the request (get, post,
 %% ...)</li>
-%% <li><em>Url</em>: full url of the request</li>
-%% <li><em>Headers</em> Proplists </li>
-%% <li><em>Body</em>:
+%% <li><strong>Url</strong>: full url of the request</li>
+%% <li><strong>Headers</strong> Proplists </li>
+%% <li><strong>Body</strong>:
 %%      <ul>
 %%      <li>{form, [{K, V}, ...]}: send a form url encoded</li>
 %%      <li>{multipart, [{K, V}, ...]}: send a form using multipart</li>
@@ -138,20 +138,20 @@ request(Method, URL, Headers, Body) ->
 %%      <li>Bin: binary or iolist</li>
 %%      </ul>
 %%  </li>
-%%  <li><em>Options:</em>
+%%  <li><strong>Options:</strong>
 %%      [{connect_options, connect_options(),
 %%       {ssl_options, ssl_options()},
 %%       hackney_options()}]
-%%
+%%      <p>
 %%      <ul>
-%%      <li>connect_options(): The default connect_options are
+%%      <li>`connect_options()': The default connect_options are
 %%      `[binary, {active, false}, {packet, raw}])' . Vor valid options
 %%      see the gen_tcp options.</li>
 %%
-%%      <li>ssl_options(): See the ssl options from the ssl
+%%      <li>`ssl_options()': See the ssl options from the ssl
 %%      module.</li>
 %%
-%%      <li>Others options are:
+%%      <li><p><em>Others options are</em>:
 %%      <ul>
 %%          <li>{follow_redirect, boolean}: false by default, follow a
 %%          redirection</li>
@@ -163,18 +163,20 @@ request(Method, URL, Headers, Body) ->
 %%          <li>insecure: to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
 %%      </ul>
+%%      </p>
 %%
 %%      </li>
 %%
-%%      <li>proxy_options()* options to connect by a proxy:
-%%      <ul>
+%%      <li>`proxy_options()':  options to connect by a proxy:
+%%      <p><ul>
 %%          <li>binary(): url to use for the proxy. Used for basic HTTP
 %%          proxy</li>
 %%          <li>{Host::binary(), Port::binary}: Host and port to connect,
 %%          for HTTP proxy</li>
-%%      </ul>
+%%      </ul></p>
 %%      </li>
 %%      </ul>
+%%      </p>
 %%  </li>
 %%  </ul>
 -spec request(term(), binary(), list(), term(), list())

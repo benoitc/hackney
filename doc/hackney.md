@@ -123,14 +123,18 @@ make a request
 
 Args:
 
-* _Method_: method used for the request (get, post,
+* <strong>>Method</strong>
+>: method used for the request (get, post,
 ...)
 
-* _Url_: full url of the request
+* <strong>Url</strong>
+: full url of the request
 
-* _Headers_ Proplists
+* <strong>Headers</strong>
+ Proplists
 
-* _Body_:
+* <strong>Body</strong>
+:
 
 * {form, [{K, V}, ...]}: send a form url encoded
 
@@ -142,23 +146,26 @@ Args:
 
 
 
-* 
-_Options:_
+* <strong>Options:</strong>
+
 [{connect_options, connect_options(),
 {ssl_options, ssl_options()},
 hackney_options()}]
 
 
-* connect_options(): The default connect_options are
+
+
+* `connect_options()`: The default connect_options are
 `[binary, {active, false}, {packet, raw}])` . Vor valid options
 see the gen_tcp options.
 
 
-* ssl_options(): See the ssl options from the ssl
+* `ssl_options()`: See the ssl options from the ssl
 module.
 
 
-* Others options are:
+* 
+_Others options are_:
 
 * {follow_redirect, boolean}: false by default, follow a
 redirection
@@ -178,13 +185,17 @@ transfers without checking the certificate
 
 
 
-* proxy_options()* options to connect by a proxy:
+
+* `proxy_options()`:  options to connect by a proxy:
+
+
 
 * binary(): url to use for the proxy. Used for basic HTTP
 proxy
 
 * {Host::binary(), Port::binary}: Host and port to connect,
 for HTTP proxy
+
 
 
 
