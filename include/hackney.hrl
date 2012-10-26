@@ -50,6 +50,7 @@
         location,
         state,
         response_state = start,
+        mp_boundary = nil,
         req_type = normal,
         send_fun=nil,
         body_state=waiting,

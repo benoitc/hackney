@@ -18,6 +18,20 @@
          close/1]).
 
 %% @doc Start the response It parse the request lines and headers.
+start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
+    case hackney_request:end_stream_body(Client) of
+        {ok, Client1} ->
+            start_response(Client1);
+        Error ->
+            Error
+    end;
+start_response(#client{response_state=stream} = Client) ->
+    case hackney_multipart:stream(eof, Client) of
+        {ok, Client1} ->
+            start_response(Client1);
+        Error ->
+            Error
+    end;
 start_response(#client{response_state=waiting} = Client) ->
      case stream_status(Client#client{response_state=on_status}) of
         {ok, Status, _Reason, Client1} ->

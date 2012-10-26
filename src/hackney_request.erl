@@ -11,7 +11,7 @@
 -export([perform/2,
          send/2, send_chunk/2,
          sendfile/2,
-         stream_body/2]).
+         stream_body/2, end_stream_body/1]).
 
 
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
@@ -40,23 +40,30 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
     ReqType0 = req_type(HeadersDict),
 
     %% build headers with the body.
-    {HeaderDict1, ReqType, Body} = case Body0 of
+    {HeaderDict1, ReqType, Body, Client1} = case Body0 of
         stream ->
-            {HeadersDict, ReqType0, stream};
+            {HeadersDict, ReqType0, stream, Client0};
+        stream_multipart ->
+            handle_multipart_body(HeadersDict, ReqType0, Client0);
+        {stream_multipart, Size} ->
+            handle_multipart_body(HeadersDict, ReqType0, Size, Client0);
+        {stream_multipart, Size, Boundary} ->
+            handle_multipart_body(HeadersDict, ReqType0, Size,
+                                  Boundary, Client0);
         <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-            handle_body(HeadersDict, ReqType0, Body0);
+            handle_body(HeadersDict, ReqType0, Body0, Client0);
         <<>> ->
-            {HeadersDict, ReqType0, Body0};
+            {HeadersDict, ReqType0, Body0, Client0};
         _ ->
-            handle_body(HeadersDict, ReqType0, Body0)
+            handle_body(HeadersDict, ReqType0, Body0, Client0)
     end,
 
     Client = case ReqType of
         normal ->
-            Client0#client{send_fun=fun hackney_request:send/2,
+            Client1#client{send_fun=fun hackney_request:send/2,
                            req_type=normal};
         chunked ->
-            Client0#client{send_fun=fun hackney_request:send_chunk/2,
+            Client1#client{send_fun=fun hackney_request:send_chunk/2,
                            req_type=chunked}
     end,
 
@@ -79,13 +86,20 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             case stream_body(Body, Client) of
                 {error, _Reason}=E ->
                     E;
-                {ok, Client1} ->
-                    hackney_response:start_response(Client1)
+                {ok, Client2} ->
+                    case end_stream_body(Client2) of
+                        {ok, FinalClient} ->
+                            hackney_response:start_response(FinalClient);
+                        Error ->
+                            Error
+                    end
             end;
         Error ->
             Error
     end.
 
+stream_body(eof, Client) ->
+    {ok, Client#client{response_state=waiting}};
 stream_body(<<>>, Client) ->
     {ok, Client#client{response_state=waiting}};
 stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
@@ -103,7 +117,7 @@ stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
         _ ->
             case Send(Client, Body) of
                 ok ->
-                    end_stream_body(Client);
+                    {ok, Client};
                 Error ->
                     Error
             end
@@ -111,7 +125,7 @@ stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
 stream_body(Body, #client{send_fun=Send}=Client) when is_list(Body) ->
     case Send(Client, Body) of
         ok ->
-            end_stream_body(Client);
+            {ok, Client};
         Error ->
             Error
     end;
@@ -145,9 +159,8 @@ sendfile(FileName, Client) ->
     end.
 
 
-
 %% internal
-handle_body(Headers, ReqType0, Body0) ->
+handle_body(Headers, ReqType0, Body0, Client) ->
     {CLen, CType, Body} = case Body0 of
         {form, KVs} ->
             hackney_form:encode_form(KVs);
@@ -188,7 +201,39 @@ handle_body(Headers, ReqType0, Body0) ->
                             {<<"Content-Length">>, CLen}],
             {hackney_headers:update(Headers, NewHeadersKV), normal}
     end,
-    {NewHeaders, ReqType, Body}.
+    {NewHeaders, ReqType, Body, Client}.
+
+handle_multipart_body(Headers, ReqType, Client) ->
+    handle_multipart_body(Headers, ReqType, chunked,
+                          hackney_multipart:boundary(), Client).
+
+handle_multipart_body(Headers, ReqType, CLen, Client) ->
+    handle_multipart_body(Headers, ReqType, CLen,
+                          hackney_multipart:boundary(), Client).
+
+handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
+    CType = << "multipart/form-data; boundary=", Boundary/binary >>,
+    {NewHeaders, ReqType}  = case {CLen, ReqType} of
+        {chunked, normal} ->
+            NewHeadersKV = [{<<"Content-Type">>, CType},
+                            {<<"Transfer-Encoding">>, <<"chunked">>}],
+            Headers1 = hackney_headers:delete(<<"content-length">>,  Headers),
+            {hackney_headers:update(Headers1, NewHeadersKV), chunked};
+        {chunked, _} ->
+            NewHeadersKV = [{<<"Content-Type">>, CType}],
+            {hackney_headers:update(Headers, NewHeadersKV), chunked};
+        {_, chunked} ->
+            NewHeadersKV = [{<<"Content-Type">>, CType},
+                            {<<"Content-Length">>, CLen}],
+            Headers1 = hackney_headers:delete(<<"transfer-encoding">>,
+                                              Headers),
+            {hackney_headers:update(Headers1, NewHeadersKV), normal};
+        {_, _} ->
+            NewHeadersKV = [{<<"Content-Type">>, CType},
+                            {<<"Content-Length">>, CLen}],
+            {hackney_headers:update(Headers, NewHeadersKV), normal}
+    end,
+    {NewHeaders, ReqType, stream, Client#client{mp_boundary=Boundary}}.
 
 req_type(Headers) ->
     TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),

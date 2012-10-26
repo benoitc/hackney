@@ -15,7 +15,8 @@
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          start_response/1,
-         stream_request_body/2,
+         stream_request_body/2, end_stream_request_body/1,
+         stream_multipart_request/2,
          stream_body/1,
          body/1, body/2, skip_body/1,
          pool/1]).
@@ -230,6 +231,32 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
     -> {ok, #client{}} | {error, term()}.
 stream_request_body(Body, Client) ->
     hackney_request:stream_body(Body, Client).
+
+
+%% @doc end streaming the request body.
+end_stream_request_body(Client) ->
+    hackney_request:end_stream_body(Client).
+
+
+%% @doc stream a multipart request until eof
+%% Possible value are :
+%% <ul>
+%% <li>`eof': end the multipart request</li>
+%% <li>`{Id, {File, FileName}}': to stream a file</li>
+%% <li>`{data, {start, Id, DileName, ContentType}}': to start to stream
+%% arbitrary binary content</li>
+%% <li>`{data, Bin}`: send a binary. Use it only after emitting a
+%% **start**</li>
+%% <li>`{data, eof}`: stop sending an arbitary content. It doesn't stop
+%% the multipart request</li>
+%% <li>`{Id, {file, Filename, Content}`: send a full content as a
+%% boundary</li>
+%% <li>`{Id, Value}: send an arbitrary value as a boundary. Filename and
+%% Id are identique</li>
+%% </ul>
+stream_multipart_request(Body, Client) ->
+    hackney_multipart:stream(Body, Client).
+
 
 %% @doc start a response.
 %% Useful if you stream the body by yourself. It will fetch the status
