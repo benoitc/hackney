@@ -102,6 +102,34 @@ stream_body(eof, Client) ->
     {ok, Client#client{response_state=waiting}};
 stream_body(<<>>, Client) ->
     {ok, Client#client{response_state=waiting}};
+stream_body(Func, Client) when is_function(Func) ->
+    case Func() of
+        {ok, Data} ->
+            case stream_body(Data, Client) of
+                {ok, Client1} ->
+                    stream_body(Func, Client1);
+                Error ->
+                    Error
+            end;
+        eof ->
+            stream_body(eof, Client);
+        Err ->
+            Err
+    end;
+stream_body({Func, State}, Client) when is_function(Func) ->
+    case Func(State) of
+        {ok, Data, NewState} ->
+            case stream_body(Data, Client) of
+                {ok, Client1} ->
+                    stream_body({Func, NewState}, Client1);
+                Error ->
+                    Error
+            end;
+        eof ->
+            stream_body(eof, Client);
+        Err ->
+            Err
+    end;
 stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
         when is_binary(Body) ->
 
@@ -170,6 +198,19 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             S= filelib:file_size(FileName),
             CT = hackney_util:content_type(FileName),
             {S, CT, Body0};
+        Func when is_function(Func) ->
+            CT = hackney_headers:get_value(<<"content-type">>, Headers,
+                                           <<"application/octet-stream">>),
+            S = hackney_headers:get_value(<<"content-length">>,
+                                          Headers),
+            {S, CT, Body0};
+        {Func, _} when is_function(Func) ->
+            CT = hackney_headers:get_value(<<"content-type">>, Headers,
+                                           <<"application/octet-stream">>),
+            S = hackney_headers:get_value(<<"content-length">>,
+                                          Headers),
+            {S, CT, Body0};
+
         _ when is_list(Body0) -> % iolist case
             S = erlang:length(Body0),
             CT = hackney_headers:get_value(<<"content-type">>, Headers,
@@ -190,8 +231,26 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             Headers1 = hackney_headers:delete(<<"transfer-encoding">>,
                                               Headers),
             {hackney_headers:update(Headers1, NewHeadersKV), normal};
+        {chunked, F} when is_function(F) ->
+            NewHeadersKV = [{<<"Content-Type">>, CType}],
+            Headers1 = hackney_headers:delete(<<"content-length">>,
+                                              Headers),
+            {hackney_headers:update(Headers1, NewHeadersKV), chunked};
+        {chunked, {F, _}} when is_function(F) ->
+            NewHeadersKV = [{<<"Content-Type">>, CType}],
+            Headers1 = hackney_headers:delete(<<"content-length">>,
+                                              Headers),
+            {hackney_headers:update(Headers1, NewHeadersKV), chunked};
+
         {chunked, _} ->
             NewHeadersKV = [{<<"Content-Type">>, CType}],
+            Headers1 = hackney_headers:delete(<<"content-length">>,
+                                              Headers),
+            {hackney_headers:update(Headers1, NewHeadersKV), chunked};
+
+        {_, _} when CLen =:= undefined ->
+            NewHeadersKV = [{<<"Content-Type">>, CType},
+                            {<<"Transfer-Encoding">>, <<"chunked">>}],
             Headers1 = hackney_headers:delete(<<"content-length">>,
                                               Headers),
             {hackney_headers:update(Headers1, NewHeadersKV), chunked};
