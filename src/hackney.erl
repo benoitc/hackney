@@ -318,8 +318,13 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
 
     ConnectOpts = case {Transport, proplists:get_value(ssl_options, Opts)} of
         {hackney_ssl_transport, undefined} ->
-            ConnectOpts1 ++ [{verify, verify_none},
+            case proplists:get_value(insecure, Opts) of
+                true ->
+                    ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
+                _ ->
+                    ConnectOpts1
+            end;
         {hackney_ssl_transport, SslOpts} ->
             ConnectOpts1 ++ SslOpts;
         {_, _} ->
