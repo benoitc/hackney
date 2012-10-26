@@ -309,11 +309,18 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
 
     %% handle ipv6
-    ConnectOpts = case hackney_util:is_ipv6(Host) of
+    ConnectOpts1 = case hackney_util:is_ipv6(Host) of
         true ->
             [inet6 | ConnectOpts0];
         false ->
             ConnectOpts0
+    end,
+
+    ConnectOpts = case proplists:get_value(ssl_options, Opts) of
+        undefined ->
+            ConnectOpts1;
+        SslOpts ->
+            ConnectOpts1 ++ SslOpts
     end,
 
     case Transport:connect(Host, Port, ConnectOpts) of
