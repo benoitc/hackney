@@ -147,11 +147,8 @@ Args:
 
 
 * <strong>Options:</strong>
-
-`[{connect_options, connect_options(), {ssl_options, ssl_options()}, Others]`
-
-
-
+ `[{connect_options, connect_options(),
+{ssl_options, ssl_options()}, Others]`
 
 * `connect_options()`: The default connect_options are
 `[binary, {active, false}, {packet, raw}])` . Vor valid options
@@ -162,8 +159,7 @@ see the gen_tcp options.
 module.
 
 
-* 
-_Others options are_:
+* _Others options are_:
 
 * {follow_redirect, boolean}: false by default, follow a
 redirection
@@ -183,7 +179,6 @@ transfers without checking the certificate
 
 
 
-
 * `proxy_options()`:  options to connect by a proxy:
 
 
@@ -193,9 +188,6 @@ proxy
 
 * {Host::binary(), Port::binary}: Host and port to connect,
 for HTTP proxy
-
-
-
 
 
 

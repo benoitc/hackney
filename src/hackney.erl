@@ -138,10 +138,8 @@ request(Method, URL, Headers, Body) ->
 %%      <li>Bin: binary or iolist</li>
 %%      </ul>
 %%  </li>
-%%  <li><strong>Options:</strong>
-%%      `[{connect_options, connect_options(), {ssl_options, ssl_options()}, Others]'
-%%      <p>
-%%      <ul>
+%%  <li><strong>Options:</strong> `[{connect_options, connect_options(),
+%%  {ssl_options, ssl_options()}, Others]'</li>
 %%      <li>`connect_options()': The default connect_options are
 %%      `[binary, {active, false}, {packet, raw}])' . Vor valid options
 %%      see the gen_tcp options.</li>
@@ -149,7 +147,7 @@ request(Method, URL, Headers, Body) ->
 %%      <li>`ssl_options()': See the ssl options from the ssl
 %%      module.</li>
 %%
-%%      <li><p><em>Others options are</em>:
+%%      <li><em>Others options are</em>:
 %%      <ul>
 %%          <li>{follow_redirect, boolean}: false by default, follow a
 %%          redirection</li>
@@ -161,7 +159,6 @@ request(Method, URL, Headers, Body) ->
 %%          <li>insecure: to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
 %%      </ul>
-%%      </p>
 %%
 %%      </li>
 %%
@@ -173,9 +170,6 @@ request(Method, URL, Headers, Body) ->
 %%          for HTTP proxy</li>
 %%      </ul></p>
 %%      </li>
-%%      </ul>
-%%      </p>
-%%  </li>
 %%  </ul>
 -spec request(term(), binary(), list(), term(), list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
