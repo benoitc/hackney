@@ -126,7 +126,7 @@ request(Method, URL, Headers, Body) ->
 %%
 %% Args:
 %% <ul>
-%% <li><strong>>Method</strong>>: method used for the request (get, post,
+%% <li><strong>Method</strong>>: method used for the request (get, post,
 %% ...)</li>
 %% <li><strong>Url</strong>: full url of the request</li>
 %% <li><strong>Headers</strong> Proplists </li>
@@ -139,9 +139,7 @@ request(Method, URL, Headers, Body) ->
 %%      </ul>
 %%  </li>
 %%  <li><strong>Options:</strong>
-%%      [{connect_options, connect_options(),
-%%       {ssl_options, ssl_options()},
-%%       hackney_options()}]
+%%      `[{connect_options, connect_options(), {ssl_options, ssl_options()}, Others]'
 %%      <p>
 %%      <ul>
 %%      <li>`connect_options()': The default connect_options are

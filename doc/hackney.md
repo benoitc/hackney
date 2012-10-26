@@ -123,7 +123,7 @@ make a request
 
 Args:
 
-* <strong>>Method</strong>
+* <strong>Method</strong>
 >: method used for the request (get, post,
 ...)
 
@@ -148,9 +148,7 @@ Args:
 
 * <strong>Options:</strong>
 
-[{connect_options, connect_options(),
-{ssl_options, ssl_options()},
-hackney_options()}]
+`[{connect_options, connect_options(), {ssl_options, ssl_options()}, Others]`
 
 
 
