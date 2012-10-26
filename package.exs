@@ -19,7 +19,7 @@ Expm.Package.new(name: "hackney", description: "Simple HTTP client in Erlang",
                                 ],
                                 [name: "Bip Thelin",
                                  email: "bip@kivra.com"
-                                ]]                               ],
+                                ]],
                  maintainers: [[name: "Benoit Chesneau",
                                 email: "bchesneau@gmail.com"]],
                  repositories: [[github: "benoitc/hackney", tag: "0.3.2"]])
