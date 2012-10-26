@@ -4,7 +4,7 @@ all: build
 
 dev: devbuild
 
-doc: devclean dev
+doc: dev
 	$(REBAR) -C rebar_dev.config doc
 
 clean:

@@ -142,6 +142,54 @@ Args:
 
 
 
+* 
+_Options:_
+[{connect_options, connect_options(),
+{ssl_options, ssl_options()},
+hackney_options()}]
+
+
+* connect_options(): The default connect_options are
+`[binary, {active, false}, {packet, raw}])` . Vor valid options
+see the gen_tcp options.
+
+
+* ssl_options(): See the ssl options from the ssl
+module.
+
+
+* Others options are:
+
+* {follow_redirect, boolean}: false by default, follow a
+redirection
+
+* {max_redirect, integer}: 5 by default, the maximum of
+redirection for a request
+
+* {force_redirect, boolean}: false by default, to force the
+redirection even on POST
+
+* {proxy, proxy_options()}: to connect via a proxy.
+
+* insecure: to perform "insecure" SSL connections and
+transfers without checking the certificate
+
+
+
+
+
+* proxy_options()* options to connect by a proxy:
+
+* binary(): url to use for the proxy. Used for basic HTTP
+proxy
+
+* {Host::binary(), Port::binary}: Host and port to connect,
+for HTTP proxy
+
+
+
+
+
 <a name="send_request-2"></a>
 
 ###send_request/2##
