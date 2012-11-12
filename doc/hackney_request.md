@@ -57,5 +57,5 @@
 ###stream_body/2##
 
 
-`stream_body(Body, Client) -> any()`
+`stream_body(Func, Client) -> any()`
 

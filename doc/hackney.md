@@ -197,6 +197,9 @@ redirection even on POST
 * insecure: to perform "insecure" SSL connections and
 transfers without checking the certificate
 
+* {recv_timeout, infinity | integer()}: timeout used when
+receiving a connection. Default is infinity
+
 
 
 

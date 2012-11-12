@@ -80,7 +80,9 @@ connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
             socket_from_pool(Pool, {Transport, Host, Port}, Client)
     end;
 connect(Transport, Host, Port, Options) when is_list(Options) ->
-    connect(Transport, Host, Port, #client{options=Options}).
+    Timeout = proplists:get_value(recv_timeout, Options, infinity),
+    connect(Transport, Host, Port, #client{recv_timeout=Timeout,
+                                           options=Options}).
 
 %% @doc close the client
 close(Client) ->
@@ -159,6 +161,8 @@ request(Method, URL, Headers, Body) ->
 %%          <li>{proxy, proxy_options()}: to connect via a proxy.</li>
 %%          <li>insecure: to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
+%%          <li>{recv_timeout, infinity | integer()}: timeout used when
+%%          receiving a connection. Default is infinity</li>
 %%      </ul>
 %%
 %%      </li>
@@ -332,13 +336,15 @@ maybe_proxy(Transport, Host, Port, Options)
             connect(Transport, Host, Port, Options)
     end.
 
-connect_proxy(ProxyUrl, Host, Port, ProxyOpts, Options) ->
+connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
     Host = iolist_to_binary([Host, ":", integer_to_list(Port)]),
     Headers = [{<<"Host">>, Host}],
+    Timeout = proplists:get_value(recv_timeout, Options, infinity),
+    ProxyOpts = [{recv_timeout, Timeout} | ProxyOpts0],
     case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
         {ok, 200, _, Client0} ->
             Client = skip_body(Client0),
-            {ok, Client#client{options=Options}};
+            {ok, Client#client{recv_timeout=Timeout, options=Options}};
         {ok, S, H, Client} ->
             Body = body(Client),
             {error, {proxy_connection, S, H, Body}};

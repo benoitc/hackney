@@ -156,9 +156,8 @@ stream_body(Client=#client{body_state=done}) ->
 
 -spec stream_body_recv(#client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
-stream_body_recv(Client=#client{
-		transport=Transport, socket=Socket, buffer=Buffer}) ->
-	case Transport:recv(Socket, 0, 5000) of
+stream_body_recv(Client=#client{buffer=Buffer}) ->
+	case recv(Client) of
 		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>,
                                 Client);
 		{error, Reason} -> {error, Reason}
@@ -323,8 +322,8 @@ te_identity(Data, {Streamed, Total}) ->
 ce_identity(Data) ->
 	{ok, Data}.
 
-recv(#client{transport=Transport, socket=Skt}) ->
-    Transport:recv(Skt, 0).
+recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
+    Transport:recv(Skt, 0, Timeout).
 
 
 close(#client{socket=nil}=Client) ->

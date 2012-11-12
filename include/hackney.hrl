@@ -42,7 +42,7 @@
         netloc = netloc,
         options = [],
         socket = nil,
-        timeout = infinity,
+        recv_timeout = infinity,
         follow_redirect = false,
         max_redirect = 5,
         force_redirect = false,
