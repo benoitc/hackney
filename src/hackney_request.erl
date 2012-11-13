@@ -88,7 +88,8 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                     E;
                 {ok, Client2} ->
                     case end_stream_body(Client2) of
-                        {ok, FinalClient} ->
+                        {ok, Client3} ->
+                            FinalClient = Client3#client{method=Method},
                             hackney_response:start_response(FinalClient);
                         Error ->
                             Error
