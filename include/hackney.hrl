@@ -60,6 +60,7 @@
         clen = nil,
         te = nil,
         connection = nil,
+        method = nil,
         ctype = nil}).
 
 -record(hackney_url, {

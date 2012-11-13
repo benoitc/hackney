@@ -134,12 +134,12 @@ parse_header(Line, Client) ->
     {header, {Key, Value}, Client1}.
 
 
-stream_body(Client=#client{body_state=waiting, te=TE, clen=Length}) ->
+stream_body(Client=#client{body_state=waiting, te=TE, clen=Length, method=Method}) ->
 	case TE of
 		<<"chunked">> ->
 			stream_body(Client#client{body_state=
 				{stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
-		_ when Length =:= 0 ->
+		_ when Length =:= 0 orelse Method =:= <<"HEAD">> ->
             {done, Client#client{body_state=done}};
         _ ->
 		    stream_body(Client#client{body_state=
