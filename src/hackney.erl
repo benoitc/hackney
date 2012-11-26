@@ -72,7 +72,8 @@ connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
     case pool(Client) of
         undefined when UseDefaultPool == true ->
             Opts1 = [{pool, default} | Opts],
-            socket_from_pool(default, {Transport, Host, Port},
+            Pool = whereis(hackney_pool),
+            socket_from_pool(Pool, {Transport, Host, Port},
                              Client#client{options=Opts1});
         undefined ->
             do_connect(Transport, Host, Port, Client);
