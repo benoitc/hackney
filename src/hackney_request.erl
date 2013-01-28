@@ -19,7 +19,12 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
     #client{host=Host, port=Port, options=Options} = Client0,
 
-    HostHdr = iolist_to_binary([Host, ":", integer_to_list(Port)]),
+    HostHdr = case is_default_port(Client0) of
+        true ->
+            list_to_binary(Host);
+        false ->
+            iolist_to_binary([Host, ":", integer_to_list(Port)])
+    end,
 
     %% make header dict
     DefaultHeaders0 = [{<<"Host">>, HostHdr},
@@ -345,3 +350,11 @@ default_ua() ->
             << "0.0.0" >>
     end,
     << "hackney/", Version/binary >>.
+
+
+is_default_port(#client{transport=hackney_tcp_transport, port=80}) ->
+    true;
+is_default_port(#client{transport=hackney_ssl_transport, port=443}) ->
+    true;
+is_default_port(_) ->
+    false.
