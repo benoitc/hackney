@@ -175,6 +175,9 @@ body(Client) ->
 %% This is most useful to quickly be able to get the full body while
 %% avoiding filling your memory with huge request bodies when you're
 %% not expecting it.
+%%
+%% When the response is larger than MaxLength, this function will return
+%% the body it received up to the last chunk, which might be a bit more than MaxLength.
 -spec body(non_neg_integer() | infinity, #client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
 body(MaxLength, Client) ->
@@ -271,7 +274,10 @@ read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 			{ok, Acc, Client2};
 		{error, Reason} ->
 			{error, Reason}
-	end.
+	end;
+
+read_body(_MaxLength, Client, Acc) ->
+	{ok, Acc, Client}.
 
 
 maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
