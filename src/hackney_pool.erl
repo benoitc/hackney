@@ -120,7 +120,7 @@ handle_call({release, Key, Socket}, _From, State) ->
     NewState = store_connection(Key, Socket, State),
     {reply, ok, NewState};
 handle_call(pool_size, _From, #state{sockets=Sockets}=State) ->
-    {ok, dict:size(Sockets), State};
+    {reply, dict:size(Sockets), State};
 handle_call({pool_size, Key}, _From, #state{connections=Conns}=State) ->
     Size = case dict:find(Key, Conns) of
         {ok, Sockets} ->
@@ -128,7 +128,7 @@ handle_call({pool_size, Key}, _From, #state{connections=Conns}=State) ->
         error ->
             0
     end,
-    {ok, Size, State}.
+    {reply, Size, State}.
 
 handle_cast({set_poolsize, NewSize}, State) ->
     {noreply, State#state{pool_size=NewSize}};
