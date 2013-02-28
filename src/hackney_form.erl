@@ -22,7 +22,7 @@ encode_form(KVs) ->
 encode_form([], Acc) ->
     Lines = hackney_util:join(lists:reverse(Acc), <<"&">>),
     CType = <<"application/x-www-form-urlencoded; charset=utf-8">>,
-    {erlang:length(Lines), CType, Lines};
+    {erlang:byte_size(Lines), CType, Lines};
 encode_form([{K,V}|R], Acc) ->
     K1 = hackney_url:urlencode(K),
     V1 = hackney_url:urlencode(V),
