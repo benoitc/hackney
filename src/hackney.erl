@@ -162,6 +162,8 @@ request(Method, URL, Headers, Body) ->
 %%          <li>{proxy, proxy_options()}: to connect via a proxy.</li>
 %%          <li>insecure: to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
+%%          <li>{connect_timeout, infinity | integer()}: timeout used when
+%%          estabilishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>{recv_timeout, infinity | integer()}: timeout used when
 %%          receiving a connection. Default is infinity</li>
 %%      </ul>
@@ -373,6 +375,7 @@ socket_from_pool(Pool, {Transport, Host, Port}=Key,
 
 do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
+    ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
     %% handle ipv6
     ConnectOpts1 = case hackney_util:is_ipv6(Host) of
@@ -397,7 +400,7 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
             ConnectOpts1
     end,
 
-    case Transport:connect(Host, Port, ConnectOpts) of
+    case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
             FollowRedirect = proplists:get_value(follow_redirect,
                                                  Opts, false),
