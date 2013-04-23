@@ -6,7 +6,7 @@
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 %%%
 -module(hackney_tcp_transport).
--export([connect/3,
+-export([connect/3, connect/4,
          recv/2, recv/3,
          send/2,
          setopts/2,
@@ -15,9 +15,13 @@
          close/1,
          sockname/1]).
 
-connect(Host, Port, Opts) when is_list(Host), is_integer(Port) ->
+connect(Host, Port, Opts) ->
+	connect(Host, Port, Opts, infinity).
+
+connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
+	(Timeout =:= infinity orelse is_integer(Timeout)) ->
 	gen_tcp:connect(Host, Port,
-		Opts ++ [binary, {active, false}, {packet, raw}]).
+		Opts ++ [binary, {active, false}, {packet, raw}], Timeout).
 
 recv(Socket, Length) ->
     recv(Socket, Length, infinity).
