@@ -83,7 +83,7 @@ stream_headers(Client, Headers) ->
         {header, KV, Client1} ->
             stream_headers(Client1, [KV | Headers]);
         {error, Reason, Acc} ->
-            {error, {Reason, Acc}, Headers, Client}
+            {error, {Reason, {Acc, Headers, Client}}}
     end.
 
 
