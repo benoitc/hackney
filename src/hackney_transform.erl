@@ -11,7 +11,7 @@
 %%
 -module(hackney_transform).
 
--include("hackney.hrl").
+-include("../include/hackney.hrl").
 
 -export([parse_transform/2]).
 
