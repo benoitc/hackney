@@ -86,7 +86,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
     %% send headers data
     case hackney_request:send(Client, HeadersData) of
         ok when Body =:= stream ->
-            {ok, Client#client{response_state=stream}};
+            {ok, Client#client{response_state=stream, method=Method}};
         ok ->
             case stream_body(Body, Client) of
                 {error, _Reason}=E ->
