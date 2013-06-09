@@ -278,7 +278,7 @@ handle_multipart_body(Headers, ReqType, CLen, Client) ->
 
 handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
     CType = << "multipart/form-data; boundary=", Boundary/binary >>,
-    {NewHeaders, ReqType}  = case {CLen, ReqType} of
+    {NewHeaders, ReqType1}  = case {CLen, ReqType} of
         {chunked, normal} ->
             NewHeadersKV = [{<<"Content-Type">>, CType},
                             {<<"Transfer-Encoding">>, <<"chunked">>}],
@@ -298,7 +298,7 @@ handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
                             {<<"Content-Length">>, CLen}],
             {hackney_headers:update(Headers, NewHeadersKV), normal}
     end,
-    {NewHeaders, ReqType, stream, Client#client{mp_boundary=Boundary}}.
+    {NewHeaders, ReqType1, stream, Client#client{mp_boundary=Boundary}}.
 
 req_type(Headers) ->
     TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),

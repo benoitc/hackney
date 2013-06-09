@@ -71,13 +71,13 @@ stream(eof, #client{mp_boundary=Boundary}=Client) ->
         Error ->
             Error
     end;
-stream({Id, {file, Name}}, #client{mp_boundary=Boundary}=Client) ->
+stream({Id, {file, Name}=File}, #client{mp_boundary=Boundary}=Client) ->
     Field = field(Id),
     CType = hackney_util:content_type(Name),
     Bin = mp_header(Field, Name, CType, Boundary),
     case hackney_request:stream_body(Bin, Client) of
         {ok, Client1} ->
-            case hackney_request:sendfile(Name, Client1) of
+            case hackney_request:stream_body(File, Client1) of
                 {ok, Client2} ->
                     hackney_request:stream_body(<<"\r\n">>, Client2);
                 Error ->
@@ -107,10 +107,11 @@ stream({Id, Value}, #client{mp_boundary=Boundary}=Client) ->
 %% internal functions
 
 mp_header(Field, FileName, CType, Boundary) ->
+    FileName1 = hackney_util:to_binary(FileName),
     Parts = [
             <<"--", Boundary/binary>>,
             <<"Content-Disposition: form-data; name=\"",
-              Field/binary, "\"; filename=\"", FileName/binary, "\"">>,
+              Field/binary, "\"; filename=\"", FileName1/binary, "\"">>,
             <<"Content-Type: ", CType/binary >>, <<>>],
     hackney_util:join(Parts, <<"\r\n">>).
 
