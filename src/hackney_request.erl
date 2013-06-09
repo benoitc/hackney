@@ -166,7 +166,7 @@ stream_body(Body, #client{send_fun=Send}=Client) when is_list(Body) ->
 stream_body({file, FileName}, Client) ->
     case sendfile(FileName, Client) of
         {ok, _BytesSent} ->
-            {ok, Client#client{response_state=waiting}};
+            {ok, Client};
         Error ->
             Error
     end.
@@ -298,7 +298,8 @@ handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
                             {<<"Content-Length">>, CLen}],
             {hackney_headers:update(Headers, NewHeadersKV), normal}
     end,
-    {NewHeaders, ReqType1, stream, Client#client{mp_boundary=Boundary}}.
+    {NewHeaders, ReqType1, stream, Client#client{response_state=stream,
+                                                 mp_boundary=Boundary}}.
 
 req_type(Headers) ->
     TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),

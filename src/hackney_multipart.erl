@@ -64,9 +64,12 @@ encode({Id, Value}, Boundary) ->
 
 
 stream(eof, #client{mp_boundary=Boundary}=Client) ->
-    Line = <<"--", Boundary/binary, "--", "\r\n">>,
+    Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
+    io:format("Line ~p~n", [Line]),
     case hackney_request:stream_body(Line, Client) of
         {ok, Client1} ->
+            io:format("ici, fuck you", []),
+
             hackney_request:end_stream_body(Client1);
         Error ->
             Error
@@ -110,9 +113,8 @@ mp_header(Field, FileName, CType, Boundary) ->
     FileName1 = hackney_util:to_binary(FileName),
     Parts = [
             <<"--", Boundary/binary>>,
-            <<"Content-Disposition: form-data; name=\"",
-              Field/binary, "\"; filename=\"", FileName1/binary, "\"">>,
-            <<"Content-Type: ", CType/binary >>, <<>>],
+            <<"Content-Disposition: form-data; name=\"", Field/binary, "\"; filename=\"", FileName1/binary, "\"">>,
+            <<"Content-Type: ", CType/binary >>, <<>>, <<>>],
     hackney_util:join(Parts, <<"\r\n">>).
 
 field(V) when is_list(V) ->
