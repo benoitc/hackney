@@ -72,7 +72,7 @@ stream(eof, #client{mp_boundary=Boundary}=Client) ->
             Error
     end;
 stream({Id, {file, Name}}, #client{mp_boundary=Boundary}=Client) ->
-    Field = atom_to_binary(Id, utf8),
+    Field = field(Id),
     CType = hackney_util:content_type(Name),
     Bin = mp_header(Field, Name, CType, Boundary),
     case hackney_request:stream_body(Bin, Client) of
