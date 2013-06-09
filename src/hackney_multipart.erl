@@ -65,11 +65,8 @@ encode({Id, Value}, Boundary) ->
 
 stream(eof, #client{mp_boundary=Boundary}=Client) ->
     Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
-    io:format("Line ~p~n", [Line]),
     case hackney_request:stream_body(Line, Client) of
         {ok, Client1} ->
-            io:format("ici, fuck you", []),
-
             hackney_request:end_stream_body(Client1);
         Error ->
             Error
