@@ -179,8 +179,8 @@ send_chunk(Client, Data) ->
     send(Client, [io_lib:format("~.16b\r\n", [Length]), Data,
                   <<"\r\n">>]).
 
-
-sendfile(FileName, #client{transport=hackney_tcp_tansport, socket=Skt}) ->
+sendfile(FileName, #client{transport=hackney_tcp_tansport, socket=Skt,
+                           req_type=normal}) ->
     file:sendfile(FileName, Skt);
 sendfile(FileName, Client) ->
     case file:open(FileName, [read, raw, binary]) of
@@ -325,11 +325,12 @@ sendfile_fallback(Fd, Client) ->
     file:position(Fd, {bof, CurrPos}),
     Res.
 
-sendfile_fallback(Fd, #client{req_chunk_size=ChunkSize}=Client, Old) ->
+sendfile_fallback(Fd, #client{req_chunk_size=ChunkSize,
+                              send_fun=Send}=Client, Old) ->
     case file:read(Fd, ChunkSize) of
         {ok, Data} ->
             Len = iolist_size(Data),
-            case send(Client, Data) of
+            case Send(Client, Data) of
                 ok ->
                     sendfile_fallback(Fd, Client, Len+Old);
                 Error ->
