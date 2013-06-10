@@ -71,7 +71,9 @@ stream(eof, #client{mp_boundary=Boundary}=Client) ->
         Error ->
             Error
     end;
-stream({Id, {file, Name}=File}, #client{mp_boundary=Boundary}=Client) ->
+stream({Id, {file, Name}}, Client) ->
+    stream({Id, {file, Name, []}}, Client);
+stream({Id, {file, Name, _Opts}=File}, #client{mp_boundary=Boundary}=Client) ->
     Field = field(Id),
     CType = hackney_util:content_type(Name),
     Bin = mp_header(Field, Name, CType, Boundary),
