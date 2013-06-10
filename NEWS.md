@@ -1,5 +1,11 @@
 # NEWS
 
+0.4.2 - 2013/06/10
+------------------
+
+- handle `identity` transfert encoding. When the connection close return
+  latest buffer.
+
 0.4.1 - 2013/06/10
 ------------------
 
