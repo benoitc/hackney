@@ -10,9 +10,10 @@
 
 -export([perform/2,
          send/2, send_chunk/2,
-         sendfile/2,
+         sendfile/3,
          stream_body/2, end_stream_body/1]).
 
+-define(CHUNK_SIZE, 20480).
 
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
     Method = hackney_util:to_upper(hackney_util:to_binary(Method0)),
@@ -164,7 +165,9 @@ stream_body(Body, #client{send_fun=Send}=Client) when is_list(Body) ->
             Error
     end;
 stream_body({file, FileName}, Client) ->
-    case sendfile(FileName, Client) of
+    stream_body({file, FileName, []}, Client);
+stream_body({file, FileName, Opts}, Client) ->
+    case sendfile(FileName, Opts, Client) of
         {ok, _BytesSent} ->
             {ok, Client};
         Error ->
@@ -179,15 +182,22 @@ send_chunk(Client, Data) ->
     send(Client, [io_lib:format("~.16b\r\n", [Length]), Data,
                   <<"\r\n">>]).
 
-sendfile(FileName, #client{transport=hackney_tcp_tansport, socket=Skt,
+sendfile(FileName, Opts, #client{transport=hackney_tcp_tansport, socket=Skt,
                            req_type=normal}) ->
-    file:sendfile(FileName, Skt);
-sendfile(FileName, Client) ->
+    Offset = proplists:get_value(offset, Opts, 0),
+    Bytes = proplists:get_value(bytes, Opts, 0),
+
+    SendFileOpts = case proplists:get_value(chunk_size, Opts, ?CHUNK_SIZE) of
+        undefined -> Opts;
+        ChunkSize -> [{chunk_size, ChunkSize}]
+    end,
+    file:sendfile(FileName, Skt, Offset, Bytes, SendFileOpts);
+sendfile(FileName, Opts, Client) ->
     case file:open(FileName, [read, raw, binary]) of
 	{error, Reason} ->
 	    {error, Reason};
 	{ok, Fd} ->
-	    Res = sendfile_fallback(Fd, Client),
+	    Res = sendfile_fallback(Fd, Opts, Client),
 	    file:close(Fd),
 	    Res
     end.
@@ -319,30 +329,42 @@ end_stream_body(Client) ->
     {ok, Client#client{response_state=waiting}}.
 
 
-sendfile_fallback(Fd, Client) ->
+sendfile_fallback(Fd, Opts, Client) ->
+    Offset = proplists:get_value(offset, Opts, 0),
+    Bytes = proplists:get_value(bytes, Opts, 0),
+    ChunkSize = proplists:get_value(chunk_size, Opts, ?CHUNK_SIZE),
+
     {ok, CurrPos} = file:position(Fd, {cur, 0}),
-    {ok, _NewPos} = file:position(Fd, {bof, 0}),
-    Res = sendfile_fallback(Fd, Client, 0),
+    {ok, _NewPos} = file:position(Fd, {bof, Offset}),
+    Res = sendfile_fallback(Fd, Bytes, ChunkSize, Client, 0),
     file:position(Fd, {bof, CurrPos}),
     Res.
 
-sendfile_fallback(Fd, #client{req_chunk_size=ChunkSize,
-                              send_fun=Send}=Client, Old) ->
-    case file:read(Fd, ChunkSize) of
+
+sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
+        when Bytes > Sent orelse Bytes =:= 0 ->
+
+    Length = if Bytes > 0 -> erlang:min(ChunkSize, Bytes - Sent);
+        true -> ChunkSize
+    end,
+
+    case file:read(Fd, Length) of
         {ok, Data} ->
             Len = iolist_size(Data),
             case Send(Client, Data) of
                 ok ->
-                    sendfile_fallback(Fd, Client, Len+Old);
+                    sendfile_fallback(Fd, Bytes, ChunkSize, Client,
+                                      Sent + Len);
                 Error ->
                     Error
             end;
         eof ->
-            {ok, Old};
+            {ok, Sent};
         Error ->
             Error
-    end.
-
+    end;
+sendfile_fallback(_, _, _, _, Sent) ->
+    {ok, Sent}.
 
 default_ua() ->
     Version = case application:get_key(hackney, vsn) of
