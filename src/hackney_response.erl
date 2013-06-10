@@ -167,6 +167,13 @@ stream_body_recv(Client=#client{buffer=Buffer, version=Version,
         {error, closed} when Version =:= {1, 0}, CLen =:= nil ->
             {ok, Buffer, Client#client{socket=nil,
                                        state = closed,
+                                       response_state = done,
+                                       body_state=done,
+                                       buffer = <<>>}};
+        {error, closed} when Client#client.te =:= <<"identity">> ->
+            {ok, Buffer, Client#client{socket=nil,
+                                       state = closed,
+                                       response_state = done,
                                        body_state=done,
                                        buffer = <<>>}};
         {error, closed} ->
