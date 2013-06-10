@@ -1,5 +1,21 @@
 # NEWS
 
+0.4.1 - 2013/06/10
+------------------
+
+- Body can be passed as a
+  [function](https://github.com/benoitc/hackney/commit/efd877f52733ccecf0ba1b5ed10783fe29d49b74)
+- Add recv_timeout option
+- Fix HEAD request (don't stream the body)
+- Don't pass the Port to the Host header if it's default (http, https)
+- Set the connection timeout
+- Make sure sendfile correctly handle chunked encoding
+- Add support for partial file uploads
+- Return received buffer when no content lenght is given (http 1.0)
+- Instead of returning `{error, closed}`, return `{error, {closed,
+  Buffer}}` when you receive the body, so you can figure what happened
+and maybe use the partial body.
+
 0.4.0 - 2012/10/26
 ------------------
 
