@@ -156,10 +156,18 @@ stream_body(Client=#client{body_state=done}) ->
 
 -spec stream_body_recv(#client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
-stream_body_recv(Client=#client{buffer=Buffer}) ->
+stream_body_recv(Client=#client{buffer=Buffer, version=Version,
+                                clen=CLen}) ->
 	case recv(Client) of
 		{ok, Data} -> transfer_decode(<< Buffer/binary, Data/binary >>,
                                 Client);
+        {error, closed} when Version =:= {1, 0}, CLen =:= nil ->
+            {ok, Buffer, Client#client{socket=nil,
+                                       state = closed,
+                                       body_state=done,
+                                       buffer = <<>>}};
+        {error, closed} ->
+            {error, {closed, Buffer}};
 		{error, Reason} -> {error, Reason}
 	end.
 
