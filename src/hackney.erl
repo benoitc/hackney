@@ -250,6 +250,7 @@ end_stream_request_body(Client) ->
 %% <ul>
 %% <li>`eof': end the multipart request</li>
 %% <li>`{Id, {File, FileName}}': to stream a file</li>
+%% %% <li>`{Id, {File, FileName, FileOptions}}': to stream a file</li>
 %% <li>`{data, {start, Id, DileName, ContentType}}': to start to stream
 %% arbitrary binary content</li>
 %% <li>`{data, Bin}`: send a binary. Use it only after emitting a
@@ -260,6 +261,12 @@ end_stream_request_body(Client) ->
 %% boundary</li>
 %% <li>`{Id, Value}': send an arbitrary value as a boundary. Filename and
 %% Id are identique</li>
+%% </ul>
+%% File options can be:
+%% <ul>
+%% <li>`{offset, Offset}': start to send file from this offset</li>
+%% <li>`{bytes, Bytes}': number of bytes to send</li>
+%% <li>`{chunk_size, ChunkSize}': the size of the chunk to send</li>
 %% </ul>
 stream_multipart_request(Body, Client) ->
     hackney_multipart:stream(Body, Client).
