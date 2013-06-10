@@ -1,7 +1,8 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of couchbeam released under the MIT license.
+%%% This file is part of hackney released under the Apache 2 license.
 %%% See the NOTICE for more information.
+%%%
 
 -module(hackney_deps).
 -author('Justin Sheehy <justin@basho.com>').
