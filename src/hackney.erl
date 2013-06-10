@@ -23,6 +23,12 @@
 
 -include("hackney.hrl").
 
+-type url() :: #hackney_url{}.
+-export_type([url/0]).
+
+-opaque client() :: #client{}.
+-export_type([client/0]).
+
 %% @doc Start the couchbeam process. Useful when testing using the shell.
 start() ->
     hackney_deps:ensure(),
