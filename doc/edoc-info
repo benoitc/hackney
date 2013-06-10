@@ -1,3 +1,4 @@
+%% encoding: UTF-8
 {application,hackney}.
 {packages,[]}.
 {modules,[hackney,hackney_app,hackney_deps,hackney_form,hackney_headers,

@@ -1,6 +1,6 @@
 
 
-#Module hackney_transform#
+# Module hackney_transform #
 * [Description](#description)
 
 
@@ -10,5 +10,5 @@ calls into hackney:request(Method, ...).
 
 <a name="description"></a>
 
-##Description##
+## Description ##
  

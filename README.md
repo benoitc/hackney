@@ -1,15 +1,14 @@
 
 
-#hackney - simple HTTP client in Erlang#
+# hackney - HTTP client library in Erlang #
 
-
-Copyright (c) 2012 Benoît Chesneau.
+Copyright (c) 2012-2013 Benoît Chesneau.
 
 __Version:__ 0.4.1
 
 # hackney
 
-**hackney** is a simple HTTP client.
+**hackney** is an HTTP client library for Erlan.
 
 Main features:
 
@@ -19,7 +18,9 @@ Main features:
 - SSL support
 - Keepalive handling
 - basic authentication
-- stream the response
+- stream the response and the requests
+- multipart support (stramed or not)
+- chunked encoding support
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optionnal socket pool
@@ -40,10 +41,14 @@ files and documentation.
 To run tests run 'make test'.
 To generate doc, run 'make doc'.
 
-Or add it to your rebar config<pre>{deps, [
+Or add it to your rebar config
+
+```
+{deps, [
     ....
     {hackney, ".*", {git, "git://github.com/benoitc/hackney.git", {branch, "master"}}}
-]}.</pre>
+]}.
+```
 
 ## Basic usage
 
@@ -56,42 +61,73 @@ hackney is an
 application. You have to start it first before using all the functions.
 The hackney applications will start for you the default socket pool.
 
-To start in the console run :<pre>$ erl -pa ebin
-1>> hackney:start().
-ok</pre>
+To start in the console run :
 
-It will start hackney and all the application it depends:<pre>application:start(crypto),
+```
+$ erl -pa ebin
+1>> hackney:start().
+ok
+```
+
+It will start hackney and all the application it depends:
+
+```
+application:start(crypto),
 application:start(public_key),
 application:start(ssl),
-application:start(hackney).</pre>
+application:start(hackney).
+```
 
 Or add hackney to the applications member of your relase an app
 
 ### Simple request without pool
 
-Do a simple a requet that will return a client state:<pre>Method = get,
+Do a simple a requet that will return a client state:
+
+```
+Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [],
 {ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL,
                                                         Headers, Payload,
-                                                        Options).</pre>
+                                                        Options).
+```
 
 The request method return the tupple `{ok, StatusCode, Headers, Client}`
 or `{error, Reason}`.
 
-If you enable the **parse_transform**, you can also do:<pre>hackney:get(URL, Headers, Payload, Options)</pre>
+If you enable the **parse_transform**, you can also do:
+
+```
+hackney:get(URL, Headers, Payload, Options)
+```
 
 To enable parse transform add the following option to the erlang
-compiler flags:<pre>{parse_transform, hackney_transform}</pre>
+compiler flags:
 
-Alternately, you can add it to the module you wish to compile:<pre>-compile([{parse_transform, hackney_transform}]).</pre>
+```
+{parse_transform, hackney_transform}
+```
 
-### Read the body<pre>{ok, Body, Client1} = hackney:body(Client).</pre>
+Alternately, you can add it to the module you wish to compile:
+
+```
+-compile([{parse_transform, hackney_transform}]).
+```
+
+### Read the body
+
+```
+{ok, Body, Client1} = hackney:body(Client).
+```
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
-`hackney:stream/body/1` function:<pre>read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
+`hackney:stream/body/1` function:
+
+```
+read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 	case stream_body(Client) of
 		{ok, Data, Client2} ->
 			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
@@ -99,12 +135,16 @@ Alternately, you can add it to the module you wish to compile:<pre>-compile([{pa
 			{ok, Acc, Client2};
 		{error, Reason} ->
 			{error, Reason}
-	end.</pre>
+	end.
+```
 
 ### Reuse the client object
 
 If your connection support the keepalive you can reuse the Client
-record using the `hackney:send_request/2` function:<pre>ReqBody = << "{
+record using the `hackney:send_request/2` function:
+
+```
+ReqBody = << "{
       \"id\": \"some_paste_id\",
       \"rev\": \"some_revision_id\",
       \"changeset\": \"changeset in unidiff format\"
@@ -115,7 +155,8 @@ NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 {ok, _, _, Client2} = hackney:send_request(Client1, NextReq).
 {ok, Body1, Client3} = hackney:body(Client2),
-hackney:close(Client3).</pre>
+hackney:close(Client3).
+```
 
 Here we are posting a JSON paylod to '/' on the service friendpaste to
 create a paste. Then we close the client connection.
@@ -146,7 +187,10 @@ function `hackney:stream_request_body/2` to stream the request body and
 The function `hackney:start_response/1` is waiting a Client with
 theresponse state equal to the atom `waiting`.
 
-ex:<pre>ReqBody = << "{
+ex:
+
+```
+ReqBody = << "{
       \"id\": \"some_paste_id2\",
       \"rev\": \"some_revision_id\",
       \"changeset\": \"changeset in unidiff format\"
@@ -160,34 +204,47 @@ Method = post,
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
-hackney:close(Client3).</pre>
+hackney:close(Client3).
+```
 
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
 socket pool. On startup, hackney launch a pool named default. To use it
-do the following:<pre>Method = get,
+do the following:
+
+```
+Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [{pool, default}],
 {ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
-                                                        Payload, Options).</pre>
+                                                        Payload, Options).
+```
 
 By adding the tuple `{pool, default}` to the options, hackney will use
 the connections stored in that pool.
 
 You can also use different pools in your application which will allows
-you to maintain some kind of group of connections.<pre>PoolName = mypool,
+you to maintain some kind of group of connections.
+
+```
+PoolName = mypool,
 Options = [{timeout, 150000}, {pool_size, 100}],
-{ok, Pid} = hackney:start_pool(PoolName, Options),</pre>
+{ok, Pid} = hackney:start_pool(PoolName, Options),
+```
 
 `timeout` is the time we keep alive the conneciton in the pool,
 `pool_size` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
 
-To close a pool do:<pre>hackney:stop_pool(PoolName).</pre>
+To close a pool do:
+
+```
+hackney:stop_pool(PoolName).
+```
 
 > Note: Sometimes you want to always use the default pool in your app
 > without having to set the client option each time. You can now do this
@@ -208,14 +265,18 @@ only follow 303 redirection (see other) if the method is a POST.
 
 Last Location is stored in the client state in the `location` property.
 
-ex:<pre>Method = get,
+ex:
+
+```
+Method = get,
 URL = "http://friendpaste.com/",
 ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
 ReqBody = <<>>,
 Options = [{follow_redirect, true}, {max_redirect, true}],
 {ok, S, H, Client} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
-{ok, Body, Client1} = hackney:body(Client).</pre>
+{ok, Body, Client1} = hackney:body(Client).
+```
 
 ### Proxy a connection
 
@@ -233,10 +294,15 @@ issue](http://github.com/benoitc/hackney/issues).
 
 If you want to contribute patches or improve the doc, you will need to
 build hackney using the `rebar_dev.config`  file. It can also be built
-using the **Makefile**:<pre>$ make dev ; # compile & get deps
-$ make devclean ; # clean all files</pre>
+using the **Makefile**:
 
-##Modules##
+```
+$ make dev ; # compile & get deps
+$ make devclean ; # clean all files
+```
+
+
+## Modules ##
 
 
 <table width="100%" border="0" summary="list of modules">

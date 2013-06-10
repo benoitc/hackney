@@ -1,13 +1,13 @@
 
 
-#Module hackney_app#
+# Module hackney_app #
 * [Function Index](#index)
 * [Function Details](#functions)
 
+__Behaviours:__ [`application`](application.md).
+<a name="index"></a>
 
-__Behaviours:__ [`application`](application.md).<a name="index"></a>
-
-##Function Index##
+## Function Index ##
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ensure_deps_started-0">ensure_deps_started/0</a></td><td></td></tr><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr><tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr></table>
@@ -15,26 +15,26 @@ __Behaviours:__ [`application`](application.md).<a name="index"></a>
 
 <a name="functions"></a>
 
-##Function Details##
+## Function Details ##
 
 <a name="ensure_deps_started-0"></a>
 
-###ensure_deps_started/0##
-
+### ensure_deps_started/0 ###
 
 `ensure_deps_started() -> any()`
 
+
 <a name="start-2"></a>
 
-###start/2##
-
+### start/2 ###
 
 `start(StartType, StartArgs) -> any()`
 
+
 <a name="stop-1"></a>
 
-###stop/1##
-
+### stop/1 ###
 
 `stop(State) -> any()`
+
 

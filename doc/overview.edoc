@@ -15,15 +15,15 @@
 %%==============================================================================
 
 
-@copyright 2012 Benoît Chesneau.
-@version 0.4
-@title hackney - simple HTTP client in Erlang
+@copyright 2012-2013 Benoît Chesneau.
+@version 0.4.1
+@title hackney - HTTP client library in Erlang
 
 @doc
 
 # hackney
 
-**hackney** is a simple HTTP client.
+**hackney** is an HTTP client library for Erlan.
 
 Main features:
 
@@ -33,7 +33,9 @@ Main features:
 - SSL support
 - Keepalive handling
 - basic authentication
-- stream the response
+- stream the response and the requests
+- multipart support (stramed or not)
+- chunked encoding support
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optionnal socket pool
