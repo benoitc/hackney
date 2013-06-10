@@ -8,7 +8,7 @@ __Version:__ 0.4.1
 
 # hackney
 
-**hackney** is an HTTP client library for Erlan.
+**hackney** is an HTTP client library for Erlang.
 
 Main features:
 

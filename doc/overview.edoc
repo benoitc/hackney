@@ -23,7 +23,7 @@
 
 # hackney
 
-**hackney** is an HTTP client library for Erlan.
+**hackney** is an HTTP client library for Erlang.
 
 Main features:
 
