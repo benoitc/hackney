@@ -193,7 +193,7 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
                  port = Port,
                  user = User,
                  password = Password,
-                 raw_path = Path} = URL,
+                 path = Path} = URL,
 
     Options = case User of
         nil ->
