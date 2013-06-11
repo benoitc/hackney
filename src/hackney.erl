@@ -21,6 +21,10 @@
          body/1, body/2, skip_body/1,
          pool/1]).
 
+-define(METHOD_TPL(Method),
+        -export([Method/1, Method/2])).
+-include("methods.hrl").
+
 -include("hackney.hrl").
 
 -type url() :: #hackney_url{}.
@@ -536,3 +540,11 @@ use_default_pool() ->
         _ ->
             false
     end.
+
+-define(METHOD_TPL(Method),
+        Method(URL) -> hackney:request(Method, URL)).
+-include("methods.hrl").
+
+-define(METHOD_TPL(Method),
+        Method(URL, Headers) -> hackney:request(Method, URL, Headers)).
+-include("methods.hrl").
