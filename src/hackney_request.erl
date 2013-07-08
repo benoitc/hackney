@@ -216,7 +216,8 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             hackney_multipart:encode_form(KVs);
         {file, FileName} ->
             S= filelib:file_size(FileName),
-            CT = hackney_util:content_type(FileName),
+	    CT = hackney_headers:get_value(<<"content-type">>, Headers,
+					   hackney_util:content_type(FileName)),
             {S, CT, Body0};
         Func when is_function(Func) ->
             CT = hackney_headers:get_value(<<"content-type">>, Headers,
