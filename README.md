@@ -1,4 +1,5 @@
 
+
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
@@ -23,7 +24,7 @@ Main features:
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optional socket pool
-- Parse transform for shorcut methods calls:`hackney:get("https://friendpaste.com")`
+- Parse transform for shorcut methods calls: `hackney:get("https://friendpaste.com")`
 
 Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
@@ -68,11 +69,10 @@ $ erl -pa ebin
 ok
 ```
 
-It will start hackney and all of the applications it depends on:
+It will start hackney and all of the application it depends on:
 
 ```
 application:start(crypto),
-application:start(asn1),
 application:start(public_key),
 application:start(ssl),
 application:start(hackney).
@@ -82,7 +82,7 @@ Or add hackney to the applications property of your .app in a release
 
 ### Simple request without pool
 
-Do a simple request that will return a client state:
+Do a simple requet that will return a client state:
 
 ```
 Method = get,
@@ -158,7 +158,7 @@ NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 hackney:close(Client3).
 ```
 
-Here we are posting a JSON paylod to '/' of the friendpaste service to
+Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
 ### Send a body
@@ -182,7 +182,7 @@ While the default is to directly send the request and fetch the status
 and headers, if the body is set as the atom `stream` the request and
 send_request function will return {ok, Client}. Then you can use the
 function `hackney:stream_request_body/2` to stream the request body and
-`hackney:start_response/1` to initialize the respone.
+`hackney:start_response/1` to initialize the response.
 
 > Note: The function `hackney:start_response/1` will only accept
 > a Client that is waiting for a response (with a response state
@@ -205,13 +205,12 @@ Method = post,
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
-hackney:close(Client3).
-```
+hackney:close(Client3).`''
 
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
-socket pool. On startup, hackney launches a pool named default. To use it
+socket pool. On startup, hackney launcesh a pool named default. To use it
 do the following:
 
 ```
@@ -227,7 +226,7 @@ Options = [{pool, default}],
 By adding the tuple `{pool, default}` to the options, hackney will use
 the connections stored in that pool.
 
-You can also use different pools in your application which  allows
+You can also use different pools in your application which allows
 you to maintain a group of connections.
 
 ```
@@ -236,7 +235,7 @@ Options = [{timeout, 150000}, {pool_size, 100}],
 {ok, Pid} = hackney:start_pool(PoolName, Options),
 ```
 
-`timeout` is the time we keep the connection alive in the pool,
+`timeout` is the time we keep the conneciton alive in the pool,
 `pool_size` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
@@ -262,7 +261,7 @@ retrieve the body. The maximum number of connections can be set using the
 The client will follow redirects on 301, 302 & 307 if the method is
 get or head. If another method is used the tuple
 `{ok, maybe_redirect, Status, Headers, Client}` will be returned. It
-only follows 303 redirects (see other) if the method is a POST.
+only follow 303 redirects (see other) if the method is a POST.
 
 Last Location is stored in the `location` property of the client state.
 
