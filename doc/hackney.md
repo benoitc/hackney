@@ -1,8 +1,34 @@
 
 
 # Module hackney #
+* [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
+
+
+
+<a name="types"></a>
+
+## Data Types ##
+
+
+
+
+### <a name="type-client">client()</a> ###
+
+
+__abstract datatype__: `client()`
+
+
+
+
+### <a name="type-url">url()</a> ###
+
+
+
+<pre><code>
+url() = #hackney_url{}
+</code></pre>
 
 
 <a name="index"></a>

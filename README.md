@@ -1,4 +1,5 @@
 
+
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
@@ -21,6 +22,7 @@ Main features:
 - multipart support (stramed or not)
 - chunked encoding support
 - Can send files using the sendfile API
+- Chunked encoding support
 - Optionnal socket pool
 - Used parse transform for shorcut methods calls:`hackney:get("https://friendpaste.com")`
 
