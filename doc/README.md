@@ -61,7 +61,7 @@ hackney is an
 application. You have to start it first before using all the functions.
 The hackney applications will start for you the default socket pool.
 
-To start in the console run :
+To start in the console run:
 
 ```
 $ erl -pa ebin
@@ -95,7 +95,7 @@ Options = [],
                                                         Options).
 ```
 
-The request method return the tupple `{ok, StatusCode, Headers, Client}`
+The request method return the tuple `{ok, StatusCode, Headers, Client}`
 or `{error, Reason}`.
 
 If you enable the **parse_transform**, you can also do:
