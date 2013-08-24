@@ -199,7 +199,7 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
             NewConns = update_connections(ConnSockets, Key, Conns),
             NewSockets = dict:erase(Socket, Sockets),
             State#state{connections=NewConns, sockets=NewSockets};
-        false ->
+        error ->
             State
     end.
 
