@@ -24,8 +24,7 @@ Main features:
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optional socket pool
-- REST syntax: `hackney:Method(URL)` (where a method can
-be get, post, put, delete, ...)
+- REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
 Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
