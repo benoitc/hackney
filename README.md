@@ -192,7 +192,8 @@ Method = post,
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
-hackney:close(Client3).`''
+hackney:close(Client3).
+```
 
 ### Use a pool
 
