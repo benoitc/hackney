@@ -189,6 +189,10 @@ request(Method, URL, Headers, Body) ->
 %%      </ul></p>
 %%      </li>
 %%  </ul>
+%%
+%%  <bloquote>Note: instead of doing `hackney:request(Method, ...)' you can
+%%  also do `hackney:Method(...)' if you prefer to use the REST
+%%  syntax.</bloquote>
 -spec request(term(), binary(), list(), term(), list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
 request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->

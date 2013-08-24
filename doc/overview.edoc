@@ -16,7 +16,7 @@
 
 
 @copyright 2012-2013 Benoît Chesneau.
-@version 0.4.2
+@version 0.4.3
 @title hackney - HTTP client library in Erlang
 
 @doc
@@ -39,7 +39,8 @@ Main features:
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optional socket pool
-- Parse transform for shorcut methods calls: `hackney:get("https://friendpaste.com")'
+- REST syntax: `hackney:Method(URL)' (where a method can
+  be get, post, put, delete, ...)
 
 
 Note: This is a work in progress, see the
@@ -117,23 +118,10 @@ The request method return the tuple `{ok, StatusCode, Headers, Client}'
 or `{error, Reason}'.
 
 
-If you enable the **parse_transform**, you can also do:
+If you prefer the REST syntax, you can also do:
 
 ```
 hackney:get(URL, Headers, Payload, Options)
-'''
-
-To enable parse transform add the following option to the erlang
-compiler flags:
-
-```
-{parse_transform, hackney_transform}
-'''
-
-Alternately, you can add it to the module you wish to compile:
-
-```
--compile([{parse_transform, hackney_transform}]).
 '''
 
 ### Read the body

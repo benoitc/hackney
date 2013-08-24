@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.4.2
+__Version:__ 0.4.3
 
 # hackney
 
@@ -24,7 +24,8 @@ Main features:
 - Can send files using the sendfile API
 - Chunked encoding support
 - Optional socket pool
-- Parse transform for shorcut methods calls: `hackney:get("https://friendpaste.com")`
+- REST syntax: `hackney:Method(URL)` (where a method can
+be get, post, put, delete, ...)
 
 Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
@@ -98,23 +99,10 @@ Options = [],
 The request method return the tuple `{ok, StatusCode, Headers, Client}`
 or `{error, Reason}`.
 
-If you enable the **parse_transform**, you can also do:
+If you prefer the REST syntax, you can also do:
 
 ```
 hackney:get(URL, Headers, Payload, Options)
-```
-
-To enable parse transform add the following option to the erlang
-compiler flags:
-
-```
-{parse_transform, hackney_transform}
-```
-
-Alternately, you can add it to the module you wish to compile:
-
-```
--compile([{parse_transform, hackney_transform}]).
 ```
 
 ### Read the body
@@ -318,7 +306,6 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
 <tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
 <tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
-<tr><td><a href="hackney_transform.md" class="module">hackney_transform</a></td></tr>
 <tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

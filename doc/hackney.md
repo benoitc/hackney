@@ -280,6 +280,12 @@ for HTTP proxy
 
 
 
+
+
+<bloquote>Note: instead of doing `hackney:request(Method, ...)` you can
+also do `hackney:Method(...)` if you prefer to use the REST
+syntax.</bloquote>
+
 <a name="send_request-2"></a>
 
 ### send_request/2 ###
