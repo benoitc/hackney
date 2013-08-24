@@ -1,5 +1,4 @@
 
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
@@ -101,7 +100,7 @@ or `{error, Reason}`.
 If you prefer the REST syntax, you can also do:
 
 ```
-hackney:get(URL, Headers, Payload, Options)
+hackney:Method(URL, Headers, Payload, Options)
 ```
 
 ### Read the body
