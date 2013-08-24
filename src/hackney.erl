@@ -23,7 +23,7 @@
 
 -define(METHOD_TPL(Method),
         -export([Method/1, Method/2, Method/3, Method/4])).
--include("methods.hrl").
+-include("hackney_methods.hrl").
 
 -include("hackney.hrl").
 
@@ -544,20 +544,20 @@ use_default_pool() ->
 -define(METHOD_TPL(Method),
         Method(URL) ->
             hackney:request(Method, URL)).
--include("methods.hrl").
+-include("hackney_methods.hrl").
 
 -define(METHOD_TPL(Method),
         Method(URL, Headers) ->
             hackney:request(Method, URL, Headers)).
--include("methods.hrl").
+-include("hackney_methods.hrl").
 
 
 -define(METHOD_TPL(Method),
         Method(URL, Headers, Body) ->
             hackney:request(Method, URL, Headers, Body)).
--include("methods.hrl").
+-include("hackney_methods.hrl").
 
 -define(METHOD_TPL(Method),
         Method(URL, Headers, Body, Options) ->
             hackney:request(Method, URL, Headers, Body, Options)).
--include("methods.hrl").
+-include("hackney_methods.hrl").
