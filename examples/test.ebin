@@ -7,9 +7,7 @@
 
 
 main(_) ->
-    application:start(crypto),
-    application:start(public_key),
-    application:start(ssl),
+    hackney:start(),
 
     {ok, _, _, Client} = hackney:request(<<"https://friendpaste.com">>),
     {ok, Body, Client1} = hackney:body(Client),
