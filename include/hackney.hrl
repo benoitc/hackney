@@ -36,7 +36,7 @@
         fragment = <<>>,
         host,
         port,
-        user = nil,
+        user = <<>>,
         password = <<>> }).
 
 %% common types

@@ -71,8 +71,6 @@ unparse_url(#hackney_url{}=Url) ->
     Netloc1 = case User of
         <<>> ->
             Netloc;
-        nil ->
-            Netloc;
         _ when Password /= <<>>, Password /= <<"">> ->
             << User/binary, ":", Password/binary, "@", Netloc/binary >>;
         _ ->

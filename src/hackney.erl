@@ -204,7 +204,7 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
                  raw_path = Path} = URL,
 
     Options = case User of
-        nil ->
+        <<>> ->
             Options0;
         _ ->
             lists:keystore(basic_auth, 1, Options0,
@@ -368,9 +368,9 @@ connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
     case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
         {ok, 200, _, Client0} ->
             case skip_body(Client0) of
-                {ok, Client} -> 
+                {ok, Client} ->
                     {ok, Client#client{recv_timeout=Timeout, options=Options}};
-                {error, Reason} -> 
+                {error, Reason} ->
                     {error, {proxy_connection, Reason}}
             end;
         {ok, S, H, Client} ->
