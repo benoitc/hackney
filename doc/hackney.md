@@ -193,7 +193,7 @@ make a request
 
 
 <pre><code>
-request(Method::term(), Hackney_url::binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
+request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
 </code></pre>
 
 <br></br>

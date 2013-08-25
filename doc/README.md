@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.4.3
+__Version:__ 0.4.4
 
 # hackney
 
@@ -82,7 +82,7 @@ Or add hackney to the applications property of your .app in a release
 
 ### Simple request without pool
 
-Do a simple requet that will return a client state:
+Do a simple request that will return a client state:
 
 ```
 Method = get,
@@ -101,7 +101,7 @@ or `{error, Reason}`.
 If you prefer the REST syntax, you can also do:
 
 ```
-hackney:get(URL, Headers, Payload, Options)
+hackney:Method(URL, Headers, Payload, Options)
 ```
 
 ### Read the body
@@ -132,10 +132,10 @@ record using the `hackney:send_request/2` function:
 
 ```
 ReqBody = << "{
-      \"id\": \"some_paste_id\",
-      \"rev\": \"some_revision_id\",
-      \"changeset\": \"changeset in unidiff format\"
-}" >>,
+	\"id\": \"some_paste_id\",
+	\"rev\": \"some_revision_id\",
+	\"changeset\": \"changeset in unidiff format\"
+	}" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
@@ -175,7 +175,7 @@ function `hackney:stream_request_body/2` to stream the request body and
 > a Client that is waiting for a response (with a response state
 > equal to the atom `waiting`).
 
-ex:
+Ex:
 
 ```
 ReqBody = << "{
@@ -186,18 +186,17 @@ ReqBody = << "{
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 Path = <<"https://friendpaste.com/">>,
 Method = post,
-{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream,
-                               []),
-
+{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream, []),
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
-hackney:close(Client3).`''
+hackney:close(Client3).
+```
 
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
-socket pool. On startup, hackney launcesh a pool named default. To use it
+socket pool. On startup, hackney launches a pool named default. To use it
 do the following:
 
 ```
@@ -222,7 +221,7 @@ Options = [{timeout, 150000}, {pool_size, 100}],
 {ok, Pid} = hackney:start_pool(PoolName, Options),
 ```
 
-`timeout` is the time we keep the conneciton alive in the pool,
+`timeout` is the time we keep the connection alive in the pool,
 `pool_size` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
@@ -269,7 +268,7 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 For now only HTTP tunneling is supported. To use an HTTP tunnel add the
 option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
-`{Host, Port}` tuple. If you need to authetnicate set the option
+`{Host, Port}` tuple. If you need to authenticate set the option
 `{proxy_auth, {User, Password}}`.
 
 ## Contribute

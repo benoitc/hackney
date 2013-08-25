@@ -1,8 +1,10 @@
+
+
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.4.3
+__Version:__ 0.4.4
 
 # hackney
 
@@ -130,10 +132,10 @@ record using the `hackney:send_request/2` function:
 
 ```
 ReqBody = << "{
-      \"id\": \"some_paste_id\",
-      \"rev\": \"some_revision_id\",
-      \"changeset\": \"changeset in unidiff format\"
-}" >>,
+	\"id\": \"some_paste_id\",
+	\"rev\": \"some_revision_id\",
+	\"changeset\": \"changeset in unidiff format\"
+	}" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
@@ -173,7 +175,7 @@ function `hackney:stream_request_body/2` to stream the request body and
 > a Client that is waiting for a response (with a response state
 > equal to the atom `waiting`).
 
-ex:
+Ex:
 
 ```
 ReqBody = << "{
@@ -184,9 +186,7 @@ ReqBody = << "{
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 Path = <<"https://friendpaste.com/">>,
 Method = post,
-{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream,
-                               []),
-
+{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream, []),
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
@@ -268,7 +268,7 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 For now only HTTP tunneling is supported. To use an HTTP tunnel add the
 option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
-`{Host, Port}` tuple. If you need to authenticate, set the option
+`{Host, Port}` tuple. If you need to authenticate set the option
 `{proxy_auth, {User, Password}}`.
 
 ## Contribute

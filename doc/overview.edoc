@@ -152,10 +152,10 @@ record using the `hackney:send_request/2' function:
 
 ```
 ReqBody = << "{
-      \"id\": \"some_paste_id\",
-      \"rev\": \"some_revision_id\",
-      \"changeset\": \"changeset in unidiff format\"
-}" >>,
+	\"id\": \"some_paste_id\",
+	\"rev\": \"some_revision_id\",
+	\"changeset\": \"changeset in unidiff format\"
+	}" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
@@ -192,11 +192,11 @@ send_request function will return {ok, Client}. Then you can use the
 function `hackney:stream_request_body/2' to stream the request body and
 `hackney:start_response/1' to initialize the response.
 
-> Note: The function `hackney:start_response/1` will only accept
+> Note: The function `hackney:start_response/1' will only accept
 > a Client that is waiting for a response (with a response state
-> equal to the atom `waiting`).
+> equal to the atom `waiting').
 
-ex:
+Ex:
 
 ```
 ReqBody = << "{
@@ -207,9 +207,7 @@ ReqBody = << "{
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 Path = <<"https://friendpaste.com/">>,
 Method = post,
-{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream,
-                               []),
-
+{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream, []),
 {ok, Client1} = hackney:stream_request_body(ReqBody, Client),
 {ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
 {ok, Body, Client3} = hackney:body(Client2),
