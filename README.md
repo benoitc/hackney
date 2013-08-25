@@ -1,4 +1,3 @@
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
@@ -81,7 +80,7 @@ Or add hackney to the applications property of your .app in a release
 
 ### Simple request without pool
 
-Do a simple requet that will return a client state:
+Do a simple request that will return a client state:
 
 ```
 Method = get,
@@ -197,7 +196,7 @@ hackney:close(Client3).
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
-socket pool. On startup, hackney launcesh a pool named default. To use it
+socket pool. On startup, hackney launches a pool named default. To use it
 do the following:
 
 ```
@@ -222,7 +221,7 @@ Options = [{timeout, 150000}, {pool_size, 100}],
 {ok, Pid} = hackney:start_pool(PoolName, Options),
 ```
 
-`timeout` is the time we keep the conneciton alive in the pool,
+`timeout` is the time we keep the connection alive in the pool,
 `pool_size` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
@@ -269,7 +268,7 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 For now only HTTP tunneling is supported. To use an HTTP tunnel add the
 option `{proxy, ProxyUrl}` where `ProxyUrl` can be a simple url or an
-`{Host, Port}` tuple. If you need to authetnicate set the option
+`{Host, Port}` tuple. If you need to authenticate, set the option
 `{proxy_auth, {User, Password}}`.
 
 ## Contribute
