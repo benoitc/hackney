@@ -7,6 +7,6 @@
   {vsn, "0.4.4"},
   {registered, [hackney_pool]},
   {applications, [kernel, stdlib, crypto, asn1, public_key, ssl, mimetypes]},
-  {mod, { hackney_app, nil}},
+  {mod, { hackney_app, []}},
   {env, [{timeout, 150000}, {pool_size, 50}]}
  ]}.
