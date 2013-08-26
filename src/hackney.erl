@@ -201,7 +201,8 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
                  port = Port,
                  user = User,
                  password = Password,
-                 raw_path = Path} = URL,
+                 path = Path,
+                 qs = Query} = URL,
 
     Options = case User of
         <<>> ->
@@ -211,9 +212,15 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
                              {basic_auth, {User, Password}})
     end,
 
+    SendPath = case Query of
+        <<>> ->
+            Path;
+        _ ->
+            <<Path/binary, "?", Query/binary>>
+    end,
     case maybe_proxy(Transport, Host, Port, Options) of
         {ok, Client} ->
-            send_request(Client, {Method, Path, Headers, Body});
+            send_request(Client, {Method, SendPath, Headers, Body});
         Error ->
             Error
     end;
