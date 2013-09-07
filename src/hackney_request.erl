@@ -83,8 +83,15 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                     [ << K/binary, ": ", V1/binary, "\r\n" >> | Lines]
             end, [], HeaderDict1),
 
+    HostOrPath = case Method0 of
+        connect ->
+            hackney_headers:get_value(<<"host">>, HeadersDict);
+        _ ->
+            Path
+    end,
+
     HeadersData = iolist_to_binary([
-                << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
+                << Method/binary, " ", HostOrPath/binary, " HTTP/1.1", "\r\n" >>,
                 HeadersLines,
                 <<"\r\n">>]),
 

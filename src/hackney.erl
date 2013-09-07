@@ -195,7 +195,7 @@ request(Method, URL, Headers, Body) ->
 %%  syntax.</bloquote>
 -spec request(term(), url() | binary(), list(), term(), list())
     -> {ok, integer(), list(), #client{}} | {error, term()}.
-request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
+request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
     #hackney_url{transport=Transport,
                  host = Host,
                  port = Port,
@@ -218,6 +218,14 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
         _ ->
             <<Path/binary, "?", Query/binary>>
     end,
+
+    Headers = case lists:keyfind(<<"Host">>, 1, Headers0) of
+        false ->
+          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":", integer_to_list(Port)])}];
+        _ ->
+          Headers0
+    end,
+
     case maybe_proxy(Transport, Host, Port, Options) of
         {ok, Client} ->
             send_request(Client, {Method, SendPath, Headers, Body});
@@ -374,12 +382,7 @@ connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
     ProxyOpts = [{recv_timeout, Timeout} | ProxyOpts0],
     case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
         {ok, 200, _, Client0} ->
-            case skip_body(Client0) of
-                {ok, Client} ->
-                    {ok, Client#client{recv_timeout=Timeout, options=Options}};
-                {error, Reason} ->
-                    {error, {proxy_connection, Reason}}
-            end;
+            {ok, Client0#client{recv_timeout=Timeout, options=Options, response_state=start, body_state=waiting}};
         {ok, S, H, Client} ->
             Body = body(Client),
             {error, {proxy_connection, S, H, Body}};
