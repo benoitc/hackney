@@ -143,7 +143,8 @@ stream_body(Client=#client{body_state=waiting, te=TE, clen=Length, method=Method
 			stream_body(Client#client{body_state=
 				{stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
 		_ when Length =:= 0 orelse Method =:= <<"HEAD">> ->
-            {done, Client#client{body_state=done}};
+            Client1 = transfer_decode_done(<<>>, Client),
+            {done, Client1};
         _ ->
 		    stream_body(Client#client{body_state=
 						{stream, fun te_identity/2, {0, Length},
