@@ -38,6 +38,7 @@ socket(PidOrName, {Transport, Host0, Port}) ->
 %% @doc release a socket in the pool
 release(PidOrName, {Transport, Host0, Port}, Socket) ->
     Host = string:to_lower(Host0),
+    Transport:controlling_process(Socket, PidOrName),
     gen_server:call(PidOrName, {release, {Transport, Host, Port}, Socket}).
 
 %% @doc get total pool size
