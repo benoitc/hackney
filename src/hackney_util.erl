@@ -130,7 +130,7 @@ join([], _Separator, Acc) ->
 join([S | Rest], Separator, []) ->
     join(Rest, Separator, [S]);
 join([S | Rest], Separator, Acc) ->
-    join(Rest, Separator, [S, Separator, Acc]).
+    join(Rest, Separator, [S, Separator | Acc]).
 
 to_hex([]) ->
     [];
