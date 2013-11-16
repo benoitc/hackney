@@ -29,7 +29,7 @@ encode_form([], Boundary, Acc) ->
     {erlang:size(Lines), CType, Lines};
 encode_form([C | R], Boundary, Acc) ->
     Field = encode(C, Boundary),
-    encode_form(R, Boundary, hackney_util:join([Acc, Field], "\r\n")).
+    encode_form(R, Boundary, iolist_to_binary([Acc, Field])).
 
 decode_form(_) -> {error, not_implemented}.
 
