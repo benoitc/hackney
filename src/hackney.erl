@@ -19,6 +19,7 @@
          stream_multipart_request/2,
          stream_body/1,
          body/1, body/2, skip_body/1,
+         controlling_process/2,
          pool/1]).
 
 -define(METHOD_TPL(Method),
@@ -209,7 +210,7 @@ request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
             Options0;
         _ ->
             lists:keystore(basic_auth, 1, Options0,
-                             {basic_auth, {User, Password}})
+                           {basic_auth, {User, Password}})
     end,
 
     SendPath = case Query of
@@ -332,6 +333,12 @@ body(MaxLength, Client) ->
 skip_body(Client) ->
     hackney_response:skip_body(Client).
 
+
+%% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
+-spec controlling_process(#client{}, pid())
+	-> ok | {error, closed | not_owner | atom()}.
+controlling_process(#client{transport=Transport, socket=Skt}, Pid) ->
+    Transport:controlling_process(Skt, Pid).
 
 %% @doc get current pool pid or name used by a client if needed
 pool(#client{options=Opts}) ->
