@@ -15,6 +15,7 @@
         response_state = start,
         mp_boundary = nil,
         req_type = normal,
+        expect = false,
         send_fun=nil,
         body_state=waiting,
         req_chunk_size=4096,

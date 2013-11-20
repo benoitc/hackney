@@ -313,6 +313,8 @@ start_response(Client) ->
 
 
 %% @doc Stream the response body.
+-spec stream_body(#client{})
+    -> {ok, #client{}} | {stop, #client{}} | {error, term()}.
 stream_body(Client) ->
     hackney_response:stream_body(Client).
 

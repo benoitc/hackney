@@ -18,7 +18,8 @@
          stream_headers/1, stream_header/1,
          stream_body/1,
          body/1, body/2, skip_body/1,
-         close/1]).
+         close/1,
+         expect_response/1]).
 
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
@@ -49,6 +50,20 @@ start_response(#client{response_state=waiting} = Client) ->
     end;
 start_response(_) ->
     {error, invalide_state}.
+
+
+expect_response(Client) ->
+    case recv(Client#client{recv_timeout=1000}) of
+        {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" >>} ->
+            {continue, Client#client{expect=false}};
+        {ok, Data} ->
+            {stop, Client#client{buffer=Data, expect=false,
+                                 response_state=waiting}};
+        {error, timeout} ->
+            continue;
+        Error ->
+            Error
+    end.
 
 %% @doc parse the status line
 stream_status(#client{buffer=Buf}=Client) ->

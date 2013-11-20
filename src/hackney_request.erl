@@ -48,6 +48,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                                          Headers0),
 
     ReqType0 = req_type(HeadersDict),
+    Expect = expectation(HeadersDict),
 
     %% build headers with the body.
     {HeaderDict1, ReqType, Body, Client1} = case Body0 of
@@ -98,11 +99,15 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
     %% send headers data
     case hackney_request:send(Client, HeadersData) of
         ok when Body =:= stream ->
-            {ok, Client#client{response_state=stream, method=Method}};
+            {ok, Client#client{response_state=stream, method=Method,
+                               expect=Expect}};
         ok ->
-            case stream_body(Body, Client) of
+            case stream_body(Body, Client#client{expect=Expect}) of
                 {error, _Reason}=E ->
                     E;
+                {stop, Client2} ->
+                    FinalClient = Client2#client{method=Method},
+                    hackney_response:start_response(FinalClient);
                 {ok, Client2} ->
                     case end_stream_body(Client2) of
                         {ok, Client3} ->
@@ -116,6 +121,15 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             Error
     end.
 
+stream_body(Msg, #client{expect=true}=Client) ->
+    case hackney_response:expect_response(Client) of
+        {continue, Client2} ->
+            stream_body(Msg, Client2);
+        {stop, Client2} ->
+            {stop, Client2};
+        Error ->
+            Error
+    end;
 stream_body(eof, Client) ->
     {ok, Client#client{response_state=waiting}};
 stream_body(<<>>, Client) ->
@@ -329,6 +343,13 @@ req_type(Headers) ->
     case hackney_util:to_lower(TE) of
         <<"chunked">> -> chunked;
         _ -> normal
+    end.
+
+expectation(Headers) ->
+    ExpectHdr = hackney_headers:get_value(<<"Expect">>, Headers, <<>>),
+    case hackney_util:to_lower(ExpectHdr) of
+        <<"100-continue">> -> true;
+        _ -> false
     end.
 
 end_stream_body(#client{req_type=chunked}=Client) ->
