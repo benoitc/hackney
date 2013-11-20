@@ -60,7 +60,7 @@ expect_response(Client) ->
             {stop, Client#client{buffer=Data, expect=false,
                                  response_state=waiting}};
         {error, timeout} ->
-            continue;
+            {continue, Client#client{expect=false}};
         Error ->
             Error
     end.
