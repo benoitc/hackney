@@ -63,6 +63,8 @@ encode({Id, Value}, Boundary) ->
     hackney_util:join(Parts, <<"\r\n">>).
 
 
+stream(eof, #client{response_state=waiting}=Client) ->
+    {ok, Client};
 stream(eof, #client{mp_boundary=Boundary}=Client) ->
     Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
     case hackney_request:stream_body(Line, Client) of
