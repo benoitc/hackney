@@ -222,7 +222,8 @@ request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
 
     Headers = case lists:keyfind(<<"Host">>, 1, Headers0) of
         false ->
-          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":", integer_to_list(Port)])}];
+          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":",
+                                                      integer_to_list(Port)])}];
         _ ->
           Headers0
     end,
@@ -389,7 +390,8 @@ connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
     ProxyOpts = [{recv_timeout, Timeout} | ProxyOpts0],
     case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
         {ok, 200, _, Client0} ->
-            {ok, Client0#client{recv_timeout=Timeout, options=Options, response_state=start, body_state=waiting}};
+            {ok, Client0#client{recv_timeout=Timeout, options=Options,
+                                response_state=start, body_state=waiting}};
         {ok, S, H, Client} ->
             Body = body(Client),
             {error, {proxy_connection, S, H, Body}};
