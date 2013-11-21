@@ -6,7 +6,8 @@
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 %%%
 -module(hackney_tcp_transport).
--export([connect/3, connect/4,
+-export([messages/0,
+         connect/3, connect/4,
          recv/2, recv/3,
          send/2,
          setopts/2,
@@ -14,6 +15,9 @@
          peername/1,
          close/1,
          sockname/1]).
+
+%% @doc Atoms used to identify messages in {active, once | true} mode.
+messages() -> {tcp, tcp_closed, tcp_error}.
 
 connect(Host, Port, Opts) ->
 	connect(Host, Port, Opts, infinity).

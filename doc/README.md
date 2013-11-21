@@ -12,13 +12,14 @@ __Version:__ 0.5.0
 
 Main features:
 
-- no message passing: response is directly streamed to the current
-  process and state is kept in a `#client{}` record.
+- no message passing (except for asynchronous responses): response is
+  directly streamed to the current process and state is kept in a `#client{}` record.
 - binary streams
 - SSL support
 - Keepalive handling
 - basic authentication
 - stream the response and the requests
+- fetch a response asynchronously
 - multipart support (streamed or not)
 - chunked encoding support
 - Can send files using the sendfile API
@@ -148,6 +149,9 @@ hackney:close(Client3).
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
+Note: asynchronous responses automatically checkout the socket at the
+end.
+
 ### Send a body
 
 hackney helps you send different payloads by passing different terms as
@@ -193,6 +197,38 @@ Method = post,
 hackney:close(Client3).
 ```
 
+### Get a response asynchronously
+
+Since the 0.6 version, hackney is able to fetch the response
+asynchrnously using the `async` option:
+
+Ex:
+
+```
+Url = <<"https://friendpaste.com/_all_languages">>,
+Opts = [async],
+LoopFun = fun(Ref) ->
+    receive
+        {StreamRef, {status, StatusInt, Reason}} ->
+            io:format("got status: ~p with reason ~p~n", [StatusInt,
+                                                          Reason]),
+            loop(StreamRef);
+        {StreamRef, {headers, Headers}} ->
+            io:format("got headers: ~p~n", [Headers]),
+            loop(StreamRef);
+        {StreamRef, done} ->
+            ok;
+        {StreamRef, Bin} ->
+            io:format("got chunk: ~p~n", [Bin]),
+            loop(StreamRef);
+
+        Else ->
+            io:format("else ~p~n", [Else]),
+            ok
+    end.
+
+{ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
+LoopFun(StreamRef).
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a

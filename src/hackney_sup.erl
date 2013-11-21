@@ -24,9 +24,12 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
+    %% setup the default pool
     PoolOptions = [{name, hackney_pool}],
     DefaultPool = {hackney_pool,
                    {hackney_pool, start_link, [PoolOptions]},
                    permanent, 10000, worker, [hackney_pool]},
+    %% start table to keep async streams ref
+    ets:new(hackney_streams, [set, public, named_table]),
     {ok, { {one_for_one, 10, 1}, [DefaultPool]}}.
 

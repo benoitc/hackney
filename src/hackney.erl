@@ -22,6 +22,10 @@
          controlling_process/2,
          pool/1]).
 
+-export([stream_pid/1,
+         monitor_stream/1, demonitor_stream/1,
+         pause_stream/1, resume_stream/1]).
+
 -define(METHOD_TPL(Method),
         -export([Method/1, Method/2, Method/3, Method/4])).
 -include("hackney_methods.hrl").
@@ -33,6 +37,9 @@
 
 -opaque client() :: #client{}.
 -export_type([client/0]).
+
+-type stream_ref() :: term().
+-export_type([stream_ref/0]).
 
 %% @doc Start the couchbeam process. Useful when testing using the shell.
 start() ->
@@ -162,6 +169,10 @@ request(Method, URL, Headers, Body) ->
 %%      <li>`ssl_options()': See the ssl options from the ssl
 %%      module.</li>
 %%
+%%      <li>async: receive the response asynchronously
+%%      The function return {ok, {response_stream, StreamRef}}.
+%%      </li>
+%%
 %%      <li><em>Others options are</em>:
 %%      <ul>
 %%          <li>{follow_redirect, boolean}: false by default, follow a
@@ -195,7 +206,10 @@ request(Method, URL, Headers, Body) ->
 %%  also do `hackney:Method(...)' if you prefer to use the REST
 %%  syntax.</bloquote>
 -spec request(term(), url() | binary(), list(), term(), list())
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
+    -> {ok, integer(), list(), #client{}}
+    | {ok, #client{}}
+    | {ok, {response_stream, stream_ref()}}
+    | {error, term()}.
 request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
     #hackney_url{transport=Transport,
                  host = Host,
@@ -314,7 +328,8 @@ start_response(Client) ->
 
 %% @doc Stream the response body.
 -spec stream_body(#client{})
-    -> {ok, #client{}} | {stop, #client{}} | {error, term()}.
+    -> {ok, #client{}} | {ok, #client{}} | {stop, #client{}}
+    | {error, term()}.
 stream_body(Client) ->
     hackney_response:stream_body(Client).
 
@@ -336,6 +351,48 @@ body(MaxLength, Client) ->
 skip_body(Client) ->
     hackney_response:skip_body(Client).
 
+%% @doc return the Pid of a response stream
+-spec stream_pid(stream_ref()) -> pid() | undefined.
+stream_pid(StreamRef) ->
+    case ets:lookup(hackney_streams, StreamRef) of
+        [] -> undefined;
+        [{_, Pid}] -> Pid
+    end.
+
+%% @doc monitor response stream
+-spec monitor_stream(stream_ref()) -> ok.
+monitor_stream(StreamRef) ->
+    erlang:monitor(stream_pid(StreamRef), [process]).
+
+%% @doc demonitor response stream
+-spec demonitor_stream(stream_ref()) -> ok.
+demonitor_stream(StreamRef) ->
+    erlang:demonitor(stream_pid(StreamRef)).
+
+
+%% @doc pause a response stream, the stream process will hibernate and
+%% be woken later by the resume function
+-spec pause_stream(stream_ref()) -> ok | stream_undefined.
+pause_stream(StreamRef) ->
+    case stream_pid(StreamRef) of
+        undefined ->
+            stream_undefined;
+        Pid ->
+            Pid ! {StreamRef, pause},
+            ok
+    end.
+
+%% @doc resume a paused response stream, the stream process will be
+%% awoken
+-spec resume_stream(stream_ref()) -> ok | stream_undefined.
+resume_stream(StreamRef) ->
+    case stream_pid(StreamRef) of
+        undefined ->
+            stream_undefined;
+        Pid ->
+            Pid ! {StreamRef, resume},
+            ok
+    end.
 
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
 -spec controlling_process(#client{}, pid())
@@ -408,13 +465,15 @@ socket_from_pool(Pool, {Transport, Host, Port}=Key,
             FollowRedirect = proplists:get_value(follow_redirect,
                                                  Opts, false),
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
+            Async =  proplists:get_value(async, Opts, false),
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
                                socket=Skt,
                                state = connected,
                                follow_redirect=FollowRedirect,
-                               max_redirect=MaxRedirect}};
+                               max_redirect=MaxRedirect,
+                               async=Async}};
         no_socket ->
             do_connect(Transport, Host, Port, Client)
     end.
@@ -453,6 +512,7 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
             ForceRedirect = proplists:get_value(force_redirect, Opts,
                                                 false),
+            Async =  proplists:get_value(async, Opts, false),
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
@@ -460,7 +520,8 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
                                state = connected,
                                follow_redirect=FollowRedirect,
                                max_redirect=MaxRedirect,
-                               force_redirect=ForceRedirect}};
+                               force_redirect=ForceRedirect,
+                               async=Async}};
         Error ->
             Error
     end.

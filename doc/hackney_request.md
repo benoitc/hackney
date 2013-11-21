@@ -59,6 +59,6 @@ module handling the request.
 
 ### stream_body/2 ###
 
-`stream_body(Func, Client) -> any()`
+`stream_body(Msg, Client) -> any()`
 
 

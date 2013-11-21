@@ -21,6 +21,9 @@
          close/1,
          expect_response/1]).
 
+%% internal
+-export([async_recv/3, maybe_continue/3]).
+
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
     case hackney_request:end_stream_body(Client) of
@@ -36,11 +39,31 @@ start_response(#client{response_state=stream} = Client) ->
         Error ->
             Error
     end;
+start_response(#client{response_state=waiting, async=true} = Client) ->
+    Source = self(),
+    StreamRef = make_ref(),
+    spawn_link(fun() ->
+                %% pass the control to the process
+                #client{transport=Transport, socket=Sock} = Client,
+                Transport:controlling_process(Sock, self()),
+
+                %% register the stream
+                ets:insert(hackney_streams, [{StreamRef, self()}]),
+
+                %% start the stream loop
+                stream_loop(Source, StreamRef,
+                            Client#client{response_state=on_status}),
+
+                %% normal exit
+                unlink(Source)
+        end),
+    %% return a response stream to get the response asynchronously
+    {ok, {response_stream, StreamRef}};
 start_response(#client{response_state=waiting} = Client) ->
      case stream_status(Client#client{response_state=on_status}) of
         {ok, Status, _Reason, Client1} ->
             case stream_headers(Client1) of
-                {ok, Headers, Client2} ->
+                {ok, {headers, Headers}, Client2} ->
                     {ok, Status, Headers, Client2};
                 Error ->
                     Error
@@ -51,7 +74,7 @@ start_response(#client{response_state=waiting} = Client) ->
 start_response(_) ->
     {error, invalide_state}.
 
-
+%% @doc handle Expect header
 expect_response(Client) ->
     case recv(Client#client{recv_timeout=1000}) of
         {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" >>} ->
@@ -65,11 +88,56 @@ expect_response(Client) ->
             Error
     end.
 
+
+stream_loop(Source, Ref, #client{response_state=St}=Client) ->
+    Resp = case St of
+        on_status -> stream_status(Client);
+        on_header -> stream_headers(Client);
+        on_body -> stream_body(Client)
+    end,
+
+    case Resp of
+        {more, Client2} ->
+            async_recv(Source, Ref, Client2);
+        {ok, StatusInt, Reason, Client2} ->
+            Source ! {Ref, {status, StatusInt, Reason}},
+            maybe_continue(Source, Ref, Client2);
+        {ok, {headers, Headers}, Client2} ->
+            Source ! {Ref, {headers, Headers}},
+            maybe_continue(Source, Ref, Client2);
+        {ok, Data, Client2} ->
+            Source ! {Ref, Data},
+            maybe_continue(Source, Ref, Client2);
+        {done, _} ->
+            Source ! {Ref, done},
+            ets:delete(hackney_streams, Ref);
+        {error, _Reason} = Error ->
+            Source ! {Ref, Error},
+            ets:delete(hackney_streams, Ref)
+    end.
+
+
+maybe_continue(Source, Ref, Client) ->
+    receive
+        {Ref, resume} ->
+            stream_loop(Source, Ref, Client);
+        {Ref, pause} ->
+            io:fotmat("got pause", []),
+            erlang:hibernate(?MODULE, maybe_continue, [Source, Ref,
+                                                       Client]);
+        {Ref, stop} ->
+            close(Client)
+    after 0 ->
+            stream_loop(Source, Ref, Client)
+    end.
+
 %% @doc parse the status line
-stream_status(#client{buffer=Buf}=Client) ->
+stream_status(#client{buffer=Buf, async=Async}=Client) ->
     case binary:split(Buf, <<"\r\n">>) of
         [Line, Rest] ->
             parse_status(Line, Client#client{buffer=Rest});
+        _ when Async =:= true ->
+            {more, Client};
         _ ->
              case recv(Client) of
                 {ok, Data} ->
@@ -88,24 +156,26 @@ parse_status(<< "HTTP/", High, ".", Low, " ", Status/binary >>, Client)
     [StatusCode, Reason] = binary:split(Status, <<" ">>, [trim]),
     StatusInt = list_to_integer(binary_to_list(StatusCode)),
     {ok, StatusInt, Reason, Client#client{version=Version,
-                                          response_state=on_header}}.
+                                          response_state=on_header,
+                                          partial_headers=[]}}.
 
 %% @doc fetch all headers
-stream_headers(Client) ->
-    stream_headers(Client, []).
-
-stream_headers(Client, Headers) ->
+stream_headers(#client{partial_headers=Headers}=Client) ->
     case stream_header(Client) of
+        {more, Client1} ->
+            {more, Client1};
         {headers_complete, Client1} ->
-            {ok, lists:reverse(Headers), Client1};
+            {ok, {headers, lists:reverse(Headers)},
+             Client1#client{partial_headers=[]}};
         {header, KV, Client1} ->
-            stream_headers(Client1, [KV | Headers]);
+            stream_headers(Client1#client{partial_headers=[KV | Headers]});
         {error, Reason, Acc} ->
-            {error, {Reason, {Acc, Headers, Client}}}
+            {error, {Reason, {Acc, Headers,
+                              Client#client{partial_headers=[]}}}}
     end.
 
 
-stream_header(#client{buffer=Buf}=Client) ->
+stream_header(#client{buffer=Buf, async=Async}=Client) ->
     case binary:split(Buf, <<"\r\n">>) of
         [<<>>, Rest] ->
             {headers_complete, Client#client{buffer=Rest,
@@ -118,6 +188,8 @@ stream_header(#client{buffer=Buf}=Client) ->
             stream_header(Client#client{buffer=NewBuf});
         [Line, Rest]->
             parse_header(Line, Client#client{buffer=Rest});
+        [Buf] when Async =:= true ->
+            {more, Client};
         [Buf] ->
             case recv(Client) of
                 {ok, Data} ->
@@ -169,6 +241,9 @@ stream_body(Client=#client{body_state=waiting, te=TE, clen=Length,
 stream_body(Client=#client{buffer=Buffer, body_state={stream, _, _, _}})
 		when Buffer =/= <<>> ->
 	transfer_decode(Buffer, Client#client{buffer= <<>>});
+stream_body(Client=#client{body_state={stream, _, _, _},
+                           async=true, buffer=Buffer}) ->
+    transfer_decode(Buffer, Client);
 stream_body(Client=#client{body_state={stream, _, _, _}}) ->
 	stream_body_recv(Client);
 stream_body(Client=#client{body_state=done}) ->
@@ -230,8 +305,9 @@ skip_body(Client) ->
 -spec transfer_decode(binary(), #client{})
                      -> {ok, binary(), #client{}} | {error, atom()}.
 transfer_decode(Data, Client=#client{
-                        body_state={stream, TransferDecode,
-                                    TransferState, ContentDecode}}) ->
+                body_state={stream, TransferDecode,
+                                    TransferState, ContentDecode},
+                async=Async}) ->
     case TransferDecode(Data, TransferState) of
         {ok, Data2, TransferState2} ->
             content_decode(ContentDecode, Data2,
@@ -253,6 +329,8 @@ transfer_decode(Data, Client=#client{
 
         {chunk_ok, Chunk, Rest} ->
             {ok, Chunk, Client#client{buffer=Rest}};
+        more when Async =:= true ->
+            {more, Client#client{buffer=Data}};
         more ->
             stream_body_recv(Client#client{buffer=Data});
         {done, Rest} ->
@@ -366,6 +444,48 @@ ce_identity(Data) ->
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
     Transport:recv(Skt, 0, Timeout).
 
+async_recv(Source, Ref, #client{transport=Transport,
+                                socket=Sock,
+                                buffer=Buffer,
+                                recv_timeout=Timeout}=Client) ->
+
+    {OK, Closed, Error} = Transport:messages(),
+    Transport:setopts(Sock, [{active, once}]),
+    %% some useful info
+    #client{version=Version, clen=CLen, te=TE} = Client,
+    receive
+        {Ref, resume} ->
+            async_recv(Source, Ref, Client);
+        {Ref, pause} ->
+            io:fotmat("got pause", []),
+            %% make sure that the proces won't be awoken by a tcp msg
+            Transport:setopts(Sock, [{active, false}]),
+            %% hibernate
+            erlang:hibernate(?MODULE, async_recv, [Source, Ref, Client]);
+        {OK, Sock, Data} ->
+            NewBuffer =  << Buffer/binary, Data/binary >>,
+            stream_loop(Source, Ref, Client#client{buffer=NewBuffer});
+        {Closed, Sock} ->
+            case Client#client.response_state of
+                on_body when Version =:= {1, 0}, CLen =:= nil ->
+                    Source ! {Ref, Buffer};
+                on_body when TE =:= <<"identity">> ->
+                    Source ! {Ref, Buffer};
+                on_body ->
+                    Source ! {Ref, {error, {closed, Buffer}}};
+                _ ->
+                    Source ! {error, closed}
+            end,
+            ets:delete(hackney_streams, Ref),
+            Transport:close(Sock);
+        {Error, Sock, Reason} ->
+            Source ! {error, Reason},
+            ets:delete(hackney_streams, Ref),
+            Transport:close(Sock)
+    after Timeout ->
+        Source ! {error, {closed, timeout}},
+        Transport:close(Sock)
+    end.
 
 close(#client{socket=nil}=Client) ->
     Client#client{state = closed};
