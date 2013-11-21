@@ -355,15 +355,14 @@ transfer_decode_done(Rest, Client0) ->
                             body_state=done,
                             buffer=Rest},
 
-    Pool = hackney:pool(Client),
+    Pool = hackney:is_pool(Client),
     case maybe_close(Client) of
         true ->
             close(Client);
-        false when Pool /= undefined ->
-            #client{host=Host, port=Port, transport=Transport,
-                    socket=Socket}=Client,
-            hackney_pool:release(Pool, {Transport, Host, Port}, Socket),
-            Client#client{state=closed, socket=nil};
+        false when Pool /= false ->
+            #client{socket=Socket, socket_ref=Ref}=Client,
+            hackney_pool:checkin(Ref, Socket),
+            Client#client{state=closed, socket=nil, socket_ref=nil};
         false ->
             Client
     end.

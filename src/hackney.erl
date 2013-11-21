@@ -20,7 +20,7 @@
          stream_body/1,
          body/1, body/2, skip_body/1,
          controlling_process/2,
-         pool/1]).
+         is_pool/1]).
 
 -export([stream_pid/1,
          monitor_stream/1, demonitor_stream/1,
@@ -57,14 +57,13 @@ connect(#client{state=connected, redirect=nil}=Client) ->
     {ok, Client};
 
 connect(#client{state=connected, redirect=Redirect}=Client) ->
-    #client{host=Host, port=Port, transport=Transport,
-                    socket=Socket}=Client,
+    #client{socket=Socket, socket_ref=Ref}=Client,
 
-    case pool(Client) of
-        undefined ->
+    case is_pool(Client) of
+        false ->
             close(Client);
-        Pool ->
-            hackney_pool:release(Pool, {Transport, Host, Port}, Socket)
+        true ->
+            hackney_pool:checkout(Ref, Socket)
     end,
     connect(Redirect);
 connect(#client{state=closed, redirect=nil}=Client) ->
@@ -83,20 +82,14 @@ connect(Transport, Host, Port) ->
 
 connect(_Transport, _Host, _Port, #client{state=connected}=Client) ->
     {ok, Client};
-connect(Transport, Host, Port, #client{socket=Skt, options=Opts}=Client)
+connect(Transport, Host, Port, #client{socket=Skt}=Client)
         when is_list(Host), is_integer(Port), Skt =:= nil ->
-
-    UseDefaultPool = use_default_pool(),
-    case pool(Client) of
-        undefined when UseDefaultPool == true ->
-            Opts1 = [{pool, default} | Opts],
-            Pool = whereis(hackney_pool),
-            socket_from_pool(Pool, {Transport, Host, Port},
-                             Client#client{options=Opts1});
-        undefined ->
+    case is_pool(Client) of
+        false ->
+            %% the client won't use any pool
             do_connect(Transport, Host, Port, Client);
-        Pool ->
-            socket_from_pool(Pool, {Transport, Host, Port}, Client)
+        true ->
+            socket_from_pool(Transport, Host, Port, Client)
     end;
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     Timeout = proplists:get_value(recv_timeout, Options, infinity),
@@ -112,12 +105,12 @@ set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
     Transport:setopts(Skt, Options).
 
 %% @doc start a pool
-start_pool(Name, Options) ->
-    hackney_pool:start_pool(Name, Options).
+start_pool(Key, Options) ->
+    hackney_pool:start_pool(Key, Options).
 
 %% @doc stop a pool
-stop_pool(Name) ->
-    hackney_pool:stop_pool(Name).
+stop_pool(Key) ->
+    hackney_pool:stop_pool(Key).
 
 
 %% @doc make a request
@@ -401,14 +394,17 @@ controlling_process(#client{transport=Transport, socket=Skt}, Pid) ->
     Transport:controlling_process(Skt, Pid).
 
 %% @doc get current pool pid or name used by a client if needed
-pool(#client{options=Opts}) ->
+is_pool(#client{options=Opts}) ->
+    UseDefaultPool = use_default_pool(),
     case proplists:get_value(pool, Opts) of
+        false ->
+            false;
+        undefined when UseDefaultPool =:= true ->
+            true;
         undefined ->
-            undefined;
-        default ->
-            whereis(hackney_pool);
-        Pool ->
-            Pool
+            false;
+        _ ->
+            true
     end.
 
 
@@ -458,10 +454,9 @@ connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
             {error, {proxy_connection, Error}}
     end.
 
-socket_from_pool(Pool, {Transport, Host, Port}=Key,
-                 #client{options=Opts}=Client) ->
-    case hackney_pool:socket(Pool, Key) of
-        {ok, Skt} ->
+socket_from_pool(Transport, Host, Port, #client{options=Opts}=Client) ->
+    case hackney_pool:checkout(Transport, Host, Port, Client) of
+        {ok, Ref, Skt} ->
             FollowRedirect = proplists:get_value(follow_redirect,
                                                  Opts, false),
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
@@ -470,12 +465,16 @@ socket_from_pool(Pool, {Transport, Host, Port}=Key,
                                host=Host,
                                port=Port,
                                socket=Skt,
+                               socket_ref=Ref,
                                state = connected,
                                follow_redirect=FollowRedirect,
                                max_redirect=MaxRedirect,
                                async=Async}};
-        no_socket ->
-            do_connect(Transport, Host, Port, Client)
+        {error, no_socket, Ref} ->
+            do_connect(Transport, Host, Port,
+                         Client#client{socket_ref=Ref});
+        Error ->
+            Error
     end.
 
 do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
@@ -513,6 +512,7 @@ do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
             ForceRedirect = proplists:get_value(force_redirect, Opts,
                                                 false),
             Async =  proplists:get_value(async, Opts, false),
+
             {ok, Client#client{transport=Transport,
                                host=Host,
                                port=Port,
@@ -625,10 +625,10 @@ redirect_location(Headers) ->
 
 use_default_pool() ->
     case application:get_env(hackney, use_default_pool) of
-        {ok, true} ->
-            true;
+        {ok, Val} ->
+            Val;
         _ ->
-            false
+            true
     end.
 
 -define(METHOD_TPL(Method),

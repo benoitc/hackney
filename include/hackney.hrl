@@ -5,6 +5,7 @@
         netloc = netloc,
         options = [],
         socket = nil,
+        socket_ref = nil,
         recv_timeout = infinity,
         follow_redirect = false,
         max_redirect = 5,
