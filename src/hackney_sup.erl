@@ -27,4 +27,3 @@ init([]) ->
     %% start table to keep async streams ref
     ets:new(hackney_streams, [set, public, named_table]),
     {ok, { {one_for_one, 10, 1}, []}}.
-

@@ -26,7 +26,7 @@ start(_StartType, _StartArgs) ->
 
     %% start the pool handler
     PoolHandler = get_app_env(pool_handler, hackney_pool),
-    ok = PoolHandler:start([]),
+    ok = PoolHandler:start(),
 
     %% finish to start the application
     {ok, Pid}.

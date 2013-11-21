@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% PUBLIC API
--export([start/1,
+-export([start/0,
          checkout/4,
          checkin/2]).
 
@@ -42,7 +42,7 @@
         sockets = dict:new()}).
 
 
-start(_Config) ->
+start() ->
     %% init the table to maintain association between the pools and
     %% their pid
     ets:new(hackney_pool, [set, public, named_table]),
