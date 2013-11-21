@@ -1,5 +1,4 @@
 
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2013 Benoît Chesneau.
@@ -229,6 +228,8 @@ LoopFun = fun(Ref) ->
 
 {ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
 LoopFun(StreamRef).
+```
+
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
