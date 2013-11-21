@@ -205,20 +205,20 @@ asynchrnously using the `async` option:
 ```
 Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
-LoopFun = fun(Ref) ->
+LoopFun = fun(Loop, Ref) ->
     receive
         {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
-            loop(StreamRef);
+            Loop(StreamRef);
         {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
-            loop(StreamRef);
+            Loop(StreamRef);
         {Ref, done} ->
             ok;
         {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
-            loop(StreamRef);
+            Loop(StreamRef);
 
         Else ->
             io:format("else ~p~n", [Else]),
@@ -226,7 +226,7 @@ LoopFun = fun(Ref) ->
     end.
 
 {ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
-LoopFun(StreamRef).
+LoopFun(LoopFun, StreamRef).
 ```
 
 ### Use a pool
