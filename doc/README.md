@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.6.0
+__Version:__ 0.6.1
 
 # hackney
 
@@ -210,15 +210,15 @@ LoopFun = fun(Loop, Ref) ->
         {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
         {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
         {Ref, done} ->
             ok;
         {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
 
         Else ->
             io:format("else ~p~n", [Else]),
