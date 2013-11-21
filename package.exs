@@ -22,5 +22,5 @@ Expm.Package.new(name: "hackney", description: "Simple HTTP client in Erlang",
                                 ]],
                  maintainers: [[name: "Benoit Chesneau",
                                 email: "bchesneau@gmail.com"]],
-                 repositories: [[github: "benoitc/hackney", tag: "0.5.0"]])
+                 repositories: [[github: "benoitc/hackney", tag: "0.6.0"]])
 
