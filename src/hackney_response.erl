@@ -152,7 +152,8 @@ parse_header(Line, Client) ->
     {header, {Key, Value}, Client1}.
 
 
-stream_body(Client=#client{body_state=waiting, te=TE, clen=Length, method=Method}) ->
+stream_body(Client=#client{body_state=waiting, te=TE, clen=Length,
+                           method=Method}) ->
 	case TE of
 		<<"chunked">> ->
 			stream_body(Client#client{body_state=
