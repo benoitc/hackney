@@ -16,7 +16,7 @@
 
 
 @copyright 2012-2013 Benoît Chesneau.
-@version 0.6.0
+@version 0.6.1
 @title hackney - HTTP client library in Erlang
 
 @doc
@@ -233,15 +233,15 @@ LoopFun = fun(Loop, Ref) ->
         {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
         {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
         {Ref, done} ->
             ok;
         {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
-            Loop(StreamRef);
+            Loop(Loop, StreamRef);
 
         Else ->
             io:format("else ~p~n", [Else]),
