@@ -2,23 +2,54 @@
 
 # Module hackney_url #
 * [Description](#description)
+* [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
 
 
 module to manage urls.
 
+
+<a name="types"></a>
+
+## Data Types ##
+
+
+
+
+### <a name="type-qs_vals">qs_vals()</a> ###
+
+
+
+<pre><code>
+qs_vals() = [{binary(), binary() | true}]
+</code></pre>
+
+
 <a name="index"></a>
 
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#parse_url-1">parse_url/1</a></td><td>Parse an url and return a #hackney_url record.</td></tr><tr><td valign="top"><a href="#transport_scheme-1">transport_scheme/1</a></td><td></td></tr><tr><td valign="top"><a href="#unparse_url-1">unparse_url/1</a></td><td></td></tr><tr><td valign="top"><a href="#urldecode-1">urldecode/1</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urldecode-2">urldecode/2</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urlencode-1">urlencode/1</a></td><td>URL encode a string binary.</td></tr><tr><td valign="top"><a href="#urlencode-2">urlencode/2</a></td><td>URL encode a string binary.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#parse_qs-1">parse_qs/1</a></td><td></td></tr><tr><td valign="top"><a href="#parse_url-1">parse_url/1</a></td><td>Parse an url and return a #hackney_url record.</td></tr><tr><td valign="top"><a href="#qs-1">qs/1</a></td><td>encode query properties to binary.</td></tr><tr><td valign="top"><a href="#transport_scheme-1">transport_scheme/1</a></td><td></td></tr><tr><td valign="top"><a href="#unparse_url-1">unparse_url/1</a></td><td></td></tr><tr><td valign="top"><a href="#urldecode-1">urldecode/1</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urldecode-2">urldecode/2</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urlencode-1">urlencode/1</a></td><td>URL encode a string binary.</td></tr><tr><td valign="top"><a href="#urlencode-2">urlencode/2</a></td><td>URL encode a string binary.</td></tr></table>
 
 
 <a name="functions"></a>
 
 ## Function Details ##
+
+<a name="parse_qs-1"></a>
+
+### parse_qs/1 ###
+
+
+<pre><code>
+parse_qs(Bin::binary()) -&gt; <a href="#type-qs_vals">qs_vals()</a>
+</code></pre>
+
+<br></br>
+
+
 
 <a name="parse_url-1"></a>
 
@@ -33,6 +64,19 @@ parse_url(URL::binary() | list()) -&gt; <a href="#type-hackney_url">hackney_url(
 
 
 Parse an url and return a #hackney_url record.
+<a name="qs-1"></a>
+
+### qs/1 ###
+
+
+<pre><code>
+qs(KVs::<a href="#type-qs_vals">qs_vals()</a>) -&gt; binary()
+</code></pre>
+
+<br></br>
+
+
+encode query properties to binary
 <a name="transport_scheme-1"></a>
 
 ### transport_scheme/1 ###

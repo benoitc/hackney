@@ -15,9 +15,14 @@
          transport_scheme/1,
          unparse_url/1,
          urldecode/1, urldecode/2,
-         urlencode/1, urlencode/2]).
+         urlencode/1, urlencode/2,
+         parse_qs/1,
+         qs/1,
+         make_url/3]).
 
 -include("hackney.hrl").
+
+-type qs_vals() :: [{binary(), binary() | true}].
 
 %% @doc Parse an url and return a #hackney_url record.
 -spec parse_url(URL::binary()|list()) -> hackney_url().
@@ -234,3 +239,45 @@ tohexu(C) when C < 17 -> $A + C - 10.
 -spec tohexl(byte()) -> byte().
 tohexl(C) when C < 10 -> $0 + C;
 tohexl(C) when C < 17 -> $a + C - 10.
+
+
+%% parse a query or a form from a binary and return a list of properties
+-spec parse_qs(binary()) -> qs_vals().
+parse_qs(<<>>) ->
+    [];
+parse_qs(Bin) ->
+    Tokens = binary:split(Bin, <<"&">>, [trim, global]),
+    [case binary:split(Token, <<"=">>, [trim]) of
+            [T] ->
+                {urldecode(T), true};
+            [Name, Value] ->
+                {urldecode(Name), urldecode(Value)}
+        end || Token <- Tokens].
+
+
+%% @doc encode query properties to binary
+-spec qs(qs_vals()) -> binary().
+qs(KVs) ->
+   qs(KVs, []).
+
+qs([], Acc) ->
+    hackney_util:join(lists:reverse(Acc), <<"&">>);
+qs([{K, V}|R], Acc) ->
+    K1 = urlencode(K),
+    V1 = urlencode(V),
+    Line = << K1/binary, "=", V1/binary >>,
+    qs(R, [Line | Acc]).
+
+%% @doc  construct an url from a base url, a path and a list of
+%% properties to give to the url.
+-spec make_url(binary(), binary(), binary() | qs_vals()) -> binary().
+make_url(Url, Path, Query) when is_list(Query) ->
+    %% a list of properties has been passed
+    make_url(Url, Path, qs(Query));
+make_url(Url, Path, Query) when is_binary(Query) ->
+    binary_to_list(
+        iolist_to_binary(
+            [Url, <<"/">>,
+             Path,
+             [ [<<"?">>, Query] || Query =/= [] ]
+            ])).
