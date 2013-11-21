@@ -202,8 +202,6 @@ hackney:close(Client3).
 Since the 0.6 version, hackney is able to fetch the response
 asynchrnously using the `async` option:
 
-Ex:
-
 ```
 Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
@@ -229,6 +227,8 @@ LoopFun = fun(Ref) ->
 
 {ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
 LoopFun(StreamRef).
+```
+
 ### Use a pool
 
 To reuse a connection globally in your application you can also use a
