@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.5.0
+__Version:__ 0.6.0
 
 # hackney
 
@@ -209,16 +209,16 @@ Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
 LoopFun = fun(Ref) ->
     receive
-        {StreamRef, {status, StatusInt, Reason}} ->
+        {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
             loop(StreamRef);
-        {StreamRef, {headers, Headers}} ->
+        {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
             loop(StreamRef);
-        {StreamRef, done} ->
+        {Ref, done} ->
             ok;
-        {StreamRef, Bin} ->
+        {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
             loop(StreamRef);
 

@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.5.0
+__Version:__ 0.6.0
 
 # hackney
 
@@ -209,16 +209,16 @@ Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
 LoopFun = fun(Ref) ->
     receive
-        {StreamRef, {status, StatusInt, Reason}} ->
+        {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
             loop(StreamRef);
-        {StreamRef, {headers, Headers}} ->
+        {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
             loop(StreamRef);
-        {StreamRef, done} ->
+        {Ref, done} ->
             ok;
-        {StreamRef, Bin} ->
+        {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
             loop(StreamRef);
 
@@ -328,18 +328,18 @@ $ make devclean ; # clean all files
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney.md" class="module">hackney</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/feature/async/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

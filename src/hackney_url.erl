@@ -234,4 +234,3 @@ tohexu(C) when C < 17 -> $A + C - 10.
 -spec tohexl(byte()) -> byte().
 tohexl(C) when C < 10 -> $0 + C;
 tohexl(C) when C < 17 -> $a + C - 10.
-
