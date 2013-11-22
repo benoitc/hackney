@@ -315,7 +315,8 @@ In your application config set the `pool_handler` property to
 
 ```
 {hackney, [
-    {pool_handler, hackney_disp},`''
+    {pool_handler, hackney_disp},
+```
 
 and hackney will automatically use this pool.
 

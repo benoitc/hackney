@@ -336,7 +336,7 @@ experimental.
 #### How to use it?
 
 In your application config set the `pool_handler' property to
-`hackney_disp`:
+`hackney_disp':
 
 ```
 {hackney, [
