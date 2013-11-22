@@ -1,6 +1,6 @@
 # NEWS
 
-0.7.0 - current
+0.7.0 - 2013/11/22
 
 - add new Loadbalance pool handler based on dispcount
 - allows to set the pool handler
