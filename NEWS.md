@@ -8,6 +8,9 @@
   `hackney:stop_pool/1`, use instead `hackney_pool:start_pool/2` and
   `hackney_pool:stop_pool/1`
 - breaking change: A pool is now used by default
+- breaking change: The `hackney_form` module has been removed. You can
+  now encode/parse a form using the functions in the `hackney_url` module.
+
 
 0.6.1 - 2013/11/21
 

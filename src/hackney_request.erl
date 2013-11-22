@@ -15,7 +15,8 @@
 -export([perform/2,
          send/2, send_chunk/2,
          sendfile/3,
-         stream_body/2, end_stream_body/1]).
+         stream_body/2, end_stream_body/1,
+         encode_form/1]).
 
 -define(CHUNK_SIZE, 20480).
 
@@ -227,12 +228,18 @@ sendfile(FileName, Opts, Client) ->
 	    Res
     end.
 
+%% @doc encode a list of properties in a form.
+encode_form(KVs) ->
+    Lines = hackney_url:qs(KVs),
+    CType = <<"application/x-www-form-urlencoded; charset=utf-8">>,
+    {erlang:byte_size(Lines), CType, Lines}.
+
 
 %% internal
 handle_body(Headers, ReqType0, Body0, Client) ->
     {CLen, CType, Body} = case Body0 of
         {form, KVs} ->
-            hackney_form:encode_form(KVs);
+            encode_form(KVs);
         {multipart, KVs} ->
             hackney_multipart:encode_form(KVs);
         {file, FileName} ->
