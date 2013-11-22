@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.6.1
+__Version:__ 0.7.0
 
 # hackney
 
@@ -230,7 +230,7 @@ LoopFun = fun(Loop, Ref) ->
 LoopFun(LoopFun, StreamRef).
 ```
 
-### Use a pool
+### Use the default pool
 
 To reuse a connection globally in your application you can also use a
 socket pool. On startup, hackney launches a pool named default. To use it
@@ -255,7 +255,7 @@ you to maintain a group of connections.
 ```
 PoolName = mypool,
 Options = [{timeout, 150000}, {pool_size, 100}],
-{ok, Pid} = hackney:start_pool(PoolName, Options),
+{ok, Pid} = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
@@ -266,7 +266,7 @@ automatically.
 To close a pool do:
 
 ```
-hackney:stop_pool(PoolName).
+hackney_pool:stop_pool(PoolName).
 ```
 
 > Note: Sometimes you want to always use the default pool in your app
@@ -332,6 +332,8 @@ $ make devclean ; # clean all files
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp.md" class="module">hackney_disp</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp_handler.md" class="module">hackney_disp_handler</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>

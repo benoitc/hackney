@@ -10,7 +10,7 @@ __Behaviours:__ [`application`](application.md).
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ensure_deps_started-0">ensure_deps_started/0</a></td><td></td></tr><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr><tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ensure_deps_started-0">ensure_deps_started/0</a></td><td></td></tr><tr><td valign="top"><a href="#get_app_env-1">get_app_env/1</a></td><td>return a config value.</td></tr><tr><td valign="top"><a href="#get_app_env-2">get_app_env/2</a></td><td>return a config value.</td></tr><tr><td valign="top"><a href="#start-2">start/2</a></td><td></td></tr><tr><td valign="top"><a href="#stop-1">stop/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -24,6 +24,20 @@ __Behaviours:__ [`application`](application.md).
 `ensure_deps_started() -> any()`
 
 
+<a name="get_app_env-1"></a>
+
+### get_app_env/1 ###
+
+`get_app_env(Key) -> any()`
+
+return a config value
+<a name="get_app_env-2"></a>
+
+### get_app_env/2 ###
+
+`get_app_env(Key, Default) -> any()`
+
+return a config value
 <a name="start-2"></a>
 
 ### start/2 ###

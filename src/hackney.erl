@@ -11,7 +11,6 @@
 -export([connect/1, connect/3, connect/4,
          close/1,
          set_sockopts/2,
-         start_pool/2, stop_pool/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          start_response/1,
@@ -107,15 +106,6 @@ close(Client) ->
 %% @doc add set sockets options in the client
 set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
     Transport:setopts(Skt, Options).
-
-%% @doc start a pool
-start_pool(Key, Options) ->
-    hackney_pool:start_pool(Key, Options).
-
-%% @doc stop a pool
-stop_pool(Key) ->
-    hackney_pool:stop_pool(Key).
-
 
 %% @doc make a request
 -spec request(binary()|list())

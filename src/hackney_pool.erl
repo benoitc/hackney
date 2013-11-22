@@ -16,15 +16,16 @@
          checkout/4,
          checkin/2]).
 
+-export([start_pool/2,
+         stop_pool/1]).
+
 
 -export([pool_size/1, pool_size/2,
          max_poolsize/1,
          set_poolsize/2,
          timeout/1,
          set_timeout/2,
-         child_spec/2,
-         start_pool/2,
-         stop_pool/1]).
+         child_spec/2]).
 
 -export([start_link/2]).
 

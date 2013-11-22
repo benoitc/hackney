@@ -49,9 +49,9 @@ url() = #hackney_url{}
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the response.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the response as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Client</em>.</td></tr><tr><td valign="top"><a href="#demonitor_stream-1">demonitor_stream/1</a></td><td>demonitor response stream.</td></tr><tr><td valign="top"><a href="#end_stream_request_body-1">end_stream_request_body/1</a></td><td>end streaming the request body.</td></tr><tr><td valign="top"><a href="#monitor_stream-1">monitor_stream/1</a></td><td>monitor response stream.</td></tr><tr><td valign="top"><a href="#pause_stream-1">pause_stream/1</a></td><td>pause a response stream, the stream process will hibernate and
-be woken later by the resume function.</td></tr><tr><td valign="top"><a href="#pool-1">pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#resume_stream-1">resume_stream/1</a></td><td>resume a paused response stream, the stream process will be
-awoken.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td>add set sockets options in the client.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart_request-2">stream_multipart_request/2</a></td><td>stream a multipart request until eof
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Client</em>.</td></tr><tr><td valign="top"><a href="#demonitor_stream-1">demonitor_stream/1</a></td><td>demonitor response stream.</td></tr><tr><td valign="top"><a href="#end_stream_request_body-1">end_stream_request_body/1</a></td><td>end streaming the request body.</td></tr><tr><td valign="top"><a href="#is_pool-1">is_pool/1</a></td><td>get current pool pid or name used by a client if needed.</td></tr><tr><td valign="top"><a href="#monitor_stream-1">monitor_stream/1</a></td><td>monitor response stream.</td></tr><tr><td valign="top"><a href="#pause_stream-1">pause_stream/1</a></td><td>pause a response stream, the stream process will hibernate and
+be woken later by the resume function.</td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#resume_stream-1">resume_stream/1</a></td><td>resume a paused response stream, the stream process will be
+awoken.</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#set_sockopts-2">set_sockopts/2</a></td><td>add set sockets options in the client.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart_request-2">stream_multipart_request/2</a></td><td>stream a multipart request until eof
 Possible value are :
 <ul>
 <li><code>eof</code>: end the multipart request</li>
@@ -168,6 +168,13 @@ demonitor response stream
 `end_stream_request_body(Client) -> any()`
 
 end streaming the request body.
+<a name="is_pool-1"></a>
+
+### is_pool/1 ###
+
+`is_pool(Client) -> any()`
+
+get current pool pid or name used by a client if needed
 <a name="monitor_stream-1"></a>
 
 ### monitor_stream/1 ###
@@ -195,13 +202,6 @@ pause_stream(StreamRef::<a href="#type-stream_ref">stream_ref()</a>) -&gt; ok | 
 
 pause a response stream, the stream process will hibernate and
 be woken later by the resume function
-<a name="pool-1"></a>
-
-### pool/1 ###
-
-`pool(Client) -> any()`
-
-get current pool pid or name used by a client if needed
 <a name="request-1"></a>
 
 ### request/1 ###
@@ -405,13 +405,13 @@ skip the full body. (read all the body if needed).
 `start() -> any()`
 
 Start the couchbeam process. Useful when testing using the shell.
-<a name="start_pool-2"></a>
+<a name="start-1"></a>
 
-### start_pool/2 ###
+### start/1 ###
 
-`start_pool(Name, Options) -> any()`
+`start(PoolHandler) -> any()`
 
-start a pool
+
 <a name="start_response-1"></a>
 
 ### start_response/1 ###
@@ -434,13 +434,6 @@ and headers of the response. and return
 `stop() -> any()`
 
 Stop the couchbeam process. Useful when testing using the shell.
-<a name="stop_pool-1"></a>
-
-### stop_pool/1 ###
-
-`stop_pool(Name) -> any()`
-
-stop a pool
 <a name="stream_body-1"></a>
 
 ### stream_body/1 ###
