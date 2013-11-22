@@ -360,8 +360,10 @@ transfer_decode_done(Rest, Client0) ->
         true ->
             close(Client);
         false when Pool /= false ->
-            #client{socket=Socket, socket_ref=Ref}=Client,
-            hackney_pool:checkin(Ref, Socket),
+            #client{socket=Socket,
+                    socket_ref=Ref,
+                    pool_handler=Handler}=Client,
+            Handler:checkin(Ref, Socket),
             Client#client{state=closed, socket=nil, socket_ref=nil};
         false ->
             Client

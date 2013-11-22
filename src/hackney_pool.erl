@@ -43,24 +43,21 @@
 
 
 start() ->
-    %% init the table to maintain association between the pools and
-    %% their pid
-    ets:new(hackney_pool, [set, public, named_table]),
     ok.
 
 %% @doc fetch a socket from the pool
-checkout(Transport, Host0, Port, #client{options=Opts}) ->
+checkout(Host0, Port, Transport, #client{options=Opts}) ->
     Host = string:to_lower(Host0),
     Pid = self(),
     Name = proplists:get_value(pool, Opts, default),
     Pool = find_pool(Name, Opts),
-    case gen_server:call(Pool, {checkout, {Transport, Host, Port},
+    case gen_server:call(Pool, {checkout, {Host, Port, Transport},
                                            Pid}) of
         {ok, Socket, Owner} ->
-            CheckinReference = {Transport, Host, Port},
+            CheckinReference = {Host, Port, Transport},
             {ok, {Name, CheckinReference, Owner, Transport}, Socket};
         {error, no_socket, Owner} ->
-            CheckinReference = {Transport, Host, Port},
+            CheckinReference = {Host, Port, Transport},
             {error, no_socket, {Name, CheckinReference, Owner,
                                 Transport}};
 
@@ -229,7 +226,7 @@ terminate(_Reason, #state{sockets=Sockets}) ->
 
 %% internals
 
-find_connection({Transport, _Host, _Port}=Key, Pid,
+find_connection({_Host, _Port, Transport}=Key, Pid,
                 #state{connections=Conns, sockets=Sockets}=State) ->
     case dict:find(Key, Conns) of
         {ok, [S | Rest]} ->
@@ -266,7 +263,7 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     end.
 
 
-store_connection({Transport, _, _} = Key, Socket,
+store_connection({_Host, _Port, Transport} = Key, Socket,
                  #state{timeout=Timeout, connections=Conns,
                         sockets=Sockets}=State) ->
     Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),

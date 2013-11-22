@@ -7,7 +7,7 @@
 %%%
 
 -module(hackney).
--export([start/0, stop/0]).
+-export([start/0, start/1, stop/0]).
 -export([connect/1, connect/3, connect/4,
          close/1,
          set_sockopts/2,
@@ -48,6 +48,10 @@ start() ->
     hackney_app:ensure_deps_started(),
     application:start(hackney).
 
+start(PoolHandler) ->
+    application:set_env(hackney, pool_handler, PoolHandler),
+    start().
+
 %% @doc Stop the couchbeam process. Useful when testing using the shell.
 stop() ->
     application:stop(hackney).
@@ -57,13 +61,13 @@ connect(#client{state=connected, redirect=nil}=Client) ->
     {ok, Client};
 
 connect(#client{state=connected, redirect=Redirect}=Client) ->
-    #client{socket=Socket, socket_ref=Ref}=Client,
+    #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
 
     case is_pool(Client) of
         false ->
             close(Client);
         true ->
-            hackney_pool:checkout(Ref, Socket)
+            Handler:checkout(Ref, Socket)
     end,
     connect(Redirect);
 connect(#client{state=closed, redirect=nil}=Client) ->
@@ -87,9 +91,9 @@ connect(Transport, Host, Port, #client{socket=Skt}=Client)
     case is_pool(Client) of
         false ->
             %% the client won't use any pool
-            do_connect(Transport, Host, Port, Client);
+            do_connect(Host, Port, Transport, Client);
         true ->
-            socket_from_pool(Transport, Host, Port, Client)
+            socket_from_pool(Host, Port, Transport, Client)
     end;
 connect(Transport, Host, Port, Options) when is_list(Options) ->
     Timeout = proplists:get_value(recv_timeout, Options, infinity),
@@ -454,8 +458,10 @@ connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
             {error, {proxy_connection, Error}}
     end.
 
-socket_from_pool(Transport, Host, Port, #client{options=Opts}=Client) ->
-    case hackney_pool:checkout(Transport, Host, Port, Client) of
+socket_from_pool(Host, Port, Transport, #client{options=Opts}=Client) ->
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+
+    case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
             FollowRedirect = proplists:get_value(follow_redirect,
                                                  Opts, false),
@@ -466,18 +472,18 @@ socket_from_pool(Transport, Host, Port, #client{options=Opts}=Client) ->
                                port=Port,
                                socket=Skt,
                                socket_ref=Ref,
+                               pool_handler=PoolHandler,
                                state = connected,
                                follow_redirect=FollowRedirect,
                                max_redirect=MaxRedirect,
                                async=Async}};
         {error, no_socket, Ref} ->
-            do_connect(Transport, Host, Port,
-                         Client#client{socket_ref=Ref});
+            do_connect(Host, Port, Transport, Client#client{socket_ref=Ref});
         Error ->
             Error
     end.
 
-do_connect(Transport, Host, Port, #client{options=Opts}=Client) ->
+do_connect(Host, Port, Transport, #client{options=Opts}=Client) ->
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 

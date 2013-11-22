@@ -17,7 +17,13 @@
 %% ===================================================================
 
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    %% start the pool handler
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+    ok = PoolHandler:start(),
+
+    %% finish to start the application
+    {ok, Pid}.
 
 %% ===================================================================
 %% Supervisor callbacks
@@ -26,4 +32,7 @@ start_link() ->
 init([]) ->
     %% start table to keep async streams ref
     ets:new(hackney_streams, [set, public, named_table]),
+    %% init the table to find a pool
+    ets:new(hackney_pool, [named_table, set, public]),
+
     {ok, { {one_for_one, 10, 1}, []}}.

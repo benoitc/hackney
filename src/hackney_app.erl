@@ -22,15 +22,7 @@
 start(_StartType, _StartArgs) ->
     hackney_deps:ensure(),
     ensure_deps_started(),
-    {ok, Pid} = hackney_sup:start_link(),
-
-    %% start the pool handler
-    PoolHandler = get_app_env(pool_handler, hackney_pool),
-    ok = PoolHandler:start(),
-
-    %% finish to start the application
-    {ok, Pid}.
-
+    hackney_sup:start_link().
 
 stop(_State) ->
     ok.

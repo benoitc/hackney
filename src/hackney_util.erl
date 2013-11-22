@@ -7,6 +7,8 @@
 %%%
 -module(hackney_util).
 
+-export([require/1]).
+
 -export([is_ipv6/1,
          to_binary/1,
          to_lower/1, to_upper/1,
@@ -16,6 +18,16 @@
          token_ci/2, token/2,
          content_type/1]).
 
+%% @doc Start the given applications if they were not already started.
+-spec require(list(module())) -> ok.
+require([]) ->
+	ok;
+require([App|Rest]) ->
+	case application:start(App) of
+		ok -> ok;
+		{error, {already_started, App}} -> ok
+	end,
+	require(Rest).
 
 is_ipv6(Host) ->
     case inet_parse:address(Host) of
