@@ -1,5 +1,42 @@
 # NEWS
 
+0.7.0 - current
+
+- add new Loadbalance pool handler based on dispcount
+- allows to set the pool handler
+
+0.6.1 - 2013/11/21
+
+- doc: Fix the asynchronous response example in the readme
+- add d hackney_url:make_url/3, hackney_url:qs/1, hackney_url:parse_qs/1 functions
+
+0.6.0 - 2013/11/21
+
+- add the possibility to get an asynchronous response
+- add support for the "Expect: 100-continue" header
+- add hackney:controlling_process/2 to pass the control of an hackney context to another process
+
+0.5.0 - 2013/11/06
+
+- fix: proxied connections
+- fix: correct the path passed to a request
+- fix: multipart forms
+- fix: Make sure that the controller process of the socket is the pool process when the socket is in the pool
+- fix: auth header when when the user is not given
+
+0.4.4 - 2013/08/25
+
+- fix: doc typos
+- fix: dialyzer errors
+- fix: add mimetypes to the list of loaded applications
+- fix: test.ebin example
+
+0.4.3 - 2013/08/04
+
+- removed parse_transform, the REST API is now available at the compilation.
+fix: fix file upload content type
+- doc: fix typos
+
 0.4.2 - 2013/06/10
 ------------------
 
