@@ -10,6 +10,8 @@
 - breaking change: A pool is now used by default
 - breaking change: The `hackney_form` module has been removed. You can
   now encode/parse a form using the functions in the `hackney_url` module.
+- deprecate `pool_size` and replace it by `max_connections`
+- fix: apply applications defaults to the pool
 
 
 0.6.1 - 2013/11/21
