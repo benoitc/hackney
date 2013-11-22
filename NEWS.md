@@ -17,7 +17,7 @@
 0.6.1 - 2013/11/21
 
 - doc: Fix the asynchronous response example in the readme
-- add d hackney_url:make_url/3, hackney_url:qs/1, hackney_url:parse_qs/1 functions
+- add hackney_url:make_url/3, hackney_url:qs/1, hackney_url:parse_qs/1 functions
 
 0.6.0 - 2013/11/21
 
