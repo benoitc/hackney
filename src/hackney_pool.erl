@@ -80,22 +80,28 @@ checkin({_Name, Key, Owner, Transport}, Socket) ->
 
 %% @doc start a pool
 start_pool(Name, Options) ->
-    Spec = child_spec(Name, Options),
-    case supervisor:start_child(hackney_sup, Spec) of
-        {ok, Pid} ->
-            Pid;
-        already_started ->
-            find_pool(Name, Options)
+    case find_pool(Name, Options) of
+        Pid when is_pid(Pid) ->
+            ok;
+        Error ->
+            Error
     end.
 
 
 %% @doc stop a pool
 stop_pool(Name) ->
-    case supervisor:terminate_child(hackney_sup, Name) of
-        ok ->
-            supervisor:delete_child(hackney_sup, Name);
-        Error ->
-            Error
+    case find_pool(Name) of
+        undefined ->
+            ok;
+        _Pid ->
+            case supervisor:terminate_child(hackney_sup, Name) of
+                ok ->
+                    supervisor:delete_child(hackney_sup, Name),
+                    ets:delete(hackney_pool, Name),
+                    ok;
+                Error ->
+                    Error
+            end
     end.
 
 %%
@@ -138,6 +144,17 @@ set_timeout(Name, NewTimeout) ->
 
 %% @private
 %%
+%%
+do_start_pool(Name, Options) ->
+    Spec = child_spec(Name, Options),
+    case supervisor:start_child(hackney_sup, Spec) of
+        {ok, Pid} ->
+            Pid;
+        already_started ->
+            find_pool(Name, Options)
+    end.
+
+
 find_pool(Name) ->
     case ets:lookup(?MODULE, Name) of
         [] ->
@@ -149,7 +166,7 @@ find_pool(Name) ->
 find_pool(Name, Options) ->
      case ets:lookup(?MODULE, Name) of
         [] ->
-            start_pool(Name, Options);
+            do_start_pool(Name, Options);
         [{_, Pid}] ->
             Pid
     end.

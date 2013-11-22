@@ -255,7 +255,7 @@ you to maintain a group of connections.
 ```
 PoolName = mypool,
 Options = [{timeout, 150000}, {max_connections, 100}],
-{ok, Pid} = hackney_pool:start_pool(PoolName, Options),
+{ok, Name} = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
@@ -269,10 +269,11 @@ To close a pool do:
 hackney_pool:stop_pool(PoolName).
 ```
 
-> Note: Sometimes you want to always use the default pool in your app
-> without having to set the client option each time. You can now do this
+> Note: Sometimes you want to always use a pool in your app
+> without having to set the client option each time. You can do this
 > by setting the hackney application environment key `use_default_pool`
-> to true.
+> to false (default is true) or by passing the opton {pool, false} to
+> the request options.
 
 ### Use the Load-balanced Pool dispatcher
 
