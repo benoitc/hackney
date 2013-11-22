@@ -122,7 +122,7 @@ maybe_continue(Source, Ref, Client) ->
         {Ref, resume} ->
             stream_loop(Source, Ref, Client);
         {Ref, pause} ->
-            io:fotmat("got pause", []),
+            io:format("got pause", []),
             erlang:hibernate(?MODULE, maybe_continue, [Source, Ref,
                                                        Client]);
         {Ref, stop} ->
@@ -458,7 +458,7 @@ async_recv(Source, Ref, #client{transport=Transport,
         {Ref, resume} ->
             async_recv(Source, Ref, Client);
         {Ref, pause} ->
-            io:fotmat("got pause", []),
+            io:format("got pause", []),
             %% make sure that the proces won't be awoken by a tcp msg
             Transport:setopts(Sock, [{active, false}]),
             %% hibernate
