@@ -343,12 +343,20 @@ In your application config set the `pool_handler' property to
 ```
 {hackney, [
     {pool_handler, hackney_disp},
+    {restart, permanent},
+    {shutdown, 10000},
+    {maxr, 10},
+    {maxt, 1}
     ...
 ]}
-
-'''
+```
 
 and hackney will automatically use this pool.
+
+The restart, shutdown, maxr, and maxt values allow to configure the
+supervisor that will take care of that dispatcher. You can set the
+maximum number of connections with the options passed to the client:
+`[{max_connections, 200}]' .
 
 > Note: for now you can't force the pool handler / client.
 

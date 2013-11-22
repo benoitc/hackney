@@ -318,27 +318,35 @@ In your application config set the `pool_handler` property to
 ```
 {hackney, [
     {pool_handler, hackney_disp},
+    {restart, permanent},
+    {shutdown, 10000},
+    {maxr, 10},
+    {maxt, 1}
     ...
 ]}
 ```
 
 and hackney will automatically use this pool.
 
-> Note: for now you can't force the pool handler / client.
+The restart, shutdown, maxr, and maxt values allow to configure the
+supervisor that will take care of that dispatcher. You can set the
+maximum number of connections with the options passed to the client:
+`[{max_connections, 200}]' .
 
+> Note: for now you can't force the pool handler / client.
 ### Automatically follow a redirection
 
-If the option `{follow_redirect, true}` is given to the request, the
+If the option `{follow_redirect, true}' is given to the request, the
 client will be able to automatically follow the redirection and
 retrieve the body. The maximum number of connections can be set using the
-`{max_redirect, Max}` option. Default is 5.
+`{max_redirect, Max}' option. Default is 5.
 
-The client will follow redirects on 301, 302 & 307 if the method is
+The client will follow redirects on 301, 302 &amp; 307 if the method is
 get or head. If another method is used the tuple
-`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It
+`{ok, maybe_redirect, Status, Headers, Client}' will be returned. It
 only follow 303 redirects (see other) if the method is a POST.
 
-Last Location is stored in the `location` property of the client state.
+Last Location is stored in the `location' property of the client state.
 
 ex:
 
