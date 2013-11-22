@@ -349,7 +349,7 @@ In your application config set the `pool_handler' property to
     {maxt, 1}
     ...
 ]}
-```
+'''
 
 and hackney will automatically use this pool.
 
