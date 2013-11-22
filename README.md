@@ -241,7 +241,8 @@ Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
-Options = [{pool, default}],
+PoolName = default,
+Options = [{pool, PoolName}],
 {ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
                                                         Payload, Options).
 ```
@@ -255,7 +256,7 @@ you to maintain a group of connections.
 ```
 PoolName = mypool,
 Options = [{timeout, 150000}, {max_connections, 100}],
-{ok, Name} = hackney_pool:start_pool(PoolName, Options),
+ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
