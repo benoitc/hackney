@@ -241,8 +241,7 @@ Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
-PoolName = default,
-Options = [{pool, PoolName}],
+Options = [{pool, default}],
 {ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
                                                         Payload, Options).
 ```
@@ -255,12 +254,12 @@ you to maintain a group of connections.
 
 ```
 PoolName = mypool,
-Options = [{timeout, 150000}, {max_connections, 100}],
-ok = hackney_pool:start_pool(PoolName, Options),
+Options = [{timeout, 150000}, {pool_size, 100}],
+{ok, Pid} = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
-`max_connections` is the number of connections maintained in the pool. Each
+`pool_size` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
 
@@ -270,11 +269,10 @@ To close a pool do:
 hackney_pool:stop_pool(PoolName).
 ```
 
-> Note: Sometimes you want to always use a pool in your app
-> without having to set the client option each time. You can do this
+> Note: Sometimes you want to always use the default pool in your app
+> without having to set the client option each time. You can now do this
 > by setting the hackney application environment key `use_default_pool`
-> to false (default is true) or by passing the opton {pool, false} to
-> the request options.
+> to true.
 
 ### Use the Load-balanced Pool dispatcher
 
@@ -397,7 +395,6 @@ $ make devclean ; # clean all files
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp.md" class="module">hackney_disp</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp_handler.md" class="module">hackney_disp_handler</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_form.md" class="module">hackney_form</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>

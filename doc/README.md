@@ -395,7 +395,6 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="hackney_disp.md" class="module">hackney_disp</a></td></tr>
 <tr><td><a href="hackney_disp_handler.md" class="module">hackney_disp_handler</a></td></tr>
-<tr><td><a href="hackney_form.md" class="module">hackney_form</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>

@@ -13,13 +13,20 @@ module handling the request.
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#end_stream_body-1">end_stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#send_chunk-2">send_chunk/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-3">sendfile/3</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-2">stream_body/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#encode_form-1">encode_form/1</a></td><td>encode a list of properties in a form.</td></tr><tr><td valign="top"><a href="#end_stream_body-1">end_stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#perform-2">perform/2</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td></td></tr><tr><td valign="top"><a href="#send_chunk-2">send_chunk/2</a></td><td></td></tr><tr><td valign="top"><a href="#sendfile-3">sendfile/3</a></td><td></td></tr><tr><td valign="top"><a href="#stream_body-2">stream_body/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
 
 ## Function Details ##
 
+<a name="encode_form-1"></a>
+
+### encode_form/1 ###
+
+`encode_form(KVs) -> any()`
+
+encode a list of properties in a form.
 <a name="end_stream_body-1"></a>
 
 ### end_stream_body/1 ###
