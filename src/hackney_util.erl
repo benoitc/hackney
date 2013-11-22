@@ -9,6 +9,8 @@
 
 -export([require/1]).
 
+-export([maybe_apply_defaults/2]).
+
 -export([is_ipv6/1,
          to_binary/1,
          to_lower/1, to_upper/1,
@@ -28,6 +30,17 @@ require([App|Rest]) ->
 		{error, {already_started, App}} -> ok
 	end,
 	require(Rest).
+
+maybe_apply_defaults([], Options) ->
+    Options;
+maybe_apply_defaults([OptName | Rest], Options) ->
+    case proplists:is_defined(OptName, Options) of
+        true ->
+            maybe_apply_defaults(Rest, Options);
+        false ->
+            {ok, Default} = application:get_env(hackney, OptName),
+            maybe_apply_defaults(Rest, [{OptName, Default} | Options])
+    end.
 
 is_ipv6(Host) ->
     case inet_parse:address(Host) of

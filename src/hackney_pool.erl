@@ -173,7 +173,8 @@ find_pool(Name, Options) ->
 
 
 start_link(Name, Options0) ->
-    Options = maybe_apply_defaults([max_connections, timeout], Options0),
+    Options = hackney_util:maybe_apply_defaults([max_connections, timeout],
+                                                Options0),
     gen_server:start_link(?MODULE, [Name, Options], []).
 
 init([Name, Options]) ->
@@ -317,19 +318,6 @@ update_connections([], Key, Connections) ->
     dict:erase(Key, Connections);
 update_connections(Sockets, Key, Connections) ->
     dict:store(Key, Sockets, Connections).
-
-
-maybe_apply_defaults([], Options) ->
-    Options;
-maybe_apply_defaults([OptName | Rest], Options) ->
-    case proplists:is_defined(OptName, Options) of
-        true ->
-            maybe_apply_defaults(Rest, Options);
-        false ->
-            {ok, Default} = application:get_env(hackney, OptName),
-            maybe_apply_defaults(Rest, [{OptName, Default} | Options])
-    end.
-
 
 cancel_timer(Socket, Timer) ->
     case erlang:cancel_timer(Timer) of

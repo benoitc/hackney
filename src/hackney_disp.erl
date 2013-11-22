@@ -66,12 +66,15 @@ find_disp(Key, Args) ->
 %% Wart ahead. Atoms are created dynamically based on the key
 %% to ensure uniqueness of pools.
 %% TODO: optionally use gproc for registration to avoid this?
-start_disp(Key = {Host, Port, Transport}, Opts) ->
+start_disp(Key = {Host, Port, Transport}, Opts0) ->
     {ok, Type} = application:get_env(hackney, restart),
     {ok, Timeout} = application:get_env(hackney, shutdown),
     {ok, X} = application:get_env(hackney, maxr),
     {ok, Y} = application:get_env(hackney, maxt),
-    MaxConn = proplists:get_value(max_connections, Opts, 10),
+
+    %% apply defaults to the options
+    Opts = hackney_util:maybe_apply_defaults([max_connections], Opts0),
+    MaxConn = proplists:get_value(max_connections, Opts, 25),
 
     AtomKey = case Transport of
         hackney_ssl_transport ->
