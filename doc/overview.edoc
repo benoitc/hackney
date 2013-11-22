@@ -313,7 +313,7 @@ The load balancer/pools/dispatcher mechanism is based on
 [dispcount](https://github.com/ferd/dispcount), which will randomly
 contact workers. This means that even though few connections might be
 required, the nondeterministic dispatching may make all connections open
-at some point. As such, dlhttpc should be used in cases where the load
+at some point. As such, it should be used in cases where the load
 is somewhat predictable in terms of base levels.
 
 #### When to use it?
