@@ -21,8 +21,8 @@
 
 
 -export([pool_size/1, pool_size/2,
-         max_poolsize/1,
-         set_poolsize/2,
+         max_connections/1,
+         set_max_connections/2,
          timeout/1,
          set_timeout/2,
          child_spec/2]).
@@ -37,7 +37,7 @@
 -include("hackney.hrl").
 
 -record(state, {
-        pool_size,
+        max_connections,
         timeout,
         connections = dict:new(),
         sockets = dict:new()}).
@@ -70,7 +70,7 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
 checkin({_Name, Key, Owner, Transport}, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
-            gen_server:call(Owner, {checkin, Key, Socket});
+            gen_server:call(Owner, {checkin, Key, Socket, Transport});
         _ ->
             Transport:close(Socket)
     end.
@@ -120,12 +120,12 @@ pool_size(Name, {Transport, Host0, Port}) ->
     gen_server:call(find_pool(Name), {pool_size, {Transport, Host, Port}}).
 
 %% @doc get max pool size
-max_poolsize(Name) ->
-    gen_server:call(find_pool(Name), max_poolsize).
+max_connections(Name) ->
+    gen_server:call(find_pool(Name), max_connections).
 
 %% @doc change the pool size
-set_poolsize(Name, NewSize) ->
-    gen_server:cast(find_pool(Name), {set_poolsize, NewSize}).
+set_max_connections(Name, NewSize) ->
+    gen_server:cast(find_pool(Name), {set_maxconn, NewSize}).
 
 %% @doc get timeout
 timeout(Name) ->
@@ -156,26 +156,44 @@ find_pool(Name, Options) ->
 
 
 start_link(Name, Options0) ->
-    Options = maybe_apply_defaults([pool_size, timeout], Options0),
+    Options = maybe_apply_defaults([max_connections, timeout], Options0),
     gen_server:start_link(?MODULE, [Name, Options], []).
 
 init([Name, Options]) ->
-    PoolSize = proplists:get_value(pool_size, Options),
+    MaxConn = case proplists:get_value(pool_size, Options) of
+        undefined ->
+            proplists:get_value(max_connections, Options);
+        Size ->
+            Size
+    end,
     Timeout = proplists:get_value(timeout, Options),
 
     %% register the module
     ets:insert(?MODULE, {Name, self()}),
 
-    {ok, #state{pool_size=PoolSize,
-                timeout=Timeout}}.
+    {ok, #state{max_connections=MaxConn, timeout=Timeout}}.
 
 handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
     {reply, Timeout, State};
-handle_call(max_poolsize, _From, #state{pool_size=Size}=State) ->
-    {reply, Size, State};
+handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
+    {reply, MaxConn, State};
 handle_call({checkout, Key, Pid}, _From, State) ->
     {Reply, NewState} = find_connection(Key, Pid, State),
     {reply, Reply, NewState};
+
+handle_call({checkin, Key, Socket, Transport}, _From,
+            #state{sockets=Sockets, max_connections=MaxConn}=State) ->
+    PoolSize = dict:size(Sockets),
+    NewState = if PoolSize < MaxConn ->
+            store_connection(Key, Socket, State);
+        true ->
+            %% don't store more than MaxConn
+            Transport:close(Socket),
+            State
+    end,
+    {reply, ok, NewState};
+
+
 handle_call({checkin, Key, Socket}, _From, State) ->
     NewState = store_connection(Key, Socket, State),
     {reply, ok, NewState};
@@ -190,8 +208,8 @@ handle_call({pool_size, Key}, _From, #state{connections=Conns}=State) ->
     end,
     {reply, Size, State}.
 
-handle_cast({set_poolsize, NewSize}, State) ->
-    {noreply, State#state{pool_size=NewSize}};
+handle_cast({set_maxconn, MaxConn}, State) ->
+    {noreply, State#state{max_connections=MaxConn}};
 handle_cast({set_timeout, NewTimeout}, State) ->
     {noreply, State#state{timeout=NewTimeout}};
 

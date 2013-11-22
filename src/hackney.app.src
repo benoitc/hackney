@@ -16,7 +16,7 @@
         {included_applications, [dispcount]},
         {mod, { hackney_app, []}},
         {env, [{timeout, 150000},
-               {pool_size, 50},
+               {max_connections, 25},
                {restart, permanent},
                {shutdown, 10000},
                {maxr, 10},
