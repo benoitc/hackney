@@ -4,6 +4,10 @@
 
 - add new Loadbalance pool handler based on dispcount
 - allows to set the pool handler
+- breaking change: remove `hackney:start_pool/2` and
+  `hackney:stop_pool/1`, use instead `hackney_pool:start_pool/2` and
+  `hackney_pool:stop_pool/1`
+- breaking change: A pool is now used by default
 
 0.6.1 - 2013/11/21
 
