@@ -330,10 +330,10 @@ mailbox ends up as a bottleneck that makes the application too slow.
 Dispcount was developed to solve similar issues by avoiding all message
 passing on busy workers.
 
-**WARNING**: use with caution, this pool handler is considered as
-experimental. It's for now nased on the code from the
-[dlhttpc](https://github.com/ferd/dlhttpc) project and adapted to
-hackney.
+> **WARNING**: use with caution, this pool handler is considered as
+> experimental. It's for now nased on the code from the
+> [dlhttpc](https://github.com/ferd/dlhttpc) project and adapted to
+> hackney.
 
 #### How to use it?
 
@@ -350,7 +350,7 @@ In your application config set the `pool_handler' property to
 
 and hackney will automatically use this pool.
 
-Note: for now you can't force the pool handler / client.
+> Note: for now you can't force the pool handler / client.
 
 
 ### Automatically follow a redirection
