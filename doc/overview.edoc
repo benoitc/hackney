@@ -331,7 +331,8 @@ Dispcount was developed to solve similar issues by avoiding all message
 passing on busy workers.
 
 **WARNING**: use with caution, this pool handler is considered as
-experimental.
+experimental. The code is based on the code from the
+[dlhttpc](https://github.com/ferd/dlhttpc) project.
 
 #### How to use it?
 
