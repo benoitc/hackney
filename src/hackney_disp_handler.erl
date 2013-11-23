@@ -10,6 +10,7 @@
 %%%
 -module(hackney_disp_handler).
 -behaviour(dispcount).
+-behaviour(coffer_pool_handler).
 
 -export([init/1,
          checkout/2,

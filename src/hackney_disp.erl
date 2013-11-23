@@ -18,6 +18,7 @@
 %%         that happens, it is shut down, to be reopened next time.
 %%
 -module(hackney_disp).
+-behaviour(hackney_pool_handler).
 
 -export([start/0,
          checkout/4,

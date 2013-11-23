@@ -22,8 +22,7 @@ init([]) ->
     %% define a stream spec
     Stream = {hackney_stream, {hackney_stream, start_link, []},
               transient, 5000, worker, [hackney_stream]},
-
     %% start table to keep async streams ref
     ets:new(hackney_streams, [set, public, named_table]),
-
+    %% then init.
     {ok, {{simple_one_for_one, 10, 10}, [Stream]}}.

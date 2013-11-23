@@ -10,6 +10,7 @@
 %%
 -module(hackney_pool).
 -behaviour(gen_server).
+-behaviour(coffer_pool_handler).
 
 %% PUBLIC API
 -export([start/0,
