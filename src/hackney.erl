@@ -19,6 +19,7 @@
          stream_body/1,
          body/1, body/2, skip_body/1,
          controlling_process/2,
+         raw/1,
          is_pool/1]).
 
 -export([stream_pid/1,
@@ -386,6 +387,29 @@ resume_stream(StreamRef) ->
 	-> ok | {error, closed | not_owner | atom()}.
 controlling_process(#client{transport=Transport, socket=Skt}, Pid) ->
     Transport:controlling_process(Skt, Pid).
+
+%% @doc Extract raw informations from the client context
+%% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
+%%
+%% return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}'
+%% <ul>
+%% <li>`Response': waiting_response, on_status, on_headers, on_body</li>
+%% <li>`Transport': The current transport module</li>
+%% <li>`Socket': the current socket</li>
+%% <li>`Buffer': Data fetched but not yet processed</li>
+%% </ul>
+-spec raw(#client{}) ->
+    {atom(), inet:socket(), binary(), hackney_response:response_state()}
+    | {error, term()}.
+raw(#client{transport=Transport, socket=Socket, buffer=Buffer,
+            response_state=State}) ->
+    case Transport:controlling_process(Socket, self()) of
+        ok ->
+            {State, Transport, Socket, Buffer};
+        Error ->
+            Error
+    end.
+
 
 %% @doc get current pool pid or name used by a client if needed
 is_pool(#client{options=Opts}) ->
