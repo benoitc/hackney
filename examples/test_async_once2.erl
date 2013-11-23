@@ -17,6 +17,8 @@ loop(StreamRef) ->
             io:format("got headers: ~p~n~n", [Headers]),
             io:format("Stop asynchronous fetching ~n~n", []),
             {ok, Client} = hackney:stop_async(StreamRef),
+            %% make sure the stream has been unregistered
+            stream_undefined = hackney:stream_pid(StreamRef),
             finish_request(Client);
         Else ->
             io:format("else ~p~n", [Else]),

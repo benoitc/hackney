@@ -346,10 +346,10 @@ skip_body(Client) ->
     hackney_response:skip_body(Client).
 
 %% @doc return the Pid of a response stream
--spec stream_pid(stream_ref()) -> pid() | undefined.
+-spec stream_pid(stream_ref()) -> pid() | stream_undefined.
 stream_pid(StreamRef) ->
     case ets:lookup(hackney_streams, StreamRef) of
-        [] -> undefined;
+        [] -> stream_undefined;
         [{_, Pid}] -> Pid
     end.
 
