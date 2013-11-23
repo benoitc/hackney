@@ -13,6 +13,9 @@
 
 -include("hackney.hrl").
 
+-type response_state() :: start | waiting | on_status | on_headers | on_body.
+-export_type([response_state/0]).
+
 -export([start_response/1,
          stream_status/1,
          stream_headers/1, stream_header/1,
@@ -22,7 +25,7 @@
          expect_response/1]).
 
 %% internal
--export([async_recv/3, maybe_continue/3]).
+-export([async_recv/3, maybe_continue/4]).
 
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
@@ -39,7 +42,8 @@ start_response(#client{response_state=stream} = Client) ->
         Error ->
             Error
     end;
-start_response(#client{response_state=waiting, async=true} = Client) ->
+start_response(#client{response_state=waiting, async=Async} = Client)
+        when Async =:= true orelse Async =:= once ->
     Source = self(),
     StreamRef = make_ref(),
     spawn_link(fun() ->
@@ -89,7 +93,7 @@ expect_response(Client) ->
     end.
 
 
-stream_loop(Source, Ref, #client{response_state=St}=Client) ->
+stream_loop(Source, Ref, #client{response_state=St, async=Async}=Client) ->
     Resp = case St of
         on_status -> stream_status(Client);
         on_header -> stream_headers(Client);
@@ -101,13 +105,13 @@ stream_loop(Source, Ref, #client{response_state=St}=Client) ->
             async_recv(Source, Ref, Client2);
         {ok, StatusInt, Reason, Client2} ->
             Source ! {Ref, {status, StatusInt, Reason}},
-            maybe_continue(Source, Ref, Client2);
+            maybe_continue(Source, Ref, Client2, Async);
         {ok, {headers, Headers}, Client2} ->
             Source ! {Ref, {headers, Headers}},
-            maybe_continue(Source, Ref, Client2);
+            maybe_continue(Source, Ref, Client2, Async);
         {ok, Data, Client2} ->
             Source ! {Ref, Data},
-            maybe_continue(Source, Ref, Client2);
+            maybe_continue(Source, Ref, Client2, Async);
         {done, _} ->
             Source ! {Ref, done},
             ets:delete(hackney_streams, Ref);
@@ -117,17 +121,45 @@ stream_loop(Source, Ref, #client{response_state=St}=Client) ->
     end.
 
 
-maybe_continue(Source, Ref, Client) ->
+maybe_continue(Source, Ref, #client{transport=Transport,
+                                    socket=Socket}=Client, true) ->
     receive
         {Ref, resume} ->
             stream_loop(Source, Ref, Client);
         {Ref, pause} ->
             erlang:hibernate(?MODULE, maybe_continue, [Source, Ref,
-                                                       Client]);
-        {Ref, stop} ->
+                                                       Client, true]);
+        {Ref, stop_async, From} ->
+            ets:delete(hackney_streams, Ref),
+            Transport:setopts(Socket, [{active, false}]),
+            Transport:controlling_process(Socket, From),
+            From ! {Ref, Client};
+        {Ref, close} ->
+            ets:delete(hackney_streams, Ref),
             close(Client)
     after 0 ->
             stream_loop(Source, Ref, Client)
+    end;
+maybe_continue(Source, Ref, #client{transport=Transport,
+                                    socket=Socket}=Client, once) ->
+    receive
+        {Ref, stream_next} ->
+            stream_loop(Source, Ref, Client);
+        {Ref, stop_async, From} ->
+            ets:delete(hackney_streams, Ref),
+            Transport:setopts(Socket, [{active, false}]),
+            Transport:controlling_process(Socket, From),
+            From ! {Ref, Client};
+        {Ref, close} ->
+            ets:delete(hackney_streams, Ref),
+            close(Client);
+        _ ->
+            maybe_continue(Source, Ref, Client, once)
+    after 5000 ->
+
+        erlang:hibernate(?MODULE, maybe_continue, [Source, Ref, Client,
+                                                   once])
+
     end.
 
 %% @doc parse the status line
@@ -456,11 +488,21 @@ async_recv(Source, Ref, #client{transport=Transport,
     receive
         {Ref, resume} ->
             async_recv(Source, Ref, Client);
+        {Ref, stream_next} ->
+            async_recv(Source, Ref, Client);
         {Ref, pause} ->
             %% make sure that the proces won't be awoken by a tcp msg
             Transport:setopts(Sock, [{active, false}]),
             %% hibernate
             erlang:hibernate(?MODULE, async_recv, [Source, Ref, Client]);
+        {Ref, close} ->
+            ets:delete(hackney_streams, Ref),
+            Transport:close(Sock);
+        {Ref, stop_async, From} ->
+            ets:delete(hackney_streams, Ref),
+            Transport:setopts(Sock, [{active, false}]),
+            Transport:controlling_process(Sock, From),
+            From ! {Ref, Client};
         {OK, Sock, Data} ->
             NewBuffer =  << Buffer/binary, Data/binary >>,
             stream_loop(Source, Ref, Client#client{buffer=NewBuffer});

@@ -17,6 +17,9 @@
          stream_request_body/2, end_stream_request_body/1,
          stream_multipart_request/2,
          stream_body/1,
+         stream_next/1,
+         close_stream/1,
+         stop_async/1,
          body/1, body/2, skip_body/1,
          controlling_process/2,
          raw/1,
@@ -159,6 +162,9 @@ request(Method, URL, Headers, Body) ->
 %%
 %%      <li>async: receive the response asynchronously
 %%      The function return {ok, {response_stream, StreamRef}}.
+%%      When {async, once} is used the socket will receive only once. To
+%%      receive the other messages use the function
+%%      `hackney:stream_next/1'
 %%      </li>
 %%
 %%      <li><em>Others options are</em>:
@@ -380,6 +386,49 @@ resume_stream(StreamRef) ->
         Pid ->
             Pid ! {StreamRef, resume},
             ok
+    end.
+
+%% @doc continue to the next stream message. Only use it when
+%% `{async, once}' is set in the client options.
+-spec stream_next(stream_ref()) -> ok | stream_undefined.
+stream_next(StreamRef) ->
+    case stream_pid(StreamRef) of
+        undefined ->
+            stream_undefined;
+        Pid ->
+            Pid ! {StreamRef, stream_next},
+            ok
+    end.
+
+
+%% @doc close the stream we are receiving on. The socket is closed and
+%% not put back in the pool if any
+-spec close_stream(stream_ref()) -> ok | stream_undefined.
+close_stream(StreamRef) ->
+    case stream_pid(StreamRef) of
+        undefined ->
+            stream_undefined;
+        Pid ->
+            Pid ! {StreamRef, close},
+            ok
+    end.
+
+%% @doc stop to receive asynchronously.
+-spec stop_async(stream_ref()) -> ok | stream_undefined | {error, term()}.
+stop_async(StreamRef) ->
+    case stream_pid(StreamRef) of
+        undefined ->
+            stream_undefined;
+        Pid ->
+            Pid ! {StreamRef, stop_async, self()},
+            receive
+                {StreamRef, Client} ->
+                    {ok, Client};
+                Error ->
+                    Error
+            after 5000 ->
+                {error, timeout}
+            end
     end.
 
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.

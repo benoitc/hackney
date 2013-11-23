@@ -2,11 +2,29 @@
 
 # Module hackney_response #
 * [Description](#description)
+* [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
 
 
 module handling the response.
+
+
+<a name="types"></a>
+
+## Data Types ##
+
+
+
+
+### <a name="type-response_state">response_state()</a> ###
+
+
+
+<pre><code>
+response_state() = start | waiting | on_status | on_headers | on_body
+</code></pre>
+
 
 <a name="index"></a>
 
@@ -14,7 +32,7 @@ module handling the response.
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#async_recv-3">async_recv/3</a></td><td></td></tr><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the request.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the request as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#maybe_continue-3">maybe_continue/3</a></td><td></td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_header-1">stream_header/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_headers-1">stream_headers/1</a></td><td>fetch all headers.</td></tr><tr><td valign="top"><a href="#stream_status-1">stream_status/1</a></td><td>parse the status line.</td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#maybe_continue-4">maybe_continue/4</a></td><td></td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_header-1">stream_header/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_headers-1">stream_headers/1</a></td><td>fetch all headers.</td></tr><tr><td valign="top"><a href="#stream_status-1">stream_status/1</a></td><td>parse the status line.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -80,11 +98,11 @@ the body it received up to the last chunk, which might be a bit more than MaxLen
 `expect_response(Client) -> any()`
 
 handle Expect header
-<a name="maybe_continue-3"></a>
+<a name="maybe_continue-4"></a>
 
-### maybe_continue/3 ###
+### maybe_continue/4 ###
 
-`maybe_continue(Source, Ref, Client) -> any()`
+`maybe_continue(Source, Ref, Client, X4) -> any()`
 
 
 <a name="skip_body-1"></a>
