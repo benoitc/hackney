@@ -30,9 +30,10 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    %% start table to keep async streams ref
-    ets:new(hackney_streams, [set, public, named_table]),
     %% init the table to find a pool
     ets:new(hackney_pool, [named_table, set, public]),
 
-    {ok, { {one_for_one, 10, 1}, []}}.
+    %% streams supervisore
+    StreamSup = ?CHILD(hackney_stream_sup, supervisor),
+
+    {ok, { {one_for_one, 10, 1}, [StreamSup]}}.

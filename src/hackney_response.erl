@@ -25,8 +25,6 @@
          expect_response/1]).
 
 %% internal
--export([async_recv/3, maybe_continue/4]).
-
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
     case hackney_request:end_stream_body(Client) of
@@ -45,24 +43,14 @@ start_response(#client{response_state=stream} = Client) ->
 start_response(#client{response_state=waiting, async=Async} = Client)
         when Async =:= true orelse Async =:= once ->
     Source = self(),
-    StreamRef = make_ref(),
-    spawn_link(fun() ->
-                %% pass the control to the process
-                #client{transport=Transport, socket=Sock} = Client,
-                Transport:controlling_process(Sock, self()),
-
-                %% register the stream
-                ets:insert(hackney_streams, [{StreamRef, self()}]),
-
-                %% start the stream loop
-                stream_loop(Source, StreamRef,
-                            Client#client{response_state=on_status}),
-
-                %% normal exit
-                unlink(Source)
-        end),
-    %% return a response stream to get the response asynchronously
-    {ok, {response_stream, StreamRef}};
+    StreamRef = {hackney_stream, make_ref()},
+    case supervisor:start_child(hackney_stream_sup, [Source, StreamRef,
+                                                     Client]) of
+        {ok, _Pid} ->
+            {ok, {response_stream, StreamRef}};
+        Error ->
+            Error
+    end;
 start_response(#client{response_state=waiting} = Client) ->
      case stream_status(Client#client{response_state=on_status}) of
         {ok, Status, _Reason, Client1} ->
@@ -90,76 +78,6 @@ expect_response(Client) ->
             {continue, Client#client{expect=false}};
         Error ->
             Error
-    end.
-
-
-stream_loop(Source, Ref, #client{response_state=St, async=Async}=Client) ->
-    Resp = case St of
-        on_status -> stream_status(Client);
-        on_header -> stream_headers(Client);
-        on_body -> stream_body(Client)
-    end,
-
-    case Resp of
-        {more, Client2} ->
-            async_recv(Source, Ref, Client2);
-        {ok, StatusInt, Reason, Client2} ->
-            Source ! {Ref, {status, StatusInt, Reason}},
-            maybe_continue(Source, Ref, Client2, Async);
-        {ok, {headers, Headers}, Client2} ->
-            Source ! {Ref, {headers, Headers}},
-            maybe_continue(Source, Ref, Client2, Async);
-        {ok, Data, Client2} ->
-            Source ! {Ref, Data},
-            maybe_continue(Source, Ref, Client2, Async);
-        {done, _} ->
-            Source ! {Ref, done},
-            ets:delete(hackney_streams, Ref);
-        {error, _Reason} = Error ->
-            Source ! {Ref, Error},
-            ets:delete(hackney_streams, Ref)
-    end.
-
-
-maybe_continue(Source, Ref, #client{transport=Transport,
-                                    socket=Socket}=Client, true) ->
-    receive
-        {Ref, resume} ->
-            stream_loop(Source, Ref, Client);
-        {Ref, pause} ->
-            erlang:hibernate(?MODULE, maybe_continue, [Source, Ref,
-                                                       Client, true]);
-        {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
-            Transport:setopts(Socket, [{active, false}]),
-            Transport:controlling_process(Socket, From),
-            From ! {Ref, Client};
-        {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
-            close(Client)
-    after 0 ->
-            stream_loop(Source, Ref, Client)
-    end;
-maybe_continue(Source, Ref, #client{transport=Transport,
-                                    socket=Socket}=Client, once) ->
-    receive
-        {Ref, stream_next} ->
-            stream_loop(Source, Ref, Client);
-        {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
-            Transport:setopts(Socket, [{active, false}]),
-            Transport:controlling_process(Socket, From),
-            From ! {Ref, Client};
-        {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
-            close(Client);
-        _ ->
-            maybe_continue(Source, Ref, Client, once)
-    after 5000 ->
-
-        erlang:hibernate(?MODULE, maybe_continue, [Source, Ref, Client,
-                                                   once])
-
     end.
 
 %% @doc parse the status line
@@ -476,57 +394,7 @@ ce_identity(Data) ->
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
     Transport:recv(Skt, 0, Timeout).
 
-async_recv(Source, Ref, #client{transport=Transport,
-                                socket=Sock,
-                                buffer=Buffer,
-                                recv_timeout=Timeout}=Client) ->
 
-    {OK, Closed, Error} = Transport:messages(),
-    Transport:setopts(Sock, [{active, once}]),
-    %% some useful info
-    #client{version=Version, clen=CLen, te=TE} = Client,
-    receive
-        {Ref, resume} ->
-            async_recv(Source, Ref, Client);
-        {Ref, stream_next} ->
-            async_recv(Source, Ref, Client);
-        {Ref, pause} ->
-            %% make sure that the proces won't be awoken by a tcp msg
-            Transport:setopts(Sock, [{active, false}]),
-            %% hibernate
-            erlang:hibernate(?MODULE, async_recv, [Source, Ref, Client]);
-        {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
-            Transport:close(Sock);
-        {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
-            Transport:setopts(Sock, [{active, false}]),
-            Transport:controlling_process(Sock, From),
-            From ! {Ref, Client};
-        {OK, Sock, Data} ->
-            NewBuffer =  << Buffer/binary, Data/binary >>,
-            stream_loop(Source, Ref, Client#client{buffer=NewBuffer});
-        {Closed, Sock} ->
-            case Client#client.response_state of
-                on_body when Version =:= {1, 0}, CLen =:= nil ->
-                    Source ! {Ref, Buffer};
-                on_body when TE =:= <<"identity">> ->
-                    Source ! {Ref, Buffer};
-                on_body ->
-                    Source ! {Ref, {error, {closed, Buffer}}};
-                _ ->
-                    Source ! {error, closed}
-            end,
-            ets:delete(hackney_streams, Ref),
-            Transport:close(Sock);
-        {Error, Sock, Reason} ->
-            Source ! {error, Reason},
-            ets:delete(hackney_streams, Ref),
-            Transport:close(Sock)
-    after Timeout ->
-        Source ! {error, {closed, timeout}},
-        Transport:close(Sock)
-    end.
 
 close(#client{socket=nil}=Client) ->
     Client#client{state = closed};
