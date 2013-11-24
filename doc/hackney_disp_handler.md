@@ -7,7 +7,7 @@
 
 
 Dispcount worker implementation for TCP socket handling.
-__Behaviours:__ [`coffer_pool_handler`](coffer_pool_handler.md), [`dispcount`](/Users/benoitc/work/hackney/deps/dispcount/doc/dispcount.md).
+__Behaviours:__ [`dispcount`](/Users/benoitc/work/hackney/deps/dispcount/doc/dispcount.md).
 <a name="index"></a>
 
 ## Function Index ##

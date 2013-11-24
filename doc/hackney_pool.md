@@ -7,7 +7,7 @@
 
 
 pool of sockets connections.
-__Behaviours:__ [`coffer_pool_handler`](coffer_pool_handler.md), [`gen_server`](gen_server.md).
+__Behaviours:__ [`gen_server`](gen_server.md), [`hackney_pool_handler`](hackney_pool_handler.md).
 <a name="index"></a>
 
 ## Function Index ##
