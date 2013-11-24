@@ -230,6 +230,9 @@ LoopFun = fun(Loop, Ref) ->
 LoopFun(LoopFun, StreamRef).
 ```
 
+> Note: When `{async, once}` is used the socket will receive only once.
+> To receive the other messages use the function `hackney:stream_next/1`.
+
 ### Use the default pool
 
 To reuse a connection globally in your application you can also use a
