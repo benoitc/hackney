@@ -565,7 +565,7 @@ continue to the next stream message. Only use it when
 
 
 <pre><code>
-stream_pid(StreamRef::<a href="#type-stream_ref">stream_ref()</a>) -&gt; pid() | undefined
+stream_pid(StreamRef::<a href="#type-stream_ref">stream_ref()</a>) -&gt; pid() | stream_undefined
 </code></pre>
 
 <br></br>

@@ -7,7 +7,7 @@
 
 
 Dispatcher for hackney using dispcount.
-
+__Behaviours:__ [`hackney_pool_handler`](hackney_pool_handler.md).
 <a name="description"></a>
 
 ## Description ##

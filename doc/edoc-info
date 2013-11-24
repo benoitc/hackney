@@ -2,6 +2,7 @@
 {application,hackney}.
 {packages,[]}.
 {modules,[hackney,hackney_app,hackney_deps,hackney_disp,hackney_disp_handler,
-          hackney_headers,hackney_multipart,hackney_pool,hackney_request,
-          hackney_response,hackney_ssl_transport,hackney_sup,
-          hackney_tcp_transport,hackney_url,hackney_util]}.
+          hackney_headers,hackney_multipart,hackney_pool,hackney_pool_handler,
+          hackney_request,hackney_response,hackney_ssl_transport,
+          hackney_stream,hackney_sup,hackney_tcp_transport,hackney_url,
+          hackney_util]}.
