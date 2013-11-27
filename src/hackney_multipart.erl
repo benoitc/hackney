@@ -45,7 +45,7 @@ unique(Size, Acc) ->
 
 encode({Id, {file, Name, Content}}, Boundary) ->
     CType = hackney_util:content_type(Name),
-    encode(Id, {file, Name, Content, CType});
+    encode({Id, {file, Name, Content, CType}}, Boundary);
 encode({Id, {file, Name, Content, CType}}, Boundary) ->
     Field = field(Id),
     Parts = [
