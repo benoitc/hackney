@@ -44,8 +44,10 @@ unique(Size, Acc) ->
   unique(Size, <<Acc/binary, Random>>).
 
 encode({Id, {file, Name, Content}}, Boundary) ->
-    Field = field(Id),
     CType = hackney_util:content_type(Name),
+    encode(Id, {file, Name, Content, CType});
+encode({Id, {file, Name, Content, CType}}, Boundary) ->
+    Field = field(Id),
     Parts = [
         <<"--", Boundary/binary>>,
         <<"Content-Disposition: form-data; name=\"",
