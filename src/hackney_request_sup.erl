@@ -84,7 +84,7 @@ handle_call({new_request, Pid, InitialState}, _From, Children) ->
     {reply, Ref, NChildren};
 
 handle_call({controlling_process, Ref, Pid}, _From, Children) ->
-    case ets:lookup(Ref, ?MODULE) of
+    case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
         [#request{pid=Owner, state=St}=Req] ->
@@ -105,11 +105,11 @@ handle_call({controlling_process, Ref, Pid}, _From, Children) ->
     end;
 
 handle_call({cancel_request, Ref}, _From, Children) ->
-    case ets:lookup(Ref, ?MODULE) of
+    case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
         [#request{pid=Pid, state=St}] ->
-            ets:delete(?MODULE, ?MODULE),
+            ets:delete(?MODULE, Ref),
             NChildren = case dict:is_key(Pid, Children) of
                 true ->
                     unlink(Pid),
@@ -124,11 +124,11 @@ handle_call({cancel_request, Ref}, _From, Children) ->
     end;
 
 handle_call({close_request, Ref}, _From, Children) ->
-    case ets:lookup(Ref, ?MODULE) of
+    case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
         [#request{pid=Pid, state=St}] ->
-            ets:delete(?MODULE, ?MODULE),
+            ets:delete(?MODULE, Ref),
             NChildren = case dict:is_key(Pid, Children) of
                 true ->
                     unlink(Pid),
