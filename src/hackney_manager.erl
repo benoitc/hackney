@@ -12,9 +12,9 @@
          close_request/1,
          controlling_process/2]).
 
--export([get_state/1]).
--export([increment_bytes_sent/2,
-         increment_bytes_received/2]).
+-export([get_state/1,
+         update_state/2]).
+
 
 -export([start_link/0]).
 
@@ -27,9 +27,7 @@
 
 -record(request, {ref,
                   pid,
-                  state,
-                  bytes_sent=0,
-                  bytes_received=0}).
+                  state}).
 
 
 new_request(InitialState) ->
@@ -59,11 +57,9 @@ get_state(Ref) ->
             {ok, State}
     end.
 
-increment_bytes_sent(Ref, Bytes) ->
-    ets:update_counter(?MODULE, {Ref, #request.bytes_sent}, Bytes).
+update_state(Ref, NState) ->
+    gen_server:call(?MODULE, {update_state, Ref, NState}).
 
-increment_bytes_received(Ref, Bytes) ->
-    ets:update_counter(?MODULE, {Ref, #request.bytes_received}, Bytes).
 
 
 start_link() ->
@@ -79,6 +75,15 @@ init(_) ->
 handle_call({new_request, Pid, InitialState}, _From, Children) ->
     {Ref, NChildren} = make_request(Pid, InitialState, Children),
     {reply, Ref, NChildren};
+
+handle_call({update_state, Ref, NState}, _From, Children) ->
+    case ets:lookup(?MODULE, Ref) of
+        [] ->
+            {reply, req_not_found, Children};
+        [Req] ->
+            ets:insert(?MODULE, Ref, Req#request{state=NState}),
+            {reply, ok, Children}
+    end;
 
 handle_call({controlling_process, Ref, Pid}, _From, Children) ->
     case ets:lookup(?MODULE, Ref) of
