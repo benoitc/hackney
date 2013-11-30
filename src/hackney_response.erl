@@ -304,7 +304,7 @@ transfer_decode_done(Rest, Client0) ->
                             body_state=done,
                             buffer=Rest},
 
-    Pool = hackney:is_pool(Client),
+    Pool = hackney_connect:is_pool(Client),
     case maybe_close(Client) of
         true ->
             close(Client);

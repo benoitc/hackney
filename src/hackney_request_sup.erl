@@ -41,9 +41,6 @@ cancel_request(Ref) ->
 close_request(Ref) ->
     gen_server:call(?MODULE, {close_request, Ref}).
 
-nb_requests(Ref) ->
-
-
 controlling_process(Ref, Pid) ->
     Reply = gen_server:call(?MODULE, {controlling_process, Ref, Pid}),
     case Reply of
