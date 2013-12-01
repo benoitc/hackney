@@ -11,51 +11,43 @@
 
 -module(hackney_connect).
 
--export([connect/1, connect/3, connect/4,
-         create_connection/4,
+-export([connect/3, connect/4,
+         create_connection/4, create_connection/5,
+         maybe_connect/1,
+         reconnect/4,
          set_sockopts/2,
-         close/1,
+         close_socket/1,
          is_pool/1]).
 
 -include("hackney.hrl").
 
-%% @doc connect a socket and create a client state.
-connect(#client{state=connected, redirect=nil}=Client) ->
-    {ok, Client};
-
-connect(#client{state=connected, redirect=Redirect}=Client) ->
-    #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
-
-    case is_pool(Client) of
-        false ->
-            close(Client);
-        true ->
-            Handler:checkout(Ref, Socket)
-    end,
-    connect(Redirect);
-connect(#client{state=closed, redirect=nil}=Client) ->
-    #client{transport=Transport,
-            host=Host,
-            port=Port,
-            options=Options} = Client,
-
-    connect(Transport, Host, Port, Options);
-
-connect(#client{state=closed, redirect=Redirect}) ->
-    connect(Redirect);
-connect({Transport, Host, Port, Options}) ->
-    connect(Transport, Host, Port, Options).
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, []).
 
 connect(Transport, Host, Port, Options) ->
-    create_connection(Transport, Host, Port, Options).
+    case create_connection(Transport, Host, Port, Options) of
+        {ok, #client{request_ref=Ref}} ->
+            {ok, Ref};
+        Error ->
+            Error
+    end.
 
-create_connection(Transport, Host, Port, Options) when is_list(Options) ->
+
+%% @doc create a connection and return a client state
+create_connection(Transport, Host, Port, Options) ->
+    create_connection(Transport, Host, Port, Options, true).
+
+create_connection(Transport, Host, Port, Options, Dynamic)
+        when is_list(Options) ->
+    %% default timeout
     Timeout = proplists:get_value(recv_timeout, Options, infinity),
-
-    InitialState = #client{recv_timeout=Timeout,  options=Options},
+    %% initial state
+    InitialState = #client{dynamic=Dynamic,
+                           recv_timeout=Timeout,
+                           options=Options},
+    %% if we use a pool then checkout the connection from the pool, else
+    %% connect the socket to the remote
     case is_pool(InitialState) of
         false ->
             %% the client won't use any pool
@@ -64,14 +56,51 @@ create_connection(Transport, Host, Port, Options) when is_list(Options) ->
             socket_from_pool(Host, Port, Transport, InitialState)
     end.
 
+
+%% @doc connect a socket and create a client state.
+maybe_connect(#client{state=connected, redirect=nil}=Client) ->
+    {ok, Client};
+
+maybe_connect(#client{state=connected, redirect=Redirect}=Client) ->
+    #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
+    %% the connection was redirected. If we are using a pool, checkin
+    %% the socket and create the newone, else close the current socket
+    %% and create a new one.
+    case is_pool(Client) of
+        false ->
+            close(Client);
+        true ->
+            Handler:checkin(Ref, Socket)
+    end,
+    %% reinit the options and reconnect the client
+    {Transport, Host, Port, Options} = Redirect,
+    Client1 = Client#client{options=Options,
+                            redirect=nil},
+    reconnect(Transport, Host, Port, Client1);
+maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
+    %% connection closed after a redirection, reinit the options and
+    %% reconnect it.
+    {Transport, Host, Port, Options} = Redirect,
+    Client1 = Client#client{options=Options,
+                            redirect=nil},
+    reconnect(Transport, Host, Port, Client1);
+maybe_connect(#client{state=closed, redirect=nil}=Client) ->
+    %% the socket has been closed, reconnect it.
+    #client{transport=Transport,
+            host=Host,
+            port=Port} = Client,
+    reconnect(Transport, Host, Port, Client).
+
 %% @doc add set sockets options in the client
 set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
     Transport:setopts(Skt, Options).
 
 
 %% @doc close the client
-close(Client) ->
-    hackney_response:close(Client).
+close_socket(#client{transport=Transport, socket=Socket}) ->
+    Transport:close(Socket).
+
+
 
 %% @doc get current pool pid or name used by a client if needed
 is_pool(#client{options=Opts}) ->
@@ -88,10 +117,23 @@ is_pool(#client{options=Opts}) ->
     end.
 
 
+reconnect(Host, Port, Transport, State) ->
+    %% if we use a pool then checkout the connection from the pool, else
+    %% connect the socket to the remote
+    case is_pool(State) of
+        false ->
+            %% the client won't use any pool
+            do_connect(Host, Port, Transport, State);
+        true ->
+            socket_from_pool(Host, Port, Transport, State)
+    end.
+
+%%
 %% internal functions
 %%
 
-socket_from_pool(Host, Port, Transport, #client{options=Opts}=Client) ->
+socket_from_pool(Host, Port, Transport, #client{options=Opts,
+                                                request_ref=Ref0}=Client) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
@@ -100,23 +142,37 @@ socket_from_pool(Host, Port, Transport, #client{options=Opts}=Client) ->
                                                  Opts, false),
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
             Async =  proplists:get_value(async, Opts, false),
-            {ok, Client#client{transport=Transport,
-                               host=Host,
-                               port=Port,
-                               socket=Skt,
-                               socket_ref=Ref,
-                               pool_handler=PoolHandler,
-                               state = connected,
-                               follow_redirect=FollowRedirect,
-                               max_redirect=MaxRedirect,
-                               async=Async}};
+
+            Client1 = Client#client{transport=Transport,
+                                    host=Host,
+                                    port=Port,
+                                    socket=Skt,
+                                    socket_ref=Ref,
+                                    pool_handler=PoolHandler,
+                                    state = connected,
+                                    follow_redirect=FollowRedirect,
+                                    max_redirect=MaxRedirect,
+                                    async=Async,
+                                    buffer = <<>>},
+
+
+            FinalClient = case is_reference(Ref0) of
+                true ->
+                    ok = hackney_manager:update_state(Ref0, Client1),
+                    Client1;
+                false ->
+                    Ref = hackney_manager:new_request(Client1),
+                    Client1#client{request_ref=Ref}
+            end,
+            {ok, FinalClient};
         {error, no_socket, Ref} ->
             do_connect(Host, Port, Transport, Client#client{socket_ref=Ref});
         Error ->
             Error
     end.
 
-do_connect(Host, Port, Transport, #client{options=Opts}=Client) ->
+do_connect(Host, Port, Transport, #client{options=Opts,
+                                          request_ref=Ref0}=Client) ->
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
@@ -152,15 +208,26 @@ do_connect(Host, Port, Transport, #client{options=Opts}=Client) ->
                                                 false),
             Async =  proplists:get_value(async, Opts, false),
 
-            {ok, Client#client{transport=Transport,
-                               host=Host,
-                               port=Port,
-                               socket=Skt,
-                               state = connected,
-                               follow_redirect=FollowRedirect,
-                               max_redirect=MaxRedirect,
-                               force_redirect=ForceRedirect,
-                               async=Async}};
+            Client1 = Client#client{transport=Transport,
+                                    host=Host,
+                                    port=Port,
+                                    socket=Skt,
+                                    state = connected,
+                                    follow_redirect=FollowRedirect,
+                                    max_redirect=MaxRedirect,
+                                    force_redirect=ForceRedirect,
+                                    async=Async,
+                                    buffer = <<>>},
+
+            FinalClient = case is_reference(Ref0) of
+                true ->
+                    ok = hackney_manager:update_state(Ref0, Client1),
+                    Client1;
+                false ->
+                    Ref = hackney_manager:new_request(Client1),
+                    Client1#client{request_ref=Ref}
+            end,
+            {ok, FinalClient};
         Error ->
             Error
     end.

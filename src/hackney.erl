@@ -10,12 +10,11 @@
 -export([start/0, start/1, stop/0]).
 -export([connect/3, connect/4,
          close/1,
-         set_sockopts/2,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          start_response/1,
-         stream_request_body/2, end_stream_request_body/1,
-         stream_multipart_request/2,
+         send_body/2, finish_send_body/1,
+         send_multipart_body/2,
          stream_body/1,
          stream_next/1,
          close_stream/1,
@@ -43,6 +42,9 @@
 -type stream_ref() :: term().
 -export_type([stream_ref/0]).
 
+-type request() :: term().
+-export_type([request/0]).
+
 %% @doc Start the couchbeam process. Useful when testing using the shell.
 start() ->
     hackney_deps:ensure(),
@@ -60,18 +62,20 @@ stop() ->
 
 %% @doc connect a socket and create a client state.
 connect(Transport, Host, Port) ->
-    hackney:connect(Transport, Host, Port, []).
+    hackney_connect:connect(Transport, Host, Port, []).
 
 connect(Transport, Host, Port, Options) ->
-    hackney:connect(Transport, Host, Port, Options).
+    hackney_connect:connect(Transport, Host, Port, Options).
+
+%% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
+-spec controlling_process(request(), pid())
+	-> ok | {error, closed | not_owner | atom()}.
+controlling_process(Ref, Pid) ->
+    hackney_manager:controlling_process(Ref, Pid).
 
 %% @doc close the client
 close(Client) ->
     hackney_response:close(Client).
-
-%% @doc add set sockets options in the client
-set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
-    Transport:setopts(Skt, Options).
 
 %% @doc make a request
 -spec request(binary()|list())
@@ -166,14 +170,12 @@ request(Method, URL, Headers, Body) ->
     | {ok, #client{}}
     | {ok, {response_stream, stream_ref()}}
     | {error, term()}.
-request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
+request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
     #hackney_url{transport=Transport,
                  host = Host,
                  port = Port,
                  user = User,
-                 password = Password,
-                 path = Path,
-                 qs = Query} = URL,
+                 password = Password} = URL,
 
     Options = case User of
         <<>> ->
@@ -183,24 +185,11 @@ request(Method, #hackney_url{}=URL, Headers0, Body, Options0) ->
                            {basic_auth, {User, Password}})
     end,
 
-    SendPath = case Query of
-        <<>> ->
-            Path;
-        _ ->
-            <<Path/binary, "?", Query/binary>>
-    end,
+    Request = make_request(Method, URL, Headers, Body),
 
-    Headers = case lists:keyfind(<<"Host">>, 1, Headers0) of
-        false ->
-          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":",
-                                                      integer_to_list(Port)])}];
-        _ ->
-          Headers0
-    end,
-
-    case maybe_proxy(Transport, Host, Port, Options) of
-        {ok, Client} ->
-            send_request(Client, {Method, SendPath, Headers, Body});
+    case hackney_http_proxy:maybe_proxy(Transport, Host, Port, Options) of
+        {ok, State} ->
+            send_request(State, Request);
         Error ->
             Error
     end;
@@ -210,22 +199,30 @@ request(Method, URL, Headers, Body, Options)
 
 
 %% @doc send a request using the current client state
+
+send_request(Req, Req) when is_reference(Req) ->
+    case hackney_manager:get_state(Req) of
+        req_not_found ->
+            {error, closed};
+        State ->
+            send_request(State, Req)
+    end;
 send_request(#client{response_state=done}=Client0 ,
              {Method, Path, Headers, Body}) ->
     Client = Client0#client{response_state=start, body_state=waiting},
     send_request(Client, {Method, Path, Headers, Body});
 
 send_request(Client0, {Method, Path, Headers, Body}=Req) ->
-    case hackney_connect:connect(Client0) of
+    case hackney_connect:maybe_connect(Client0) of
         {ok, Client} ->
             case {Client#client.response_state, Client#client.body_state} of
                 {start, waiting} ->
-                     Resp = hackney_request:perform(Client, {Method,
-                                                             Path,
-                                                             Headers,
-                                                             Body}),
-                     maybe_redirect(Resp, Req, 0);
-
+                    Resp = hackney_request:perform(Client, {Method,
+                                                            Path,
+                                                            Headers,
+                                                            Body}),
+                    Reply = maybe_redirect(Resp, Req, 0),
+                    reply_response(Reply, Client);
                 _ ->
                     {error, invalide_state}
             end;
@@ -233,20 +230,24 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
             Error
     end.
 
-%% @doc stream the request body. It isued after sending a request using
+%% @doc send the request body until eob. It's issued after sending a request using
 %% the `request' and `send_request' functions.
--spec stream_request_body(term(), #client{})
-    -> {ok, #client{}} | {error, term()}.
-stream_request_body(Body, Client) ->
-    hackney_request:stream_body(Body, Client).
+-spec send_body(request(), term())
+    -> ok | {error, term()}.
+send_body(Ref, Body) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_request:stream_body(Body, State),
+                reply(Reply, State)
+        end).
+
+finish_send_body(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_request:end_stream_body(State),
+                reply(Reply, State)
+        end).
 
 
-%% @doc end streaming the request body.
-end_stream_request_body(Client) ->
-    hackney_request:end_stream_body(Client).
-
-
-%% @doc stream a multipart request until eof
+%% @doc send a multipart body until eof
 %% Possible value are :
 %% <ul>
 %% <li>`eof': end the multipart request</li>
@@ -269,45 +270,61 @@ end_stream_request_body(Client) ->
 %% <li>`{bytes, Bytes}': number of bytes to send</li>
 %% <li>`{chunk_size, ChunkSize}': the size of the chunk to send</li>
 %% </ul>
-stream_multipart_request(Body, Client) ->
-    hackney_multipart:stream(Body, Client).
-
+-spec send_multipart_body(request(), term()) -> ok | {error, term()}.
+send_multipart_body(Ref, Body) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_multipart:stream(Body, State),
+                reply(Reply, State)
+        end).
 
 %% @doc start a response.
 %% Useful if you stream the body by yourself. It will fetch the status
 %% and headers of the response. and return
--spec start_response(#client{})
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
-start_response(Client) ->
-    hackney_response:start_response(Client).
-
+-spec start_response(request())
+    -> {ok, integer(), list(), request()} | {ok, request()} | {error, term()}.
+start_response(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:start_response(State),
+                response_reply(Reply, State)
+        end).
 
 %% @doc Stream the response body.
--spec stream_body(#client{})
-    -> {ok, #client{}} | {ok, #client{}} | {stop, #client{}}
-    | {error, term()}.
-stream_body(Client) ->
-    hackney_response:stream_body(Client).
+-spec stream_body(request())
+    -> ok | stop | {error, term()}.
+stream_body(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:stream_body(State),
+                reply(Reply, State)
+        end).
 
 %% @doc Return the full body sent with the response.
--spec body(#client{}) -> {ok, binary(), #client{}} | {error, atom()}.
-body(Client) ->
-    hackney_response:body(Client).
+-spec body(request()) -> {ok, binary()} | {error, atom()}.
+body(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:body(State),
+                reply(Reply, State)
+        end).
 
 %% @doc Return the full body sent with the response as long as the body
 %% length doesn't go over MaxLength.
--spec body(non_neg_integer() | infinity, #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
-body(MaxLength, Client) ->
-    hackney_response:body(MaxLength, Client).
+-spec body(request(), non_neg_integer() | infinity)
+	-> {ok, binary()} | {error, atom()}.
+body(Ref, MaxLength) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:body(MaxLength, State),
+                reply(Reply, State)
+        end).
 
 
 %% @doc skip the full body. (read all the body if needed).
--spec skip_body(#client{}) -> {ok, #client{}} | {error, atom()}.
-skip_body(Client) ->
-    hackney_response:skip_body(Client).
+-spec skip_body(request()) -> ok | {error, atom()}.
+skip_body(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:skip_body(State),
+                reply(Reply, State)
+        end).
 
-%% @doc return the Pid of a response stream
+
 -spec stream_pid(stream_ref()) -> pid() | stream_undefined.
 stream_pid(StreamRef) ->
     case ets:lookup(hackney_streams, StreamRef) of
@@ -393,11 +410,7 @@ stop_async(StreamRef) ->
             end
     end.
 
-%% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
--spec controlling_process(#client{}, pid())
-	-> ok | {error, closed | not_owner | atom()}.
-controlling_process(#client{transport=Transport, socket=Skt}, Pid) ->
-    Transport:controlling_process(Skt, Pid).
+
 
 %% @doc Extract raw informations from the client context
 %% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
@@ -424,49 +437,29 @@ raw(#client{transport=Transport, socket=Socket, buffer=Buffer,
 
 %% internal functions
 %%
-maybe_proxy(Transport, Host, Port, Options)
-        when is_list(Host), is_integer(Port), is_list(Options) ->
+make_request(Method, #hackney_url{}=URL, Headers0, Body) ->
+    #hackney_url{host = Host,
+                 port = Port,
+                 path = Path,
+                 qs = Query} = URL,
 
-    case proplists:get_value(proxy, Options) of
-        Url when is_binary(Url) orelse is_list(Url) ->
-            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
-                                                          Options)}],
-            #hackney_url{transport=PTransport} = hackney_url:parse_url(Url),
 
-            if PTransport =/= Transport ->
-                    {error, invalid_proxy_transport};
-                true ->
-                    connect_proxy(Url, Host, Port, ProxyOpts, Options)
-            end;
-        {ProxyHost, ProxyPort} ->
-            Netloc = iolist_to_binary([ProxyHost, ":",
-                                       integer_to_list(ProxyPort)]),
-            Scheme = hackney_url:transport_scheme(Transport),
-            Url = #hackney_url{scheme=Scheme, netloc=Netloc},
-            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
-                                                          Options)}],
-            connect_proxy(hackney_url:unparse_url(Url), Host, Port, ProxyOpts,
-                          Options);
-
+    FinalPath = case Query of
+        <<>> ->
+            Path;
         _ ->
-            hackney_connect:create_connection(Transport, Host, Port, Options)
-    end.
+            <<Path/binary, "?", Query/binary>>
+    end,
 
-connect_proxy(ProxyUrl, Host, Port, ProxyOpts0, Options) ->
-    Host1 = iolist_to_binary([Host, ":", integer_to_list(Port)]),
-    Headers = [{<<"Host">>, Host1}],
-    Timeout = proplists:get_value(recv_timeout, Options, infinity),
-    ProxyOpts = [{recv_timeout, Timeout} | ProxyOpts0],
-    case request(connect, ProxyUrl, Headers, <<>>, ProxyOpts) of
-        {ok, 200, _, Client0} ->
-            {ok, Client0#client{recv_timeout=Timeout, options=Options,
-                                response_state=start, body_state=waiting}};
-        {ok, S, H, Client} ->
-            Body = body(Client),
-            {error, {proxy_connection, S, H, Body}};
-        Error ->
-            {error, {proxy_connection, Error}}
-    end.
+    Headers = case lists:keyfind(<<"Host">>, 1, Headers0) of
+        false ->
+          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":",
+                                                      integer_to_list(Port)])}];
+        _ ->
+          Headers0
+    end,
+
+    {Method, Headers, FinalPath, Body}.
 
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
@@ -533,10 +526,14 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
 
 
     %% close the connection if we don't use a pool
-    Client1 = case Client#client.state of
-        closed -> Client;
-        _ -> close(Client)
-    end,
+    RedirectUrl = hackney_url:parse_url(NewLocation),
+    #hackney_url{transport=RedirectTransport,
+                 host=RedirectHost,
+                 port=RedirectPort}=RedirectUrl,
+    RedirectRequest = make_request(Method, RedirectUrl, NewHeaders,
+                                   Body),
+
+
 
     %% make a request without any redirection
     #client{transport=Transport,
@@ -544,8 +541,12 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             port=Port,
             options=Opts0,
             redirect=Redirect} = Client1,
+
+
     Opts = lists:keystore(follow_redirect, 1, Opts0,
                           {follow_redirect, false}),
+
+
 
 
     case request(Method, NewLocation, Headers, Body, Opts) of
@@ -567,6 +568,37 @@ redirect_location(Headers) ->
     hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).
 
 
+%% handle send response
+reply({ok, Data, NState}, _State) ->
+    maybe_update_req(NState),
+    {ok, Data};
+reply({done, NState}, _State) ->
+    maybe_update_req(NState),
+    done;
+reply({ok, NState}, _State) ->
+    hackney_manager:update_state(NState),
+    ok;
+reply(Error, State) ->
+    hackney_manager:handle_error(State),
+    Error.
+
+%% response reply
+reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
+               _State) ->
+    hackney_manager:update_state(NState),
+    {ok, Status, Headers, Ref};
+reply_response({ok, #client{request_ref=Ref}=NState}, _State) ->
+    hackney_manager:update_state(NState),
+    {ok, Ref};
+reply_response(Error, State) ->
+    hackney_manager:handle_error(State),
+    Error.
+
+
+maybe_update_req(#client{dynamic=true, response_state=done}=State) ->
+    hackney_manager:cancel_request(State);
+maybe_update_req(State) ->
+    hackney_manager:update_state(State).
 
 -define(METHOD_TPL(Method),
         Method(URL) ->

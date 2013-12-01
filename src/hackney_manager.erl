@@ -4,7 +4,7 @@
 %%% See the NOTICE for more information.
 
 
--module(hackney_request_sup).
+-module(hackney_manager).
 -behaviour(gen_server).
 
 -export([new_request/1,
@@ -12,8 +12,9 @@
          close_request/1,
          controlling_process/2]).
 
--export([get_state/1,
-         update_state/2]).
+-export([get_state/1, get_state/2,
+         update_state/1, update_state/2,
+         handle_error/1]).
 
 
 -export([start_link/0]).
@@ -33,8 +34,11 @@
 new_request(InitialState) ->
     gen_server:call(?MODULE, {new_request, self(), InitialState}).
 
-cancel_request(Ref) ->
+cancel_request(#client{request_ref=Ref}) ->
+    cancel_request(Ref);
+cancel_request(Ref) when is_reference(Ref) ->
     gen_server:call(?MODULE, {cancel_request, Ref}).
+
 
 close_request(Ref) ->
     gen_server:call(?MODULE, {close_request, Ref}).
@@ -48,26 +52,59 @@ controlling_process(Ref, Pid) ->
             Error
     end.
 
+get_state(#client{request_ref=Ref}) ->
+    get_state(Ref);
 
 get_state(Ref) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
-            not_found;
-        [#request{state=State}] ->
-            {ok, State}
+            req_not_found;
+        [{Ref, #request{state=State}}] ->
+            State
     end.
 
-update_state(Ref, NState) ->
-    gen_server:call(?MODULE, {update_state, Ref, NState}).
+get_state(Ref, Fun) ->
+    case get_state(Ref) of
+        req_not_found -> {error, req_not_found};
+        State -> Fun(State)
+    end.
 
+
+update_state(#client{request_ref=Ref}=NState) ->
+    update_state(Ref, NState).
+
+update_state(Ref, NState) ->
+    case ets:lookup(?MODULE, Ref) of
+        [] -> ok;
+        _ ->
+            true = ets:insert(?MODULE, {Ref, NState}),
+            ok
+    end.
+
+handle_error(#client{request_ref=Ref, dynamic=true}) ->
+    close_request(Ref);
+
+handle_error(#client{request_ref=Ref, transport=Transport,
+                    socket=Socket}) ->
+    case ets:lookup(?MODULE, Ref) of
+        [] -> ok;
+        [{Ref, #request{state=State}}] ->
+
+            Transport:controlling_process(Socket, self()),
+            Transport:close(Socket),
+            NState = State#client{socket=nil,
+                                  state=closed},
+            true = ets:insert(?MODULE, {Ref, NState}),
+            ok
+    end.
 
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init(_) ->
-    ets:new(?MODULE, [set, {keypos, #request.ref}, public, named_table,
-                      {read_concurrency, true}]),
+    ets:new(?MODULE, [set, {keypos, 1}, public, named_table,
+                      {write_concurrency, true}]),
 
     {ok, dict:new()}.
 
@@ -76,20 +113,11 @@ handle_call({new_request, Pid, InitialState}, _From, Children) ->
     {Ref, NChildren} = make_request(Pid, InitialState, Children),
     {reply, Ref, NChildren};
 
-handle_call({update_state, Ref, NState}, _From, Children) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
-            {reply, req_not_found, Children};
-        [Req] ->
-            ets:insert(?MODULE, Ref, Req#request{state=NState}),
-            {reply, ok, Children}
-    end;
-
 handle_call({controlling_process, Ref, Pid}, _From, Children) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
-        [#request{pid=Owner, state=St}=Req] ->
+        [{Ref, #request{pid=Owner, state=St}=Req}] ->
             Children1 = case dict:is_key(Owner, Children) of
                 true ->
                     unlink(Owner),
@@ -110,7 +138,7 @@ handle_call({cancel_request, Ref}, _From, Children) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
-        [#request{pid=Pid, state=St}] ->
+        [{Ref, #request{pid=Pid, state=St}}] ->
             ets:delete(?MODULE, Ref),
             NChildren = case dict:is_key(Pid, Children) of
                 true ->
@@ -129,7 +157,7 @@ handle_call({close_request, Ref}, _From, Children) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
-        [#request{pid=Pid, state=St}] ->
+        [{Ref, #request{pid=Pid, state=St}}] ->
             ets:delete(?MODULE, Ref),
             NChildren = case dict:is_key(Pid, Children) of
                 true ->
@@ -161,7 +189,7 @@ handle_info({'EXIT', Pid, _Reason}, Children) ->
             case ets:lookup(?MODULE, Ref) of
                 [] ->
                     ok;
-                [#request{}] ->
+                [{Ref, #request{}}] ->
                     ets:delete(?MODULE, Ref)
             end,
             dict:erase(Pid, Children);
@@ -180,16 +208,13 @@ code_change(_OldVsn, Ring, _Extra) ->
 terminate(_Reason, _Ring) ->
     ok.
 
-
-
-
 make_request(Pid, InitialState, Children) ->
     Ref = make_ref(),
     Req = #request{ref=Ref,
                    pid=Pid,
-                   state=InitialState},
+                   state=InitialState#client{request_ref=Ref}},
 
-    link(Children),
+    link(Pid),
     NChildren = dict:store(Pid, Ref, Children),
-    ets:insert(Req, ?MODULE),
+    ets:insert(?MODULE, {Ref, Req}),
     {Ref, NChildren}.

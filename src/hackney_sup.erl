@@ -36,4 +36,6 @@ init([]) ->
     %% streams supervisore
     StreamSup = ?CHILD(hackney_stream_sup, supervisor),
 
-    {ok, { {one_for_one, 10, 1}, [StreamSup]}}.
+    Manager= ?CHILD(hackney_manager, supervisor),
+
+    {ok, { {one_for_one, 10, 1}, [StreamSup, Manager]}}.

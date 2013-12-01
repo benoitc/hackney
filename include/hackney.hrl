@@ -6,6 +6,8 @@
         options = [],
         socket = nil,
         socket_ref = nil,
+        request_ref = nil,
+        dynamic = true,
         pool_handler = hackney_pool,
         recv_timeout = infinity,
         follow_redirect = false,
