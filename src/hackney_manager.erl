@@ -76,8 +76,8 @@ update_state(#client{request_ref=Ref}=NState) ->
 update_state(Ref, NState) ->
     case ets:lookup(?MODULE, Ref) of
         [] -> ok;
-        _ ->
-            true = ets:insert(?MODULE, {Ref, NState}),
+        [{Ref, Req}] ->
+            true = ets:insert(?MODULE, {Ref, Req#request{state=NState}}),
             ok
     end.
 

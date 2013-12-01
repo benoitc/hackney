@@ -68,7 +68,7 @@ maybe_connect(#client{state=connected, redirect=Redirect}=Client) ->
     %% and create a new one.
     case is_pool(Client) of
         false ->
-            close(Client);
+            close_socket(Client);
         true ->
             Handler:checkin(Ref, Socket)
     end,

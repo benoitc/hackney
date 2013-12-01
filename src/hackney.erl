@@ -200,8 +200,8 @@ request(Method, URL, Headers, Body, Options)
 
 %% @doc send a request using the current client state
 
-send_request(Req, Req) when is_reference(Req) ->
-    case hackney_manager:get_state(Req) of
+send_request(Ref, Req) when is_reference(Ref) ->
+    case hackney_manager:get_state(Ref) of
         req_not_found ->
             {error, closed};
         State ->
@@ -285,7 +285,7 @@ send_multipart_body(Ref, Body) ->
 start_response(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:start_response(State),
-                response_reply(Reply, State)
+                reply_response(Reply, State)
         end).
 
 %% @doc Stream the response body.
@@ -459,7 +459,7 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body) ->
           Headers0
     end,
 
-    {Method, Headers, FinalPath, Body}.
+    {Method, FinalPath, Headers, Body}.
 
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
@@ -530,38 +530,39 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     #hackney_url{transport=RedirectTransport,
                  host=RedirectHost,
                  port=RedirectPort}=RedirectUrl,
-    RedirectRequest = make_request(Method, RedirectUrl, NewHeaders,
-                                   Body),
-
-
+    RedirectRequest = make_request(Method, RedirectUrl, Headers, Body),
 
     %% make a request without any redirection
     #client{transport=Transport,
             host=Host,
             port=Port,
             options=Opts0,
-            redirect=Redirect} = Client1,
-
+            redirect=Redirect} = Client,
 
     Opts = lists:keystore(follow_redirect, 1, Opts0,
                           {follow_redirect, false}),
 
 
+    %% update the state with the redirect info
+    Client1 = Client#client{transport=RedirectTransport,
+                            host=RedirectHost,
+                            port=RedirectPort,
+                            options=Opts},
 
 
-    case request(Method, NewLocation, Headers, Body, Opts) of
+    case send_request(Client1, RedirectRequest) of
         {ok,  S, H, RedirectClient} when Redirect /= nil ->
             NewClient = RedirectClient#client{redirect=Redirect,
                                               options=Opts0},
-            {ok, S, H, NewClient};
+            reply_response({ok, S, H, NewClient}, Client1);
         {ok, S, H, RedirectClient} ->
             NewRedirect = {Transport, Host, Port, Opts0},
             NewClient = RedirectClient#client{redirect=NewRedirect,
                                               options=Opts0},
-            {ok, S, H, NewClient};
+            reply_response({ok, S, H, NewClient}, Client1);
 
         Error ->
-            Error
+            reply_response(Error, Client1)
     end.
 
 redirect_location(Headers) ->
