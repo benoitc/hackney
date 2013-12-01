@@ -58,10 +58,23 @@ create_connection(Transport, Host, Port, Options, Dynamic)
 
 
 %% @doc connect a socket and create a client state.
-maybe_connect(#client{state=connected, redirect=nil}=Client) ->
+%%
+maybe_connect(#client{state=closed, redirect=nil}=Client) ->
+    %% the socket has been closed, reconnect it.
+    #client{transport=Transport,
+            host=Host,
+            port=Port} = Client,
+    reconnect(Host, Port, Transport, Client);
+maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
+    %% connection closed after a redirection, reinit the options and
+    %% reconnect it.
+    {Transport, Host, Port, Options} = Redirect,
+    Client1 = Client#client{options=Options,
+                            redirect=nil},
+    reconnect(Host, Port, Transport, Client1);
+maybe_connect(#client{redirect=nil}=Client) ->
     {ok, Client};
-
-maybe_connect(#client{state=connected, redirect=Redirect}=Client) ->
+maybe_connect(#client{redirect=Redirect}=Client) ->
     #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
     %% the connection was redirected. If we are using a pool, checkin
     %% the socket and create the newone, else close the current socket
@@ -76,20 +89,8 @@ maybe_connect(#client{state=connected, redirect=Redirect}=Client) ->
     {Transport, Host, Port, Options} = Redirect,
     Client1 = Client#client{options=Options,
                             redirect=nil},
-    reconnect(Transport, Host, Port, Client1);
-maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
-    %% connection closed after a redirection, reinit the options and
-    %% reconnect it.
-    {Transport, Host, Port, Options} = Redirect,
-    Client1 = Client#client{options=Options,
-                            redirect=nil},
-    reconnect(Transport, Host, Port, Client1);
-maybe_connect(#client{state=closed, redirect=nil}=Client) ->
-    %% the socket has been closed, reconnect it.
-    #client{transport=Transport,
-            host=Host,
-            port=Port} = Client,
-    reconnect(Transport, Host, Port, Client).
+    reconnect(Host, Port, Transport, Client1).
+
 
 %% @doc add set sockets options in the client
 set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
@@ -133,7 +134,7 @@ reconnect(Host, Port, Transport, State) ->
 %%
 
 socket_from_pool(Host, Port, Transport, #client{options=Opts,
-                                                request_ref=Ref0}=Client) ->
+                                                request_ref=ReqRef0}=Client) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
@@ -156,13 +157,13 @@ socket_from_pool(Host, Port, Transport, #client{options=Opts,
                                     buffer = <<>>},
 
 
-            FinalClient = case is_reference(Ref0) of
+            FinalClient = case is_reference(ReqRef0) of
                 true ->
-                    ok = hackney_manager:update_state(Ref0, Client1),
+                    ok = hackney_manager:update_state(ReqRef0, Client1),
                     Client1;
                 false ->
-                    Ref = hackney_manager:new_request(Client1),
-                    Client1#client{request_ref=Ref}
+                    RequestRef = hackney_manager:new_request(Client1),
+                    Client1#client{request_ref=RequestRef}
             end,
             {ok, FinalClient};
         {error, no_socket, Ref} ->

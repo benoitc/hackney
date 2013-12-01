@@ -188,8 +188,8 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
     Request = make_request(Method, URL, Headers, Body),
 
     case hackney_http_proxy:maybe_proxy(Transport, Host, Port, Options) of
-        {ok, State} ->
-            send_request(State, Request);
+        {ok, Ref} ->
+            send_request(Ref, Request);
         Error ->
             Error
     end;
@@ -522,8 +522,7 @@ maybe_redirect(Resp, _Req, _Tries) ->
 
 redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     %% skip the body
-    {ok, Client} = skip_body(Client0),
-
+    {ok, Client} = hackney_response:skip_body(Client0),
 
     %% close the connection if we don't use a pool
     RedirectUrl = hackney_url:parse_url(NewLocation),
@@ -531,7 +530,6 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
                  host=RedirectHost,
                  port=RedirectPort}=RedirectUrl,
     RedirectRequest = make_request(Method, RedirectUrl, Headers, Body),
-
     %% make a request without any redirection
     #client{transport=Transport,
             host=Host,
@@ -542,27 +540,38 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     Opts = lists:keystore(follow_redirect, 1, Opts0,
                           {follow_redirect, false}),
 
-
     %% update the state with the redirect info
     Client1 = Client#client{transport=RedirectTransport,
                             host=RedirectHost,
                             port=RedirectPort,
                             options=Opts},
 
-
+    %% send a request to the new location
     case send_request(Client1, RedirectRequest) of
+        {ok,  S, H, RedirectRef} when is_reference(RedirectRef) ->
+            RedirectState = hackney_manager:get_state(RedirectRef),
+            RedirectState1 = case Redirect of
+                nil ->
+                    RedirectState#client{redirect=Redirect,
+                                         options=Opts0};
+                _ ->
+                    NewRedirect = {Transport, Host, Port, Opts0},
+                    RedirectState#client{redirect=NewRedirect,
+                                         options=Opts0}
+            end,
+            {ok, S, H, RedirectState1};
         {ok,  S, H, RedirectClient} when Redirect /= nil ->
             NewClient = RedirectClient#client{redirect=Redirect,
                                               options=Opts0},
-            reply_response({ok, S, H, NewClient}, Client1);
+            {ok, S, H, NewClient};
         {ok, S, H, RedirectClient} ->
             NewRedirect = {Transport, Host, Port, Opts0},
+            io:format("got ~p~n", [RedirectClient]),
             NewClient = RedirectClient#client{redirect=NewRedirect,
                                               options=Opts0},
-            reply_response({ok, S, H, NewClient}, Client1);
-
+            {ok, S, H, NewClient};
         Error ->
-            reply_response(Error, Client1)
+            Error
     end.
 
 redirect_location(Headers) ->
