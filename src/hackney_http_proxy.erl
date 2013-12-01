@@ -40,7 +40,7 @@ maybe_proxy(Transport, Host, Port, Options)
                              Port, Options, true);
 
         _ ->
-            hackney_connect:connect(Transport, Host, Port, Options)
+            hackney_connect:connect(Transport, Host, Port, Options, true)
     end.
 
 

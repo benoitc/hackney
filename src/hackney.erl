@@ -8,7 +8,7 @@
 
 -module(hackney).
 -export([start/0, start/1, stop/0]).
--export([connect/3, connect/4,
+-export([connect/1, connect/2, connect/3, connect/4,
          close/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
@@ -60,12 +60,25 @@ start(PoolHandler) ->
 stop() ->
     application:stop(hackney).
 
+
+connect(URL) ->
+    connect(URL, []).
+
+connect(#hackney_url{}=URL, Options) ->
+    #hackney_url{transport=Transport,
+                 host=Host,
+                 port=Port} = URL,
+    connect(Transport, Host, Port, Options);
+connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
+    connect(hackney_url:parse_url(URL), Options).
+
 %% @doc connect a socket and create a client state.
 connect(Transport, Host, Port) ->
     hackney_connect:connect(Transport, Host, Port, []).
 
 connect(Transport, Host, Port, Options) ->
     hackney_connect:connect(Transport, Host, Port, Options).
+
 
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
 -spec controlling_process(request(), pid())
@@ -75,7 +88,7 @@ controlling_process(Ref, Pid) ->
 
 %% @doc close the client
 close(Client) ->
-    hackney_response:close(Client).
+    hackney_connect:close(Client).
 
 %% @doc make a request
 -spec request(binary()|list())
@@ -566,7 +579,6 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             {ok, S, H, NewClient};
         {ok, S, H, RedirectClient} ->
             NewRedirect = {Transport, Host, Port, Opts0},
-            io:format("got ~p~n", [RedirectClient]),
             NewClient = RedirectClient#client{redirect=NewRedirect,
                                               options=Opts0},
             {ok, S, H, NewClient};

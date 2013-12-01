@@ -9,42 +9,38 @@
 main(_) ->
     hackney:start(),
 
-    {ok, _, _, Client} = hackney:request(get, <<"https://friendpaste.com">>,
+    io:format("step 1~n", []),
+    {ok, _, _, Ref} = hackney:request(get, <<"https://friendpaste.com">>,
                                          [], <<>>, [{pool, default}]),
-    {ok, Body, Client1} = hackney:body(Client),
-
+    {ok, Body} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body]),
 
-    {ok, _, _, Client2} = hackney:send_request(Client1, {get,
-                                                         <<"/_all_languages">>,
-                                                         [],
-                                                         <<>>}),
-
-    {ok, Body1, Client3} = hackney:body(Client2),
-
+    io:format("step 1~n", []),
+    {ok, _, _, Ref2} = hackney:request(get,
+                                       <<"https://friendpaste.com/_all_languages">>,
+                                       [],
+                                       <<>>),
+    {ok, Body1} = hackney:body(Ref2),
     io:format("body: ~p~n~n", [Body1]),
 
-
+    io:format("step 3~n", []),
     ReqBody = << "{
          \"id\": \"some_paste_id\",
          \"rev\": \"some_revision_id\",
          \"changeset\": \"changeset in unidiff format\"
     }" >>,
-
     ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
-
-    {ok, _, _, Client4} = hackney:send_request(Client3, {post, <<"/">>,
-                                                         ReqHeaders,
-                                                         ReqBody}),
-    {ok, Body2, Client5} = hackney:body(Client4),
+    {ok, _, _, Ref3} = hackney:request(post, <<"https://friendpaste.com">>,
+                                    ReqHeaders, ReqBody),
+    {ok, Body2} = hackney:body(Ref3),
     io:format("body: ~p~n~n", [Body2]),
 
+    io:format("step 4~n", []),
     ReqBody1 = {file, "./examples/test.json"},
-
-    {ok, _, _, Client6} = hackney:send_request(Client5, {post, <<"/">>,
-                                                         ReqHeaders,
-                                                         ReqBody1}),
-    {ok, Body3, Client7} = hackney:body(Client6),
+    {ok, _, _, Ref4} = hackney:request(post, <<"https://friendpaste.com">>,
+                                       ReqHeaders, ReqBody1),
+    {ok, Body3} = hackney:body(Ref4),
     io:format("body: ~p~n~n", [Body3]),
 
-    hackney:close(Client7).
+    IsClosed = hackney_manager:get_state(Ref4) =:= req_not_found,
+    io:format("has been closed: ~p~n", [IsClosed]).

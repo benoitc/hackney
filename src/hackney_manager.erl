@@ -172,9 +172,11 @@ handle_call({close_request, Ref}, _From, Children) ->
             case Status of
                 done ->
                     ok;
-                _ ->
+                _ when Socket /= nil ->
                     Transport:controlling_process(Socket, self()),
-                    Transport:close(Socket)
+                    Transport:close(Socket);
+                _ ->
+                    ok
             end,
 
             {reply, ok, NChildren}

@@ -11,12 +11,12 @@
 
 -module(hackney_connect).
 
--export([connect/3, connect/4,
+-export([connect/3, connect/4, connect/5,
          create_connection/4, create_connection/5,
          maybe_connect/1,
          reconnect/4,
          set_sockopts/2,
-         close_socket/1,
+         close/1,
          is_pool/1]).
 
 -include("hackney.hrl").
@@ -26,7 +26,10 @@ connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, []).
 
 connect(Transport, Host, Port, Options) ->
-    case create_connection(Transport, Host, Port, Options) of
+    connect(Transport, Host, Port, Options, false).
+
+connect(Transport, Host, Port, Options, Dynamic) ->
+    case create_connection(Transport, Host, Port, Options, Dynamic) of
         {ok, #client{request_ref=Ref}} ->
             {ok, Ref};
         Error ->
@@ -81,7 +84,7 @@ maybe_connect(#client{redirect=Redirect}=Client) ->
     %% and create a new one.
     case is_pool(Client) of
         false ->
-            close_socket(Client);
+            close(Client);
         true ->
             Handler:checkin(Ref, Socket)
     end,
@@ -98,9 +101,15 @@ set_sockopts(#client{transport=Transport, socket=Skt}, Options) ->
 
 
 %% @doc close the client
-close_socket(#client{transport=Transport, socket=Socket}) ->
-    Transport:close(Socket).
-
+%%
+%%
+close(#client{socket=nil}=Client) ->
+    Client#client{state = closed};
+close(#client{transport=Transport, socket=Skt}=Client) ->
+    Transport:close(Skt),
+    Client#client{state = closed, socket=nil};
+close(Ref) when is_reference(Ref) ->
+    hackney_manager:close_request(Ref).
 
 
 %% @doc get current pool pid or name used by a client if needed
