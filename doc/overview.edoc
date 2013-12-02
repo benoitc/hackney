@@ -109,7 +109,7 @@ URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [],
-{ok, StatusCode, RespHeaders, Client}Ref = hackney:request(Method, URL,
+{ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL,
                                                         Headers, Payload,
                                                         Options).
 '''
@@ -131,7 +131,7 @@ where `Method', can be any HTTP methods in lowercase.
 ### Read the body
 
 ```
-{ok, Body, Client1} = hackney:body(Client).
+{ok, Body} = hackney:body(Client).
 '''
 
 `hackney:body/1' fetch the body. To fetch it by chunk you can use the
