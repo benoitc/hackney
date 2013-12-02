@@ -81,7 +81,7 @@ application:start(hackney).
 
 Or add hackney to the applications property of your .app in a release
 
-### Simple request without pool
+### Simple request
 
 Do a simple request that will return a client state:
 
@@ -99,10 +99,12 @@ Options = [],
 The request method return the tuple `{ok, StatusCode, Headers, ClientRef}`
 or `{error, Reason}`. A `ClientRef` is simply a reference to the current
 request that you can reuse.
+
 If you prefer the REST syntax, you can also do:
 
 ```
-hackney:Method(URL, Headers, Payload, Options)`''
+hackney:Method(URL, Headers, Payload, Options)
+```
 
 where `Method`, can be any HTTP methods in lowercase.
 ### Read the body
