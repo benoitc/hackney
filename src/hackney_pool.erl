@@ -151,7 +151,7 @@ do_start_pool(Name, Options) ->
     case supervisor:start_child(hackney_sup, Spec) of
         {ok, Pid} ->
             Pid;
-        already_started ->
+         {error, {already_started, _}} ->
             find_pool(Name, Options)
     end.
 
