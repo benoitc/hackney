@@ -16,9 +16,3 @@ Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 *) hackney_pool is based on lhttpc_manager code from the lhttpc project
 under BSD.
 Copyright (c) 2009, Erlang Training and Consulting Ltd.
-
-*) hackney_disp and hackney_disp_handler from the dlhttpc project under
-the BSD license
-
-Copyright (c) 2012, Frederic Trottier-Hebert under
-the BSD license
