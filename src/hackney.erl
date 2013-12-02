@@ -81,6 +81,22 @@ connect(Transport, Host, Port, Options) ->
 controlling_process(Ref, Pid) ->
     hackney_manager:controlling_process(Ref, Pid).
 
+%% @doc Extract raw informations from the client context
+%% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
+%%
+%% return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}'
+%% <ul>
+%% <li>`Response': waiting_response, on_status, on_headers, on_body</li>
+%% <li>`Transport': The current transport module</li>
+%% <li>`Socket': the current socket</li>
+%% <li>`Buffer': Data fetched but not yet processed</li>
+%% </ul>
+-spec cancel_request(client_ref()) ->
+    {atom(), inet:socket(), binary(), hackney_response:response_state()}
+    | {error, term()}.
+cancel_request(Ref) ->
+    hackney_manager:cancel_request(Ref).
+
 %% @doc close the client
 close(Ref) ->
     hackney_connect:close(Ref).
@@ -365,21 +381,6 @@ stop_async(Ref) ->
     hackney_manager:stop_async_response(Ref).
 
 
-%% @doc Extract raw informations from the client context
-%% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
-%%
-%% return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}'
-%% <ul>
-%% <li>`Response': waiting_response, on_status, on_headers, on_body</li>
-%% <li>`Transport': The current transport module</li>
-%% <li>`Socket': the current socket</li>
-%% <li>`Buffer': Data fetched but not yet processed</li>
-%% </ul>
--spec cancel_request(client_ref()) ->
-    {atom(), inet:socket(), binary()}
-    | {error, term()}.
-cancel_request(Ref) ->
-    hackney_manager:cancel_request(Ref).
 
 %% internal functions
 %%
