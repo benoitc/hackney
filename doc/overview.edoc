@@ -278,6 +278,11 @@ LoopFun(LoopFun, ClientRef).
 
 > **Note 2**:  Asynchronous responses automatically checkout the socket at the end.
 
+> **Note 3**:  At any time you can go back and received your response
+> synchronously using the function `hackney:stop_async/1' See the
+> example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
+
+
 
 ### Use the default pool
 
