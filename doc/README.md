@@ -107,10 +107,12 @@ hackney:Method(URL, Headers, Payload, Options)
 ```
 
 where `Method`, can be any HTTP methods in lowercase.
+
 ### Read the body
 
 ```
-{ok, Body, Client1} = hackney:body(Client).`''
+{ok, Body, Client1} = hackney:body(Client).
+```
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
 `hackney:stream_body/1` function:

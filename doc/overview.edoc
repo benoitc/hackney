@@ -125,7 +125,7 @@ If you prefer the REST syntax, you can also do:
 hackney:Method(URL, Headers, Payload, Options)
 '''
 
-where `Method`, can be any HTTP methods in lowercase.
+where `Method', can be any HTTP methods in lowercase.
 
 
 ### Read the body
