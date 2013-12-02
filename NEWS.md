@@ -1,5 +1,28 @@
 # NEWS
 
+0.8.0 - 2013/12/02
+
+major release. With this release the API will not evolve much until the
+1.0 release sometimes in january.
+
+- breaking change: hackney now return a reference instead of an opaque record. The
+  information is maintained in an ETS table. The same reference is now
+used for async response requests.
+- breaking change: `stream_body_request/2` and `stream_multipart_request/2` functions has
+  been renamed to `send_body/2` and `send_multipart_body/2` .
+- breaking change: remove `hackney:close_stream/1` function. You only need to
+  use `hackney:close/1` now.
+- breaking change: rename `hackney:raw/1` function to
+  `hackney:cancel_request/1`.
+- breaking change: the hakney pool handler based on dispcount is now
+  available in its own module so hackney does not depends on dispcount.
+- fix: canceling and closing a request now make sure the async response
+  process is killed.
+- fix: make sure we pass a `Transfer-Encoding: chunked` header when we
+  send a body without content-length.
+- fix: make sure the client is correcly reconnected when we reuse a
+  reference.
+
 0.7.0 - 2013/11/22
 
 - add new Loadbalance pool handler based on dispcount
