@@ -18,7 +18,7 @@
          body/1, body/2, skip_body/1,
          stream_body/1,
          controlling_process/2,
-         raw/1]).
+         cancel_request/1]).
 
 -export([stream_next/1,
          stop_async/1,
@@ -375,18 +375,11 @@ stop_async(Ref) ->
 %% <li>`Socket': the current socket</li>
 %% <li>`Buffer': Data fetched but not yet processed</li>
 %% </ul>
--spec raw(#client{}) ->
-    {atom(), inet:socket(), binary(), hackney_response:response_state()}
+-spec cancel_request(client_ref()) ->
+    {atom(), inet:socket(), binary()}
     | {error, term()}.
-raw(#client{transport=Transport, socket=Socket, buffer=Buffer,
-            response_state=State}) ->
-    case Transport:controlling_process(Socket, self()) of
-        ok ->
-            {State, Transport, Socket, Buffer};
-        Error ->
-            Error
-    end.
-
+cancel_request(Ref) ->
+    hackney_manager:cancel_request(Ref).
 
 %% internal functions
 %%

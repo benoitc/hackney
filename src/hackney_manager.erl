@@ -42,7 +42,7 @@ new_request(InitialState) ->
 cancel_request(#client{request_ref=Ref}) ->
     cancel_request(Ref);
 cancel_request(Ref) when is_reference(Ref) ->
-    gen_server:call(?MODULE, {cancel_request, Ref}).
+    gen_server:call(?MODULE, {cancel_request, Ref, self()}).
 
 close_request(Ref) ->
     gen_server:call(?MODULE, {close_request, Ref}).
@@ -188,7 +188,7 @@ handle_call({controlling_process, Ref, Pid}, _From, Children) ->
             {reply, {ok, {Transport, Socket}}, NChildren}
     end;
 
-handle_call({cancel_request, Ref}, _From, Children) ->
+handle_call({cancel_request, Ref, Owner}, _From, Children) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
@@ -204,9 +204,17 @@ handle_call({cancel_request, Ref}, _From, Children) ->
 
             case maybe_close_async_response(Req, Children1) of
                 {ok, NChildren} ->
-                    #client{transport=Transport, socket=Socket,
-                            buffer=Buffer}=St,
-                    {reply, {Transport, Socket, Buffer}, NChildren};
+                    #client{transport=Transport,
+                            socket=Socket,
+                            buffer=Buffer,
+                            response_state=RespState}=St,
+                    case Transport:controlling_process(Socket, Owner) of
+                        ok ->
+                            {reply, {Transport, Socket, Buffer,
+                                     RespState}, NChildren};
+                        Error ->
+                            {reply, Error, NChildren}
+                    end;
                 {Error, NChildren} ->
                     {reply, Error, NChildren}
             end
