@@ -10,24 +10,24 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#connect_proxy-5">connect_proxy/5</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_proxy-4">maybe_proxy/4</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#connect-5">connect/5</a></td><td></td></tr><tr><td valign="top"><a href="#connect-6">connect/6</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
 
 ## Function Details ##
 
-<a name="connect_proxy-5"></a>
+<a name="connect-5"></a>
 
-### connect_proxy/5 ###
+### connect/5 ###
 
-`connect_proxy(ProxyUrl, ProxyOpts, Host, Port, Options) -> any()`
+`connect(ProxyUrl, ProxyOpts, Host, Port, Options) -> any()`
 
 
-<a name="maybe_proxy-4"></a>
+<a name="connect-6"></a>
 
-### maybe_proxy/4 ###
+### connect/6 ###
 
-`maybe_proxy(Transport, Host, Port, Options) -> any()`
+`connect(ProxyUrl, ProxyOpts0, Host, Port, Options, Dynamic) -> any()`
 
 

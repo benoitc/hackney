@@ -1,9 +1,12 @@
 
 
-# Module hackney_ssl_transport #
+# Module hackney_socks5 #
+* [Description](#description)
 * [Function Index](#index)
 * [Function Details](#functions)
 
+
+socks 5 transport.
 
 <a name="index"></a>
 
@@ -23,7 +26,7 @@
 
 
 <pre><code>
-close(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; ok
+close(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; ok
 </code></pre>
 
 <br></br>
@@ -31,7 +34,7 @@ close(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; ok
 
 Close a TCP socket.
 
-__See also:__ [ssl:close/1](ssl.md#close-1).
+__See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 <a name="connect-3"></a>
 
 ### connect/3 ###
@@ -52,7 +55,7 @@ __See also:__ [ssl:close/1](ssl.md#close-1).
 
 
 <pre><code>
-controlling_process(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
+controlling_process(X1::<a href="inet.md#type-socket">inet:socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
 </code></pre>
 
 <br></br>
@@ -60,7 +63,7 @@ controlling_process(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>,
 
 Assign a new controlling process _Pid_ to _Socket_.
 
-__See also:__ [ssl:controlling_process/2](ssl.md#controlling_process-2).
+__See also:__ [gen_tcp:controlling_process/2](gen_tcp.md#controlling_process-2).
 <a name="messages-1"></a>
 
 ### messages/1 ###
@@ -74,7 +77,7 @@ Atoms used to identify messages in {active, once | true} mode.
 
 
 <pre><code>
-peername(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+peername(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -82,7 +85,7 @@ peername(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok,
 
 Return the address and port for the other end of a connection.
 
-__See also:__ [ssl:peername/1](ssl.md#peername-1).
+__See also:__ [inet:peername/1](inet.md#peername-1).
 <a name="recv-2"></a>
 
 ### recv/2 ###
@@ -96,7 +99,7 @@ __See also:__ [ssl:peername/1](ssl.md#peername-1).
 
 
 <pre><code>
-recv(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
+recv(X1::<a href="inet.md#type-socket">inet:socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
 </code></pre>
 
 <br></br>
@@ -104,14 +107,14 @@ recv(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Length::non_ne
 
 Receive a packet from a socket in passive mode.
 
-__See also:__ [ssl:recv/3](ssl.md#recv-3).
+__See also:__ [gen_tcp:recv/3](gen_tcp.md#recv-3).
 <a name="send-2"></a>
 
 ### send/2 ###
 
 
 <pre><code>
-send(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
+send(X1::<a href="inet.md#type-socket">inet:socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -119,14 +122,14 @@ send(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Packet::iolist
 
 Send a packet on a socket.
 
-__See also:__ [ssl:send/2](ssl.md#send-2).
+__See also:__ [gen_tcp:send/2](gen_tcp.md#send-2).
 <a name="setopts-2"></a>
 
 ### setopts/2 ###
 
 
 <pre><code>
-setopts(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Opts::list()) -&gt; ok | {error, atom()}
+setopts(X1::<a href="inet.md#type-socket">inet:socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -134,14 +137,14 @@ setopts(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Opts::list(
 
 Set one or more options for a socket.
 
-__See also:__ [ssl:setopts/2](ssl.md#setopts-2).
+__See also:__ [inet:setopts/2](inet.md#setopts-2).
 <a name="sockname-1"></a>
 
 ### sockname/1 ###
 
 
 <pre><code>
-sockname(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+sockname(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -149,4 +152,4 @@ sockname(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok,
 
 Get the local address and port of a socket
 
-__See also:__ [ssl:sockname/1](ssl.md#sockname-1).
+__See also:__ [inet:sockname/1](inet.md#sockname-1).
