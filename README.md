@@ -91,66 +91,78 @@ URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [],
-{ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL,
+{ok, StatusCode, RespHeaders, Client}Ref = hackney:request(Method, URL,
                                                         Headers, Payload,
                                                         Options).
 ```
 
-The request method return the tuple `{ok, StatusCode, Headers, Client}`
-or `{error, Reason}`.
-
+The request method return the tuple `{ok, StatusCode, Headers, ClientRef}`
+or `{error, Reason}`. A `ClientRef` is simply a reference to the current
+request that you can reuse.
 If you prefer the REST syntax, you can also do:
 
 ```
-hackney:Method(URL, Headers, Payload, Options)
-```
+hackney:Method(URL, Headers, Payload, Options)`''
 
+where `Method`, can be any HTTP methods in lowercase.
 ### Read the body
 
 ```
-{ok, Body, Client1} = hackney:body(Client).
-```
+{ok, Body, Client1} = hackney:body(Client).`''
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
 `hackney:stream_body/1` function:
 
 ```
-read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Client) of
-		{ok, Data, Client2} ->
-			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
-		{done, Client2} ->
-			{ok, Acc, Client2};
+read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
+	case stream_body(Ref) of
+		{ok, Data} ->
+			read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
+		done ->
+			{ok, Acc};
 		{error, Reason} ->
 			{error, Reason}
 	end.
 ```
 
-### Reuse the client object
+### Reuse a connection
 
-If your connection supports keepalive you can reuse the Client
-record using the `hackney:send_request/2` function:
+By default all connections are created and closed dynamically by
+hackney but sometimes you may want to reuse the same reference for your
+connections. It's especially usefull you just want to handle serially a
+couple of request.
+
+> A closed connection will automatically be reconnected.
+
+#### To create a connection:
 
 ```
-ReqBody = << "{
-	\"id\": \"some_paste_id\",
-	\"rev\": \"some_revision_id\",
-	\"changeset\": \"changeset in unidiff format\"
-	}" >>,
+Transport = hackney_tcp_protocol,
+Host = << "https://friendpaste.com" >>,
+Port = 443,
+Options = [],
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
+```
+
+#### Make a request
+
+Once you created a connection use the `hackney:send_request/2` function
+to make a request:
+
+```
+ReqBody = << "{	\"snippet\": \"some snippet\" }" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
-{ok, _, _, Client2} = hackney:send_request(Client1, NextReq).
-{ok, Body1, Client3} = hackney:body(Client2),
-hackney:close(Client3).
+{ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
+{ok, Body1} = hackney:body(ConnRef),
 ```
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
-Note: asynchronous responses automatically checkout the socket at the
-end.
+> If your connection supports keepalive the connection will be simply :
 
 ### Send a body
 
@@ -172,12 +184,13 @@ the request body:
 While the default is to directly send the request and fetch the status
 and headers, if the body is set as the atom `stream` the request and
 send_request function will return {ok, Client}. Then you can use the
-function `hackney:stream_request_body/2` to stream the request body and
+function `hackney:send_body/2` to stream the request body and
 `hackney:start_response/1` to initialize the response.
 
 > Note: The function `hackney:start_response/1` will only accept
 > a Client that is waiting for a response (with a response state
 > equal to the atom `waiting`).
+:w
 
 Ex:
 
@@ -190,11 +203,10 @@ ReqBody = << "{
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 Path = <<"https://friendpaste.com/">>,
 Method = post,
-{ok, Client} = hackney:request(Method, Path, ReqHeaders, stream, []),
-{ok, Client1} = hackney:stream_request_body(ReqBody, Client),
-{ok, _Status, _Headers, Client2} = hackney:start_response(Client1),
-{ok, Body, Client3} = hackney:body(Client2),
-hackney:close(Client3).
+{ok, ClientRef} = hackney:request(Method, Path, ReqHeaders, stream, []),
+ok  = hackney:send_body(ClientRef, ReqBody),
+{ok, _Status, _Headers, ClientRef} = hackney:start_response(ClientRef),
+{ok, Body} = hackney:body(ClientRef),
 ```
 
 ### Get a response asynchronously
@@ -226,12 +238,13 @@ LoopFun = fun(Loop, Ref) ->
         end
     end.
 
-{ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
-LoopFun(LoopFun, StreamRef).
+{ok, ClientRef} = hackney:get(Url, [], <<>>, Opts),
+LoopFun(LoopFun, ClientRef).
 ```
 
-> Note: When `{async, once}` is used the socket will receive only once.
+> **Note 1**: When `{async, once}` is used the socket will receive only once.
 > To receive the other messages use the function `hackney:stream_next/1`.
+> **Note 2**:  Asynchronous responses automatically checkout the socket at the end.
 
 ### Use the default pool
 
@@ -245,7 +258,7 @@ URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
 Options = [{pool, default}],
-{ok, StatusCode, RespHeaders, Client} = hackney:request(Method, URL, Headers,
+{ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL, Headers,
                                                         Payload, Options).
 ```
 
@@ -277,66 +290,17 @@ hackney_pool:stop_pool(PoolName).
 > by setting the hackney application environment key `use_default_pool`
 > to true.
 
-### Use the Load-balanced Pool dispatcher
+### Use a custom pool handler.
 
-Like the default pool handler hackney_pool, but with the difference that
-for each endpoint (domain/ip + port + ssl) of requests, a load balancer
-is started allowing as many connections as mentioned in the
-configuration.
+Since the version 0.8 it is now possible to use your own Pool to
+maintain the connections in hackney.
 
-Each load balancer has N workers that will connect on-demand to each
-client.
+A pool handler is a module that handle the `hackney_pool_handler`
+behaviour.
 
-The load balancer/pools/dispatcher mechanism is based on
-[dispcount](https://github.com/ferd/dispcount), which will randomly
-contact workers. This means that even though few connections might be
-required, the nondeterministic dispatching may make all connections open
-at some point. As such, it should be used in cases where the load
-is somewhat predictable in terms of base levels.
-
-#### When to use it?
-
-Whenever the HTTP client you're currently using happens to block trying
-to access resources that are too scarce for the load required, you may
-experience something similar to bufferbloat, where the queuing up of
-requests ends up ruining latency for everyone, making the overall
-response time terribly slow.
-
-In the case of Erlang, this may happen over pools (like the default)
-that dispatch resources through message passing. Then the process'
-mailbox ends up as a bottleneck that makes the application too slow.
-Dispcount was developed to solve similar issues by avoiding all message
-passing on busy workers.
-
-> **WARNING**: use with caution, this pool handler is considered as
-> experimental. It's for now nased on the code from the
-> [dlhttpc](https://github.com/ferd/dlhttpc) project and adapted to
-> hackney.
-
-#### How to use it?
-
-In your application config set the `pool_handler` property to
-`hackney_disp`:
-
-```
-{hackney, [
-    {pool_handler, hackney_disp},
-    {restart, permanent},
-    {shutdown, 10000},
-    {maxr, 10},
-    {maxt, 1}
-    ...
-]}
-```
-
-and hackney will automatically use this pool.
-
-The restart, shutdown, maxr, and maxt values allow to configure the
-supervisor that will take care of that dispatcher. You can set the
-maximum number of connections with the options passed to the client:
-`[{max_connections, 200}]` .
-
-> Note: for now you can't force the pool handler / client.
+See for example the
+[hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
+Pool dispatcher based on dispcount].> Note: for now you can`t force the pool handler / client.
 
 ### Automatically follow a redirection
 
@@ -360,9 +324,9 @@ URL = "http://friendpaste.com/",
 ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
 ReqBody = <<>>,
 Options = [{follow_redirect, true}, {max_redirect, true}],
-{ok, S, H, Client} = hackney:request(Method, URL, ReqHeaders,
+{ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
-{ok, Body, Client1} = hackney:body(Client).
+{ok, Body1} = hackney:body(Ref).
 ```
 
 ### Proxy a connection
@@ -395,10 +359,11 @@ $ make devclean ; # clean all files
 <table width="100%" border="0" summary="list of modules">
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp.md" class="module">hackney_disp</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_disp_handler.md" class="module">hackney_disp_handler</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_proxy.md" class="module">hackney_http_proxy</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_manager.md" class="module">hackney_manager</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
