@@ -33,7 +33,6 @@ init([]) ->
     %% init the table to find a pool
     ets:new(hackney_pool, [named_table, set, public]),
 
-    %% streams supervisore
-    StreamSup = ?CHILD(hackney_stream_sup, supervisor),
+    Manager= ?CHILD(hackney_manager, supervisor),
 
-    {ok, { {one_for_one, 10, 1}, [StreamSup]}}.
+    {ok, { {one_for_one, 10, 1}, [Manager]}}.

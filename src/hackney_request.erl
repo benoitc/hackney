@@ -45,10 +45,9 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             DefaultHeaders0 ++ [{<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
     end,
 
-    HeadersDict = hackney_headers:update(hackney_headers:new(DefaultHeaders),
+    HeadersDict0 = hackney_headers:update(hackney_headers:new(DefaultHeaders),
                                          Headers0),
-
-    ReqType0 = req_type(HeadersDict),
+    {HeadersDict, ReqType0} = req_type(HeadersDict0, Body0),
     Expect = expectation(HeadersDict),
 
     %% build headers with the body.
@@ -132,9 +131,9 @@ stream_body(Msg, #client{expect=true}=Client) ->
             Error
     end;
 stream_body(eof, Client) ->
-    {ok, Client#client{response_state=waiting}};
+    {ok, Client};
 stream_body(<<>>, Client) ->
-    {ok, Client#client{response_state=waiting}};
+    {ok, Client};
 stream_body(Func, Client) when is_function(Func) ->
     case Func() of
         {ok, Data} ->
@@ -244,7 +243,7 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             hackney_multipart:encode_form(KVs);
         {file, FileName} ->
             S= filelib:file_size(FileName),
-	    CT = hackney_headers:get_value(<<"content-type">>, Headers,
+	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
 					   hackney_util:content_type(FileName)),
             {S, CT, Body0};
         Func when is_function(Func) ->
@@ -345,11 +344,27 @@ handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
     {NewHeaders, ReqType1, stream, Client#client{response_state=stream,
                                                  mp_boundary=Boundary}}.
 
-req_type(Headers) ->
+req_type(Headers, stream) ->
+    TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),
+    CLen = hackney_headers:get_value(<<"Content-Length">>, Headers,
+                                     undefined),
+
+    case hackney_util:to_lower(TE) of
+        <<"chunked">> ->
+            {Headers, chunked};
+        _ when CLen =:= undefined ->
+            Headers1 = hackney_headers:update(Headers,
+                                              [{<<"Transfer-Encoding">>,
+                                                <<"chunked">>}]),
+            {Headers1, chunked};
+        _ ->
+            {Headers, normal}
+    end;
+req_type(Headers, _Body) ->
     TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),
     case hackney_util:to_lower(TE) of
-        <<"chunked">> -> chunked;
-        _ -> normal
+        <<"chunked">> -> {Headers, chunked};
+        _ -> {Headers, normal}
     end.
 
 expectation(Headers) ->

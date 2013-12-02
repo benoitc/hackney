@@ -8,7 +8,6 @@
 -module(hackney_util).
 
 -export([require/1]).
-
 -export([maybe_apply_defaults/2]).
 
 -export([is_ipv6/1,
@@ -19,6 +18,8 @@
          to_hex/1,
          token_ci/2, token/2,
          content_type/1]).
+
+-include("hackney.hrl").
 
 %% @doc Start the given applications if they were not already started.
 -spec require(list(module())) -> ok.

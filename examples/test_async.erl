@@ -5,20 +5,20 @@
 -module(test_async).
 
 
-loop(StreamRef) ->
+loop(Ref) ->
     receive
-        {StreamRef, {status, StatusInt, Reason}} ->
+        {Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
-            loop(StreamRef);
-        {StreamRef, {headers, Headers}} ->
+            loop(Ref);
+        {Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
-            loop(StreamRef);
-        {StreamRef, done} ->
+            loop(Ref);
+        {Ref, done} ->
             ok;
-        {StreamRef, Bin} ->
+        {Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
-            loop(StreamRef);
+            loop(Ref);
 
         Else ->
             io:format("else ~p~n", [Else]),
@@ -31,5 +31,5 @@ main(_) ->
 
     Url = <<"https://friendpaste.com/_all_languages">>,
     Opts = [async],
-    {ok, {response_stream, StreamRef}} = hackney:get(Url, [], <<>>, Opts),
-    loop(StreamRef).
+    {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
+    loop(Ref).
