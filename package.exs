@@ -48,7 +48,7 @@ Expm.Package.new(name: "hackney", description: "Simple HTTP client in Erlang",
                                  email: "chris@nodnol.org"
                                 ],
                                 [name: "Alexey Aniskin",
-                                 email: "alexey.aniskin@gmail.com
+                                 email: "alexey.aniskin@gmail.com"
                                 ],
                                 [name: "Yuki Ito",
                                  email: "yuki@gnnk.net"
