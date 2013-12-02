@@ -13,7 +13,7 @@
                         public_key,
                         ssl,
                         mimetypes]},
-        {included_applications, [dispcount]},
+        {included_applications, []},
         {mod, { hackney_app, []}},
         {env, [{timeout, 150000},
                {max_connections, 25},
