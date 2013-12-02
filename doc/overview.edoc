@@ -215,7 +215,7 @@ function `hackney:send_body/2' to stream the request body and
 > Note: The function `hackney:start_response/1' will only accept
 > a Client that is waiting for a response (with a response state
 > equal to the atom `waiting').
-:w
+
 
 Ex:
 
