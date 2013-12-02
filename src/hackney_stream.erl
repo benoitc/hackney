@@ -25,10 +25,7 @@ init(Parent, Owner, Ref, #client{transport=Transport,
     %% pass the control to the process
     Transport:controlling_process(Socket, self()),
     %% register the stream
-    ets:insert(hackney_streams, [{Ref, self()}]),
-
     ok = proc_lib:init_ack(Parent, {ok, self()}),
-
 
     try
         stream_loop(Parent, Owner, Ref, Client)
@@ -40,6 +37,7 @@ init(Parent, Owner, Ref, #client{transport=Transport,
 
 
 stream_loop(Parent, Owner, Ref, #client{response_state=St}=Client) ->
+    hackney_manager:update_state(Client),
 
     Resp = case St of
         waiting -> hackney_response:stream_status(Client);
@@ -50,22 +48,26 @@ stream_loop(Parent, Owner, Ref, #client{response_state=St}=Client) ->
 
     case Resp of
         {more, Client2} ->
+            hackney_manager:update_state(Client2),
             async_recv(Parent, Owner, Ref, Client2);
         {ok, StatusInt, Reason, Client2} ->
+            hackney_manager:update_state(Client2),
             Owner ! {Ref, {status, StatusInt, Reason}},
             maybe_continue(Parent, Owner, Ref, Client2);
         {ok, {headers, Headers}, Client2} ->
+            hackney_manager:update_state(Client2),
             Owner ! {Ref, {headers, Headers}},
             maybe_continue(Parent, Owner, Ref, Client2);
         {ok, Data, Client2} ->
+            hackney_manager:update_state(Client2),
             Owner ! {Ref, Data},
             maybe_continue(Parent, Owner, Ref, Client2);
-        {done, _} ->
-            Owner ! {Ref, done},
-            ets:delete(hackney_streams, Ref);
+        {done, Client2} ->
+            hackney_manager:update_state(Client2),
+            Owner ! {Ref, done};
         {error, _Reason} = Error ->
-            Owner ! {Ref, Error},
-            ets:delete(hackney_streams, Ref)
+            hackney_manager:handle_error(Client),
+            Owner ! {Ref, Error}
     end.
 
 maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
@@ -78,12 +80,12 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             erlang:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
                                                        Client]);
         {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
+            hackney_manager:update_state(Client),
             Transport:setopts(Socket, [{active, false}]),
             Transport:controlling_process(Socket, From),
-            From ! {Ref, Client};
+            From ! {Ref, ok};
         {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
+            hackney_manager:update_state(Client),
             hackney_response:close(Client);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -101,12 +103,12 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
         {Ref, stream_next} ->
             stream_loop(Parent, Owner, Ref, Client);
         {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
+            hackney_manager:update_state(Client),
             Transport:setopts(Socket, [{active, false}]),
             Transport:controlling_process(Socket, From),
-            From ! {Ref, Client};
+            From ! {Ref, ok};
         {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
+            hackney_manager:update_state(Client),
             hackney_reponse:close(Client);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -141,7 +143,6 @@ async_recv(Parent, Owner, Ref, #client{transport=Transport,
             %% hibernate
             erlang:hibernate(?MODULE, async_recv, [Parent, Owner, Ref, Client]);
         {Ref, close} ->
-            ets:delete(hackney_streams, Ref),
             Transport:close(Sock);
         {Ref, stop_async, From} ->
             ets:delete(hackney_streams, Ref),
@@ -162,11 +163,9 @@ async_recv(Parent, Owner, Ref, #client{transport=Transport,
                 _ ->
                     Owner ! {error, closed}
             end,
-            ets:delete(hackney_streams, Ref),
             Transport:close(Sock);
         {Error, Sock, Reason} ->
             Owner ! {error, Reason},
-            ets:delete(hackney_streams, Ref),
             Transport:close(Sock);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -186,8 +185,7 @@ system_continue(_, _, {async_recv, Parent, Owner, Ref, Client}) ->
     async_recv(Parent, Owner, Ref, Client).
 
 -spec system_terminate(any(), _, _, _) -> no_return().
-system_terminate(Reason, _, _, {_, _, _, Ref, _}) ->
-    ets:delete(hackney_streams, Ref),
+system_terminate(Reason, _, _, {_, _, _, _Ref, _}) ->
     exit(Reason).
 
 system_code_change(Misc, _, _, _) ->

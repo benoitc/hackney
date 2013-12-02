@@ -15,17 +15,16 @@
          start_response/1,
          send_body/2, finish_send_body/1,
          send_multipart_body/2,
-         stream_body/1,
-         stream_next/1,
-         close_stream/1,
-         stop_async/1,
          body/1, body/2, skip_body/1,
          controlling_process/2,
          raw/1]).
 
--export([stream_pid/1,
-         monitor_stream/1, demonitor_stream/1,
-         pause_stream/1, resume_stream/1]).
+-export([stream_body/1,
+         stream_next/1,
+         close_stream/1,
+         stop_async/1,
+         pause_stream/1,
+         resume_stream/1]).
 
 -define(METHOD_TPL(Method),
         -export([Method/1, Method/2, Method/3, Method/4])).
@@ -338,90 +337,46 @@ skip_body(Ref) ->
         end).
 
 
--spec stream_pid(stream_ref()) -> pid() | stream_undefined.
-stream_pid(StreamRef) ->
-    case ets:lookup(hackney_streams, StreamRef) of
-        [] -> stream_undefined;
-        [{_, Pid}] -> Pid
-    end.
-
-%% @doc monitor response stream
--spec monitor_stream(stream_ref()) -> ok.
-monitor_stream(StreamRef) ->
-    erlang:monitor(stream_pid(StreamRef), [process]).
-
-%% @doc demonitor response stream
--spec demonitor_stream(stream_ref()) -> ok.
-demonitor_stream(StreamRef) ->
-    erlang:demonitor(stream_pid(StreamRef)).
-
-
 %% @doc pause a response stream, the stream process will hibernate and
 %% be woken later by the resume function
--spec pause_stream(stream_ref()) -> ok | stream_undefined.
-pause_stream(StreamRef) ->
-    case stream_pid(StreamRef) of
-        undefined ->
-            stream_undefined;
-        Pid ->
-            Pid ! {StreamRef, pause},
-            ok
-    end.
+-spec pause_stream(request()) -> ok | {error, req_not_found}.
+pause_stream(Ref) ->
+    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
+                Pid ! {Ref, pauwse},
+                ok
+        end).
 
 %% @doc resume a paused response stream, the stream process will be
 %% awoken
--spec resume_stream(stream_ref()) -> ok | stream_undefined.
-resume_stream(StreamRef) ->
-    case stream_pid(StreamRef) of
-        undefined ->
-            stream_undefined;
-        Pid ->
-            Pid ! {StreamRef, resume},
-            ok
-    end.
+-spec resume_stream(request()) -> ok | {error, req_not_found}.
+resume_stream(Ref) ->
+    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
+                Pid ! {Ref, resume},
+                ok
+        end).
 
 %% @doc continue to the next stream message. Only use it when
 %% `{async, once}' is set in the client options.
--spec stream_next(stream_ref()) -> ok | stream_undefined.
-stream_next(StreamRef) ->
-    case stream_pid(StreamRef) of
-        undefined ->
-            stream_undefined;
-        Pid ->
-            Pid ! {StreamRef, stream_next},
-            ok
-    end.
+-spec stream_next(request()) -> ok | {error, req_not_found}.
+stream_next(Ref) ->
+    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
+                Pid ! {Ref, stream_next},
+                ok
+        end).
 
 
 %% @doc close the stream we are receiving on. The socket is closed and
 %% not put back in the pool if any
--spec close_stream(stream_ref()) -> ok | stream_undefined.
-close_stream(StreamRef) ->
-    case stream_pid(StreamRef) of
-        undefined ->
-            stream_undefined;
-        Pid ->
-            Pid ! {StreamRef, close},
-            ok
-    end.
+-spec close_stream(request()) -> ok | stream_undefined.
+close_stream(Ref) ->
+    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
+                Pid ! {Ref, close}
+        end).
 
 %% @doc stop to receive asynchronously.
--spec stop_async(stream_ref()) -> ok | stream_undefined | {error, term()}.
-stop_async(StreamRef) ->
-    case stream_pid(StreamRef) of
-        undefined ->
-            stream_undefined;
-        Pid ->
-            Pid ! {StreamRef, stop_async, self()},
-            receive
-                {StreamRef, Client} ->
-                    {ok, Client};
-                Error ->
-                    Error
-            after 5000 ->
-                {error, timeout}
-            end
-    end.
+-spec stop_async(request()) -> ok | {error, req_not_found} | {error, term()}.
+stop_async(Ref) ->
+    hackney_manager:stop_async_response(Ref).
 
 
 
@@ -611,6 +566,8 @@ reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
     {ok, Status, Headers, Ref};
 reply_response({ok, #client{request_ref=Ref}=NState}, _State) ->
     hackney_manager:update_state(NState),
+    {ok, Ref};
+reply_response({ok, Ref}, _State) when is_reference(Ref) ->
     {ok, Ref};
 reply_response(Error, State) ->
     hackney_manager:handle_error(State),

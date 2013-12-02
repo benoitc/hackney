@@ -40,14 +40,14 @@ start_response(#client{response_state=stream} = Client) ->
         Error ->
             Error
     end;
-start_response(#client{response_state=waiting, async=Async} = Client)
+start_response(#client{request_ref=Ref, response_state=waiting,
+                       async=Async}=Client)
         when Async =:= true orelse Async =:= once ->
-    Source = self(),
-    StreamRef = {hackney_stream, make_ref()},
-    case supervisor:start_child(hackney_stream_sup, [Source, StreamRef,
-                                                     Client]) of
-        {ok, _Pid} ->
-            {ok, {response_stream, StreamRef}};
+
+    hackney_manager:update_state(Client),
+    case hackney_manager:start_async_response(Ref) of
+        ok ->
+            {ok, Ref};
         Error ->
             Error
     end;
