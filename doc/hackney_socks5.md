@@ -2,18 +2,36 @@
 
 # Module hackney_socks5 #
 * [Description](#description)
+* [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
 
 
 socks 5 transport.
 
+
+<a name="types"></a>
+
+## Data Types ##
+
+
+
+
+### <a name="type-socks5_socket">socks5_socket()</a> ###
+
+
+
+<pre><code>
+socks5_socket() = {atom(), <a href="inet.md#type-socket">inet:socket()</a>}
+</code></pre>
+
+
 <a name="index"></a>
 
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#close-1">close/1</a></td><td>Close a TCP socket.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Socket</em>.</td></tr><tr><td valign="top"><a href="#messages-1">messages/1</a></td><td>Atoms used to identify messages in {active, once | true} mode.</td></tr><tr><td valign="top"><a href="#peername-1">peername/1</a></td><td>Return the address and port for the other end of a connection.</td></tr><tr><td valign="top"><a href="#recv-2">recv/2</a></td><td></td></tr><tr><td valign="top"><a href="#recv-3">recv/3</a></td><td>Receive a packet from a socket in passive mode.</td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td>Send a packet on a socket.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>Set one or more options for a socket.</td></tr><tr><td valign="top"><a href="#sockname-1">sockname/1</a></td><td>Get the local address and port of a socket.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#close-1">close/1</a></td><td>Close a socks5 socket.</td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td></td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Socket</em>.</td></tr><tr><td valign="top"><a href="#messages-1">messages/1</a></td><td>Atoms used to identify messages in {active, once | true} mode.</td></tr><tr><td valign="top"><a href="#peername-1">peername/1</a></td><td>Return the address and port for the other end of a connection.</td></tr><tr><td valign="top"><a href="#recv-2">recv/2</a></td><td></td></tr><tr><td valign="top"><a href="#recv-3">recv/3</a></td><td>Receive a packet from a socket in passive mode.</td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td>Send a packet on a socket.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>Set one or more options for a socket.</td></tr><tr><td valign="top"><a href="#sockname-1">sockname/1</a></td><td>Get the local address and port of a socket.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -26,13 +44,13 @@ socks 5 transport.
 
 
 <pre><code>
-close(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; ok
+close(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; ok
 </code></pre>
 
 <br></br>
 
 
-Close a TCP socket.
+Close a socks5 socket.
 
 __See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 <a name="connect-3"></a>
@@ -55,7 +73,7 @@ __See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 
 
 <pre><code>
-controlling_process(X1::<a href="inet.md#type-socket">inet:socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
+controlling_process(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
 </code></pre>
 
 <br></br>
@@ -77,7 +95,7 @@ Atoms used to identify messages in {active, once | true} mode.
 
 
 <pre><code>
-peername(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+peername(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -99,7 +117,7 @@ __See also:__ [inet:peername/1](inet.md#peername-1).
 
 
 <pre><code>
-recv(X1::<a href="inet.md#type-socket">inet:socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
+recv(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
 </code></pre>
 
 <br></br>
@@ -114,7 +132,7 @@ __See also:__ [gen_tcp:recv/3](gen_tcp.md#recv-3).
 
 
 <pre><code>
-send(X1::<a href="inet.md#type-socket">inet:socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
+send(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -129,7 +147,7 @@ __See also:__ [gen_tcp:send/2](gen_tcp.md#send-2).
 
 
 <pre><code>
-setopts(X1::<a href="inet.md#type-socket">inet:socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
+setopts(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
 </code></pre>
 
 <br></br>
@@ -144,7 +162,7 @@ __See also:__ [inet:setopts/2](inet.md#setopts-2).
 
 
 <pre><code>
-sockname(X1::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+sockname(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 
 <br></br>
