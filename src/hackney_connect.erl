@@ -238,6 +238,8 @@ do_connect(Host, Port, Transport, #client{options=Opts,
                     Client1#client{request_ref=Ref}
             end,
             {ok, FinalClient};
+        {error, timeout} ->
+            {error, connect_timeout};
         Error ->
             Error
     end.
