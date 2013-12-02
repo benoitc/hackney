@@ -128,7 +128,7 @@ async_recv(Parent, Owner, Ref, #client{transport=Transport,
                                 buffer=Buffer,
                                 recv_timeout=Timeout}=Client) ->
 
-    {OK, Closed, Error} = Transport:messages(),
+    {OK, Closed, Error} = Transport:messages(Sock),
     Transport:setopts(Sock, [{active, once}]),
     %% some useful info
     #client{version=Version, clen=CLen, te=TE} = Client,

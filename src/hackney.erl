@@ -432,7 +432,35 @@ maybe_proxy(Transport, Host, Port, Options)
                                                           Options)}],
             hackney_http_proxy:connect(hackney_url:unparse_url(Url), ProxyOpts, Host,
                              Port, Options, true);
+        {socks5, ProxyHost, ProxyPort} ->
+            %% create connection options
+            ProxyUser = proplists:get_value(socks5_user, Options),
+            ProxyPass = proplists:get_value(socks5_pass, Options),
+            ConnectOpts = proplists:get_value(connect_options, Options,
+                                              []),
+            ConnectOpts1 = [{socks5_host, ProxyHost},
+                           {socks5_port, ProxyPort},
+                           {socks5_user, ProxyUser},
+                           {socks5_pass, ProxyPass},
+                           {socks5_transport, Transport} | ConnectOpts],
 
+            %% ssl options?
+            Insecure = proplists:get_value(insecure, Options, false),
+            ConnectOpts2 =  case proplists:get_value(ssl_options,
+                                                     Options) of
+                undefined ->
+                    [{insecure, Insecure}] ++ ConnectOpts1;
+                SslOpts ->
+                    [{ssl_opttions, SslOpts},
+                     {insecure, Insecure}] ++ ConnectOpts1
+            end,
+
+            Options1 = lists:keystore(connect_options, 1, Options,
+                                      {connect_options, ConnectOpts2}),
+
+            %% connect using a socks5 proxy
+            hackney_connect:connect(hackney_socks5, Host, Port, Options1,
+                                    true);
         _ ->
             hackney_connect:connect(Transport, Host, Port, Options, true)
     end.
