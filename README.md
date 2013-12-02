@@ -250,6 +250,7 @@ LoopFun(LoopFun, ClientRef).
 
 > **Note 1**: When `{async, once}` is used the socket will receive only once.
 > To receive the other messages use the function `hackney:stream_next/1`.
+
 > **Note 2**:  Asynchronous responses automatically checkout the socket at the end.
 
 ### Use the default pool
