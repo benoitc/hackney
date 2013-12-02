@@ -16,12 +16,11 @@
          send_body/2, finish_send_body/1,
          send_multipart_body/2,
          body/1, body/2, skip_body/1,
+         stream_body/1,
          controlling_process/2,
          raw/1]).
 
--export([stream_body/1,
-         stream_next/1,
-         close_stream/1,
+-export([stream_next/1,
          stop_async/1,
          pause_stream/1,
          resume_stream/1]).
@@ -38,11 +37,8 @@
 -opaque client() :: #client{}.
 -export_type([client/0]).
 
--type stream_ref() :: term().
--export_type([stream_ref/0]).
-
--type request() :: term().
--export_type([request/0]).
+-type client_ref() :: term().
+-export_type([client_ref/0]).
 
 %% @doc Start the couchbeam process. Useful when testing using the shell.
 start() ->
@@ -80,14 +76,14 @@ connect(Transport, Host, Port, Options) ->
 
 
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
--spec controlling_process(request(), pid())
+-spec controlling_process(client_ref(), pid())
 	-> ok | {error, closed | not_owner | atom()}.
 controlling_process(Ref, Pid) ->
     hackney_manager:controlling_process(Ref, Pid).
 
 %% @doc close the client
-close(Client) ->
-    hackney_connect:close(Client).
+close(Ref) ->
+    hackney_connect:close(Ref).
 
 %% @doc make a request
 -spec request(binary()|list())
@@ -178,9 +174,8 @@ request(Method, URL, Headers, Body) ->
 %%  also do `hackney:Method(...)' if you prefer to use the REST
 %%  syntax.</bloquote>
 -spec request(term(), url() | binary(), list(), term(), list())
-    -> {ok, integer(), list(), #client{}}
-    | {ok, #client{}}
-    | {ok, {response_stream, stream_ref()}}
+    -> {ok, integer(), list(), client_ref()}
+    | {ok, client_ref()}
     | {error, term()}.
 request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
     #hackney_url{transport=Transport,
@@ -244,7 +239,7 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
 
 %% @doc send the request body until eob. It's issued after sending a request using
 %% the `request' and `send_request' functions.
--spec send_body(request(), term())
+-spec send_body(client_ref(), term())
     -> ok | {error, term()}.
 send_body(Ref, Body) ->
     hackney_manager:get_state(Ref, fun(State) ->
@@ -282,7 +277,7 @@ finish_send_body(Ref) ->
 %% <li>`{bytes, Bytes}': number of bytes to send</li>
 %% <li>`{chunk_size, ChunkSize}': the size of the chunk to send</li>
 %% </ul>
--spec send_multipart_body(request(), term()) -> ok | {error, term()}.
+-spec send_multipart_body(client_ref(), term()) -> ok | {error, term()}.
 send_multipart_body(Ref, Body) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_multipart:stream(Body, State),
@@ -292,8 +287,8 @@ send_multipart_body(Ref, Body) ->
 %% @doc start a response.
 %% Useful if you stream the body by yourself. It will fetch the status
 %% and headers of the response. and return
--spec start_response(request())
-    -> {ok, integer(), list(), request()} | {ok, request()} | {error, term()}.
+-spec start_response(client_ref())
+    -> {ok, integer(), list(), client_ref()} | {ok, client_ref()} | {error, term()}.
 start_response(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:start_response(State),
@@ -301,7 +296,7 @@ start_response(Ref) ->
         end).
 
 %% @doc Stream the response body.
--spec stream_body(request())
+-spec stream_body(client_ref())
     -> ok | stop | {error, term()}.
 stream_body(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
@@ -310,7 +305,7 @@ stream_body(Ref) ->
         end).
 
 %% @doc Return the full body sent with the response.
--spec body(request()) -> {ok, binary()} | {error, atom()}.
+-spec body(client_ref()) -> {ok, binary()} | {error, atom()}.
 body(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:body(State),
@@ -319,7 +314,7 @@ body(Ref) ->
 
 %% @doc Return the full body sent with the response as long as the body
 %% length doesn't go over MaxLength.
--spec body(request(), non_neg_integer() | infinity)
+-spec body(client_ref(), non_neg_integer() | infinity)
 	-> {ok, binary()} | {error, atom()}.
 body(Ref, MaxLength) ->
     hackney_manager:get_state(Ref, fun(State) ->
@@ -329,7 +324,7 @@ body(Ref, MaxLength) ->
 
 
 %% @doc skip the full body. (read all the body if needed).
--spec skip_body(request()) -> ok | {error, atom()}.
+-spec skip_body(client_ref()) -> ok | {error, atom()}.
 skip_body(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:skip_body(State),
@@ -337,9 +332,18 @@ skip_body(Ref) ->
         end).
 
 
+%% @doc continue to the next stream message. Only use it when
+%% `{async, once}' is set in the client options.
+-spec stream_next(client_ref()) -> ok | {error, req_not_found}.
+stream_next(Ref) ->
+    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
+                Pid ! {Ref, stream_next},
+                ok
+        end).
+
 %% @doc pause a response stream, the stream process will hibernate and
 %% be woken later by the resume function
--spec pause_stream(request()) -> ok | {error, req_not_found}.
+-spec pause_stream(client_ref()) -> ok | {error, req_not_found}.
 pause_stream(Ref) ->
     hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
                 Pid ! {Ref, pauwse},
@@ -348,33 +352,15 @@ pause_stream(Ref) ->
 
 %% @doc resume a paused response stream, the stream process will be
 %% awoken
--spec resume_stream(request()) -> ok | {error, req_not_found}.
+-spec resume_stream(client_ref()) -> ok | {error, req_not_found}.
 resume_stream(Ref) ->
     hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
                 Pid ! {Ref, resume},
                 ok
         end).
 
-%% @doc continue to the next stream message. Only use it when
-%% `{async, once}' is set in the client options.
--spec stream_next(request()) -> ok | {error, req_not_found}.
-stream_next(Ref) ->
-    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
-                Pid ! {Ref, stream_next},
-                ok
-        end).
-
-
-%% @doc close the stream we are receiving on. The socket is closed and
-%% not put back in the pool if any
--spec close_stream(request()) -> ok | stream_undefined.
-close_stream(Ref) ->
-    hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
-                Pid ! {Ref, close}
-        end).
-
 %% @doc stop to receive asynchronously.
--spec stop_async(request()) -> ok | {error, req_not_found} | {error, term()}.
+-spec stop_async(client_ref()) -> ok | {error, req_not_found} | {error, term()}.
 stop_async(Ref) ->
     hackney_manager:stop_async_response(Ref).
 
