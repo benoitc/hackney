@@ -373,10 +373,24 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 ### Proxy a connection
 
-For now only HTTP tunneling is supported. To use an HTTP tunnel add the
-option `{proxy, ProxyUrl}' where `ProxyUrl' can be a simple url or an
-`{Host, Port}' tuple. If you need to authenticate set the option
-`{proxy_auth, {User, Password}}'.
+#### HTTP Proxy
+
+To use an HTTP tunnel add the option `{proxy, ProxyUrl}' where
+`ProxyUrl' can be a simple url or an `{Host, Port}' tuple. If you need
+to authenticate set the option `{proxy_auth, {User, Password}}'.
+
+#### SOCKS5 proxy
+
+Hackney supports the connection via a socks5 proxy. To set a socks5
+proxy, use the following settings:
+
+- `{proxy, {socks5, ProxyHost, ProxyPort}}': to set the host and port of
+  the proxy to connect.
+- `{socks5_user, Username}': to set the user used to connect to the proxy
+- `{socks5_pass, Password}': to set the password used to connect to the proxy
+
+SSL and TCP connections can be forwarded via a socks5 proxy. hackney is
+automatically upgrading to an SSL connection if needed.
 
 ## Contribute
 
