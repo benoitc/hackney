@@ -15,7 +15,7 @@ used for async response requests.
 - breaking change: rename `hackney:raw/1` function to
   `hackney:cancel_request/1`.
 - breaking change: the hakney pool handler based on dispcount is now
-  available in its own module so hackney does not depends on dispcount.
+  available in its [own repository](https://github.com/benoitc/hackney_disp) so hackney doe  not depends on dispcount.
 - fix: canceling and closing a request now make sure the async response
   process is killed.
 - fix: make sure we pass a `Transfer-Encoding: chunked` header when we
