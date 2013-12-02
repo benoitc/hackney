@@ -210,7 +210,7 @@ request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
 
     Request = make_request(Method, URL, Headers, Body),
 
-    case hackney_http_proxy:maybe_proxy(Transport, Host, Port, Options) of
+    case maybe_proxy(Transport, Host, Port, Options) of
         {ok, Ref} ->
             send_request(Ref, Request);
         Error ->
@@ -407,6 +407,35 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body) ->
     end,
 
     {Method, FinalPath, Headers, Body}.
+
+
+maybe_proxy(Transport, Host, Port, Options)
+        when is_list(Host), is_integer(Port), is_list(Options) ->
+
+    case proplists:get_value(proxy, Options) of
+        Url when is_binary(Url) orelse is_list(Url) ->
+            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
+                                                          Options)}],
+            #hackney_url{transport=PTransport} = hackney_url:parse_url(Url),
+
+            if PTransport =/= Transport ->
+                    {error, invalid_proxy_transport};
+                true ->
+                    hackney_http_proxy:connect(Url, ProxyOpts, Host, Port, Options)
+            end;
+        {ProxyHost, ProxyPort} ->
+            Netloc = iolist_to_binary([ProxyHost, ":",
+                                       integer_to_list(ProxyPort)]),
+            Scheme = hackney_url:transport_scheme(Transport),
+            Url = #hackney_url{scheme=Scheme, netloc=Netloc},
+            ProxyOpts = [{basic_auth, proplists:get_value(proxy_auth,
+                                                          Options)}],
+            hackney_http_proxy:connect(hackney_url:unparse_url(Url), ProxyOpts, Host,
+                             Port, Options, true);
+
+        _ ->
+            hackney_connect:connect(Transport, Host, Port, Options, true)
+    end.
 
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
