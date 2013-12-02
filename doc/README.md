@@ -148,6 +148,9 @@ Options = [],
 {ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
 ```
 
+> To create a connection that will use an HTTP proxy use
+> `hackney_http_proxy:connect_proxy/5` instead.
+
 #### Make a request
 
 Once you created a connection use the `hackney:send_request/2` function

@@ -365,7 +365,6 @@ stop_async(Ref) ->
     hackney_manager:stop_async_response(Ref).
 
 
-
 %% @doc Extract raw informations from the client context
 %% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
 %%
