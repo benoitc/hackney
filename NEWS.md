@@ -1,5 +1,17 @@
 # NEWS
 
+0.8.1 - 2014/12/04
+------------------
+
+service release with a new feature and some minor improvements
+
+- added the support for [socks5
+  proxies](https://github.com/benoitc/hackney#socks5-proxy)
+- improvment: integer and atom can now be passed in url params or forms
+  values.
+- breaking change: differentiate connect/recv timeout, now connect
+  timeout return `{error, connect_timeout}`
+
 0.8.0 - 2013/12/02
 ------------------
 
