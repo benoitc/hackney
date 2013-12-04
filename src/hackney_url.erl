@@ -201,7 +201,7 @@ unhex(_) -> error.
 %% @equiv urlencode(Bin, [])
 -spec urlencode(binary()) -> binary().
 urlencode(Bin) ->
-	urlencode(Bin, []).
+	urlencode(hackney_util:to_binary(Bin), []).
 
 %% @doc URL encode a string binary.
 %% The `noplus' option disables the default behaviour of quoting space
