@@ -150,6 +150,7 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init(_) ->
+    process_flag(trap_exit, true),
     ets:new(?MODULE, [set, {keypos, 1}, public, named_table,
                       {write_concurrency, true}]),
     {ok, dict:new()}.
