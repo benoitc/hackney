@@ -40,6 +40,7 @@ stream_loop(Parent, Owner, Ref, #client{response_state=St}=Client) ->
     hackney_manager:update_state(Client),
 
     Resp = case St of
+        done -> {done, Client};
         waiting -> hackney_response:stream_status(Client);
         on_status -> hackney_response:stream_status(Client);
         on_header -> hackney_response:stream_headers(Client);
