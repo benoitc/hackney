@@ -1,6 +1,6 @@
 # NEWS
 
-0.8.3 - 2014/12/07
+0.8.3 - 2013/12/07
 ------------------
 
 - add: support redirection in async responses
@@ -8,12 +8,12 @@
   [hackney_url:make_url/3](https://github.com/benoitc/hackney/commit/a545d266106c0557374a8b9b13caa63ce89e86f2)
 - fix: handle case where the response is already done in async responses
 
-0.8.2 - 2014/12/05
+0.8.2 - 2013/12/05
 ------------------
 
 - fix: trap exits in hackney_manager
 
-0.8.1 - 2014/12/04
+0.8.1 - 2013/12/04
 ------------------
 
 service release with a new feature and some minor improvements
