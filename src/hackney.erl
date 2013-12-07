@@ -477,7 +477,6 @@ maybe_proxy(Transport, Host, Port, Options)
 
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
-    io:format("ici redirect"),
     Resp;
 maybe_redirect({ok, S, H, #client{follow_redirect=true,
                                   max_redirect=Max,
