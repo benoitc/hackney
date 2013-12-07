@@ -1,5 +1,13 @@
 # NEWS
 
+0.8.3 - 2014/12/05
+------------------
+
+- add: support redirection in async responses
+- improve
+  [hackney_url:make_url/3](https://github.com/benoitc/hackney/commit/a545d266106c0557374a8b9b13caa63ce89e86f2)
+- fix: handle case where the response is already done in async responses
+
 0.8.2 - 2014/12/05
 ------------------
 
