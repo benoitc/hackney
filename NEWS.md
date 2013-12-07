@@ -1,6 +1,6 @@
 # NEWS
 
-0.8.3 - 2014/12/05
+0.8.3 - 2014/12/07
 ------------------
 
 - add: support redirection in async responses
