@@ -126,8 +126,8 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
 %% to the receiver so he can eventually start a new request.
 %%
 %% redirect messages:
-%% - {redirect, To, Headers} (for get and head requests)
-%% - {see_other, To, Headers} for POST requests.
+%% - {redirect, To, Headers}
+%% - {see_other, To, Headers} for status 303 and POST requests.
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                #client{transport=Transport,
                        socket=Socket,

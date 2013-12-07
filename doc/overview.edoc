@@ -286,8 +286,8 @@ LoopFun(LoopFun, ClientRef).
 > at the end. When the option `{following_redirect, true}' is passed to
 > the request, you will receive the folllowing messages on valid
 > redirection:
-> - `{redirect, To, Headers}' (for get and head requests)
-> - `{see_other, To, Headers}' for POST requests.
+> - `{redirect, To, Headers}'
+> - `{see_other, To, Headers}' for status 303 and POST requests.
 
 
 

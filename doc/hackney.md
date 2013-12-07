@@ -355,9 +355,9 @@ receiving a connection. Default is infinity
 `follow_redirect` is take in consideration for the redirection.
 If a valid redirection happen you receive the messages:
 
-* `{redirect, To, Headers`} (for get and head requests)
+* `{redirect, To, Headers`}
 
-* `{see_other, To, Headers}` for POST requests.
+* `{see_other, To, Headers}` for status 303 POST requests.
 
 </blocquote>
 

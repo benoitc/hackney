@@ -180,8 +180,8 @@ request(Method, URL, Headers, Body) ->
 %%      `follow_redirect' is take in consideration for the redirection.
 %%      If a valid redirection happen you receive the messages:
 %%      <ul>
-%%        <li>`{redirect, To, Headers'} (for get and head requests)</li>
-%%        <li>`{see_other, To, Headers}' for POST requests.</li>
+%%        <li>`{redirect, To, Headers'}</li>
+%%        <li>`{see_other, To, Headers}' for status 303 POST requests.</li>
 %%      </ul></blocquote>
 %%
 %%      </li>
