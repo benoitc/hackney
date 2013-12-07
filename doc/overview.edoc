@@ -282,6 +282,13 @@ LoopFun(LoopFun, ClientRef).
 > synchronously using the function `hackney:stop_async/1' See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
+> **Note 4**:  Asynchronous responses automatically checkout the socket
+> at the end. When the option `{following_redirect, true}' is passed to
+> the request, you will receive the folllowing messages on valid
+> redirection:
+> - `{redirect, To, Headers}' (for get and head requests)
+> - `{see_other, To, Headers}' for POST requests.
+
 
 
 ### Use the default pool

@@ -20,6 +20,8 @@
          controlling_process/2,
          cancel_request/1]).
 
+-export([redirect_location/1]).
+
 -export([stream_next/1,
          stop_async/1,
          pause_stream/1,
@@ -173,6 +175,14 @@ request(Method, URL, Headers, Body) ->
 %%          <li>{recv_timeout, infinity | integer()}: timeout used when
 %%          receiving a connection. Default is infinity</li>
 %%      </ul>
+%%
+%%      <blocquote>Note: if the response is async, only
+%%      `follow_redirect' is take in consideration for the redirection.
+%%      If a valid redirection happen you receive the messages:
+%%      <ul>
+%%        <li>`{redirect, To, Headers'} (for get and head requests)</li>
+%%        <li>`{see_other, To, Headers}' for POST requests.</li>
+%%      </ul></blocquote>
 %%
 %%      </li>
 %%
@@ -467,6 +477,7 @@ maybe_proxy(Transport, Host, Port, Options)
 
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
+    io:format("ici redirect"),
     Resp;
 maybe_redirect({ok, S, H, #client{follow_redirect=true,
                                   max_redirect=Max,

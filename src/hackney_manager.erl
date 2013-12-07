@@ -60,8 +60,14 @@ start_async_response(Ref) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
             req_not_found;
-        [{Ref, Req}] ->
-            gen_server:call(?MODULE, {start_async_response, Req})
+        [{Ref, #request{state=Client}=Req}] ->
+            #client{transport=Transport, socket=Socket} = Client,
+            case gen_server:call(?MODULE, {start_async_response, Req}) of
+                {ok, Pid} ->
+                    Transport:controlling_process(Socket, Pid);
+                Error ->
+                    Error
+            end
     end.
 
 stop_async_response(Ref) ->
@@ -164,7 +170,7 @@ handle_call({start_async_response, #request{ref=Ref}=Req}, _From, Children) ->
         {ok, #request{async_pid=Pid}=NReq} ->
             true = ets:insert(?MODULE, {Ref, NReq}),
             NChildren = dict:store(Pid, Ref, Children),
-            {reply, ok, NChildren};
+            {reply, {ok, Pid}, NChildren};
         Error ->
             {reply, Error, Children}
     end;

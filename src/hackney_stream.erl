@@ -20,10 +20,7 @@
 start_link(Owner, Ref, Client) ->
     proc_lib:start_link(?MODULE, init, [self(), Owner, Ref, Client]).
 
-init(Parent, Owner, Ref, #client{transport=Transport,
-                                 socket=Socket}=Client) ->
-    %% pass the control to the process
-    Transport:controlling_process(Socket, self()),
+init(Parent, Owner, Ref, Client) ->
     %% register the stream
     ok = proc_lib:init_ack(Parent, {ok, self()}),
 
@@ -38,7 +35,6 @@ init(Parent, Owner, Ref, #client{transport=Transport,
 
 stream_loop(Parent, Owner, Ref, #client{response_state=St}=Client) ->
     hackney_manager:update_state(Client),
-
     Resp = case St of
         done -> {done, Client};
         waiting -> hackney_response:stream_status(Client);
@@ -47,14 +43,14 @@ stream_loop(Parent, Owner, Ref, #client{response_state=St}=Client) ->
         on_body -> hackney_response:stream_body(Client)
     end,
 
+
     case Resp of
         {more, Client2} ->
             hackney_manager:update_state(Client2),
             async_recv(Parent, Owner, Ref, Client2);
         {ok, StatusInt, Reason, Client2} ->
-            hackney_manager:update_state(Client2),
-            Owner ! {Ref, {status, StatusInt, Reason}},
-            maybe_continue(Parent, Owner, Ref, Client2);
+            maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
+                           Client2);
         {ok, {headers, Headers}, Client2} ->
             hackney_manager:update_state(Client2),
             Owner ! {Ref, {headers, Headers}},
@@ -81,7 +77,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             erlang:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
                                                        Client]);
         {Ref, stop_async, From} ->
-            hackney_manager:update_state(Client),
+            hackney_manager:update_state(Client#client{async=false}),
             Transport:setopts(Socket, [{active, false}]),
             Transport:controlling_process(Socket, From),
             From ! {Ref, ok};
@@ -124,6 +120,81 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
 
     end.
 
+
+%% if follow_redirect is true, we are parsing the headers to fetch the
+%% location. If we can still redirect, send a message with the location
+%% to the receiver so he can eventually start a new request.
+%%
+%% redirect messages:
+%% - {redirect, To, Headers} (for get and head requests)
+%% - {see_other, To, Headers} for POST requests.
+maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
+               #client{transport=Transport,
+                       socket=Socket,
+                       method=Method,
+                       follow_redirect=true}=Client) ->
+    hackney_manager:update_state(Client),
+    case lists:member(StatusInt, [301, 302, 307]) of
+        true ->
+            Transport:setopts(Socket, [{active, false}]),
+            Client1 = Client#client{async=false},
+            case hackney_response:stream_headers(Client1) of
+                {ok, {headers, Headers}, Client2} ->
+                    Location = hackney:redirect_location(Headers),
+                    case {Location, lists:member(Method, [get, head])} of
+                        {undefined, _} ->
+                            Owner ! {error, invalid_redirection},
+                            hackney_manager:handle_error(Client2);
+                        {_, _} ->
+                            case hackney_response:skip_body(Client2) of
+                                {ok, Client3} ->
+                                    hackney_manager:update_state(Client3),
+                                    Owner ! {Ref, {redirect, Location,
+                                                   Headers}};
+                                Error ->
+                                    Owner ! {Ref, Error},
+                                    hackney_manager:handle_error(Client2)
+                            end
+                    end;
+                {error, Error} ->
+                    hackney_manager:handle_error(Client1),
+                    Owner ! {Ref, {error, Error}}
+            end;
+        false when StatusInt =:= 303, Method =:= post ->
+            Transport:setopts(Socket, [{active, false}]),
+            Client1 = Client#client{async=false},
+            case hackney_response:stream_headers(Client1) of
+                {ok, {headers, Headers}, Client2} ->
+                    case hackney:redirect_location(Headers) of
+                        undefined ->
+                            Owner ! {error, invalid_redirection},
+                            hackney_manager:handle_error(Client2);
+                        Location ->
+                            case hackney_response:skip_body(Client2) of
+                                {ok, Client3} ->
+                                    hackney_manager:update_state(Client3),
+                                    Owner ! {Ref, {see_other, Location,
+                                                   Headers}};
+                                Error ->
+                                    Owner ! {Ref, Error},
+                                    hackney_manager:handle_error(Client2)
+                            end
+                    end;
+                {error, Error} ->
+                    hackney_manager:handle_error(Client1),
+                    Owner ! {Ref, {error, Error}}
+            end;
+        _ ->
+            hackney_manager:update_state(Client),
+            Owner ! {Ref, {status, StatusInt, Reason}},
+            maybe_continue(Parent, Owner, Ref, Client)
+    end;
+maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
+    hackney_manager:update_state(Client),
+    Owner ! {Ref, {status, StatusInt, Reason}},
+    maybe_continue(Parent, Owner, Ref, Client).
+
+
 async_recv(Parent, Owner, Ref, #client{transport=Transport,
                                 socket=Sock,
                                 buffer=Buffer,
@@ -146,10 +217,10 @@ async_recv(Parent, Owner, Ref, #client{transport=Transport,
         {Ref, close} ->
             Transport:close(Sock);
         {Ref, stop_async, From} ->
-            ets:delete(hackney_streams, Ref),
+            hackney_manager:update_state(Client#client{async=false}),
             Transport:setopts(Sock, [{active, false}]),
             Transport:controlling_process(Sock, From),
-            From ! {Ref, Client};
+            From ! {Ref, ok};
         {OK, Sock, Data} ->
             NewBuffer =  << Buffer/binary, Data/binary >>,
             stream_loop(Parent, Owner, Ref, Client#client{buffer=NewBuffer});
