@@ -19,7 +19,7 @@
          parse_qs/1,
          qs/1,
          make_url/3,
-         remove_trailing_slash/1]).
+         fix_path/1]).
 
 -include("hackney.hrl").
 
@@ -280,7 +280,7 @@ make_url(Url, Path, Query) when is_binary(Path) ->
     make_url(Url, [Path], Query);
 make_url(Url, PathParts, Query) when is_binary(Query) ->
     %% create path
-    PathParts1 = [remove_trailing_slash(P) || P <- PathParts],
+    PathParts1 = [fix_path(P) || P <- PathParts, P /= "/" orelse P /= <<"/">>],
     Path = hackney_util:join([<<>> | PathParts1], <<"/">>),
 
     %% initialise the query
@@ -290,11 +290,13 @@ make_url(Url, PathParts, Query) when is_binary(Query) ->
     end,
 
     %% make the final uri
-    iolist_to_binary([remove_trailing_slash(Url), Path, Query1]).
+    iolist_to_binary([fix_path(Url), Path, Query1]).
 
-remove_trailing_slash(Path) when is_list(Path) ->
-    remove_trailing_slash(list_to_binary(Path));
-remove_trailing_slash(Path) ->
+fix_path(Path) when is_list(Path) ->
+    fix_path(list_to_binary(Path));
+fix_path(<<"/", Path/binary>>) ->
+    fix_path(Path);
+fix_path(Path) ->
     case binary:part(Path, {size(Path), -1}) of
         <<"/">> -> binary:part(Path, {0, size(Path) - 1});
         _ -> Path
