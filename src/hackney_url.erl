@@ -18,7 +18,8 @@
          urlencode/1, urlencode/2,
          parse_qs/1,
          qs/1,
-         make_url/3]).
+         make_url/3,
+         remove_trailing_slash/1]).
 
 -include("hackney.hrl").
 
@@ -270,14 +271,31 @@ qs([{K, V}|R], Acc) ->
 
 %% @doc  construct an url from a base url, a path and a list of
 %% properties to give to the url.
--spec make_url(binary(), binary(), binary() | qs_vals()) -> binary().
+-spec make_url(binary(), binary() | [binary()], binary() | qs_vals())
+    -> binary().
 make_url(Url, Path, Query) when is_list(Query) ->
     %% a list of properties has been passed
     make_url(Url, Path, qs(Query));
-make_url(Url, Path, Query) when is_binary(Query) ->
-    binary_to_list(
-        iolist_to_binary(
-            [Url, <<"/">>,
-             Path,
-             [ [<<"?">>, Query] || Query =/= [] ]
-            ])).
+make_url(Url, Path, Query) when is_binary(Path) ->
+    make_url(Url, [Path], Query);
+make_url(Url, PathParts, Query) when is_binary(Query) ->
+    %% create path
+    PathParts1 = [remove_trailing_slash(P) || P <- PathParts],
+    Path = hackney_util:join([<<>> | PathParts1], <<"/">>),
+
+    %% initialise the query
+    Query1 = case Query of
+        <<>> -> <<>>;
+        _ -> << "?", Query/binary >>
+    end,
+
+    %% make the final uri
+    iolist_to_binary([remove_trailing_slash(Url), Path, Query1]).
+
+remove_trailing_slash(Path) when is_list(Path) ->
+    remove_trailing_slash(list_to_binary(Path));
+remove_trailing_slash(Path) ->
+    case binary:part(Path, {size(Path), -1}) of
+        <<"/">> -> binary:part(Path, {0, size(Path) - 1});
+        _ -> Path
+    end.
