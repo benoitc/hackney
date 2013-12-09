@@ -96,29 +96,35 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                 HeadersLines,
                 <<"\r\n">>]),
 
-    %% send headers data
-    case hackney_request:send(Client, HeadersData) of
-        ok when Body =:= stream ->
-            {ok, Client#client{response_state=stream, method=Method,
-                               expect=Expect}};
-        ok ->
-            case stream_body(Body, Client#client{expect=Expect}) of
-                {error, _Reason}=E ->
-                    E;
-                {stop, Client2} ->
-                    FinalClient = Client2#client{method=Method},
-                    hackney_response:start_response(FinalClient);
-                {ok, Client2} ->
-                    case end_stream_body(Client2) of
-                        {ok, Client3} ->
-                            FinalClient = Client3#client{method=Method},
+    PerformAll = proplists:get_value(perform_all, Options, true),
+
+    case can_perform_all(Body, Expect, PerformAll) of
+        true ->
+            perform_all(Client, HeadersData, Body, Method, Expect);
+        _ ->
+            case hackney_request:send(Client, HeadersData) of
+                ok when Body =:= stream ->
+                    {ok, Client#client{response_state=stream, method=Method,
+                                       expect=Expect}};
+                ok ->
+                    case stream_body(Body, Client#client{expect=Expect}) of
+                        {error, _Reason}=E ->
+                            E;
+                        {stop, Client2} ->
+                            FinalClient = Client2#client{method=Method},
                             hackney_response:start_response(FinalClient);
-                        Error ->
-                            Error
-                    end
-            end;
-        Error ->
-            Error
+                        {ok, Client2} ->
+                            case end_stream_body(Client2) of
+                              {ok, Client3} ->
+                                FinalClient = Client3#client{method=Method},
+                                hackney_response:start_response(FinalClient);
+                              Error ->
+                                Error
+                            end
+                    end;
+                Error ->
+                    Error
+            end
     end.
 
 stream_body(Msg, #client{expect=true}=Client) ->
@@ -384,6 +390,28 @@ end_stream_body(#client{req_type=chunked}=Client) ->
 end_stream_body(Client) ->
     {ok, Client#client{response_state=waiting}}.
 
+can_perform_all(Body, Expect, PerformAll) when Expect =:= false,
+    (is_list(Body) orelse is_binary(Body)) ->
+    PerformAll;
+can_perform_all(_Body, _Expect, _PerformAll) ->
+    false.
+
+perform_all(Client, HeadersData, Body, Method, Expect) ->
+    case stream_body(iolist_to_binary([HeadersData, Body]), Client#client{expect=Expect}) of
+        {error, _Reason}=E ->
+            E;
+        {stop, Client2} ->
+            FinalClient = Client2#client{method=Method},
+            hackney_response:start_response(FinalClient);
+        {ok, Client2} ->
+            case end_stream_body(Client2) of
+                {ok, Client3} ->
+                    FinalClient = Client3#client{method=Method},
+                    hackney_response:start_response(FinalClient);
+                Error ->
+                    Error
+            end
+    end.
 
 sendfile_fallback(Fd, Opts, Client) ->
     Offset = proplists:get_value(offset, Opts, 0),
