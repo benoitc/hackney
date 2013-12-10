@@ -21,7 +21,7 @@
          stop_pool/1]).
 
 
--export([pool_size/1, pool_size/2,
+-export([count/1, count/2,
          max_connections/1,
          set_max_connections/2,
          timeout/1,
@@ -119,14 +119,14 @@ child_spec(Name, Options0) ->
       permanent, 10000, worker, [Name]}.
 
 
-%% @doc get total pool size
-pool_size(Name) ->
-    gen_server:call(find_pool(Name), pool_size).
+%% @doc get the number of connections in the pool
+count(Name) ->
+    gen_server:call(find_pool(Name), count).
 
-%% @doc get the pool size for `{Transport, Host0, Port}'
-pool_size(Name, {Transport, Host0, Port}) ->
+%% @doc get the number of connections in the pool for `{Host0, Port, Transport}'
+count(Name, {Host0, Port, Transport}) ->
     Host = string:to_lower(Host0),
-    gen_server:call(find_pool(Name), {pool_size, {Transport, Host, Port}}).
+    gen_server:call(find_pool(Name), {count, {Host, Port, Transport}}).
 
 %% @doc get max pool size
 max_connections(Name) ->
@@ -218,9 +218,9 @@ handle_call({checkin, Key, Socket, Transport}, _From,
 handle_call({checkin, Key, Socket}, _From, State) ->
     NewState = store_connection(Key, Socket, State),
     {reply, ok, NewState};
-handle_call(pool_size, _From, #state{sockets=Sockets}=State) ->
+handle_call(count, _From, #state{sockets=Sockets}=State) ->
     {reply, dict:size(Sockets), State};
-handle_call({pool_size, Key}, _From, #state{connections=Conns}=State) ->
+handle_call({count, Key}, _From, #state{connections=Conns}=State) ->
     Size = case dict:find(Key, Conns) of
         {ok, Sockets} ->
             length(Sockets);
