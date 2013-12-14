@@ -33,6 +33,6 @@ init([]) ->
     %% init the table to find a pool
     ets:new(hackney_pool, [named_table, set, public]),
 
-    Manager= ?CHILD(hackney_manager, supervisor),
+    Manager = ?CHILD(hackney_manager, worker),
 
     {ok, { {one_for_one, 10, 1}, [Manager]}}.
