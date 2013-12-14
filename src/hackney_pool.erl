@@ -45,6 +45,8 @@
 
 
 start() ->
+    %% NB this is first called from hackney_sup:start_link
+    %%    BEFORE the hackney_pool ETS table exists
     ok.
 
 %% @doc fetch a socket from the pool

@@ -30,8 +30,6 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    %% init the table to find a pool
-    ets:new(hackney_pool, [named_table, set, public]),
 
     Manager= ?CHILD(hackney_manager, supervisor),
 
