@@ -35,4 +35,4 @@ init([]) ->
 
     Manager= ?CHILD(hackney_manager, supervisor),
 
-    {ok, { {one_for_one, 10, 1}, [Manager]}}.
+    {ok, { {one_for_one, 10000, 1}, [Manager]}}.
