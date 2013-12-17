@@ -22,47 +22,13 @@
 encode_form(KVs) ->
     encode_form(KVs, boundary(), []).
 
-%% @private
-encode_form([], Boundary, Acc) ->
-    CType = <<"multipart/form-data; boundary=", Boundary/binary>>,
-    Lines = <<Acc/binary, "--", Boundary/binary, "--", "\r\n">>,
-    {erlang:size(Lines), CType, Lines};
-encode_form([C | R], Boundary, Acc) ->
-    Field = encode(C, Boundary),
-    encode_form(R, Boundary, iolist_to_binary([Acc, Field])).
-
 decode_form(_) -> {error, not_implemented}.
 
 boundary() ->
     Unique = unique(16),
     <<"---------------------------", Unique/binary>>.
 
-unique(Size) -> unique(Size, <<>>).
-unique(Size, Acc) when size(Acc) == Size -> Acc;
-unique(Size, Acc) ->
-  Random = $a + random:uniform($z - $a),
-  unique(Size, <<Acc/binary, Random>>).
 
-encode({Id, {file, Name, Content}}, Boundary) ->
-    CType = hackney_util:content_type(Name),
-    encode({Id, {file, Name, Content, CType}}, Boundary);
-encode({Id, {file, Name, Content, CType}}, Boundary) ->
-    Field = field(Id),
-    Parts = [
-        <<"--", Boundary/binary>>,
-        <<"Content-Disposition: form-data; name=\"",
-            Field/binary, "\"; filename=\"", Name/binary, "\"">>,
-        <<"Content-Type: ", CType/binary >>,
-        <<>>, Content, <<>>],
-    hackney_util:join(Parts, <<"\r\n">>);
-encode({Id, Value}, Boundary) ->
-    Field = field(Id),
-    Parts = [
-        <<"--", Boundary/binary>>,
-        <<"Content-Disposition: form-data; name=\"", Field/binary, "\"">>,
-        <<"Content-Type: application/octet-stream">>,
-        <<>>, Value, <<>>],
-    hackney_util:join(Parts, <<"\r\n">>).
 
 
 stream(eof, #client{response_state=waiting}=Client) ->
@@ -111,6 +77,41 @@ stream({Id, Value}, #client{mp_boundary=Boundary}=Client) ->
 
 
 %% internal functions
+%%
+unique(Size) -> unique(Size, <<>>).
+unique(Size, Acc) when size(Acc) == Size -> Acc;
+unique(Size, Acc) ->
+  Random = $a + random:uniform($z - $a),
+  unique(Size, <<Acc/binary, Random>>).
+
+encode_form([], Boundary, Acc) ->
+    CType = <<"multipart/form-data; boundary=", Boundary/binary>>,
+    Lines = <<Acc/binary, "--", Boundary/binary, "--", "\r\n">>,
+    {erlang:size(Lines), CType, Lines};
+encode_form([C | R], Boundary, Acc) ->
+    Field = encode(C, Boundary),
+    encode_form(R, Boundary, iolist_to_binary([Acc, Field])).
+
+encode({Id, {file, Name, Content}}, Boundary) ->
+    CType = hackney_util:content_type(Name),
+    encode({Id, {file, Name, Content, CType}}, Boundary);
+encode({Id, {file, Name, Content, CType}}, Boundary) ->
+    Field = field(Id),
+    Parts = [
+        <<"--", Boundary/binary>>,
+        <<"Content-Disposition: form-data; name=\"",
+            Field/binary, "\"; filename=\"", Name/binary, "\"">>,
+        <<"Content-Type: ", CType/binary >>,
+        <<>>, Content, <<>>],
+    hackney_util:join(Parts, <<"\r\n">>);
+encode({Id, Value}, Boundary) ->
+    Field = field(Id),
+    Parts = [
+        <<"--", Boundary/binary>>,
+        <<"Content-Disposition: form-data; name=\"", Field/binary, "\"">>,
+        <<"Content-Type: application/octet-stream">>,
+        <<>>, Value, <<>>],
+    hackney_util:join(Parts, <<"\r\n">>).
 
 mp_header(Field, FileName, CType, Boundary) ->
     FileName1 = hackney_util:to_binary(FileName),
