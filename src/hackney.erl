@@ -650,8 +650,13 @@ mp_reply({headers, Headers, NState}, _State) ->
     {headers, Headers};
 mp_reply({body, Body, NState}, _State) ->
     maybe_update_req(NState),
-    io:format("ici", []),
     {body, Body};
+mp_reply({mp_mixed, NState}, _State) ->
+    maybe_update_req(NState),
+    mp_mixed;
+mp_reply({mp_mixed_eof, NState}, _State) ->
+    maybe_update_req(NState),
+    mp_mixed_eof;
 mp_reply({eof, NState}, _State) ->
     maybe_update_req(NState),
     eof;

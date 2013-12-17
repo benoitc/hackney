@@ -190,9 +190,14 @@ suffix_match(Bin, Pat, Size, Match) when Match < 0 ->
 -spec parse_boundary_tail(binary(), patterns()) -> more(part_result()).
 parse_boundary_tail(Bin, Pattern) when byte_size(Bin) >= 2 ->
     case Bin of
-        <<"--", _Rest/binary>> ->
+        <<"--\r\n">> ->
             % Boundary is followed by "--", end parsing.
             eof;
+        <<"--">> ->
+            eof;
+        <<"--", Rest/binary>> ->
+            % Boundary is followed by "--", end parsing.
+            {eof, Rest};
         _ ->
             % No dash after boundary, proceed with unknown chars and lwsp
             % removal.
@@ -245,7 +250,16 @@ parse_headers(Bin, Pattern, Acc) ->
             parse_headers(Rest, Pattern, [{Name2, Value} | Acc]);
         {ok, http_eoh, Rest} ->
             Headers = lists:reverse(Acc),
-            {headers, Headers, fun () -> parse_body(Rest, Pattern) end};
+            case hackney_headers:parse(<<"content-type">>, Headers) of
+                {<<"multipart">>, _, Params} ->
+                    {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
+                    Parser = hackney_multipart:parser(Boundary),
+                    Wrapper = fun() -> Parser(Rest) end,
+                    {mp_mixed, fun() -> mp_parse_mixed(Pattern, Wrapper) end};
+                _ ->
+                    Fun =  fun () -> parse_body(Rest, Pattern) end,
+                    {headers, Headers, Fun}
+            end;
         {ok, {http_error, _}, _} ->
             % Skip malformed parts.
             skip(Bin, Pattern);
@@ -308,3 +322,23 @@ more(Bin, InnerF) ->
             InnerF(<<Bin/binary, NewData/binary>>)
     end,
     {more, F}.
+
+mp_parse_mixed(Pattern, {Fun, Body}) ->
+    mp_parse_mixed1(Fun(Body), Pattern);
+mp_parse_mixed(Pattern, Fun) ->
+    mp_parse_mixed1(Fun(), Pattern).
+
+mp_parse_mixed1({headers, Headers, F}, Pattern) ->
+    {headers, Headers, fun() -> mp_parse_mixed(Pattern, F) end};
+mp_parse_mixed1({body, Data, F}, Pattern) ->
+    {body, Data, fun() -> mp_parse_mixed(Pattern, F) end};
+mp_parse_mixed1({end_of_part, F}, Pattern) ->
+    {end_of_part, fun() -> mp_parse_mixed(Pattern, F) end};
+mp_parse_mixed1({more, F}, Pattern) ->
+    {more, fun(Body) -> mp_parse_mixed(Pattern, {F, Body}) end};
+mp_parse_mixed1({eof, Rest}, Pattern) ->
+    {mp_mixed_eof, fun () -> parse_body(Rest, Pattern) end};
+mp_parse_mixed1(eof, Pattern) ->
+    {mp_mixed_eof, fun () -> parse_body(<<>>, Pattern) end};
+mp_parse_mixed1(Error, _Pattern) ->
+    Error.

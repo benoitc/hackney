@@ -252,6 +252,10 @@ multipart_data(Client, Length, {body, Data, Cont}) ->
     {body, Data, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {end_of_part, Cont}) ->
     {end_of_part, Client#client{multipart={Length, Cont}}};
+multipart_data(Client, Length, {mp_mixed, Cont}) ->
+    {mp_mixed, Client#client{multipart={Length, Cont}}};
+multipart_data(Client, Length, {mp_mixed_eof, Cont}) ->
+    {mp_mixed_eof, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, 0, eof) ->
     {eof, Client#client{body_state=done, multipart=nil}};
 multipart_data(Client, _, eof) ->
