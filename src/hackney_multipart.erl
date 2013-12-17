@@ -210,7 +210,7 @@ parse_boundary_eol(Bin, Pattern) ->
             % End of line found, remove optional whitespace.
             <<_:CrlfStart/binary, Rest/binary>> = Bin,
             Fun = fun (Rest2) -> parse_boundary_crlf(Rest2, Pattern) end,
-            cowboy_http:whitespace(Rest, Fun);
+            hackney_util:whitespace(Rest, Fun);
         nomatch ->
             % CRLF not found in the given binary.
             RestStart = max(byte_size(Bin) - 1, 0),

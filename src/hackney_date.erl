@@ -1,3 +1,12 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of hackney released under the Apache 2 license.
+%%% See the NOTICE for more information.
+%%%
+%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
+%%% Copyright (c) 2012-2013 Benoît Chesneau <benoitc@e-engura.org>
+%%%
+
 -module(hackney_date).
 
 -export([date_to_rfc2109/1]).

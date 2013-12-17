@@ -18,6 +18,8 @@
          send_multipart_body/2,
          body/1, body/2, skip_body/1,
          stream_body/1,
+         stream_multipart/1,
+         skip_multipart/1,
          controlling_process/2,
          cancel_request/1]).
 
@@ -350,6 +352,24 @@ stream_body(Ref) ->
                 reply(Reply, State)
         end).
 
+%% @doc Stream the response body.
+-spec stream_multipart(client_ref())
+    -> {headers, list()} | {body, binary()} | eof | end_of_part
+    | {error, term()}.
+stream_multipart(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:stream_multipart(State),
+                mp_reply(Reply, State)
+        end).
+
+%% @doc Stream the response body.
+-spec skip_multipart(client_ref()) -> ok | {error, term()}.
+skip_multipart(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                Reply = hackney_response:skip_multipart(State),
+                mp_reply(Reply, State)
+        end).
+
 %% @doc Return the full body sent with the response.
 -spec body(client_ref()) -> {ok, binary()} | {error, atom()}.
 body(Ref) ->
@@ -622,6 +642,26 @@ reply({ok, NState}, _State) ->
     hackney_manager:update_state(NState),
     ok;
 reply(Error, State) ->
+    hackney_manager:handle_error(State),
+    Error.
+
+mp_reply({headers, Headers, NState}, _State) ->
+    maybe_update_req(NState),
+    {headers, Headers};
+mp_reply({body, Body, NState}, _State) ->
+    maybe_update_req(NState),
+    io:format("ici", []),
+    {body, Body};
+mp_reply({eof, NState}, _State) ->
+    maybe_update_req(NState),
+    eof;
+mp_reply({end_of_part, NState}, _State) ->
+    maybe_update_req(NState),
+    end_of_part;
+mp_reply({ok, NState}, _State) ->
+    hackney_manager:update_state(NState),
+    ok;
+mp_reply(Error, State) ->
     hackney_manager:handle_error(State),
     Error.
 

@@ -20,6 +20,8 @@
          stream_status/1,
          stream_headers/1, stream_header/1,
          stream_body/1,
+         stream_multipart/1,
+         skip_multipart/1,
          body/1, body/2, skip_body/1,
          close/1,
          expect_response/1]).
@@ -222,6 +224,64 @@ stream_body_recv(Client=#client{buffer=Buffer, version=Version,
         {error, Reason} -> {error, Reason}
     end.
 
+%% @doc stream a multipart response
+%%
+%% Use this function for multipart streaming. For each part in the
+%% response, this function returns <em>{headers, Headers, Req}</em> followed by a sequence of
+%% <em>{body, Data, Req}</em> tuples and finally <em>{end_of_part, Req}</em>. When there
+%% is no part to parse anymore, <em>{eof, Req}</em> is returned.
+-spec stream_multipart(#client{})
+    -> {headers, list(), #client{}} | {body, binary(), #client{}}
+    | {eof, #client{}} | {end_of_part, #client{}}
+    | {error, term()}.
+stream_multipart(Client=#client{body_state=waiting,
+                                ctype=CType,
+                                clen=Length}) ->
+    {<<"multipart">>, _, Params} = hackney_headers:content_type(CType),
+    {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
+    Parser = hackney_multipart:parser(Boundary),
+    multipart_data(Client, Length, {more, Parser});
+stream_multipart(Client=#client{multipart={Length, Cont}}) ->
+    multipart_data(Client, Length, Cont());
+stream_multipart(Client=#client{body_state=done}) ->
+    {eof, Client}.
+
+multipart_data(Client, Length, {headers, Headers, Cont}) ->
+    {headers, Headers, Client#client{multipart={Length, Cont}}};
+multipart_data(Client, Length, {body, Data, Cont}) ->
+    {body, Data, Client#client{multipart={Length, Cont}}};
+multipart_data(Client, Length, {end_of_part, Cont}) ->
+    {end_of_part, Client#client{multipart={Length, Cont}}};
+multipart_data(Client, 0, eof) ->
+    {eof, Client#client{body_state=done, multipart=nil}};
+multipart_data(Client, _, eof) ->
+    %% We just want to skip so no need to stream data here.
+    {ok, Client2} = skip_body(Client),
+    {eof, Client2#client{multipart=nil}};
+multipart_data(Client, Length, {more, Parser})
+        when Length > 0 orelse Length =:= nil->
+    case stream_body(Client) of
+        {ok, Data, Client2} when Length =:= nil ->
+            multipart_data(Client2, Length, Parser(Data));
+        {ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
+            multipart_data(Client2#client{buffer=Buffer}, 0,
+                           Parser(Data));
+        {ok, Data, Client2} ->
+            multipart_data(Client2, Length - byte_size(Data),
+                           Parser(Data))
+    end.
+
+%% @doc Skip a part returned by the multipart parser.
+%%
+%% This function repeatedly calls <em>multipart_data/1</em> until
+%% <em>{end_of_part, Req}</em> or <em>{eof, Req}</em> is parsed.
+-spec skip_multipart(Client) -> {ok, Client} when Client::#client{}.
+skip_multipart(Client) ->
+        case stream_multipart(Client) of
+                {end_of_part, Client2} -> {ok, Client2};
+                {eof, Client2} -> {ok, Client2};
+                {_, _, Client2} -> skip_multipart(Client2)
+        end.
 
 %% @doc Return the full body sent with the request.
 -spec body(#client{}) -> {ok, binary(), #client{}} | {error, atom()}.
