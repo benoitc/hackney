@@ -16,6 +16,7 @@
          send/2, send_chunk/2,
          sendfile/3,
          stream_body/2, end_stream_body/1,
+         stream_multipart/2,
          encode_form/1]).
 
 -define(CHUNK_SIZE, 20480).
@@ -209,6 +210,53 @@ stream_body({file, FileName, Opts}, Client) ->
         Error ->
             Error
     end.
+
+%% @doc stream multipart
+stream_multipart(eof, #client{response_state=waiting}=Client) ->
+    {ok, Client};
+stream_multipart(eof, #client{mp_boundary=Boundary}=Client) ->
+    Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
+    case stream_body(Line, Client) of
+        {ok, Client1} ->
+            end_stream_body(Client1);
+        Error ->
+            Error
+    end;
+stream_multipart({Id, {file, Name}}, Client) ->
+    stream_multipart({Id, {file, Name, []}}, Client);
+stream_multipart({Id, {file, Name, _Opts}=File},
+                 #client{mp_boundary=Boundary}=Client) ->
+    Field = hackney_multipart:field(Id),
+    CType = hackney_multipart:content_type(Name),
+    Bin = hackney_multipart:mp_header(Field, Name, CType, Boundary),
+    case stream_body(Bin, Client) of
+        {ok, Client1} ->
+            case stream_body(File, Client1) of
+                {ok, Client2} ->
+                   stream_body(<<"\r\n">>, Client2);
+                Error ->
+                    Error
+            end;
+        Error ->
+            Error
+    end;
+stream_multipart({data, {start, Name, FileName, CType}},
+                 #client{mp_boundary=Boundary}=Client) ->
+    Bin = hackney_multipart:mp_header(Name, FileName, CType, Boundary),
+    stream_body(Bin, Client);
+stream_multipart({data, eof}, Client) ->
+    stream_body(<<"\r\n">>, Client);
+stream_multipart({data, Bin}, Client) ->
+    stream_body(Bin, Client);
+stream_multipart({Id, {file, Name, Content}},
+                 #client{mp_boundary=Boundary}=Client) ->
+
+    Bin = hackney_multipart:encode({Id, {file, Name, Content}}, Boundary),
+    stream_body(Bin, Client);
+stream_multipart({Id, Value}, #client{mp_boundary=Boundary}=Client) ->
+    Bin = hackney_multipart:encode({Id, Value}, Boundary),
+    stream_body(Bin, Client).
+
 
 send(#client{transport=Transport, socket=Skt}, Data) ->
     Transport:send(Skt, Data).

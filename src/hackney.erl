@@ -310,7 +310,7 @@ finish_send_body(Ref) ->
 -spec send_multipart_body(client_ref(), term()) -> ok | {error, term()}.
 send_multipart_body(Ref, Body) ->
     hackney_manager:get_state(Ref, fun(State) ->
-                Reply = hackney_multipart:stream(Body, State),
+                Reply = hackney_request:stream_multipart(Body, State),
                 reply(Reply, State)
         end).
 

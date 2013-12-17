@@ -17,7 +17,9 @@
          decode_form/2, decode_form/3,
          boundary/0,
          parser/1,
-         stream/2]).
+         encode/2,
+         field/1,
+         mp_header/4]).
 
 -type part_parser() :: parser(more(part_result())).
 -type parser(T) :: fun((binary()) -> T).
@@ -51,67 +53,6 @@ parser(Boundary) when is_binary(Boundary) ->
 boundary() ->
     Unique = unique(16),
     <<"---------------------------", Unique/binary>>.
-
-stream(eof, #client{response_state=waiting}=Client) ->
-    {ok, Client};
-stream(eof, #client{mp_boundary=Boundary}=Client) ->
-    Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
-    case hackney_request:stream_body(Line, Client) of
-        {ok, Client1} ->
-            hackney_request:end_stream_body(Client1);
-        Error ->
-            Error
-    end;
-stream({Id, {file, Name}}, Client) ->
-    stream({Id, {file, Name, []}}, Client);
-stream({Id, {file, Name, _Opts}=File}, #client{mp_boundary=Boundary}=Client) ->
-    Field = field(Id),
-    CType = hackney_util:content_type(Name),
-    Bin = mp_header(Field, Name, CType, Boundary),
-    case hackney_request:stream_body(Bin, Client) of
-        {ok, Client1} ->
-            case hackney_request:stream_body(File, Client1) of
-                {ok, Client2} ->
-                    hackney_request:stream_body(<<"\r\n">>, Client2);
-                Error ->
-                    Error
-            end;
-        Error ->
-            Error
-    end;
-stream({data, {start, Name, FileName, CType}},
-                 #client{mp_boundary=Boundary}=Client) ->
-    Bin = mp_header(Name, FileName, CType, Boundary),
-    hackney_request:stream_body(Bin, Client);
-stream({data, eof}, Client) ->
-    hackney_request:stream_body(<<"\r\n">>, Client);
-stream({data, Bin}, Client) ->
-    hackney_request:stream_body(Bin, Client);
-stream({Id, {file, Name, Content}},
-                 #client{mp_boundary=Boundary}=Client) ->
-
-    Bin = encode({Id, {file, Name, Content}}, Boundary),
-    hackney_request:stream_body(Bin, Client);
-stream({Id, Value}, #client{mp_boundary=Boundary}=Client) ->
-    Bin = encode({Id, Value}, Boundary),
-    hackney_request:stream_body(Bin, Client).
-
-
-%% internal functions
-%%
-unique(Size) -> unique(Size, <<>>).
-unique(Size, Acc) when size(Acc) == Size -> Acc;
-unique(Size, Acc) ->
-  Random = $a + random:uniform($z - $a),
-  unique(Size, <<Acc/binary, Random>>).
-
-encode_form([], Boundary, Acc) ->
-    CType = <<"multipart/form-data; boundary=", Boundary/binary>>,
-    Lines = <<Acc/binary, "--", Boundary/binary, "--", "\r\n">>,
-    {erlang:size(Lines), CType, Lines};
-encode_form([C | R], Boundary, Acc) ->
-    Field = encode(C, Boundary),
-    encode_form(R, Boundary, iolist_to_binary([Acc, Field])).
 
 encode({Id, {file, Name, Content}}, Boundary) ->
     CType = hackney_util:content_type(Name),
@@ -150,6 +91,22 @@ field(V) when is_integer(V) ->
     list_to_binary(integer_to_list(V));
 field(V) when is_binary(V) ->
     V.
+
+%% internal functions
+%%
+unique(Size) -> unique(Size, <<>>).
+unique(Size, Acc) when size(Acc) == Size -> Acc;
+unique(Size, Acc) ->
+  Random = $a + random:uniform($z - $a),
+  unique(Size, <<Acc/binary, Random>>).
+
+encode_form([], Boundary, Acc) ->
+    CType = <<"multipart/form-data; boundary=", Boundary/binary>>,
+    Lines = <<Acc/binary, "--", Boundary/binary, "--", "\r\n">>,
+    {erlang:size(Lines), CType, Lines};
+encode_form([C | R], Boundary, Acc) ->
+    Field = encode(C, Boundary),
+    encode_form(R, Boundary, iolist_to_binary([Acc, Field])).
 
 decode_form1(eof, Acc) ->
     {ok, lists:reverse(Acc)};
