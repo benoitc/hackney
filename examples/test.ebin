@@ -11,8 +11,9 @@ main(_) ->
 
     io:format("step 1~n", []),
     {ok, Ref} = hackney:connect(<<"https://friendpaste.com">>),
-    {ok, _, _, Ref} = hackney:send_request(Ref, {get, <<"/">>, [],
+    {ok, _, _Headers, Ref} = hackney:send_request(Ref, {get, <<"/">>, [],
                                                  <<>>}),
+
     {ok, Body} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body]),
 

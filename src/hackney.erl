@@ -13,6 +13,7 @@
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          start_response/1,
+         cookies/1,
          send_body/2, finish_send_body/1,
          send_multipart_body/2,
          body/1, body/2, skip_body/1,
@@ -152,27 +153,30 @@ request(Method, URL, Headers, Body) ->
 %%      <li>`ssl_options()': See the ssl options from the ssl
 %%      module.</li>
 %%
-%%      <li>async: receive the response asynchronously
+%%      <li>`async': receive the response asynchronously
 %%      The function return {ok, {response_stream, StreamRef}}.
 %%      When {async, once} is used the socket will receive only once. To
 %%      receive the other messages use the function
 %%      `hackney:stream_next/1'
 %%      </li>
 %%
+%%      <li>`{cookie, list() | binary()}' : to set a cookie or a
+%%      list of cookies.</li>
+%%
 %%      <li><em>Others options are</em>:
 %%      <ul>
-%%          <li>{follow_redirect, boolean}: false by default, follow a
+%%          <li>`{follow_redirect, boolean}': false by default, follow a
 %%          redirection</li>
-%%          <li>{max_redirect, integer}: 5 by default, the maximum of
+%%          <li>`{max_redirect, integer}': 5 by default, the maximum of
 %%          redirection for a request</li>
-%%          <li>{force_redirect, boolean}: false by default, to force the
+%%          <li>`{force_redirect, boolean}': false by default, to force the
 %%          redirection even on POST</li>
-%%          <li>{proxy, proxy_options()}: to connect via a proxy.</li>
-%%          <li>insecure: to perform "insecure" SSL connections and
+%%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
+%%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
-%%          <li>{connect_timeout, infinity | integer()}: timeout used when
+%%          <li>`{connect_timeout, infinity | integer()}': timeout used when
 %%          estabilishing a connection, in milliseconds. Default is 8000</li>
-%%          <li>{recv_timeout, infinity | integer()}: timeout used when
+%%          <li>`{recv_timeout, infinity | integer()}': timeout used when
 %%          receiving a connection. Default is infinity</li>
 %%      </ul>
 %%
@@ -320,6 +324,22 @@ start_response(Ref) ->
                 Reply = hackney_response:start_response(State),
                 reply_response(Reply, State)
         end).
+
+%% return all parsed cookies from the response headers.
+-spec cookies(list()) -> list().
+cookies(Headers) ->
+    lists:foldl(fun({K, V}, Acc) ->
+                case hackney_util:to_lower(K) of
+                    <<"set-cookie">> ->
+                        case hackney_cookie:parse_cookie(V) of
+                            {error, _} -> Acc;
+                            [{Name, _} | _]=Cookie ->
+                                [{Name, Cookie} | Acc]
+                        end;
+                    _ ->
+                        Acc
+                end
+        end, [], Headers).
 
 %% @doc Stream the response body.
 -spec stream_body(client_ref())

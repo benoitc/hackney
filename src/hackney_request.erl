@@ -42,11 +42,16 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             DefaultHeaders0;
         {User, Pwd} ->
             Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
-            DefaultHeaders0 ++ [{<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
+            DefaultHeaders0 ++ [{<<"Authorization">>,
+                                 <<"Basic ", Credentials/binary>>}]
     end,
 
-    HeadersDict0 = hackney_headers:update(hackney_headers:new(DefaultHeaders),
-                                         Headers0),
+    %% add any cookies passed ot options
+    Cookies = proplists:get_value(cookie, Options, []),
+    DefaultHeaders1 = maybe_add_cookies(Cookies, DefaultHeaders),
+
+    HeadersDict0 = hackney_headers:update(hackney_headers:new(DefaultHeaders1),
+                                          Headers0),
     {HeadersDict, ReqType0} = req_type(HeadersDict0, Body0),
     Expect = expectation(HeadersDict),
 
@@ -449,6 +454,14 @@ sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
     end;
 sendfile_fallback(_, _, _, _, Sent) ->
     {ok, Sent}.
+
+maybe_add_cookies([], Headers) ->
+    Headers;
+maybe_add_cookies(Cookie, Headers) when is_binary(Cookie) ->
+    Headers ++ [{<<"Cookie">>, Cookie}];
+maybe_add_cookies([Cookie | Rest], Headers) ->
+    Headers1 = Headers ++ [{<<"Cookie">>, Cookie}],
+    maybe_add_cookies(Rest, Headers1).
 
 default_ua() ->
     Version = case application:get_key(hackney, vsn) of
