@@ -459,6 +459,17 @@ maybe_add_cookies([], Headers) ->
     Headers;
 maybe_add_cookies(Cookie, Headers) when is_binary(Cookie) ->
     Headers ++ [{<<"Cookie">>, Cookie}];
+maybe_add_cookies({Name, Value, Opts}, Headers) ->
+    Cookie = hackney_cookie:setcookie(Name, Value, Opts),
+    Headers ++ [{<<"Cookie">>, Cookie}];
+maybe_add_cookies([{Name, Value} | Rest], Headers) ->
+    Cookie = hackney_cookie:setcookie(Name, Value, []),
+    Headers1 = Headers ++ [{<<"Cookie">>, Cookie}],
+    maybe_add_cookies(Rest, Headers1);
+maybe_add_cookies([{Name, Value, Opts} | Rest], Headers) ->
+    Cookie = hackney_cookie:setcookie(Name, Value, Opts),
+    Headers1 = Headers ++ [{<<"Cookie">>, Cookie}],
+    maybe_add_cookies(Rest, Headers1);
 maybe_add_cookies([Cookie | Rest], Headers) ->
     Headers1 = Headers ++ [{<<"Cookie">>, Cookie}],
     maybe_add_cookies(Rest, Headers1).
