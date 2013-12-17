@@ -50,7 +50,7 @@ url() = #hackney_url{}
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the response.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the response as long as the body
 length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#cancel_request-1">cancel_request/1</a></td><td>Extract raw informations from the client context
-This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td></td></tr><tr><td valign="top"><a href="#connect-2">connect/2</a></td><td></td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Client</em>.</td></tr><tr><td valign="top"><a href="#finish_send_body-1">finish_send_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#pause_stream-1">pause_stream/1</a></td><td>pause a response stream, the stream process will hibernate and
+This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>close the client.</td></tr><tr><td valign="top"><a href="#connect-1">connect/1</a></td><td></td></tr><tr><td valign="top"><a href="#connect-2">connect/2</a></td><td></td></tr><tr><td valign="top"><a href="#connect-3">connect/3</a></td><td>connect a socket and create a client state.</td></tr><tr><td valign="top"><a href="#connect-4">connect/4</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Assign a new controlling process <em>Pid</em> to <em>Client</em>.</td></tr><tr><td valign="top"><a href="#cookies-1">cookies/1</a></td><td></td></tr><tr><td valign="top"><a href="#finish_send_body-1">finish_send_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#pause_stream-1">pause_stream/1</a></td><td>pause a response stream, the stream process will hibernate and
 be woken later by the resume function.</td></tr><tr><td valign="top"><a href="#redirect_location-1">redirect_location/1</a></td><td></td></tr><tr><td valign="top"><a href="#request-1">request/1</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-2">request/2</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-3">request/3</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-4">request/4</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#request-5">request/5</a></td><td>make a request.</td></tr><tr><td valign="top"><a href="#resume_stream-1">resume_stream/1</a></td><td>resume a paused response stream, the stream process will be
 awoken.</td></tr><tr><td valign="top"><a href="#send_body-2">send_body/2</a></td><td>send the request body until eob.</td></tr><tr><td valign="top"><a href="#send_multipart_body-2">send_multipart_body/2</a></td><td>send a multipart body until eof
 Possible value are :
@@ -184,6 +184,19 @@ controlling_process(Ref::<a href="#type-client_ref">client_ref()</a>, Pid::pid()
 
 
 Assign a new controlling process _Pid_ to _Client_.
+<a name="cookies-1"></a>
+
+### cookies/1 ###
+
+
+<pre><code>
+cookies(Headers::list()) -&gt; list()
+</code></pre>
+
+<br></br>
+
+
+
 <a name="finish_send_body-1"></a>
 
 ### finish_send_body/1 ###
@@ -318,33 +331,37 @@ see the gen_tcp options.
 module.
 
 
-* async: receive the response asynchronously
+* `async`: receive the response asynchronously
 The function return {ok, {response_stream, StreamRef}}.
 When {async, once} is used the socket will receive only once. To
 receive the other messages use the function
 `hackney:stream_next/1`
 
 
+* `{cookie, list() | binary()}` : to set a cookie or a
+list of cookies.
+
+
 * _Others options are_:
 
-* {follow_redirect, boolean}: false by default, follow a
+* `{follow_redirect, boolean}`: false by default, follow a
 redirection
 
-* {max_redirect, integer}: 5 by default, the maximum of
+* `{max_redirect, integer}`: 5 by default, the maximum of
 redirection for a request
 
-* {force_redirect, boolean}: false by default, to force the
+* `{force_redirect, boolean}`: false by default, to force the
 redirection even on POST
 
-* {proxy, proxy_options()}: to connect via a proxy.
+* `{proxy, proxy_options()}`: to connect via a proxy.
 
-* insecure: to perform "insecure" SSL connections and
+* `insecure`: to perform "insecure" SSL connections and
 transfers without checking the certificate
 
-* {connect_timeout, infinity | integer()}: timeout used when
+* `{connect_timeout, infinity | integer()}`: timeout used when
 estabilishing a connection, in milliseconds. Default is 8000
 
-* {recv_timeout, infinity | integer()}: timeout used when
+* `{recv_timeout, infinity | integer()}`: timeout used when
 receiving a connection. Default is infinity
 
 
