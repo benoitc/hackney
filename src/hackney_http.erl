@@ -73,7 +73,9 @@
                   location,
                   body_state=waiting}).
 
--type parser() :: #hparser{}.
+-opaque parser() :: #hparser{}.
+-export_type([parser/0]).
+
 -type http_version() :: {integer(), integer()}.
 -type status() :: integer().
 -type http_reason() :: binary().
