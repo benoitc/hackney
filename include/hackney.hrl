@@ -15,6 +15,7 @@
         force_redirect = false,
         redirect = nil,
         location,
+        parser=nil,
         state,
         response_state = start,
         mp_boundary = nil,
