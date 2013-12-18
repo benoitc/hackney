@@ -81,8 +81,10 @@ wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
                 Error  ->
                     Error
             end;
-        {response, Status, _Reason, Fun} ->
-            wait_headers(Client#client{parser=Fun, buffer = <<>>}, Status)
+        {response, Version, Status, _Reason, Fun} ->
+            wait_headers(Client#client{parser=Fun,
+                                       buffer = <<>>,
+                                       version=Version}, Status)
     end.
 
 wait_headers(#client{parser=Fun}=Client, Status) ->
@@ -117,41 +119,23 @@ wait_headers({headers_complete, Fun2}, Client, Status, Headers) ->
     {ok, Status, lists:reverse(Headers), Client#client{parser=Fun2}}.
 
 
-stream_body(Client=#client{parser=Fun,
-                           body_state=waiting}) ->
-    case Fun() of
-        {more, Fun2, Buffer} ->
-            stream_body_recv(Buffer, Client#client{parser=Fun2});
-        {ok, Data, Fun2} ->
-            {ok, Data, Client#client{parser=Fun2}};
-        {done, Rest} ->
-            Client2 = end_stream_body(Rest, Client),
-            {done, Client2};
-        done ->
-            Client2 = end_stream_body(<<>>, Client),
-            {done, Client2};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
+stream_body(Client=#client{parser=Fun}) ->
+    stream_body1(Fun(), Client).
 
 stream_body(Data, #client{parser=Fun}=Client) ->
-    case Fun(Data) of
-        {more, Fun2, Buffer} ->
-            stream_body_recv(Buffer, Client#client{parser=Fun2});
-        {ok, Data, Fun2} ->
-            {ok, Data, Client#client{parser=Fun2}};
-        {done, Rest} ->
-            Client2 = end_stream_body(Rest, Client),
-            {done, Client2};
-        done ->
-            Client2 = end_stream_body(<<>>, Client),
-            {done, Client2};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-
+    stream_body1(Fun(Data), Client).
+stream_body1({more, Fun, Buffer}, Client) ->
+    stream_body_recv(Buffer, Client#client{parser=Fun});
+stream_body1({ok, Data, Fun}, Client) ->
+    {ok, Data, Client#client{parser=Fun}};
+stream_body1({done, Rest}, Client) ->
+    Client2 = end_stream_body(Rest, Client),
+    {done, Client2};
+stream_body1(done, Client) ->
+    Client2 = end_stream_body(<<>>, Client),
+    {done, Client2};
+stream_body1(Error, _Client) ->
+    Error.
 
 
 -spec stream_body_recv(binary(), #client{})
@@ -316,11 +300,8 @@ maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
         _ -> false
     end.
 
-
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
     Transport:recv(Skt, 0, Timeout).
-
-
 
 close(#client{socket=nil}=Client) ->
     Client#client{state = closed};

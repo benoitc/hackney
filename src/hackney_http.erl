@@ -112,7 +112,7 @@ parse_response_line(<< "HTTP/", High, ".", Low, " ", Status/binary >>, St)
                         state=on_header,
                         partial_headers=[]},
 
-    {response, StatusInt, Reason, fun() -> execute(NState) end}.
+    {response, Version, StatusInt, Reason, fun() -> execute(NState) end}.
 
 parse_request_line(#hparser{buffer=Buf}=St) ->
     parse_method(Buf, St, <<>>).
@@ -150,7 +150,7 @@ parse_version(<< "HTTP/", High, ".", Low, Rest/binary >>, St, Method, URI)
                         state=on_header,
                         buffer=Rest,
                         partial_headers=[]},
-    {request, Method, URI, fun() -> execute(NState) end};
+    {request, Method, URI, Version, fun() -> execute(NState) end};
 parse_version(_, _, _, _) ->
      {error, bad_request}.
 
@@ -210,6 +210,13 @@ parse_header(Line, St) ->
     {header, {Key, Value}, St1}.
 
 
+parse_trailers(St, Acc) ->
+    case parse_headers(St) of
+        {header, Header, St2} -> parse_trailers(St2, [Header | Acc]);
+        {headers_complete, St2} -> {ok, lists:reverse(Acc), St2};
+        _ -> error
+    end.
+
 parse_body(St=#hparser{body_state=waiting, te=TE, clen=Length,
                            method=Method}) ->
 	case TE of
@@ -223,13 +230,13 @@ parse_body(St=#hparser{body_state=waiting, te=TE, clen=Length,
 						{stream, fun te_identity/2, {0, Length},
 						 fun ce_identity/1}})
 	end;
+parse_body(St=#hparser{body_state=done}) ->
+	{done, St};
 parse_body(St=#hparser{buffer=Buffer, body_state={stream, _, _, _}})
 		when Buffer =/= <<>> ->
 	transfer_decode(Buffer, St#hparser{buffer= <<>>});
-parse_body(St=#hparser{body_state={stream, _, _, _}, buffer=Buffer}) ->
-    transfer_decode(Buffer, St);
-parse_body(St=#hparser{body_state=done}) ->
-	{done, St}.
+parse_body(St) ->
+    {more, fun(Bin) -> incomplete_handler(Bin, St) end, <<>>}.
 
 
 
@@ -243,18 +250,23 @@ transfer_decode(Data, St=#hparser{
         {ok, Data2, TransferState2} ->
             content_decode(ContentDecode, Data2,
                            St#hparser{body_state= {stream,
-                                                      TransferDecode,
-                                                      TransferState2,
-                                                      ContentDecode}});
+                                                   TransferDecode,
+                                                   TransferState2,
+                                                   ContentDecode}});
         {ok, Data2, Rest, TransferState2} ->
             content_decode(ContentDecode, Data2,
                            St#hparser{buffer=Rest,
-                                         body_state={stream,
-                                                     TransferDecode,
-                                                     TransferState2,
-                                                     ContentDecode}});
+                                      body_state={stream,
+                                                  TransferDecode,
+                                                  TransferState2,
+                                                  ContentDecode}});
         {chunk_done, Rest} ->
-            {done, Rest};
+            case parse_trailers(St#hparser{buffer=Rest}, []) of
+                {ok, _Trailers, #hparser{buffer=Rest1}} ->
+                    {done, Rest1};
+                _ ->
+                    {done, Rest}
+            end;
         {chunk_ok, Chunk, Rest} ->
             {ok, Chunk, fun() -> execute(St#hparser{buffer=Rest}) end};
         more ->
@@ -264,9 +276,11 @@ transfer_decode(Data, St=#hparser{
         {done, Rest} ->
             {done, Rest};
         {done, Data2, _Rest} ->
-            content_decode(ContentDecode, Data2, St);
-        {done, Data2, _Length, _Rest} ->
-            content_decode(ContentDecode, Data2, St);
+            content_decode(ContentDecode, Data2,
+                           St#hparser{body_state=done});
+        {done, Data2, _Length, Rest} ->
+            content_decode(ContentDecode, Data2, St#hparser{buffer=Rest,
+                                                            body_state=done});
         done ->
             done;
         {error, Reason} ->
@@ -274,7 +288,6 @@ transfer_decode(Data, St=#hparser{
     end.
 
 
-%% @todo Probably needs a Rest.
 -spec content_decode(fun(), binary(), #hparser{})
 	-> {ok, binary(), #hparser{}} | {error, atom()}.
 content_decode(ContentDecode, Data, St) ->
@@ -282,7 +295,6 @@ content_decode(ContentDecode, Data, St) ->
         {ok, Data2} -> {ok, Data2, fun() -> execute(St) end};
 		{error, Reason} -> {error, Reason}
 	end.
-
 
 
 %% @doc Decode a stream of chunks.
@@ -313,6 +325,7 @@ te_chunked(Data, _) ->
 	| {done, binary(), non_neg_integer(), binary()}.
 te_identity(Data, {Streamed, Total})
 		when Streamed + byte_size(Data) < Total ->
+    io:format("streamed: ~p - total: ~p", [Streamed, Total]),
 	{ok, Data, {Streamed + byte_size(Data), Total}};
 te_identity(Data, {Streamed, Total}) ->
 	Size = Total - Streamed,
