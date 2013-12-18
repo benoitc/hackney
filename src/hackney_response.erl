@@ -73,32 +73,34 @@ expect_response(Client) ->
 
 
 wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
-    case Parser(Buf) of
-        {more, Fun} ->
+    case hackney_http:execute(Parser, Buf) of
+        {more, NParser} ->
             case recv(Client) of
                 {ok, Data} ->
-                    wait_status(Client#client{buffer=Data, parser=Fun});
+                    wait_status(Client#client{buffer=Data,
+                                              parser=NParser});
                 Error  ->
                     Error
             end;
-        {response, Version, Status, _Reason, Fun} ->
-            wait_headers(Client#client{parser=Fun,
+        {response, Version, Status, _Reason, NParser} ->
+            wait_headers(Client#client{parser=NParser,
                                        buffer = <<>>,
                                        version=Version}, Status)
     end.
 
-wait_headers(#client{parser=Fun}=Client, Status) ->
-    wait_headers(Fun(), Client, Status, []).
+wait_headers(#client{parser=Parser}=Client, Status) ->
+    wait_headers(hackney_http:execute(Parser), Client, Status, []).
 
 
-wait_headers({more, Fun2}, Client, Status, Headers) ->
+wait_headers({more, Parser}, Client, Status, Headers) ->
       case recv(Client) of
         {ok, Data} ->
-            wait_headers(Fun2(Data), Client, Status, Headers);
+            wait_headers(hackney_http:execute(Parser, Data), Client, Status,
+                         Headers);
         Error  ->
             Error
     end;
-wait_headers({header, {Key, Value}=KV, Fun2}, Client, Status, Headers) ->
+wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
     Client1 = case hackney_util:to_lower(Key) of
         <<"content-length">> ->
             CLen = list_to_integer(binary_to_list(Value)),
@@ -114,20 +116,21 @@ wait_headers({header, {Key, Value}=KV, Fun2}, Client, Status, Headers) ->
         _ ->
             Client
     end,
-    wait_headers(Fun2(), Client1, Status, [KV | Headers]);
-wait_headers({headers_complete, Fun2}, Client, Status, Headers) ->
-    {ok, Status, lists:reverse(Headers), Client#client{parser=Fun2}}.
+    wait_headers(hackney_http:execute(Parser), Client1, Status,
+                 [KV | Headers]);
+wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
+    {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 
 
-stream_body(Client=#client{parser=Fun}) ->
-    stream_body1(Fun(), Client).
+stream_body(Client=#client{parser=Parser}) ->
+    stream_body1(hackney_http:execute(Parser), Client).
 
-stream_body(Data, #client{parser=Fun}=Client) ->
-    stream_body1(Fun(Data), Client).
-stream_body1({more, Fun, Buffer}, Client) ->
-    stream_body_recv(Buffer, Client#client{parser=Fun});
-stream_body1({ok, Data, Fun}, Client) ->
-    {ok, Data, Client#client{parser=Fun}};
+stream_body(Data, #client{parser=Parser}=Client) ->
+    stream_body1(hackney_http:execute(Parser, Data), Client).
+stream_body1({more, Parser, Buffer}, Client) ->
+    stream_body_recv(Buffer, Client#client{parser=Parser});
+stream_body1({ok, Data, Parser}, Client) ->
+    {ok, Data, Client#client{parser=Parser}};
 stream_body1({done, Rest}, Client) ->
     Client2 = end_stream_body(Rest, Client),
     {done, Client2};
