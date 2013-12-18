@@ -32,7 +32,7 @@ response_state() = start | waiting | on_status | on_headers | on_body
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the request.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the request as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_header-1">stream_header/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_headers-1">stream_headers/1</a></td><td>fetch all headers.</td></tr><tr><td valign="top"><a href="#stream_status-1">stream_status/1</a></td><td>parse the status line.</td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Skip a part returned by the multipart parser.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>stream a multipart response.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -104,6 +104,23 @@ skip_body(Client::#client{}) -&gt; {ok, #client{}} | {error, atom()}
 
 
 
+<a name="skip_multipart-1"></a>
+
+### skip_multipart/1 ###
+
+
+<pre><code>
+skip_multipart(Client) -&gt; {ok, Client}
+</code></pre>
+
+<ul class="definitions"><li><code>Client = #client{}</code></li></ul>
+
+
+Skip a part returned by the multipart parser.
+
+
+This function repeatedly calls _multipart_data/1_ until
+_{end_of_part, Req}_ or _{eof, Req}_ is parsed.
 <a name="start_response-1"></a>
 
 ### start_response/1 ###
@@ -118,24 +135,23 @@ Start the response It parse the request lines and headers.
 `stream_body(Client) -> any()`
 
 
-<a name="stream_header-1"></a>
+<a name="stream_multipart-1"></a>
 
-### stream_header/1 ###
-
-`stream_header(Client) -> any()`
+### stream_multipart/1 ###
 
 
-<a name="stream_headers-1"></a>
+<pre><code>
+stream_multipart(Client::#client{}) -&gt; {headers, list(), #client{}} | {body, binary(), #client{}} | {eof, #client{}} | {end_of_part, #client{}} | {error, term()}
+</code></pre>
 
-### stream_headers/1 ###
+<br></br>
 
-`stream_headers(Client) -> any()`
 
-fetch all headers
-<a name="stream_status-1"></a>
 
-### stream_status/1 ###
+stream a multipart response
 
-`stream_status(Client) -> any()`
 
-parse the status line
+Use this function for multipart streaming. For each part in the
+response, this function returns _{headers, Headers, Req}_ followed by a sequence of
+_{body, Data, Req}_ tuples and finally _{end_of_part, Req}_. When there
+is no part to parse anymore, _{eof, Req}_ is returned.

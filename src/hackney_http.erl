@@ -3,7 +3,50 @@
 %%% This file is part of hackney released under the Apache 2 license.
 %%% See the NOTICE for more information.
 %%%
+%%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
+%%% Copyright (c) 2013 Benoit Chesneau
+%%%
 %%% @doc HTTP parser in pure Erlang
+%%% This parser is able to parse HTTP responses and requests in a
+%%% streaming manner. If not set it will be autodetect the type of
+%%% binary parsed, if it's a request or a response.
+%%%
+%%% Internally it is keeping a buffer for intermediary steps but don't
+%%% keep any state in memory.
+%%%
+%%%
+%%% The first time you initialise a parser using `hackney_http:parser/0'
+%%% or `hackney_http:parser/1' you will receive a Function accepting a
+%%% binary. This binary will start to be parsed.
+%%%
+%%% Each steps will return the status, sonme data and the next function
+%%% to execute:
+%%%
+%%% - `{response, http_version(), status(), http_reason(), continue()}':
+%%% when the first line of a response is parsed
+%%% - `{request, http_version(), http_method(), uri(), continue()}':
+%%% when the first line of a request (on servers) is parsed
+%%% - `{more, incomplete_handler(binary())}': when the parser need more
+%%% data. The new data should be passed to the given function (the
+%%% incomplete handler) when received.
+%%% - `{header, {Name :: binary(), Value :: binary()}, continue()}':
+%%% when an header has been parsed. To continue the parsing you must
+%%% call the given `continue' function.
+%%% - `{headers_complete, continue()}' : when all headers have been parsed.
+%%% To continue the parsing you must call the given `continue' function.
+%%% - `{more, incomplete_handler(binary()), binary()}': on body, when
+%%% the parser need more data. The new data should be passed to the given function (the
+%%% incomplete handler) when received. The binary at the end of the
+%%% tuple correspond to the actual buffer of the parser. It may be used
+%%% for other purpose, like start to parse a new request on pipeline
+%%% connections, for a proxy...
+%%% - `{ok, binary(), continue()}': on body, when a chunk has been
+%%% parsed. To continue the parsing you must call the given `continue'
+%%% function.
+%%% - `done': when the parsing is done
+%%% - `{done, binary()}': on body, when no more need to be parsing. The binary
+%%% given correpond to the non parsed part of the internal buffer.
+%%% - `{error, term{}}': when an error happen
 
 -module(hackney_http).
 
@@ -25,18 +68,65 @@
                   location,
                   body_state=waiting}).
 
+-type continue() :: fun().
+-type incomplete_handler(T) :: fun((binary()) -> T).
+-type http_version() :: {integer(), integer()}.
+-type status() :: integer().
+-type http_reason() :: binary().
+-type http_method() :: binary().
+-type uri() :: binary().
+-type body_result() :: {more, incomplete_handler(binary()), binary()}
+    | {ok, binary(), continue()}
+    | {done, binary()}
+    | done.
+
+-type parser_result() ::
+    {response, http_version(), status(), http_reason(), continue()}
+    | {request, http_version(), http_method(), uri(), continue()}
+    | {more, incomplete_handler(binary())}
+    | body_result()
+    | {error, term()}.
+
+-type parser_option() :: request | response | auto
+    | {max_empty_lines, integer()}
+    | {max_line_length, integer()}.
+
+-type parser_options() :: [parser_option()].
+
+
+%% @doc Create a new HTTP parser. The parser will autodetect if the parded
+%% binary is a response or a request.
+-spec parser() -> incomplete_handler(binary()).
 parser() ->
     parser([]).
 
+%% @doc create a new HTTP parser with options. By default the type of
+%% parsed binary will be detected.
+%%
+%% Available options:
+%% <ul>
+%%   <li>`auto' : autodetect if the binary parsed is a response or a
+%%   request (default).</li>
+%%   <li>`response': set the parser to parse a response</li>
+%%   <li>`request': set the parser to parse a request (server)</li>
+%%   <li>`{max_line_lenght, Max}': set the maximum size of a line parsed
+%%   before we give up.</li>
+%%   <li>`{max_lines_empty, Max}': the maximum number of empty line we
+%%   accept before the first line happen</li>
+%% </ul>
+-spec parser(parser_options()) -> incomplete_handler(binary()).
 parser(Options) ->
     InitState = parse_options(Options, #hparser{}),
     fun(Bin) -> incomplete_handler(Bin, InitState) end.
 
 
+%% internals
+-spec incomplete_handler(binary(), #hparser{}) -> parser_result().
 incomplete_handler(Bin, #hparser{buffer=Buffer}=St) ->
     NBuffer = << Buffer/binary, Bin/binary >>,
     execute(St#hparser{buffer=NBuffer}).
 
+-spec execute(#hparser{}) -> parser_result().
 execute(#hparser{state=Status, buffer=Buffer}=St) ->
     case Status of
         done -> done;
@@ -117,7 +207,6 @@ parse_response_line(<< "HTTP/", High, ".", Low, " ", Status/binary >>, St)
 parse_request_line(#hparser{buffer=Buf}=St) ->
     parse_method(Buf, St, <<>>).
 
-
 parse_method(<< C, Rest/bits >>, St, Acc) ->
     case C of
         $\r ->  {error, bad_request};
@@ -131,7 +220,6 @@ parse_uri(<< "* ", Rest/bits >>, St, Method) ->
     parse_version(Rest, St, Method, <<"*">>);
 parse_uri(Buffer, St, Method) ->
     parse_uri_path(Buffer, St, Method, <<>>).
-
 
 parse_uri_path(<< C, Rest/bits >>, St, Method, Acc) ->
     case C of
@@ -153,7 +241,6 @@ parse_version(<< "HTTP/", High, ".", Low, Rest/binary >>, St, Method, URI)
     {request, Method, URI, Version, fun() -> execute(NState) end};
 parse_version(_, _, _, _) ->
      {error, bad_request}.
-
 
 %% @doc fetch all headers
 parse_headers(#hparser{partial_headers=Headers}=St) ->
@@ -239,7 +326,6 @@ parse_body(St) ->
     {more, fun(Bin) -> incomplete_handler(Bin, St) end, <<>>}.
 
 
-
 -spec transfer_decode(binary(), #hparser{})
                      -> {ok, binary(), #hparser{}} | {error, atom()}.
 transfer_decode(Data, St=#hparser{
@@ -299,9 +385,9 @@ content_decode(ContentDecode, Data, St) ->
 
 %% @doc Decode a stream of chunks.
 -spec te_chunked(binary(), any())
-                -> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
-                       | {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
-                       | {done, non_neg_integer(), binary()} | {error, badarg}.
+    -> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
+    | {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
+    | {done, non_neg_integer(), binary()} | {error, badarg}.
 te_chunked(<<>>, _) ->
     done;
 te_chunked(Data, _) ->
@@ -336,7 +422,6 @@ te_identity(Data, {Streamed, Total}) ->
 -spec ce_identity(binary()) -> {ok, binary()}.
 ce_identity(Data) ->
 	{ok, Data}.
-
 
 read_size(Data) ->
     case read_size(Data, [], true) of

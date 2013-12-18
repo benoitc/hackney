@@ -393,8 +393,10 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
 <tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
+<tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="hackney_http_proxy.md" class="module">hackney_http_proxy</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
 <tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>

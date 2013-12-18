@@ -74,7 +74,7 @@ File options can be:
 <li><code>{offset, Offset}</code>: start to send file from this offset</li>
 <li><code>{bytes, Bytes}</code>: number of bytes to send</li>
 <li><code>{chunk_size, ChunkSize}</code>: the size of the chunk to send</li>
-</ul></td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
+</ul></td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -494,6 +494,19 @@ skip_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, a
 
 
 skip the full body. (read all the body if needed).
+<a name="skip_multipart-1"></a>
+
+### skip_multipart/1 ###
+
+
+<pre><code>
+skip_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, term()}
+</code></pre>
+
+<br></br>
+
+
+Stream the response body.
 <a name="start-0"></a>
 
 ### start/0 ###
@@ -550,6 +563,19 @@ stop to receive asynchronously.
 
 <pre><code>
 stream_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | stop | {error, term()}
+</code></pre>
+
+<br></br>
+
+
+Stream the response body.
+<a name="stream_multipart-1"></a>
+
+### stream_multipart/1 ###
+
+
+<pre><code>
+stream_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {headers, list()} | {body, binary()} | eof | end_of_part | {error, term()}
 </code></pre>
 
 <br></br>

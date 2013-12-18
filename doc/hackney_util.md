@@ -10,13 +10,30 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#char_to_lower-1">char_to_lower/1</a></td><td>Convert [A-Z] characters to lowercase.</td></tr><tr><td valign="top"><a href="#char_to_upper-1">char_to_upper/1</a></td><td>Convert [a-z] characters to uppercase.</td></tr><tr><td valign="top"><a href="#content_type-1">content_type/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#join-2">join/2</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr><tr><td valign="top"><a href="#to_binary-1">to_binary/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_hex-1">to_hex/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_lower-1">to_lower/1</a></td><td>Convert a binary string to lowercase.</td></tr><tr><td valign="top"><a href="#to_upper-1">to_upper/1</a></td><td></td></tr><tr><td valign="top"><a href="#token-2">token/2</a></td><td>Parse a token.</td></tr><tr><td valign="top"><a href="#token_ci-2">token_ci/2</a></td><td>Parse a case-insensitive token.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#alpha-2">alpha/2</a></td><td>Parse a list of case-insensitive alpha characters.</td></tr><tr><td valign="top"><a href="#char_to_lower-1">char_to_lower/1</a></td><td>Convert [A-Z] characters to lowercase.</td></tr><tr><td valign="top"><a href="#char_to_upper-1">char_to_upper/1</a></td><td>Convert [a-z] characters to uppercase.</td></tr><tr><td valign="top"><a href="#content_type-1">content_type/1</a></td><td></td></tr><tr><td valign="top"><a href="#digits-1">digits/1</a></td><td>Parse a list of digits as a non negative integer.</td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#join-2">join/2</a></td><td></td></tr><tr><td valign="top"><a href="#list-2">list/2</a></td><td>Parse a list of the given type.</td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#nonempty_list-2">nonempty_list/2</a></td><td>Parse a non-empty list of the given type.</td></tr><tr><td valign="top"><a href="#parameterized_tokens-1">parameterized_tokens/1</a></td><td>Parse a non empty list of tokens followed with optional parameters.</td></tr><tr><td valign="top"><a href="#params-2">params/2</a></td><td>Parse a list of parameters (a=b;c=d).</td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr><tr><td valign="top"><a href="#to_binary-1">to_binary/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_hex-1">to_hex/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_lower-1">to_lower/1</a></td><td>Convert a binary string to lowercase.</td></tr><tr><td valign="top"><a href="#to_upper-1">to_upper/1</a></td><td></td></tr><tr><td valign="top"><a href="#token-2">token/2</a></td><td>Parse a token.</td></tr><tr><td valign="top"><a href="#token_ci-2">token_ci/2</a></td><td>Parse a case-insensitive token.</td></tr><tr><td valign="top"><a href="#whitespace-2">whitespace/2</a></td><td>Skip whitespace.</td></tr><tr><td valign="top"><a href="#word-2">word/2</a></td><td>Parse either a token or a quoted string.</td></tr></table>
 
 
 <a name="functions"></a>
 
 ## Function Details ##
 
+<a name="alpha-2"></a>
+
+### alpha/2 ###
+
+
+<pre><code>
+alpha(Data::binary(), Fun::function()) -&gt; any()
+</code></pre>
+
+<br></br>
+
+
+
+Parse a list of case-insensitive alpha characters.
+
+
+Changes all characters to lowercase.
 <a name="char_to_lower-1"></a>
 
 ### char_to_lower/1 ###
@@ -50,6 +67,19 @@ Convert [a-z] characters to uppercase.
 `content_type(Name) -> any()`
 
 
+<a name="digits-1"></a>
+
+### digits/1 ###
+
+
+<pre><code>
+digits(Data::binary()) -&gt; non_neg_integer() | {error, badarg}
+</code></pre>
+
+<br></br>
+
+
+Parse a list of digits as a non negative integer.
 <a name="is_ipv6-1"></a>
 
 ### is_ipv6/1 ###
@@ -64,6 +94,19 @@ Convert [a-z] characters to uppercase.
 `join(L, Separator) -> any()`
 
 
+<a name="list-2"></a>
+
+### list/2 ###
+
+
+<pre><code>
+list(Data::binary(), Fun::function()) -&gt; list() | {error, badarg}
+</code></pre>
+
+<br></br>
+
+
+Parse a list of the given type.
 <a name="maybe_apply_defaults-2"></a>
 
 ### maybe_apply_defaults/2 ###
@@ -71,6 +114,45 @@ Convert [a-z] characters to uppercase.
 `maybe_apply_defaults(Rest, Options) -> any()`
 
 
+<a name="nonempty_list-2"></a>
+
+### nonempty_list/2 ###
+
+
+<pre><code>
+nonempty_list(Data::binary(), Fun::function()) -&gt; [any(), ...] | {error, badarg}
+</code></pre>
+
+<br></br>
+
+
+Parse a non-empty list of the given type.
+<a name="parameterized_tokens-1"></a>
+
+### parameterized_tokens/1 ###
+
+
+<pre><code>
+parameterized_tokens(Data::binary()) -&gt; any()
+</code></pre>
+
+<br></br>
+
+
+Parse a non empty list of tokens followed with optional parameters.
+<a name="params-2"></a>
+
+### params/2 ###
+
+
+<pre><code>
+params(Data::binary(), Fun::function()) -&gt; any()
+</code></pre>
+
+<br></br>
+
+
+Parse a list of parameters (a=b;c=d).
 <a name="require-1"></a>
 
 ### require/1 ###
@@ -148,3 +230,29 @@ Parse a case-insensitive token.
 
 
 Changes all characters to lowercase.
+<a name="whitespace-2"></a>
+
+### whitespace/2 ###
+
+
+<pre><code>
+whitespace(Data::binary(), Fun::function()) -&gt; any()
+</code></pre>
+
+<br></br>
+
+
+Skip whitespace.
+<a name="word-2"></a>
+
+### word/2 ###
+
+
+<pre><code>
+word(Data::binary(), Fun::function()) -&gt; any()
+</code></pre>
+
+<br></br>
+
+
+Parse either a token or a quoted string.
