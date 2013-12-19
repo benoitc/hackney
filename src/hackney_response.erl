@@ -121,12 +121,15 @@ wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
     {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 
-stream_body(Client=#client{response_state= done}) ->
+stream_body(Client=#client{response_state=done}) ->
     {done, Client};
-stream_body(Client=#client{method= <<"HEAD">>}) ->
-    {done, Client};
-stream_body(Client=#client{clen=0, te=TE}) when TE /= <<"chunked">> ->
-    {done, Client};
+stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
+    Buffer = hackney_http:get(Parser, buffer),
+    {done, Client#client{buffer=Buffer}};
+stream_body(Client=#client{parser=Parser, clen=0, te=TE})
+        when TE /= <<"chunked">> ->
+    Buffer = hackney_http:get(Parser, buffer),
+    {done, Client#client{buffer=Buffer}};
 stream_body(Client=#client{parser=Parser}) ->
     stream_body1(hackney_http:execute(Parser), Client).
 
