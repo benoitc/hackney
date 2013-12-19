@@ -306,10 +306,13 @@ process({ok, Data, NParser}, Client) ->
     NClient = update_client(NParser, Client),
     {ok, Data, NClient};
 process({done, Rest}, Client) ->
-    hackney_manager:update_state(Client#client{buffer=Rest}),
+    hackney_manager:update_state(Client#client{buffer=Rest,
+                                               response_state=done,
+                                               body_state=done}),
     done;
 process(done, Client) ->
-    hackney_manager:update_state(Client),
+    hackney_manager:update_state(Client#client{response_state=done,
+                                               body_state=done}),
     done;
 process({error, Reason}, _Client) ->
     {error, Reason};
