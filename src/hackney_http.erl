@@ -125,20 +125,25 @@ parser(Options) ->
     parse_options(Options, #hparser{}).
 
 
-%% @doc Execute the parser with the new buffer
--spec execute(#hparser{}, binary()) -> parser_result().
-execute(#hparser{buffer=Buffer}=St, Bin) ->
-    NBuffer = << Buffer/binary, Bin/binary >>,
-    execute(St#hparser{buffer=NBuffer}).
 
 %% @doc Execute the parser with the current buffer.
 -spec execute(#hparser{}) -> parser_result().
-execute(#hparser{state=Status, buffer=Buffer}=St) ->
+execute(St) ->
+    execute(St, <<>>).
+
+%% @doc Execute the parser with the new buffer
+-spec execute(#hparser{}, binary()) -> parser_result().
+execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
+    %% update the state with the new buffer
+    NBuffer = << Buffer/binary, Bin/binary >>,
+    St1 = St#hparser{buffer=NBuffer},
+
+    %% process the right state.
     case Status of
         done -> done;
-        on_first_line -> parse_first_line(Buffer, St, 0);
-        on_header -> parse_headers(St);
-        on_body -> parse_body(St)
+        on_first_line -> parse_first_line(NBuffer, St1, 0);
+        on_header -> parse_headers(St1);
+        on_body -> parse_body(St1)
     end.
 
 %% Empty lines must be using \r\n.
