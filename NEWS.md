@@ -1,5 +1,17 @@
 # NEWS
 
+0.9.0 - 2013/12/19
+------------------
+
+- add support for multipart responses
+- add support for cookies: There is now a `cookie`
+option that can be passed to the request. It can be a sinle cookie or a
+list of cookies. To parse cookies from the response a function `hackney:cookies/1` has
+been added. It return all the cookies as a list of [{Key, Value}].
+- breaking change: use [hackney_lib](http://github.com/benoitc/hackney_lib)  a web toolkit to handle the HTTP protocol and other manipulations.
+- optimization: send body and headers together when it is possible
+- fix release handling
+
 0.8.3 - 2013/12/07
 ------------------
 

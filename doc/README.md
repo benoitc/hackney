@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.8.3
+__Version:__ 0.9.0
 
 # hackney
 
@@ -129,6 +129,9 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 	end.
 ```
 
+> Note: you can also fetch a multipart response using the functions
+> `hackney:stream_multipart/1` and  `hackney:skip_multipart/1`.
+
 ### Reuse a connection
 
 By default all connections are created and closed dynamically by
@@ -214,6 +217,9 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, _Status, _Headers, ClientRef} = hackney:start_response(ClientRef),
 {ok, Body} = hackney:body(ClientRef),
 ```
+
+> Note: to send a **multipart** body use the
+> `hackney:sen_multipart_body/2` function.
 
 ### Get a response asynchronously
 
