@@ -26,13 +26,22 @@ init(Parent, Owner, Ref, Client) ->
 
     Parser = hackney_http:parser([response]),
     try
-        stream_loop(Parent, Owner, Ref, Client#client{parser=Parser})
+        stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
+                                                      response_state=on_status})
     catch Class:Reason ->
         Owner ! {Ref, {error, {unknown_error,
                                {{Class, Reason, erlang:get_stacktrace()},
                                 "An unexpected error occurred."}}}}
     end.
 
+
+stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
+                                        method= <<"HEAD">>}) ->
+    Owner ! {Ref, done};
+stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
+                                        clen=0, te=TE})
+        when TE /= <<"chunked">> ->
+    Owner ! {Ref, done};
 stream_loop(Parent, Owner, Ref, Client) ->
     case parse(Client) of
         {loop, Client2} ->
@@ -264,7 +273,8 @@ process({more, NParser, Buffer}, Client) ->
     NClient = update_client(NParser, Client),
     {more, NClient, Buffer};
 process({response, Version, Status, Reason, NParser}, Client) ->
-    NClient = update_client(NParser, Client#client{version=Version}),
+    NClient = update_client(NParser, Client#client{version=Version,
+                                                   response_state=on_header}),
     {ok, Status, Reason, NClient};
 process({header, {Key, Value}=KV, NParser},
         #client{partial_headers=Headers}=Client) ->
@@ -289,7 +299,8 @@ process({header, {Key, Value}=KV, NParser},
     {loop, NClient};
 process({headers_complete, NParser},
         #client{partial_headers=Headers}=Client) ->
-    NClient = update_client(NParser, Client#client{partial_headers=[]}),
+    NClient = update_client(NParser, Client#client{partial_headers=[],
+                                                   response_state=on_body}),
     {ok, {headers, lists:reverse(Headers)}, NClient};
 process({ok, Data, NParser}, Client) ->
     NClient = update_client(NParser, Client),

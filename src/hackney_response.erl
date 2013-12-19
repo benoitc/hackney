@@ -122,6 +122,10 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
     {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 
 
+stream_body(Client=#client{method= <<"HEAD">>}) ->
+    {done, Client};
+stream_body(Client=#client{clen=0, te=TE}) when TE /= <<"chunked">> ->
+    {done, Client};
 stream_body(Client=#client{parser=Parser}) ->
     stream_body1(hackney_http:execute(Parser), Client).
 
