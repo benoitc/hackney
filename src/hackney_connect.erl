@@ -5,10 +5,6 @@
 %%%
 %%% Copyright (c) 2012-2013 Benoît Chesneau <benoitc@e-engura.org>
 %%%
-%%%
-%%%
-%%%
-
 -module(hackney_connect).
 
 -export([connect/3, connect/4, connect/5,

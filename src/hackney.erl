@@ -331,7 +331,7 @@ start_response(Ref) ->
 -spec cookies(list()) -> list().
 cookies(Headers) ->
     lists:foldl(fun({K, V}, Acc) ->
-                case hackney_util:to_lower(K) of
+                case hackney_bstr:to_lower(K) of
                     <<"set-cookie">> ->
                         case hackney_cookie:parse_cookie(V) of
                             {error, _} -> Acc;

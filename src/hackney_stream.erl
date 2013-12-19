@@ -269,16 +269,16 @@ process({response, Version, Status, Reason, NParser}, Client) ->
 process({header, {Key, Value}=KV, NParser},
         #client{partial_headers=Headers}=Client) ->
     %% store useful headers
-    Client1 = case hackney_util:to_lower(Key) of
+    Client1 = case hackney_bstr:to_lower(Key) of
         <<"content-length">> ->
             CLen = list_to_integer(binary_to_list(Value)),
             Client#client{clen=CLen};
         <<"transfer-encoding">> ->
-            Client#client{te=hackney_util:to_lower(Value)};
+            Client#client{te=hackney_bstr:to_lower(Value)};
         <<"connection">> ->
-            Client#client{connection=hackney_util:to_lower(Value)};
+            Client#client{connection=hackney_bstr:to_lower(Value)};
         <<"content-type">> ->
-            Client#client{ctype=hackney_util:to_lower(Value)};
+            Client#client{ctype=hackney_bstr:to_lower(Value)};
         <<"location">> ->
             Client#client{location=Value};
         _ ->

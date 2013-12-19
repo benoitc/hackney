@@ -392,14 +392,9 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
-<tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
-<tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="hackney_http_proxy.md" class="module">hackney_http_proxy</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
-<tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
 <tr><td><a href="hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
 <tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
@@ -409,6 +404,5 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_stream.md" class="module">hackney_stream</a></td></tr>
 <tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
 <tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
-<tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

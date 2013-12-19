@@ -1,6 +1,6 @@
 Expm.Package.new(name: "hackney", description: "Simple HTTP client in Erlang",
                  version: "0.8.3", keywords: ["http","client","binary"],
-                 dependencies: ["mimetypes"],
+                 dependencies: ["mimetypes", "hackney_lib"],
                  licenses: [[name: "Apache License, Version 2.0", file: "LICENSE"]],
                  contributors: [[name: "Adam Rutkowski",
                                  email: "hq@mtod.org"

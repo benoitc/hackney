@@ -22,7 +22,7 @@
 -define(CHUNK_SIZE, 20480).
 
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
-    Method = hackney_util:to_upper(hackney_util:to_binary(Method0)),
+    Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
 
     #client{host=Host, port=Port, options=Options} = Client0,
 
@@ -86,7 +86,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
 
     HeadersLines = hackney_headers:fold(fun({K, V}, Lines) ->
-                    V1 = hackney_util:to_binary(V),
+                    V1 = hackney_bstr:to_binary(V),
                     [ << K/binary, ": ", V1/binary, "\r\n" >> | Lines]
             end, [], HeaderDict1),
 
@@ -408,7 +408,7 @@ req_type(Headers, stream) ->
     CLen = hackney_headers:get_value(<<"Content-Length">>, Headers,
                                      undefined),
 
-    case hackney_util:to_lower(TE) of
+    case hackney_bstr:to_lower(TE) of
         <<"chunked">> ->
             {Headers, chunked};
         _ when CLen =:= undefined ->
@@ -421,14 +421,14 @@ req_type(Headers, stream) ->
     end;
 req_type(Headers, _Body) ->
     TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),
-    case hackney_util:to_lower(TE) of
+    case hackney_bstr:to_lower(TE) of
         <<"chunked">> -> {Headers, chunked};
         _ -> {Headers, normal}
     end.
 
 expectation(Headers) ->
     ExpectHdr = hackney_headers:get_value(<<"Expect">>, Headers, <<>>),
-    case hackney_util:to_lower(ExpectHdr) of
+    case hackney_bstr:to_lower(ExpectHdr) of
         <<"100-continue">> -> true;
         _ -> false
     end.
