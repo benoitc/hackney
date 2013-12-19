@@ -177,7 +177,7 @@ parse_first_line(Buffer, St=#hparser{type=Type,
                     OK
             end;
         _ when Type =:= response ->
-            parse_response_line(Buffer, St);
+            parse_response_line(St);
         _ when Type =:= request ->
             parse_request_line(St)
     end.

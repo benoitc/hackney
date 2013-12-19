@@ -64,10 +64,8 @@ parse_http_date(Data) ->
 rfc2109_to_date(Data) ->
     wkday(Data,
           fun (<< ", ", Rest/binary >>, _WkDay) ->
-                io:format("mmmm ~p~n", [Rest]),
                 date4(Rest,
                       fun (<< " ", Rest2/binary >>, Date) ->
-                            io:format("rest ~p~n", [Rest2]),
                             time(Rest2,
                                  fun (<< " GMT", Rest3/binary >>, Time) ->
                                         http_date_ret(Rest3, {Date, Time});
