@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.9.0
+__Version:__ 0.9.1
 
 # hackney
 
@@ -27,7 +27,12 @@ Main features:
 - Optional socket pool
 - REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
-Note: This is a work in progress, see the
+Hackney use [hackney_lib](http://github.com/benoitc/hackney_lib) to
+handle any web protocols. If you want to manipulate headers, cookies,
+multipart or any other thing related to web protocols this is the place
+to go.
+
+> Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
 informations on what still need to be done.
 
