@@ -190,7 +190,8 @@ stream_multipart(Client=#client{body_state=waiting,
     {<<"multipart">>, _, Params} = hackney_headers:content_type(CType),
     {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
     Parser = hackney_multipart:parser(Boundary),
-    multipart_data(Client, Length, {more, Parser});
+    multipart_data(Client#client{body_state=processing}, Length,
+                                 {more, Parser});
 stream_multipart(Client=#client{multipart={Length, Cont}}) ->
     multipart_data(Client, Length, Cont());
 stream_multipart(Client=#client{body_state=done}) ->
