@@ -345,7 +345,7 @@ cookies(Headers) ->
 
 %% @doc Stream the response body.
 -spec stream_body(client_ref())
-    -> ok | stop | {error, term()}.
+    -> {ok, binary()} | done | {error, term()}.
 stream_body(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:stream_body(State),
