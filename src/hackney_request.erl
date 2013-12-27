@@ -227,7 +227,7 @@ stream_multipart({Id, {file, Name}}, Client) ->
 stream_multipart({Id, {file, Name, _Opts}=File},
                  #client{mp_boundary=Boundary}=Client) ->
     Field = hackney_multipart:field(Id),
-    CType = hackney_multipart:content_type(Name),
+    CType = hackney_bstr:content_type(Name),
     Bin = hackney_multipart:mp_header(Field, Name, CType, Boundary),
     case stream_body(Bin, Client) of
         {ok, Client1} ->
