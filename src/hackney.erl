@@ -162,6 +162,9 @@ request(Method, URL, Headers, Body) ->
 %%      `hackney:stream_next/1'
 %%      </li>
 %%
+%%      <li>`{stream_to, pid()}': If async is true or once, the response
+%%      messafes will be sent to this PID.</li>
+%%
 %%      <li>`{cookie, list() | binary()}' : to set a cookie or a
 %%      list of cookies.</li>
 %%
