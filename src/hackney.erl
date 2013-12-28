@@ -434,12 +434,9 @@ stop_async(Ref) ->
 
 %% internal functions
 %%
-make_request(Method, #hackney_url{}=URL, Headers0, Body) ->
-    #hackney_url{host = Host,
-                 port = Port,
-                 path = Path,
+make_request(Method, #hackney_url{}=URL, Headers, Body) ->
+    #hackney_url{path = Path,
                  qs = Query} = URL,
-
 
     FinalPath = case Query of
         <<>> ->
@@ -447,15 +444,6 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body) ->
         _ ->
             <<Path/binary, "?", Query/binary>>
     end,
-
-    Headers = case lists:keyfind(<<"Host">>, 1, Headers0) of
-        false ->
-          Headers0 ++ [{<<"Host">>, iolist_to_binary([Host, ":",
-                                                      integer_to_list(Port)])}];
-        _ ->
-          Headers0
-    end,
-
     {Method, FinalPath, Headers, Body}.
 
 

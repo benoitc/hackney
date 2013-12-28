@@ -26,14 +26,13 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
     #client{host=Host, port=Port, options=Options} = Client0,
 
+    %% set initial headers
     HostHdr = case is_default_port(Client0) of
         true ->
             list_to_binary(Host);
         false ->
             iolist_to_binary([Host, ":", integer_to_list(Port)])
     end,
-
-    %% make header dict
     DefaultHeaders0 = [{<<"Host">>, HostHdr},
                        {<<"User-Agent">>, default_ua()}],
 
@@ -92,7 +91,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
     HostOrPath = case Method0 of
         connect ->
-            hackney_headers:get_value(<<"host">>, HeadersDict);
+            iolist_to_binary([Host, ":", integer_to_list(Port)]);
         _ ->
             Path
     end,
