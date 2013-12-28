@@ -148,6 +148,8 @@ socket_from_pool(Host, Port, Transport, #client{options=Opts,
                                                  Opts, false),
             MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
             Async =  proplists:get_value(async, Opts, false),
+            StreamTo = proplists:get_value(stream_to, Opts, false),
+
 
             Client1 = Client#client{transport=Transport,
                                     host=Host,
@@ -159,6 +161,7 @@ socket_from_pool(Host, Port, Transport, #client{options=Opts,
                                     follow_redirect=FollowRedirect,
                                     max_redirect=MaxRedirect,
                                     async=Async,
+                                    stream_to=StreamTo,
                                     buffer = <<>>},
 
 
@@ -213,6 +216,7 @@ do_connect(Host, Port, Transport, #client{options=Opts,
             ForceRedirect = proplists:get_value(force_redirect, Opts,
                                                 false),
             Async =  proplists:get_value(async, Opts, false),
+            StreamTo = proplists:get_value(stream_to, Opts, false),
 
             Client1 = Client#client{transport=Transport,
                                     host=Host,
@@ -223,6 +227,7 @@ do_connect(Host, Port, Transport, #client{options=Opts,
                                     max_redirect=MaxRedirect,
                                     force_redirect=ForceRedirect,
                                     async=Async,
+                                    stream_to=StreamTo,
                                     buffer = <<>>},
 
             FinalClient = case is_reference(Ref0) of

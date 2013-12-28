@@ -61,7 +61,9 @@ start_async_response(Ref) ->
         [] ->
             req_not_found;
         [{Ref, #request{state=Client}=Req}] ->
-            #client{transport=Transport, socket=Socket} = Client,
+            #client{transport=Transport,
+                    socket=Socket} = Client,
+
             case gen_server:call(?MODULE, {start_async_response, Req}) of
                 {ok, Pid} ->
                     Transport:controlling_process(Socket, Pid);
@@ -176,10 +178,10 @@ handle_call({new_request, Pid, InitialState}, _From, Children) ->
     {Ref, NChildren} = make_request(Pid, InitialState, Children),
     {reply, Ref, NChildren};
 handle_call({start_async_response, #request{ref=Ref}=Req}, _From, Children) ->
-    case do_start_async_response(Req) of
-        {ok, #request{async_pid=Pid}=NReq} ->
+    case do_start_async_response(Req, Children) of
+        {ok, #request{async_pid=Pid}=NReq, Children2} ->
             true = ets:insert(?MODULE, {Ref, NReq}),
-            NChildren = dict:store(Pid, Ref, Children),
+            NChildren = dict:store(Pid, Ref, Children2),
             {reply, {ok, Pid}, NChildren};
         Error ->
             {reply, Error, Children}
@@ -310,10 +312,26 @@ make_request(Pid, InitialState, Children) ->
     {Ref, NChildren}.
 
 
-do_start_async_response(#request{ref=Ref, pid=Owner, state=Client}=Req) ->
-    case catch hackney_stream:start_link(Owner, Ref, Client) of
+do_start_async_response(#request{ref=Ref, pid=Owner, state=Client}=Req,
+                       Children) ->
+    {StreamTo, NChildren} = case Client#client.stream_to of
+        false ->
+            {Owner, Children};
+        To ->
+            link(To),
+            Children1 = case dict:is_key(Owner, Children) of
+                true ->
+                    unlink(Owner),
+                    dict:erase(Owner, Children);
+                false ->
+                    Children
+            end,
+            {To, dict:store(To, Ref, Children1)}
+
+    end,
+    case catch hackney_stream:start_link(StreamTo, Ref, Client) of
         {ok, Pid} when is_pid(Pid) ->
-            {ok, Req#request{async_pid=Pid}};
+            {ok, Req#request{pid=StreamTo, async_pid=Pid}, NChildren};
         {error, What} ->
             {error, What};
         What ->
