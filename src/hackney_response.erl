@@ -273,7 +273,9 @@ end_stream_body(Rest, Client0) ->
     Client = Client0#client{response_state=done,
                             body_state=done,
                             parser=nil,
-                            buffer=Rest},
+                            buffer=Rest,
+                            stream_to=false,
+                            async=false},
 
     Pool = hackney_connect:is_pool(Client),
     case maybe_close(Client) of
@@ -288,7 +290,6 @@ end_stream_body(Rest, Client0) ->
         false ->
             Client
     end.
-
 
 
 -spec read_body(non_neg_integer() | infinity, #client{}, binary())

@@ -351,7 +351,9 @@ finish_response(Rest, Client0) ->
     Client = Client0#client{response_state=done,
                             body_state=done,
                             parser=nil,
-                            buffer=Rest},
+                            buffer=Rest,
+                            async=false,
+                            stream_to=false},
 
     Pool = hackney_connect:is_pool(Client),
     case hackney_response:maybe_close(Client) of
