@@ -224,10 +224,10 @@ stream_multipart({mp_mixed, Name, MixedBoundary},
                  #client{mp_boundary=Boundary}=Client) ->
     {MpHeader, _} = hackney_multipart:mp_mixed_header({Name, MixedBoundary},
                                                       Boundary),
-    stream_body(MpHeader, Client);
+    stream_body(<< MpHeader/binary, "\r\n" >>, Client);
 stream_multipart({mp_mixed_eof, MixedBoundary}, Client) ->
-    stream_body(hackney_multipart:mp_eof(MixedBoundary), Client);
-
+    Eof = hackney_multipart:mp_eof(MixedBoundary),
+    stream_body(<< Eof/binary, "\r\n" >>, Client);
 stream_multipart({file, Path}, Client) ->
     stream_multipart({file, Path, []}, Client);
 stream_multipart({file, Path, _ExtraHeaders}=File,
@@ -246,7 +246,6 @@ stream_multipart({file, Path, _ExtraHeaders}=File,
     end;
 stream_multipart({data, Name, Bin}, Client) ->
     stream_multipart({data, Name, Bin, []}, Client);
-
 stream_multipart({data, Name, Bin, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client) ->
     Len = byte_size(Name),
@@ -254,7 +253,6 @@ stream_multipart({data, Name, Bin, ExtraHeaders},
                                                      Boundary),
     Bin1 = << MpHeader/binary, Bin/binary, "\r\n" >>,
     stream_body(Bin1, Client);
-
 stream_multipart({part, eof}, Client) ->
     stream_body(<<"\r\n">>, Client);
 stream_multipart({part, Name}, Client) ->
