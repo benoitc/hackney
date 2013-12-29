@@ -26,10 +26,6 @@ wait_response(Parent) ->
             ok
     end.
 
-
-
-
-
 main(_) ->
     hackney:start(),
     Self = self(),
