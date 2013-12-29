@@ -75,7 +75,7 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
             Transport:controlling_process(Socket, Parent),
             Owner ! {Ref, done};
         {error, _Reason} = Error ->
-            %% hackney_manager:handle_error(Client),
+            hackney_manager:handle_error(Client),
             Owner ! {Ref, Error}
     end.
 
