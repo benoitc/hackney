@@ -318,8 +318,16 @@ handle_body(Headers, ReqType0, Body0, Client) ->
     {CLen, CType, Body} = case Body0 of
         {form, KVs} ->
             encode_form(KVs);
-        {multipart, KVs} ->
-            hackney_multipart:encode_form(KVs);
+        {multipart, Parts} ->
+            Boundary = hackney_multipart:boundary(),
+            {Form, Length} = hackney_multipart:encode_form(Parts,  Boundary),
+            CT = case hackney_headers:parse(<<"content-type">>, Headers) of
+                {<<"multipart">>, _, _} ->
+                    hackney_headers:get_value(<<"content-type">>, Headers);
+                _ ->
+                    << "multipart/form-data; boundary=", Boundary/binary >>
+            end,
+            {Length, CT, Form};
         {file, FileName} ->
             S= filelib:file_size(FileName),
 	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
