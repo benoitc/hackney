@@ -246,6 +246,17 @@ send_request(Ref, Req) when is_reference(Ref) ->
     case hackney_manager:get_state(Ref) of
         req_not_found ->
             {error, closed};
+        #client{socket=Socket, state=Status, redirect=Redirect} = State
+                when Socket /= nil, Status /= closed, Redirect =:= nil ->
+            %% make sure we control the socket
+            case hackney_manager:controlling_process(Ref, self()) of
+                ok ->
+                    send_request(State, Req);
+                _Else ->
+                    %% the socket has been closed, make sure to
+                    %% reconnect
+                    send_request(State#client{state=closed}, Req)
+            end;
         State ->
             send_request(State, Req)
     end;

@@ -42,7 +42,8 @@ stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
                                         clen=0, te=TE})
         when TE /= <<"chunked">> ->
     Owner ! {Ref, done};
-stream_loop(Parent, Owner, Ref, Client) ->
+stream_loop(Parent, Owner, Ref, #client{transport=Transport,
+                                        socket=Socket}=Client) ->
     case parse(Client) of
         {loop, Client2} ->
             stream_loop(Parent, Owner, Ref, Client2);
@@ -58,6 +59,9 @@ stream_loop(Parent, Owner, Ref, Client) ->
             Owner ! {Ref, Data},
             maybe_continue(Parent, Owner, Ref, Client2);
         done ->
+            %% pass the control of the socket to the manager so we make
+            %% sure a new request will be able to use it
+            Transport:controlling_process(Socket, Parent),
             Owner ! {Ref, done};
         {error, _Reason} = Error ->
             hackney_manager:handle_error(Client),

@@ -167,7 +167,7 @@ socket_from_pool(Host, Port, Transport, #client{options=Opts,
 
             FinalClient = case is_reference(ReqRef0) of
                 true ->
-                    ok = hackney_manager:update_state(ReqRef0, Client1),
+                    ok = hackney_manager:take_control(ReqRef0, Client1),
                     Client1;
                 false ->
                     RequestRef = hackney_manager:new_request(Client1),
@@ -232,7 +232,7 @@ do_connect(Host, Port, Transport, #client{options=Opts,
 
             FinalClient = case is_reference(Ref0) of
                 true ->
-                    ok = hackney_manager:update_state(Ref0, Client1),
+                    ok = hackney_manager:take_control(Ref0, Client1),
                     Client1;
                 false ->
                     Ref = hackney_manager:new_request(Client1),

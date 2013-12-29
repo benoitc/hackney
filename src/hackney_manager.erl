@@ -16,6 +16,7 @@
 
 -export([get_state/1, get_state/2,
          update_state/1, update_state/2,
+         take_control/2,
          handle_error/1]).
 
 -export([async_response_pid/1,
@@ -50,6 +51,8 @@ close_request(Ref) ->
 controlling_process(Ref, Pid) ->
     Reply = gen_server:call(?MODULE, {controlling_process, Ref, Pid}),
     case Reply of
+        ok ->
+            ok;
         {ok, {Transport, Socket}} ->
             Transport:controlling_process(Socket, Pid);
         Error ->
@@ -137,6 +140,15 @@ update_state(Ref, NState) ->
             ok
     end.
 
+take_control(Ref, NState) ->
+    case ets:lookup(?MODULE, Ref) of
+        [] -> {error, req_not_found};
+        [{Ref, Req}] ->
+            true = ets:insert(?MODULE, {Ref, Req#request{pid=self(),
+                                                         state=NState}}),
+            ok
+    end.
+
 handle_error(#client{request_ref=Ref, dynamic=true}) ->
     close_request(Ref);
 
@@ -145,7 +157,6 @@ handle_error(#client{request_ref=Ref, transport=Transport,
     case ets:lookup(?MODULE, Ref) of
         [] -> ok;
         [{Ref, #request{state=State}}] ->
-
             Transport:controlling_process(Socket, self()),
             Transport:close(Socket),
             NState = State#client{socket=nil,
@@ -187,9 +198,20 @@ handle_call({start_async_response, #request{ref=Ref}=Req}, _From, Children) ->
             {reply, Error, Children}
     end;
 handle_call({controlling_process, Ref, Pid}, _From, Children) ->
+    Self = self(),
     case ets:lookup(?MODULE, Ref) of
         [] ->
             {reply, req_not_found, Children};
+        [{Ref, #request{pid=Owner, state=St}=Req}]
+                when Owner =:= Self ->
+            %% the manager is actually controlling the process
+            ets:insert(?MODULE, Req#request{pid=Pid}),
+            NChildren = dict:store(Pid, Ref, Children),
+            link(Pid),
+            %% pas the control to the new client process
+            #client{transport=Transport, socket=Socket} = St,
+            Reply = Transport:controlling_process(Socket, Pid),
+            {reply, Reply, NChildren};
         [{Ref, #request{pid=Owner, state=St}=Req}] ->
             Children1 = case dict:is_key(Owner, Children) of
                 true ->
@@ -201,9 +223,7 @@ handle_call({controlling_process, Ref, Pid}, _From, Children) ->
             ets:insert(?MODULE, Req#request{pid=Pid}),
             NChildren = dict:store(Pid, Ref, Children1),
             link(Pid),
-
             #client{transport=Transport, socket=Socket} = St,
-
             {reply, {ok, {Transport, Socket}}, NChildren}
     end;
 
@@ -349,11 +369,14 @@ handle_exit(AsyncPid, #request{ref=Ref, pid=Pid, async_pid=AsyncPid}=Req,
         _ ->
             Pid ! {'DOWN', Ref, Reason}
     end,
-    %% store the new request reference
-    ets:insert(?MODULE, {Ref, Req#request{async_pid=nil}}),
-
-    %% delete the pid from the children
-    dict:erase(AsyncPid, Children);
+    %% delete the async pid from the children
+    Children1 = dict:erase(AsyncPid, Children),
+    %% delete the pid from the childrent
+    NChildren = dict:erase(Pid, Children1),
+    %% store the new request reference, the manager is the new owner of
+    %% the request.
+    ets:insert(?MODULE, {Ref, Req#request{pid=self(), async_pid=nil}}),
+    NChildren;
 handle_exit(Pid, #request{ref=Ref, pid=Pid, async_pid=nil}, _Reason,
             Children) ->
     %% delete the reference, the parent exited
