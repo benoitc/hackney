@@ -209,7 +209,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                     Owner ! {hackney_response, Ref, {error, Error}}
             end;
         _ ->
-            Owner ! {Ref, {status, StatusInt, Reason}},
+            Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
             maybe_continue(Parent, Owner, Ref, Client)
     end;
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
