@@ -74,7 +74,7 @@ File options can be:
 <li><code>{offset, Offset}</code>: start to send file from this offset</li>
 <li><code>{bytes, Bytes}</code>: number of bytes to send</li>
 <li><code>{chunk_size, ChunkSize}</code>: the size of the chunk to send</li>
-</ul></td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
+</ul></td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -338,6 +338,10 @@ receive the other messages use the function
 `hackney:stream_next/1`
 
 
+* `{stream_to, pid()}`: If async is true or once, the response
+messafes will be sent to this PID.
+
+
 * `{cookie, list() | binary()}` : to set a cookie or a
 list of cookies.
 
@@ -481,6 +485,19 @@ File options can be:
 `send_request(Ref, Req) -> any()`
 
 send a request using the current client state
+<a name="setopts-2"></a>
+
+### setopts/2 ###
+
+
+<pre><code>
+setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt; ok
+</code></pre>
+
+<br></br>
+
+
+set client options.
 <a name="skip_body-1"></a>
 
 ### skip_body/1 ###
@@ -562,7 +579,7 @@ stop to receive asynchronously.
 
 
 <pre><code>
-stream_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | stop | {error, term()}
+stream_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary()} | done | {error, term()}
 </code></pre>
 
 <br></br>
