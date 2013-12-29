@@ -52,6 +52,17 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
         {ok, StatusInt, Reason, Client2} ->
             maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                            Client2);
+        {ok, {headers, Headers}, #client{method= <<"HEAD">>,
+                                         parser=Parser}=Client2} ->
+            %% send the headers
+            Owner ! {Ref, {headers, Headers}},
+            %% this is an HEAD request, we are done
+            Buffer = hackney_http:get(Parser, buffer),
+            hackney_manager:update_state(finish_response(Buffer, Client2)),
+            %% pass the control to the manager and let the receiver know
+            %% that we are done.
+            Transport:controlling_process(Socket, Parent),
+            Owner ! {Ref, done};
         {ok, {headers, Headers}, Client2} ->
             Owner ! {Ref, {headers, Headers}},
             maybe_continue(Parent, Owner, Ref, Client2);
@@ -310,13 +321,12 @@ process({ok, Data, NParser}, Client) ->
     NClient = update_client(NParser, Client),
     {ok, Data, NClient};
 process({done, Rest}, Client) ->
-    hackney_manager:update_state(Client#client{buffer=Rest,
-                                               response_state=done,
-                                               body_state=done}),
+    Client2 = finish_response(Rest, Client),
+    hackney_manager:update_state(Client2),
     done;
 process(done, Client) ->
-    hackney_manager:update_state(Client#client{response_state=done,
-                                               body_state=done}),
+    Client2 = finish_response(<<>>, Client),
+    hackney_manager:update_state(Client2),
     done;
 process({error, Reason}, _Client) ->
     {error, Reason};
@@ -327,3 +337,23 @@ update_client(Parser, Client) ->
     NClient = Client#client{parser=Parser},
     hackney_manager:update_state(NClient),
     NClient.
+
+finish_response(Rest, Client0) ->
+    Client = Client0#client{response_state=done,
+                            body_state=done,
+                            parser=nil,
+                            buffer=Rest},
+
+    Pool = hackney_connect:is_pool(Client),
+    case hackney_response:maybe_close(Client) of
+        true ->
+            hackney_response:close(Client);
+        false when Pool /= false ->
+            #client{socket=Socket,
+                    socket_ref=Ref,
+                    pool_handler=Handler}=Client,
+            Handler:checkin(Ref, Socket),
+            Client#client{state=closed, socket=nil, socket_ref=nil};
+        false ->
+            Client
+    end.
