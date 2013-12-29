@@ -395,6 +395,16 @@ stream_body(Ref) ->
         end).
 
 %% @doc Stream the response body.
+%%
+%% Return:
+%% <ul>
+%% <li>`{headers, Headers}': the part headers</li>
+%% <li>`{body, Bin}': part of the content</li>
+%% <li>`end_of_part' : end of part</li>
+%% <li>`mp_mixed': notify the begininning of a mixed multipart part</li>
+%% <li>`mp_mixed_eof': notify the end  of a mixed multipart part</li>
+%% <li>`eof': notify the end of the nultipart request</li>
+%% </ul>
 -spec stream_multipart(client_ref())
     -> {headers, list()} | {body, binary()} | eof | end_of_part
     | {error, term()}.
