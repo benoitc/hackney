@@ -103,6 +103,18 @@ cancel_request(Ref) ->
     hackney_manager:cancel_request(Ref).
 
 %% @doc set client options.
+%% Options are:
+%% - `async': to fetch the response asynchronously
+%% - `{async, once}': to receive the response asynchronosly once time.
+%% To receive the next message use the function `hackney:stream_next/1'.
+%% - `{stream_to, pid()}': to set the pid where the messages of an
+%% asynchronous response will be sent.
+%% - `{follow_redirect, bool()}' : if true a redirection will be
+%% followed when the response is received synchronously
+%% - `{force_redirect, bool()}' : if true a 301/302 redirection will be
+%% followed even on POST.
+%% - `{max_redirect, integer()}' the maximum number of redirections that
+%% will be followed
 -spec setopts(client_ref(), list()) -> ok.
 setopts(Ref, Options) ->
     hackney_manager:get_state(Ref, fun(State) ->
@@ -165,7 +177,7 @@ request(Method, URL, Headers, Body) ->
 %%
 %%      <li>`async': receive the response asynchronously
 %%      The function return {ok, {response_stream, StreamRef}}.
-%%      When {async, once} is used the socket will receive only once. To
+%%      When {async, once} is used the response will be received only once. To
 %%      receive the other messages use the function
 %%      `hackney:stream_next/1'
 %%      </li>
