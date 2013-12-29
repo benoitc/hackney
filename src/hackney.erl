@@ -11,7 +11,7 @@
 -export([connect/1, connect/2, connect/3, connect/4,
          close/1,
          request/1, request/2, request/3, request/4, request/5,
-         send_request/2,
+         send_request/2, send_request/3,
          start_response/1,
          cookies/1,
          send_body/2, finish_send_body/1,
@@ -248,8 +248,13 @@ request(Method, URL, Headers, Body, Options)
     request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
 
 
-%% @doc send a request using the current client state
+%% @doc send a request using the current client state and pass new
+%% options to it.
+send_request(Ref, Req, Options) ->
+    ok = setopts(Ref, Options),
+    send_request(Ref, Req).
 
+%% @doc send a request using the current client state
 send_request(Ref, Req) when is_reference(Ref) ->
     case hackney_manager:get_state(Ref) of
         req_not_found ->
