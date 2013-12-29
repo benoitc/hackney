@@ -12,6 +12,8 @@
 - fix `Host` header: some server do not comply well with the spec and
   fail to parse the port when they are listening on 80 or 443. This
 change fix it.
+- fix: make sure we are re-using connections with asynchronous
+  responses.
 
 ### Breaking changes:
 
