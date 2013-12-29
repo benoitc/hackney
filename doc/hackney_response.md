@@ -32,7 +32,7 @@ response_state() = start | waiting | on_status | on_headers | on_body
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#body-1">body/1</a></td><td>Return the full body sent with the request.</td></tr><tr><td valign="top"><a href="#body-2">body/2</a></td><td>Return the full body sent with the request as long as the body
-length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Skip a part returned by the multipart parser.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>stream a multipart response.</td></tr></table>
+length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#expect_response-1">expect_response/1</a></td><td>handle Expect header.</td></tr><tr><td valign="top"><a href="#maybe_close-1">maybe_close/1</a></td><td></td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Skip a part returned by the multipart parser.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>Start the response It parse the request lines and headers.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td></td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>stream a multipart response.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -91,6 +91,13 @@ the body it received up to the last chunk, which might be a bit more than MaxLen
 `expect_response(Client) -> any()`
 
 handle Expect header
+<a name="maybe_close-1"></a>
+
+### maybe_close/1 ###
+
+`maybe_close(Client) -> any()`
+
+
 <a name="skip_body-1"></a>
 
 ### skip_body/1 ###
