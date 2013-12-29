@@ -21,7 +21,8 @@
          stream_multipart/1,
          skip_multipart/1,
          controlling_process/2,
-         cancel_request/1]).
+         cancel_request/1,
+         setopts/2]).
 
 -export([redirect_location/1]).
 
@@ -79,7 +80,6 @@ connect(Transport, Host, Port) ->
 connect(Transport, Host, Port, Options) ->
     hackney_connect:connect(Transport, Host, Port, Options).
 
-
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
 -spec controlling_process(client_ref(), pid())
 	-> ok | {error, closed | not_owner | atom()}.
@@ -101,6 +101,14 @@ controlling_process(Ref, Pid) ->
     | {error, term()}.
 cancel_request(Ref) ->
     hackney_manager:cancel_request(Ref).
+
+%% @doc set client options.
+-spec setopts(client_ref(), list()) -> ok.
+setopts(Ref, Options) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                State2 = parse_options(Options, State),
+                hackney_manager:update_state(Ref, State2)
+        end).
 
 %% @doc close the client
 close(Ref) ->
@@ -691,6 +699,28 @@ maybe_update_req(#client{dynamic=true, response_state=done}=State) ->
     hackney_manager:cancel_request(State);
 maybe_update_req(State) ->
     hackney_manager:update_state(State).
+
+
+parse_options([], State) ->
+    State;
+parse_options([async | Rest], State) ->
+    parse_options(Rest, State#client{async=true});
+parse_options([{async, Async} | Rest], State) ->
+    parse_options(Rest, State#client{async=Async});
+parse_options([{stream_to, Pid} | Rest], State) ->
+    parse_options(Rest, State#client{stream_to=Pid});
+parse_options([{follow_redirect, Follow} | Rest], State) ->
+    parse_options(Rest, State#client{follow_redirect=Follow});
+parse_options([{force_redirect, Force} | Rest], State) ->
+    parse_options(Rest, State#client{force_redirect=Force});
+parse_options([{max_redirect, Max} | Rest], State) ->
+    parse_options(Rest, State#client{max_redirect=Max});
+parse_options([dynamic | Rest], State) ->
+    parse_options(Rest, State#client{dynamic=true});
+parse_options([{dynamic, Dynamic} | Rest], State) ->
+    parse_options(Rest, State#client{dynamic=Dynamic});
+parse_options([_ | Rest], State) ->
+    parse_options(Rest, State).
 
 -define(METHOD_TPL(Method),
         Method(URL) ->
