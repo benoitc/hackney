@@ -378,7 +378,13 @@ handle_multipart_body(Headers, ReqType, CLen, Client) ->
                           hackney_multipart:boundary(), Client).
 
 handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
-    CType = << "multipart/form-data; boundary=", Boundary/binary >>,
+    CType = case hackney_headers:parse(<<"content-type">>, Headers) of
+        {<<"multipart">>, _, _} ->
+            hackney_headers:get_value(<<"content-type">>, Headers);
+        _ ->
+            << "multipart/form-data; boundary=", Boundary/binary >>
+    end,
+
     {NewHeaders, ReqType1}  = case {CLen, ReqType} of
         {chunked, normal} ->
             NewHeadersKV = [{<<"Content-Type">>, CType},
