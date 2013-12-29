@@ -35,13 +35,30 @@ init(Parent, Owner, Ref, Client) ->
                                                   "An unexpected error occurred."}}}}
     end.
 
-
-stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
-                                        method= <<"HEAD">>}) ->
+stream_loop(Parent, Owner, Ref, #client{transport=Transport,
+                                         socket=Socket,
+                                         response_state=on_body,
+                                         method= <<"HEAD">>,
+                                         parser=Parser}=Client) ->
+    Buffer = hackney_http:get(Parser, buffer),
+    hackney_manager:update_state(finish_response(Buffer, Client)),
+    %% pass the control of the socket to the manager so we make
+    %% sure a new request will be able to use it
+    Transport:controlling_process(Socket, Parent),
+    %% tell the client we are done
     Owner ! {hackney_response, Ref, done};
-stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
-                                        clen=0, te=TE})
+stream_loop(Parent, Owner, Ref, #client{transport=Transport,
+                                         socket=Socket,
+                                         response_state=on_body,
+                                         clen=0, te=TE,
+                                         parser=Parser}=Client)
         when TE /= <<"chunked">> ->
+    Buffer = hackney_http:get(Parser, buffer),
+    hackney_manager:update_state(finish_response(Buffer, Client)),
+    %% pass the control of the socket to the manager so we make
+    %% sure a new request will be able to use it
+    Transport:controlling_process(Socket, Parent),
+    %% tell the client we are done
     Owner ! {hackney_response, Ref, done};
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
                                         socket=Socket}=Client) ->
@@ -53,17 +70,6 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
         {ok, StatusInt, Reason, Client2} ->
             maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                            Client2);
-        {ok, {headers, Headers}, #client{method= <<"HEAD">>,
-                                         parser=Parser}=Client2} ->
-            %% send the headers
-            Owner ! {hackney_response, Ref, {headers, Headers}},
-            %% this is an HEAD request, we are done
-            Buffer = hackney_http:get(Parser, buffer),
-            hackney_manager:update_state(finish_response(Buffer, Client2)),
-            %% pass the control to the manager and let the receiver know
-            %% that we are done.
-            Transport:controlling_process(Socket, Parent),
-            Owner ! {hackney_response, Ref, done};
         {ok, {headers, Headers}, Client2} ->
             Owner ! {hackney_response, Ref, {headers, Headers}},
             maybe_continue(Parent, Owner, Ref, Client2);
