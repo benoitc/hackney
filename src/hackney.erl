@@ -329,25 +329,28 @@ finish_send_body(Ref) ->
 %% Possible value are :
 %% <ul>
 %% <li>`eof': end the multipart request</li>
-%% <li>`{Id, {File, FileName}}': to stream a file</li>
-%% %% <li>`{Id, {File, FileName, FileOptions}}': to stream a file</li>
-%% <li>`{data, {start, Id, DileName, ContentType}}': to start to stream
-%% arbitrary binary content</li>
-%% <li>`{data, Bin}`: send a binary. Use it only after emitting a
-%% **start**</li>
-%% <li>`{data, eof}`: stop sending an arbitary content. It doesn't stop
-%% the multipart request</li>
-%% <li>`{Id, {file, Filename, Content}': send a full content as a
-%% boundary</li>
-%% <li>`{Id, Value}': send an arbitrary value as a boundary. Filename and
-%% Id are identique</li>
+%% <li>`{file, Path}': to stream a file</li>
+%% <li>`{file, Path, ExtraHeaders}': to stream a file</li>
+%% <li>`{data, Name, Content}': to send a full part</li>
+%% <li>`{data, Name, Content, ExtraHeaders}': to send a full part</li>
+%% <li>`{part, Name, Len}': to start sending a part with a known length in a streaming
+%% fashion</li>
+%% <li>`{part, Name, Len, ExtraHeader}': to start sending a part in a streaming
+%% fashion</li>
+%% <li>`{part, Name}': to start sending a part without length in a streaming
+%% fashion</li>
+%% <li>`{part, Name, ExtraHeader}': to start sending a part without
+%% lengthin a streaming  fashion</li>
+%% <li>`{part_bin, Bin}': To send part of part</li>
+%% <li>`{part, eof}': To notify the end of the part </li>
+%% <li>`{mp_mixed, Name, MixedBoundary}': To notify we start a part with a a mixed
+%% multipart content</li>
+%% <li>`{mp_mixed_eof, MixedBoundary}': To notify we end a part with a a mixed
+%% multipart content</li>
 %% </ul>
-%% File options can be:
-%% <ul>
-%% <li>`{offset, Offset}': start to send file from this offset</li>
-%% <li>`{bytes, Bytes}': number of bytes to send</li>
-%% <li>`{chunk_size, ChunkSize}': the size of the chunk to send</li>
-%% </ul>
+%%
+%% Note: You can calculate the full length of a multipart stream using
+%% the function `hackney_multipart:len_mp_stream/2' .
 -spec send_multipart_body(client_ref(), term()) -> ok | {error, term()}.
 send_multipart_body(Ref, Body) ->
     hackney_manager:get_state(Ref, fun(State) ->

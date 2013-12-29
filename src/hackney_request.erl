@@ -214,23 +214,28 @@ stream_body({file, FileName, Opts}, Client) ->
 stream_multipart(eof, #client{response_state=waiting}=Client) ->
     {ok, Client};
 stream_multipart(eof, #client{mp_boundary=Boundary}=Client) ->
-    Line = <<"--", Boundary/binary, "--", "\r\n\r\n">>,
-    case stream_body(Line, Client) of
+    case stream_body(hackney_multipart:mp_eof(Boundary), Client) of
         {ok, Client1} ->
             end_stream_body(Client1);
         Error ->
             Error
     end;
-stream_multipart({Id, {file, Name}}, Client) ->
-    stream_multipart({Id, {file, Name, []}}, Client);
-stream_multipart({Id, {file, Name, _Opts}=File},
+stream_multipart({mp_mixed, Name, MixedBoundary},
                  #client{mp_boundary=Boundary}=Client) ->
-    Field = hackney_multipart:field(Id),
-    CType = hackney_bstr:content_type(Name),
-    Bin = hackney_multipart:mp_header(Field, Name, CType, Boundary),
-    case stream_body(Bin, Client) of
+    {MpHeader, _} = hackney_multipart:mp_mixed_header({Name, MixedBoundary},
+                                                      Boundary),
+    stream_body(MpHeader, Client);
+stream_multipart({mp_mixed_eof, MixedBoundary}, Client) ->
+    stream_body(hackney_multipart:mp_eof(MixedBoundary), Client);
+
+stream_multipart({file, Path}, Client) ->
+    stream_multipart({file, Path, []}, Client);
+stream_multipart({file, Path, _ExtraHeaders}=File,
+                 #client{mp_boundary=Boundary}=Client) ->
+    {MpHeader, _} = hackney_multipart:mp_file_header(File, Boundary),
+    case stream_body(MpHeader, Client) of
         {ok, Client1} ->
-            case stream_body(File, Client1) of
+            case stream_body({file, Path}, Client1) of
                 {ok, Client2} ->
                    stream_body(<<"\r\n">>, Client2);
                 Error ->
@@ -239,23 +244,41 @@ stream_multipart({Id, {file, Name, _Opts}=File},
         Error ->
             Error
     end;
-stream_multipart({data, {start, Name, FileName, CType}},
+stream_multipart({data, Name, Bin}, Client) ->
+    stream_multipart({data, Name, Bin, []}, Client);
+
+stream_multipart({data, Name, Bin, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client) ->
-    Bin = hackney_multipart:mp_header(Name, FileName, CType, Boundary),
-    stream_body(Bin, Client);
-stream_multipart({data, eof}, Client) ->
+    Len = byte_size(Name),
+    {MpHeader, _} = hackney_multipart:mp_data_header({Name, Len, ExtraHeaders},
+                                                     Boundary),
+    Bin1 = << MpHeader/binary, Bin/binary, "\r\n" >>,
+    stream_body(Bin1, Client);
+
+stream_multipart({part, eof}, Client) ->
     stream_body(<<"\r\n">>, Client);
-stream_multipart({data, Bin}, Client) ->
-    stream_body(Bin, Client);
-stream_multipart({Id, {file, Name, Content}},
+stream_multipart({part, Name}, Client) ->
+     stream_multipart({part, Name, []}, Client);
+stream_multipart({part, Name, ExtraHeaders},
+                 #client{mp_boundary=Boundary}=Client)
+        when is_list(ExtraHeaders) ->
+    %% part without content-length
+    CType = hackney_bstr:content_type(Name),
+    Headers = [{<<"Content-Disposition">>,
+                {<<"form_data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
+               },
+               {<<"Content-Type">>, CType}],
+    MpHeader = hackney_multipart:mp_header(Headers, Boundary),
+    stream_body(MpHeader, Client);
+stream_multipart({part, Name, Len}, Client) when is_integer(Len)->
+    stream_multipart({part, Name, Len, []}, Client);
+stream_multipart({part, Name, Len, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client) ->
-
-    Bin = hackney_multipart:encode({Id, {file, Name, Content}}, Boundary),
-    stream_body(Bin, Client);
-stream_multipart({Id, Value}, #client{mp_boundary=Boundary}=Client) ->
-    Bin = hackney_multipart:encode({Id, Value}, Boundary),
+    {MpHeader, _} = hackney_multipart:mp_data_header({Name, Len, ExtraHeaders},
+                                                     Boundary),
+    stream_body(MpHeader, Client);
+stream_multipart({part_bin, Bin}, Client) ->
     stream_body(Bin, Client).
-
 
 send(#client{transport=Transport, socket=Skt}, Data) ->
     Transport:send(Skt, Data).
