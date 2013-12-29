@@ -29,19 +29,20 @@ init(Parent, Owner, Ref, Client) ->
         stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
                                                       response_state=on_status})
     catch Class:Reason ->
-        Owner ! {Ref, {error, {unknown_error,
-                               {{Class, Reason, erlang:get_stacktrace()},
-                                "An unexpected error occurred."}}}}
+        Owner ! {hackney_response, Ref, {error, {unknown_error,
+                                                 {{Class, Reason,
+                                                   erlang:get_stacktrace()},
+                                                  "An unexpected error occurred."}}}}
     end.
 
 
 stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
                                         method= <<"HEAD">>}) ->
-    Owner ! {Ref, done};
+    Owner ! {hackney_response, Ref, done};
 stream_loop(_Parent, Owner, Ref, #client{response_state=on_body,
                                         clen=0, te=TE})
         when TE /= <<"chunked">> ->
-    Owner ! {Ref, done};
+    Owner ! {hackney_response, Ref, done};
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
                                         socket=Socket}=Client) ->
     case parse(Client) of
@@ -55,28 +56,28 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
         {ok, {headers, Headers}, #client{method= <<"HEAD">>,
                                          parser=Parser}=Client2} ->
             %% send the headers
-            Owner ! {Ref, {headers, Headers}},
+            Owner ! {hackney_response, Ref, {headers, Headers}},
             %% this is an HEAD request, we are done
             Buffer = hackney_http:get(Parser, buffer),
             hackney_manager:update_state(finish_response(Buffer, Client2)),
             %% pass the control to the manager and let the receiver know
             %% that we are done.
             Transport:controlling_process(Socket, Parent),
-            Owner ! {Ref, done};
+            Owner ! {hackney_response, Ref, done};
         {ok, {headers, Headers}, Client2} ->
-            Owner ! {Ref, {headers, Headers}},
+            Owner ! {hackney_response, Ref, {headers, Headers}},
             maybe_continue(Parent, Owner, Ref, Client2);
         {ok, Data, Client2} ->
-            Owner ! {Ref, Data},
+            Owner ! {hackney_response, Ref, Data},
             maybe_continue(Parent, Owner, Ref, Client2);
         done ->
             %% pass the control of the socket to the manager so we make
             %% sure a new request will be able to use it
             Transport:controlling_process(Socket, Parent),
-            Owner ! {Ref, done};
+            Owner ! {hackney_response, Ref, done};
         {error, _Reason} = Error ->
             hackney_manager:handle_error(Client),
-            Owner ! {Ref, Error}
+            Owner ! {hackney_response, Ref, Error}
     end.
 
 maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
@@ -156,22 +157,23 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                     Location = hackney:redirect_location(Headers),
                     case {Location, lists:member(Method, [get, head])} of
                         {undefined, _} ->
-                            Owner ! {error, invalid_redirection},
+                            Owner ! {hackney_response, Ref,
+                                     {error,invalid_redirection}},
                             hackney_manager:handle_error(Client2);
                         {_, _} ->
                             case hackney_response:skip_body(Client2) of
                                 {ok, Client3} ->
                                     hackney_manager:update_state(Client3),
-                                    Owner ! {Ref, {redirect, Location,
-                                                   Headers}};
+                                    Owner ! {hackney_response, Ref,
+                                             {redirect, Location, Headers}};
                                 Error ->
-                                    Owner ! {Ref, Error},
+                                    Owner ! {hackney_response, Ref, Error},
                                     hackney_manager:handle_error(Client2)
                             end
                     end;
                 {error, Error} ->
                     hackney_manager:handle_error(Client),
-                    Owner ! {Ref, {error, Error}}
+                    Owner ! {hackney_response, Ref, {error, Error}}
             end;
         false when StatusInt =:= 303, Method =:= post ->
             Transport:setopts(Socket, [{active, false}]),
@@ -182,29 +184,30 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                 {ok, {headers, Headers}, Client2} ->
                     case hackney:redirect_location(Headers) of
                         undefined ->
-                            Owner ! {error, invalid_redirection},
+                            Owner ! {hackney_response, Ref,
+                                     {error, invalid_redirection}},
                             hackney_manager:handle_error(Client2);
                         Location ->
                             case hackney_response:skip_body(Client2) of
                                 {ok, Client3} ->
                                     hackney_manager:update_state(Client3),
-                                    Owner ! {Ref, {see_other, Location,
-                                                   Headers}};
+                                    Owner ! {hackney_response, Ref,
+                                             {see_other, Location, Headers}};
                                 Error ->
-                                    Owner ! {Ref, Error},
+                                    Owner ! {hackney_response, Ref, Error},
                                     hackney_manager:handle_error(Client2)
                             end
                     end;
                 {error, Error} ->
                     hackney_manager:handle_error(Client),
-                    Owner ! {Ref, {error, Error}}
+                    Owner ! {hackney_response, Ref, {error, Error}}
             end;
         _ ->
             Owner ! {Ref, {status, StatusInt, Reason}},
             maybe_continue(Parent, Owner, Ref, Client)
     end;
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
-    Owner ! {Ref, {status, StatusInt, Reason}},
+    Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
     maybe_continue(Parent, Owner, Ref, Client).
 
 
@@ -240,17 +243,17 @@ async_recv(Parent, Owner, Ref,
         {Closed, Sock} ->
             case Client#client.response_state of
                 on_body when Version =:= {1, 0}, CLen =:= nil ->
-                    Owner ! {Ref, Buffer};
+                    Owner ! {hackney_response, Ref, Buffer};
                 on_body when TE =:= <<"identity">> ->
-                    Owner ! {Ref, Buffer};
+                    Owner ! {hackney_response, Ref, Buffer};
                 on_body ->
-                    Owner ! {Ref, {error, {closed, Buffer}}};
+                    Owner ! {hackney_response, Ref, {error, {closed, Buffer}}};
                 _ ->
-                    Owner ! {error, closed}
+                    Owner ! {hackney_response, Ref, {error, closed}}
             end,
             Transport:close(Sock);
         {Error, Sock, Reason} ->
-            Owner ! {error, Reason},
+            Owner ! {hackney_response, Ref, {error, Reason}},
             Transport:close(Sock);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -258,7 +261,7 @@ async_recv(Parent, Owner, Ref,
         Else ->
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
     after Timeout ->
-        Owner ! {error, {closed, timeout}},
+            Owner ! {hackney_response, Ref, {error, {closed, timeout}}},
         Transport:close(Sock)
     end.
 
