@@ -232,7 +232,7 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, Body} = hackney:body(ClientRef),
 ```
 
-> Note: to send a **multipart** body use the
+> Note: to send a **multipart** body  in a streaming fashion use the
 > `hackney:sen_multipart_body/2` function.
 
 ### Get a response asynchronously
