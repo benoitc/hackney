@@ -7,17 +7,17 @@
 
 wait_response(Parent) ->
     receive
-        {_Ref, {status, StatusInt, Reason}} ->
+        {hackney_response, _Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
             wait_response(Parent);
-        {_Ref, {headers, Headers}} ->
+        {hackney_response,_Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
             wait_response(Parent);
-        {Ref, done} ->
+        {hackney_response,Ref, done} ->
             Parent ! {Ref, done},
             ok;
-        {_Ref, Bin} ->
+        {hackney_response, _Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
             wait_response(Parent);
 

@@ -10,12 +10,12 @@ loop(Ref) ->
     ok = hackney:stream_next(Ref),
 
     receive
-        {Ref, {headers, Headers}} ->
+        {hackney_response, Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
             loop(Ref);
-        {Ref, done} ->
+        {hackney_response, Ref, done} ->
             ok;
-        {Ref, Bin} ->
+        {hackney_response, Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
             loop(Ref);
 
@@ -33,7 +33,7 @@ main(_) ->
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     io:format("received once~n", []),
     receive
-        {Ref, {status, StatusInt, Reason}} ->
+        {hackney_response, Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n~n", [StatusInt,
                                                           Reason]),
 

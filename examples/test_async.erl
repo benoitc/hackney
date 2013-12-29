@@ -7,16 +7,16 @@
 
 loop(Ref) ->
     receive
-        {Ref, {status, StatusInt, Reason}} ->
+        {hackney_response, Ref, {status, StatusInt, Reason}} ->
             io:format("got status: ~p with reason ~p~n", [StatusInt,
                                                           Reason]),
             loop(Ref);
-        {Ref, {headers, Headers}} ->
+        {hackney_response, Ref, {headers, Headers}} ->
             io:format("got headers: ~p~n", [Headers]),
             loop(Ref);
-        {Ref, done} ->
+        {hackney_response, Ref, done} ->
             ok;
-        {Ref, Bin} ->
+        {hackney_response, Ref, Bin} ->
             io:format("got chunk: ~p~n", [Bin]),
             loop(Ref);
 
