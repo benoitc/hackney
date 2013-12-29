@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2013 Benoît Chesneau.
 
-__Version:__ 0.9.1
+__Version:__ 0.10.0
 
 # hackney
 
@@ -185,8 +185,17 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}` : To send a form
-- `{multipart, KVs}` : to send you body using the multipart API. KVs can
-  be formatted as `{file, Name, Content}` or `Value`
+- `{multipart, Parts}` : to send you body using the multipart API. Parts
+  follow this format:
+  - `eof`: end the multipart request
+  - `{file, Path}`: to stream a file
+  - `{file, Path, ExtraHeaders}`: to stream a file
+  - `{Name, Content}`: to send a full part
+  - `{Name, Content, ExtraHeaders}`: to send a full part
+  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a
+    a mixed multipart content
+  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a a
+    mixed multipart content
 - `{file, File}` : To send a file
 - Bin: To send a binary or an iolist
 

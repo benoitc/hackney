@@ -1,5 +1,31 @@
 # NEWS
 
+0.10.0 - 2013/12/29
+-------------------
+
+- improve multipart handling: With this change, we can now calculate the
+  full multipart stream content-length using `hackney_multipart:len_mp_stream/2` .
+- add `hackney:setopts/2` to set options to a request when reusing it.
+- add `hackney:send_reques/3` to pass new options to a request.
+- add the `{stream_to, Pid}` setting to a request to send the messages
+  from an asynchronous response to another PID.
+- fix `Host` header: some server do not comply well with the spec and
+  fail to parse the port when they are listening on 80 or 443. This
+change fix it.
+
+### Breaking changes:
+
+- All messages from an async response are now under the
+  format `{hackney_response, Ref, ... }` to distinct hackney messages
+from others in a process easily.
+- You can only make an async response at a time. Ie if you are are doing
+  a persistent request (reusing the same reference) you will need to
+pass the async option again to the request. For that purpose the
+functions hackney:send_request/3 and hackney:setopts/2 have been
+added.
+- multipart messages have changed. See the documentation for more
+  information.
+
 0.9.1 - 2013/12/20
 ------------------
 

@@ -73,6 +73,6 @@ encode a list of properties in a form.
 
 ### stream_multipart/2 ###
 
-`stream_multipart(X1, Client) -> any()`
+`stream_multipart(File, Client) -> any()`
 
 stream multipart

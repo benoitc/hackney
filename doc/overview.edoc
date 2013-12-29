@@ -16,7 +16,7 @@
 
 
 @copyright 2012-2013 Benoît Chesneau.
-@version 0.9.1
+@version 0.10.0
 @title hackney - HTTP client library in Erlang
 
 @doc
@@ -206,8 +206,17 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}' : To send a form
-- `{multipart, KVs}' : to send you body using the multipart API. KVs can
-  be formatted as `{file, Name, Content}' or `Value'
+- `{multipart, Parts}' : to send you body using the multipart API. Parts
+  follow this format:
+  - `eof': end the multipart request
+  - `{file, Path}': to stream a file
+  - `{file, Path, ExtraHeaders}': to stream a file
+  - `{Name, Content}': to send a full part
+  - `{Name, Content, ExtraHeaders}': to send a full part
+  - `{mp_mixed, Name, MixedBoundary}': To notify we start a part with a
+    a mixed multipart content
+  - `{mp_mixed_eof, MixedBoundary}': To notify we end a part with a a
+    mixed multipart content
 - `{file, File}' : To send a file
 - Bin: To send a binary or an iolist
 
@@ -245,7 +254,7 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, Body} = hackney:body(ClientRef),
 '''
 
-> Note: to send a **multipart** body use the
+> Note: to send a **multipart** body  in a streaming fashion use the
 > `hackney:sen_multipart_body/2' function.
 
 ### Get a response asynchronously
