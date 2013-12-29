@@ -21,6 +21,7 @@
          stream_multipart/1,
          skip_multipart/1,
          body/1, body/2, skip_body/1,
+         maybe_close/1,
          close/1,
          expect_response/1]).
 
@@ -125,11 +126,13 @@ stream_body(Client=#client{response_state=done}) ->
     {done, Client};
 stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
     Buffer = hackney_http:get(Parser, buffer),
-    {done, Client#client{buffer=Buffer}};
+    Client2 = end_stream_body(Buffer, Client),
+    {done, Client2};
 stream_body(Client=#client{parser=Parser, clen=0, te=TE})
         when TE /= <<"chunked">> ->
     Buffer = hackney_http:get(Parser, buffer),
-    {done, Client#client{buffer=Buffer}};
+    Client2 = end_stream_body(Buffer, Client),
+    {done, Client2};
 stream_body(Client=#client{parser=Parser}) ->
     stream_body1(hackney_http:execute(Parser), Client).
 
