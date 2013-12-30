@@ -61,8 +61,8 @@ start_response(_) ->
 %% @doc handle Expect header
 expect_response(Client) ->
     case recv(Client#client{recv_timeout=1000}) of
-        {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" >>} ->
-            {continue, Client#client{expect=false}};
+        {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" , Rest/binary >>} ->
+            {continue, Client#client{expect=false, buffer=Rest}};
         {ok, Data} ->
             {stop, Client#client{buffer=Data, expect=false,
                                  response_state=waiting}};
