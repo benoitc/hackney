@@ -1,5 +1,13 @@
 # NEWS
 
+0.10.1 - 2013/12/30
+-------------------
+
+- fix multipart file header
+- improve the performance when sending a `{multipart, Parts}` body. Send
+  it as a stream.
+- bump hackney_lib version to 0.2.2
+
 0.10.0 - 2013/12/29
 -------------------
 
