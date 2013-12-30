@@ -319,7 +319,6 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             Boundary = hackney_multipart:boundary(),
             {Form, Length} = hackney_multipart:encode_form(Parts, Boundary),
             CT = << "multipart/form-data; boundary=", Boundary/binary >>,
-            _ = byte_size(Form) =:= Length,
             {Length, CT, Form};
         {file, FileName} ->
             S= filelib:file_size(FileName),
