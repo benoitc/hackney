@@ -248,7 +248,11 @@ stream_multipart({data, Name, Bin, ExtraHeaders},
     stream_body(Bin1, Client);
 stream_multipart({part, eof}, Client) ->
     stream_body(<<"\r\n">>, Client);
-stream_multipart({part, Name}, Client) ->
+stream_multipart({part, Headers}, #client{mp_boundary=Boundary}=Client)
+        when is_list(Headers) ->
+    MpHeader = hackney_multipart:mp_header(Headers, Boundary),
+    stream_body(MpHeader, Client);
+stream_multipart({part, Name}, Client) when is_binary(Name) ->
      stream_multipart({part, Name, []}, Client);
 stream_multipart({part, Name, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client)
@@ -256,7 +260,7 @@ stream_multipart({part, Name, ExtraHeaders},
     %% part without content-length
     CType = hackney_bstr:content_type(Name),
     Headers = [{<<"Content-Disposition">>,
-                {<<"form_data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
+                {<<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
                },
                {<<"Content-Type">>, CType}],
     MpHeader = hackney_multipart:mp_header(Headers, Boundary),
