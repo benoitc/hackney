@@ -26,7 +26,7 @@
         send_fun=nil,
         body_state=waiting,
         multipart=nil,
-        req_chunk_size=65536000, %% 64 MB is the default
+        req_chunk_size=4096,
         buffer = <<>>,
         partial_headers = [],
         version,
