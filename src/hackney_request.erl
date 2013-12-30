@@ -19,6 +19,8 @@
          stream_multipart/2,
          encode_form/1]).
 
+-export([make_multipart_stream/2]).
+
 -define(CHUNK_SIZE, 65536000). %% 64 MB is the default
 
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
@@ -317,9 +319,10 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             encode_form(KVs);
         {multipart, Parts} ->
             Boundary = hackney_multipart:boundary(),
-            {Form, Length} = hackney_multipart:encode_form(Parts, Boundary),
+            MpLen = hackney_multipart:len_mp_stream(Parts, Boundary),
+            MpStream = make_multipart_stream(Parts, Boundary),
             CT = << "multipart/form-data; boundary=", Boundary/binary >>,
-            {Length, CT, Form};
+            {MpLen, CT, MpStream};
         {file, FileName} ->
             S= filelib:file_size(FileName),
 	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
@@ -528,6 +531,63 @@ sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
     end;
 sendfile_fallback(_, _, _, _, Sent) ->
     {ok, Sent}.
+
+
+make_multipart_stream(Parts, Boundary) ->
+    Stream = lists:foldl(fun
+                ({file, Path}, Acc) ->
+                    {MpHeader, _} = hackney_multipart:mp_file_header(
+                            {file, Path}, Boundary),
+                    [<<"\r\n">>, {file, Path}, MpHeader | Acc];
+                ({file, Path, ExtraHeaders}, Acc) ->
+                    {MpHeader, _} = hackney_multipart:mp_file_header(
+                            {file, Path, ExtraHeaders},Boundary),
+                    [<<"\r\n">>, {file, Path}, MpHeader | Acc];
+                ({file, Path, Disposition, ExtraHeaders}, Acc) ->
+                    {MpHeader, _} = hackney_multipart:mp_file_header(
+                            {file, Path, Disposition, ExtraHeaders}, Boundary),
+                    [<<"\r\n">>, {file, Path}, MpHeader | Acc];
+                ({mp_mixed, Name, MixedBoundary}, Acc) ->
+                    {MpHeader, _} = hackney_multipart:mp_mixed_header(
+                            Name, MixedBoundary),
+                    [<< MpHeader/binary, "\r\n" >> | Acc];
+                ({mp_mixed_eof, MixedBoundary}, Acc) ->
+                    Eof = hackney_multipart:mp_eof(MixedBoundary),
+                    [<< Eof/binary, "\r\n" >> | Acc];
+                ({Name, Bin}, Acc) ->
+                    Len = byte_size(Bin),
+                    {MpHeader, _} = hackney_multipart:mp_data_header(
+                            {Name, Len}, Boundary),
+                    PartBin = << MpHeader/binary, Bin/binary, "\r\n" >>,
+                    [PartBin | Acc];
+                ({Name, Bin, ExtraHeaders}, Acc) ->
+                    Len = byte_size(Bin),
+                    {MpHeader, _} = hackney_multipart:mp_data_header(
+                            {Name, Len, ExtraHeaders}, Boundary),
+                    PartBin = << MpHeader/binary, Bin/binary, "\r\n" >>,
+                    [PartBin | Acc];
+                ({Name, Bin, Disposition, ExtraHeaders}, Acc) ->
+                    Len = byte_size(Bin),
+                    {MpHeader, _} = hackney_multipart:mp_data_header(
+                            {Name, Len, Disposition,  ExtraHeaders},
+                            Boundary),
+                    PartBin = << MpHeader/binary, Bin/binary, "\r\n" >>,
+                    [PartBin | Acc]
+            end, [], Parts),
+
+    FinalStream = lists:reverse([hackney_multipart:mp_eof(Boundary) |
+                                 Stream]),
+
+    %% function used to stream
+    StreamFun = fun
+        ([]) ->
+            eof;
+        ([Part | Rest]) ->
+            {ok, Part, Rest}
+    end,
+
+    {StreamFun, FinalStream}.
+
 
 maybe_add_cookies([], Headers) ->
     Headers;
