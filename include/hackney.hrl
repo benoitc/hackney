@@ -2,7 +2,7 @@
         transport,
         host,
         port,
-        netloc = netloc,
+        netloc,
         options = [],
         socket = nil,
         socket_ref = nil,
@@ -34,4 +34,5 @@
         te = nil,
         connection = nil,
         method = nil,
+        path,
         ctype = nil}).

@@ -10,6 +10,8 @@
 -export([start/0, start/1, stop/0]).
 -export([connect/1, connect/2, connect/3, connect/4,
          close/1,
+         request_info/1,
+         location/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2, send_request/3,
          start_response/1,
@@ -127,6 +129,29 @@ setopts(Ref, Options) ->
 %% @doc close the client
 close(Ref) ->
     hackney_connect:close(Ref).
+
+
+%% @doc get request info
+-spec request_info(client_ref()) -> list().
+request_info(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+                #client{transport=Transport,
+                        method=Method} = State,
+                Location = hackney_request:location(State),
+
+
+                [{method, Method},
+                 {location, Location},
+                 {transport, Transport}]
+        end).
+
+%% @doc return the requested location
+-spec location(client_ref()) -> binary().
+location(Ref) ->
+    hackney_manager:get_state(Ref, fun(State) ->
+               hackney_request:location(State)
+        end).
+
 
 %% @doc make a request
 -spec request(binary()|list())

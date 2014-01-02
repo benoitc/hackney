@@ -11,13 +11,17 @@
 -module(hackney_request).
 
 -include("hackney.hrl").
+-include_lib("hackney_lib/include/hackney_lib.hrl").
 
 -export([perform/2,
+         location/1,
          send/2, send_chunk/2,
          sendfile/3,
          stream_body/2, end_stream_body/1,
          stream_multipart/2,
          encode_form/1]).
+
+-export([is_default_port/1]).
 
 -export([make_multipart_stream/2]).
 
@@ -100,23 +104,25 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
     case can_perform_all(Body, Expect, PerformAll) of
         true ->
-            perform_all(Client, HeadersData, Body, Method, Expect);
+            perform_all(Client, HeadersData, Body, Method, Path, Expect);
         _ ->
             case hackney_request:send(Client, HeadersData) of
                 ok when Body =:= stream ->
                     {ok, Client#client{response_state=stream, method=Method,
-                                       expect=Expect}};
+                                       path=Path, expect=Expect}};
                 ok ->
                     case stream_body(Body, Client#client{expect=Expect}) of
                         {error, _Reason}=E ->
                             E;
                         {stop, Client2} ->
-                            FinalClient = Client2#client{method=Method},
+                            FinalClient = Client2#client{method=Method,
+                                                         path=Path},
                             hackney_response:start_response(FinalClient);
                         {ok, Client2} ->
                             case end_stream_body(Client2) of
                               {ok, Client3} ->
-                                FinalClient = Client3#client{method=Method},
+                                FinalClient = Client3#client{method=Method,
+                                                             path=Path},
                                 hackney_response:start_response(FinalClient);
                               Error ->
                                 Error
@@ -126,6 +132,25 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                     Error
             end
     end.
+
+location(Client) ->
+    #client{transport=Transport,
+            host=Host,
+            port=Port,
+            path=Path} = Client,
+
+    Scheme = hackney_url:transport_scheme(Transport),
+    Netloc = case is_default_port(Client) of
+        true ->
+            list_to_binary(Host);
+        _ ->
+            iolist_to_binary([Host, ":",
+                              integer_to_list(Port)])
+    end,
+    Url = #hackney_url{scheme=Scheme, netloc=Netloc,
+                       path=Path},
+
+    hackney_url:unparse_url(Url).
 
 stream_body(Msg, #client{expect=true}=Client) ->
     case hackney_response:expect_response(Client) of
@@ -188,7 +213,8 @@ stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
                     Error
             end
     end;
-stream_body(Body, #client{send_fun=Send}=Client) when is_list(Body) ->
+stream_body(Body, #client{send_fun=Send}=Client)
+        when is_list(Body) ->
     case Send(Client, Body) of
         ok ->
             {ok, Client};
@@ -478,17 +504,19 @@ can_perform_all(Body, Expect, PerformAll) when Expect =:= false,
 can_perform_all(_Body, _Expect, _PerformAll) ->
     false.
 
-perform_all(Client, HeadersData, Body, Method, Expect) ->
-    case stream_body(iolist_to_binary([HeadersData, Body]), Client#client{expect=Expect}) of
+perform_all(Client, HeadersData, Body, Method, Path, Expect) ->
+    case stream_body(iolist_to_binary([HeadersData, Body]),
+                     Client#client{expect=Expect}) of
         {error, _Reason}=E ->
             E;
         {stop, Client2} ->
-            FinalClient = Client2#client{method=Method},
+            FinalClient = Client2#client{method=Method, path=Path},
             hackney_response:start_response(FinalClient);
         {ok, Client2} ->
             case end_stream_body(Client2) of
                 {ok, Client3} ->
-                    FinalClient = Client3#client{method=Method},
+                    FinalClient = Client3#client{method=Method,
+                                                 path=Path},
                     hackney_response:start_response(FinalClient);
                 Error ->
                     Error

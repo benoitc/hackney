@@ -154,7 +154,8 @@ stream_body1(Error, _Client) ->
 
 -spec stream_body_recv(binary(), #client{})
 	-> {ok, binary(), #client{}} | {error, atom()}.
-stream_body_recv(Buffer, Client=#client{version=Version, clen=CLen}) ->
+stream_body_recv(Buffer, Client=#client{version=Version,
+                                        clen=CLen}) ->
     case recv(Client) of
         {ok, Data} ->
             stream_body(Data, Client);
