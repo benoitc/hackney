@@ -193,26 +193,6 @@ stream_body({Func, State}, Client) when is_function(Func) ->
         Err ->
             Err
     end;
-stream_body(Body, #client{req_chunk_size=ChunkSize, send_fun=Send}=Client)
-        when is_binary(Body) ->
-
-    case Body of
-        _ when byte_size(Body) >= ChunkSize ->
-            << Data:ChunkSize/binary, Rest/binary >> = Body,
-            case Send(Client, Data) of
-                ok ->
-                    stream_body(Rest, Client);
-                Error ->
-                    Error
-            end;
-        _ ->
-            case Send(Client, Body) of
-                ok ->
-                    {ok, Client};
-                Error ->
-                    Error
-            end
-    end;
 stream_body(Body, #client{send_fun=Send}=Client)
         when is_list(Body) ->
     case Send(Client, Body) of
