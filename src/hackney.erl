@@ -491,7 +491,7 @@ stream_next(Ref) ->
 -spec pause_stream(client_ref()) -> ok | {error, req_not_found}.
 pause_stream(Ref) ->
     hackney_manager:with_async_response_pid(Ref, fun(Pid) ->
-                Pid ! {Ref, pauwse},
+                Pid ! {Ref, pause},
                 ok
         end).
 
