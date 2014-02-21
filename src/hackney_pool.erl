@@ -55,6 +55,7 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     Pid = self(),
     Name = proplists:get_value(pool, Opts, default),
     Pool = find_pool(Name, Opts),
+
     case gen_server:call(Pool, {checkout, {Host, Port, Transport},
                                            Pid}) of
         {ok, Socket, Owner} ->
@@ -74,11 +75,9 @@ checkin({_Name, Key, Owner, Transport}, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
             gen_server:call(Owner, {checkin, Key, Socket, Transport});
-        _ ->
+        _Error ->
             Transport:close(Socket)
     end.
-
-
 
 
 %% @doc start a pool
@@ -201,23 +200,18 @@ handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
 handle_call({checkout, Key, Pid}, _From, State) ->
     {Reply, NewState} = find_connection(Key, Pid, State),
     {reply, Reply, NewState};
-
-handle_call({checkin, Key, Socket, Transport}, _From,
+handle_call({checkin, Key, Socket, Transport}, From,
             #state{sockets=Sockets, max_connections=MaxConn}=State) ->
+    gen_server:reply(From, ok),
     PoolSize = dict:size(Sockets),
-    NewState = if PoolSize < MaxConn ->
+    NewState = if PoolSize =< MaxConn ->
             store_connection(Key, Socket, State);
         true ->
             %% don't store more than MaxConn
-            Transport:close(Socket),
+            catch Transport:close(Socket),
             State
     end,
-    {reply, ok, NewState};
-
-
-handle_call({checkin, Key, Socket}, _From, State) ->
-    NewState = store_connection(Key, Socket, State),
-    {reply, ok, NewState};
+    {noreply, NewState};
 handle_call(count, _From, #state{sockets=Sockets}=State) ->
     {reply, dict:size(Sockets), State};
 handle_call({count, Key}, _From, #state{connections=Conns}=State) ->
@@ -283,10 +277,10 @@ find_connection({_Host, _Port, Transport}=Key, Pid,
                 {error, badarg} ->
                     Transport:setopts(S, [{active, once}]),
                     {{error, no_socket, self()}, State};
-                _ ->
+                _Else ->
                     find_connection(Key, Pid, remove_socket(S, State))
             end;
-        error ->
+        _ ->
             {{error, no_socket, self()}, State}
     end.
 
