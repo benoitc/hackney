@@ -292,8 +292,9 @@ find_connection({_Host, _Port, Transport}=Key, Pid,
 
 remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     case dict:find(Socket, Sockets) of
-        {ok, {Key, Timer}} ->
+        {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
             cancel_timer(Socket, Timer),
+            Transport:close(Socket),
             ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
             NewConns = update_connections(ConnSockets, Key, Conns),
             NewSockets = dict:erase(Socket, Sockets),

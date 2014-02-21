@@ -193,19 +193,18 @@ stream_body({Func, State}, Client) when is_function(Func) ->
         Err ->
             Err
     end;
-stream_body(Body, #client{send_fun=Send}=Client)
-        when is_list(Body) ->
-    case Send(Client, Body) of
-        ok ->
-            {ok, Client};
-        Error ->
-            Error
-    end;
 stream_body({file, FileName}, Client) ->
     stream_body({file, FileName, []}, Client);
 stream_body({file, FileName, Opts}, Client) ->
     case sendfile(FileName, Opts, Client) of
         {ok, _BytesSent} ->
+            {ok, Client};
+        Error ->
+            Error
+    end;
+stream_body(Body, #client{send_fun=Send}=Client) ->
+    case Send(Client, Body) of
+        ok ->
             {ok, Client};
         Error ->
             Error
