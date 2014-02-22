@@ -169,7 +169,7 @@ couple of request.
 #### To create a connection:
 
 ```
-Transport = hackney_tcp_protocol,
+Transport = hackney_tcp_transport,
 Host = << "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
