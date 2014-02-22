@@ -24,6 +24,8 @@ connect(Transport, Host, Port) ->
 connect(Transport, Host, Port, Options) ->
     connect(Transport, Host, Port, Options, false).
 
+connect(Transport, Host, Port, Options, Dynamic) when is_binary(Host) ->
+    connect(Transport, binary_to_list(Host), Port, Options, Dynamic);
 connect(Transport, Host, Port, Options, Dynamic) ->
     case create_connection(Transport, Host, Port, Options, Dynamic) of
         {ok, #client{request_ref=Ref}} ->
