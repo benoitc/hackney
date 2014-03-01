@@ -203,7 +203,7 @@ request(Method, URL, Headers, Body) ->
 %%      module.</li>
 %%
 %%      <li>`async': receive the response asynchronously
-%%      The function return {ok, {response_stream, StreamRef}}.
+%%      The function return {ok, StreamRef}.
 %%      When {async, once} is used the response will be received only once. To
 %%      receive the other messages use the function
 %%      `hackney:stream_next/1'
