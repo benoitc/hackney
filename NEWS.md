@@ -1,5 +1,14 @@
 # NEWS
 
+0.11.0 - 2013/03/02
+-------------------
+
+- add `hackney:location/1` to get the final location
+- make `hackney_request:send/2` more efficient
+- fix socket removing in the pool
+- fix [HTTP proxying](https://github.com/benoitc/hackney/commit/a21e8802e1dc91c25d863ac6fc5b23a79196efcd)
+- support IDNA hostnames
+
 0.10.1 - 2013/12/30
 -------------------
 
