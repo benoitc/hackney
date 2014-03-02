@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2013 Benoît Chesneau.
+Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.10.1
+__Version:__ 0.11.0
 
 # hackney
 
