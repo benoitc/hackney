@@ -527,13 +527,28 @@ make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
     {connect, Path, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
+    #hackney_url{host = Host,
+                 port = Port,
+                 path=Path} = URL,
+
+    %% place the correct host
+    HostHdr = case Port of
+        80 -> list_to_binary(Host);
+        _ -> iolist_to_binary([Host, ":", integer_to_list(Port)])
+    end,
+
+    Headers1 = case proplists:get_value(<<"Host">>, Headers0) of
+        undefined -> Headers0 ++ [{<<"Host">>, HostHdr}];
+        _ -> lists:keyreplace(<<"Host">>, 1, Headers0, {<<"Host">>, HostHdr})
+    end,
+
     Path = hackney_url:unparse_url(URL),
     Headers = case proplists:get_value(proxy_auth, Options) of
         undefined ->
-            Headers0;
+            Headers1;
         {User, Pwd} ->
             Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
-            Headers0 ++ [{<<"Proxy-Authorization">>,
+            Headers1 ++ [{<<"Proxy-Authorization">>,
                           <<"Basic ", Credentials/binary>>}]
     end,
     {Method, Path, Headers, Body};
@@ -567,8 +582,8 @@ maybe_proxy(Transport, Host, Port, Options)
                             {error, invalid_proxy_transport}
                     end;
                 _ ->
-                    case hackney_connect:connect(Transport, Host, Port,
-                                                 Options, true) of
+                    case hackney_connect:connect(Transport, ProxyHost,
+                                                 ProxyPort,Options, true) of
                         {ok, Ref} -> {ok, Ref, true};
                         Error -> Error
                     end
@@ -580,8 +595,8 @@ maybe_proxy(Transport, Host, Port, Options)
                     do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport,
                                Host, Port, Options);
                 _ ->
-                    case hackney_connect:connect(Transport, Host, Port,
-                                                 Options, true) of
+                    case hackney_connect:connect(Transport, ProxyHost,
+                                                 ProxyPort, Options, true) of
                         {ok, Ref} -> {ok, Ref, true};
                         Error -> Error
                     end
