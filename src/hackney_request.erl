@@ -89,15 +89,8 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                            req_type=chunked}
     end,
 
-    HostOrPath = case Method0 of
-        connect ->
-            iolist_to_binary([Host, ":", integer_to_list(Port)]);
-        _ ->
-            Path
-    end,
-
     HeadersData = iolist_to_binary([
-                << Method/binary, " ", HostOrPath/binary, " HTTP/1.1", "\r\n" >>,
+                << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
                 hackney_headers:to_binary(HeaderDict1)]),
 
     PerformAll = proplists:get_value(perform_all, Options, true),
