@@ -248,6 +248,10 @@ request(Method, URL, Headers, Body) ->
 %%          proxy</li>
 %%          <li>{Host::binary(), Port::binary}: Host and port to connect,
 %%          for HTTP proxy</li>
+%%          <li>{socks5, Host::binary(), Port::binary()}: Host and Port
+%%          to connect to a socks5 proxt.</li>
+%%          <li>{connect, Host::binary(), Port::binary()}: Host and Port
+%%          to connect to an HTTP tunnel.</li>
 %%      </ul></p>
 %%      </li>
 %%  </ul>
