@@ -9,10 +9,9 @@
 
 -export([require/1]).
 -export([maybe_apply_defaults/2]).
-
 -export([is_ipv6/1]).
-
 -export([content_type/1]).
+-export([encode_idna/1]).
 
 -include("hackney.hrl").
 
@@ -67,4 +66,19 @@ content_type(Name) ->
             CT;
         CT when is_binary(CT) ->
             CT
+    end.
+
+
+encode_idna(Domain) ->
+    case is_utf8(Domain) of
+        true ->
+            idna:utf8_to_ascii(Domain);
+        false ->
+            idna:to_ascii(Domain)
+    end.
+
+is_utf8(S) ->
+    try lists:all(fun(C) -> xmerl_ucs:is_incharset(C, 'utf-8') end, S)
+    catch
+        exit:{ucs, {bad_utf8_character_code}} -> false
     end.

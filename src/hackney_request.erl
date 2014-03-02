@@ -31,6 +31,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
     Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
 
     #client{host=Host, port=Port, options=Options} = Client0,
+    Host1 = hackney_util:encode_idna(Host),
 
     %% set initial headers
     %% don't override the host if it's alreay set (especially when
@@ -39,10 +40,11 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
         undefined ->
             HostHdr = case is_default_port(Client0) of
                 true ->
-                    list_to_binary(Host);
+                    list_to_binary(Host1);
                 false ->
-                    iolist_to_binary([Host, ":", integer_to_list(Port)])
+                    iolist_to_binary([Host1, ":", integer_to_list(Port)])
             end,
+
             [{<<"Host">>, HostHdr},
              {<<"User-Agent">>, default_ua()}];
         _ ->
