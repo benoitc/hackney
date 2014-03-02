@@ -528,8 +528,7 @@ make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     {connect, Path, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
     #hackney_url{host = Host,
-                 port = Port,
-                 path=Path} = URL,
+                 port = Port} = URL,
 
     %% place the correct host
     HostHdr = case Port of
