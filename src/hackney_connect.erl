@@ -27,7 +27,7 @@ connect(Transport, Host, Port, Options) ->
 connect(Transport, Host, Port, Options, Dynamic) when is_binary(Host) ->
     connect(Transport, binary_to_list(Host), Port, Options, Dynamic);
 connect(Transport, Host, Port, Options, Dynamic) ->
-    case create_connection(Transport, hackney_util:encode_idna(Host), Port,
+    case create_connection(Transport, hackney_idna:to_ascii(Host), Port,
                            Options, Dynamic) of
         {ok, #client{request_ref=Ref}} ->
             {ok, Ref};

@@ -530,19 +530,17 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
     #hackney_url{host = Host,
                  port = Port} = URL,
 
-    Host1 = hackney_util:encode_idna(Host),
     %% place the correct host
     HostHdr = case Port of
-        80 -> list_to_binary(Host1);
-        _ -> iolist_to_binary([Host1, ":", integer_to_list(Port)])
+        80 -> list_to_binary(hackney_idna:to_ascii(Host));
+        _ -> iolist_to_binary([hackney_idna:to_ascii(Host), ":",
+                               integer_to_list(Port)])
     end,
 
     Headers1 = case proplists:get_value(<<"Host">>, Headers0) of
         undefined -> Headers0 ++ [{<<"Host">>, HostHdr}];
         _ -> lists:keyreplace(<<"Host">>, 1, Headers0, {<<"Host">>, HostHdr})
     end,
-
-
 
     Path = hackney_url:unparse_url(URL),
     Headers = case proplists:get_value(proxy_auth, Options) of
