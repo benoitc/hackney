@@ -2,7 +2,7 @@
 {application,hackney}.
 {packages,[]}.
 {modules,[hackney,hackney_app,hackney_connect,hackney_deps,
-          hackney_http_connect,hackney_manager,hackney_pool,
+          hackney_http_connect,hackney_idna,hackney_manager,hackney_pool,
           hackney_pool_handler,hackney_request,hackney_response,
           hackney_socks5,hackney_ssl_transport,hackney_stream,hackney_sup,
           hackney_tcp_transport,hackney_util]}.

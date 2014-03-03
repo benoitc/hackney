@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.11.0
+__Version:__ 0.11.1
 
 # hackney
 
@@ -416,6 +416,7 @@ $ make devclean ; # clean all files
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_idna.md" class="module">hackney_idna</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_manager.md" class="module">hackney_manager</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>

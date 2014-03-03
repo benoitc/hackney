@@ -10,7 +10,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#content_type-1">content_type/1</a></td><td></td></tr><tr><td valign="top"><a href="#encode_idna-1">encode_idna/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#content_type-1">content_type/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -22,13 +22,6 @@
 ### content_type/1 ###
 
 `content_type(Name) -> any()`
-
-
-<a name="encode_idna-1"></a>
-
-### encode_idna/1 ###
-
-`encode_idna(Domain) -> any()`
 
 
 <a name="is_ipv6-1"></a>
