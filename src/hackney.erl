@@ -551,7 +551,7 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
             Headers1 ++ [{<<"Proxy-Authorization">>,
                           <<"Basic ", Credentials/binary>>}]
     end,
-    {Method, Path, Headers, Body};
+    {Method, hackney_url:pathencode(Path), Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{path = Path,
                  qs = Query} = URL,
@@ -561,7 +561,7 @@ make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
         _ ->
             <<Path/binary, "?", Query/binary>>
     end,
-    {Method, FinalPath, Headers, Body}.
+    {Method, hackney_url:pathencode(FinalPath), Headers, Body}.
 
 
 maybe_proxy(Transport, Host, Port, Options)
