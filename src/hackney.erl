@@ -528,7 +528,8 @@ make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     {connect, Path, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
     #hackney_url{host = Host,
-                 port = Port} = URL,
+                 port = Port,
+                 path = Path0} = URL,
 
     %% place the correct host
     HostHdr = case Port of
@@ -542,7 +543,7 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
         _ -> lists:keyreplace(<<"Host">>, 1, Headers0, {<<"Host">>, HostHdr})
     end,
 
-    Path = hackney_url:unparse_url(URL),
+    Path = hackney_url:unparse_url(URL#hackney_url{path=encode_path(Path0)}),
     Headers = case proplists:get_value(proxy_auth, Options) of
         undefined ->
             Headers1;
@@ -555,13 +556,24 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
 make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{path = Path,
                  qs = Query} = URL,
+
+    Path1 = encode_path(Path),
     FinalPath = case Query of
         <<>> ->
-            Path;
+            Path1;
         _ ->
-            <<Path/binary, "?", Query/binary>>
+            <<Path1/binary, "?", Query/binary>>
     end,
     {Method, FinalPath, Headers, Body}.
+
+
+encode_path(Path) ->
+    encode_path1(re:split(Path, <<"/">>, [{return, binary}]), []).
+
+encode_path1([], Acc) ->
+    hackney_bstr:join(lists:reverse(Acc), <<"/">>);
+encode_path1([P | Rest], Acc) ->
+    encode_path1(Rest, [hackney_url:urlencode(P) | Acc]).
 
 
 maybe_proxy(Transport, Host, Port, Options)
