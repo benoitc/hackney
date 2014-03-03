@@ -528,7 +528,8 @@ make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     {connect, Path, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
     #hackney_url{host = Host,
-                 port = Port} = URL,
+                 port = Port,
+                 path = Path} = URL,
 
     %% place the correct host
     HostHdr = case Port of
@@ -542,7 +543,8 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
         _ -> lists:keyreplace(<<"Host">>, 1, Headers0, {<<"Host">>, HostHdr})
     end,
 
-    Path = hackney_url:unparse_url(URL),
+    Path1 = hackney_url:pathencode(Path),
+    FinalPath = hackney_url:unparse_url(URL#hackney_url{path=Path1}),
     Headers = case proplists:get_value(proxy_auth, Options) of
         undefined ->
             Headers1;
@@ -551,17 +553,19 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
             Headers1 ++ [{<<"Proxy-Authorization">>,
                           <<"Basic ", Credentials/binary>>}]
     end,
-    {Method, hackney_url:pathencode(Path), Headers, Body};
+    {Method, FinalPath, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{path = Path,
                  qs = Query} = URL,
+
+    Path1 =  hackney_url:pathencode(Path),
     FinalPath = case Query of
         <<>> ->
-            Path;
+            Path1;
         _ ->
-            <<Path/binary, "?", Query/binary>>
+            <<Path1/binary, "?", Query/binary>>
     end,
-    {Method, hackney_url:pathencode(FinalPath), Headers, Body}.
+    {Method, FinalPath, Headers, Body}.
 
 
 maybe_proxy(Transport, Host, Port, Options)
