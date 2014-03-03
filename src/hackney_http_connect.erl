@@ -138,9 +138,9 @@ do_handshake(Socket, Host, Port, Options) ->
 
     %% set defaults headers
     HostHdr = case ProxyPort of
-        true ->
+        80 ->
             list_to_binary(Host);
-        false ->
+        _ ->
             iolist_to_binary([Host, ":", integer_to_list(Port)])
     end,
     UA =  hackney_request:default_ua(),
