@@ -1,5 +1,13 @@
 # NEWS
 
+0.11.1 - 2013/03/03
+-------------------
+
+- improvement: speed IDNA domains handing
+- fix http proxy via CONNECT
+- fix: encode the path
+- bump to [hackney_lib 0.2.4](https://github.com/benoitc/hackney_lib/releases/tag/0.2.4)
+
 0.11.0 - 2013/03/02
 -------------------
 
