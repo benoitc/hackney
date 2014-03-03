@@ -168,40 +168,16 @@ do_handshake(Socket, Host, Port, Options) ->
     end.
 
 check_response(Socket) ->
-    Parser = http_parser:parse([response]),
     case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
         {ok, Data} ->
-            check_response(http_parser:execute(Parser, Data), Socket, false);
+            check_status(Data);
         Error ->
             Error
     end.
 
-check_response({done, _}, _Socket, Status) ->
-    Status;
-check_response({more, Parser}, Socket, Status) ->
-    case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
-        {ok, Data} ->
-            check_response(http_parser:execute(Parser, Data), Socket, Status);
-        Error ->
-            Error
-    end;
-check_response({response, _, Status, _, Parser}, Socket, _)
-        when Status =:= 200 orelse Status =:= 201 ->
-    check_response(http_parser:execute(Parser), Socket, ok);
-check_response({response, _, Status, _, Parser}, Socket, _) ->
-    check_response(http_parser:execute(Parser), Socket, {error, Status});
-check_response({{header, _}, Parser}, Socket, Status) ->
-    check_response(http_parser:execute(Parser), Socket, Status);
-check_response({headers_complete, Parser}, Socket, Status) ->
-    check_response(http_parser:execute(Parser), Socket, Status);
-check_response({ok, _, Parser}, Socket, Status) ->
-    check_response(http_parser:execute(Parser), Socket, Status);
-check_response({more, Parser, _}, Socket, Status) ->
-    case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
-        {ok, Data} ->
-            check_response(http_parser:execute(Parser, Data), Socket, Status);
-        Error ->
-            Error
-    end;
-check_response(Error, _, _) ->
-    Error.
+check_status(<< "HTTP/1.1 200", _/bits >>) ->
+    ok;
+check_status(<< "HTTP/1.1 201", _/bits >>) ->
+    ok;
+check_status(_) ->
+    false.

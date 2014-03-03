@@ -19,7 +19,8 @@
          sendfile/3,
          stream_body/2, end_stream_body/1,
          stream_multipart/2,
-         encode_form/1]).
+         encode_form/1,
+         default_ua/0]).
 
 -export([is_default_port/1]).
 
