@@ -14,7 +14,7 @@
                         ssl,
                         mimetypes,
                         idna]},
-        {included_applications, [ets_lru, hackney_lib]},
+        {included_applications, [hackney_lib]},
         {mod, { hackney_app, []}},
         {env, [{timeout, 150000},
                {max_connections, 25},
