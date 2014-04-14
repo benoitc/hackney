@@ -35,7 +35,7 @@ start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
             Error
     end;
 start_response(#client{response_state=stream} = Client) ->
-    case hackney_multipart:stream(eof, Client) of
+    case hackney_request:stream_multipart(eof, Client) of
         {ok, Client1} ->
             start_response(Client1);
         Error ->
