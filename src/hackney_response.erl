@@ -289,7 +289,8 @@ end_stream_body(Rest, Client0) ->
                     socket_ref=Ref,
                     pool_handler=Handler}=Client,
             Handler:checkin(Ref, Socket),
-            Client#client{state=closed, socket=nil, socket_ref=nil};
+            Client#client{state=closed, socket=nil, socket_ref=nil,
+                          buffer = <<>>};
         false ->
             Client
     end.
