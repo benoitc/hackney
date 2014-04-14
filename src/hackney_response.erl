@@ -211,8 +211,10 @@ multipart_data(Client, Length, {mp_mixed, Cont}) ->
     {mp_mixed, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {mp_mixed_eof, Cont}) ->
     {mp_mixed_eof, Client#client{multipart={Length, Cont}}};
-multipart_data(Client, 0, eof) ->
-    {eof, Client#client{body_state=done, multipart=nil}};
+multipart_data(Client, Length, eof)
+        when Length =:= 0 orelse Length =:= nil ->
+    Client2 = end_stream_body(<<>>, Client),
+    {eof, Client2#client{body_state=done, multipart=nil}};
 multipart_data(Client, _, eof) ->
     %% We just want to skip so no need to stream data here.
     {ok, Client2} = skip_body(Client),
