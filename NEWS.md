@@ -1,6 +1,17 @@
 # NEWS
 
-0.11.1 - 2013/03/03
+0.11.2 - 2014/04/15
+-------------------
+
+- new improved and more performant IDNA support
+- make sure the socket is closed when we skip the body if needed
+- fix multipart EOF parsing
+- make sure we finish a multipart stream
+- bump hackney_lib to 0.2.5
+- enable TCP_NODELAY by default. (To disable, pass the option 
+  `{nodelay, false} to `connect_options`.
+
+0.11.1 - 2014/03/03
 -------------------
 
 - improvement: speed IDNA domains handing
@@ -8,7 +19,7 @@
 - fix: encode the path
 - bump to [hackney_lib 0.2.4](https://github.com/benoitc/hackney_lib/releases/tag/0.2.4)
 
-0.11.0 - 2013/03/02
+0.11.0 - 2014/03/02
 -------------------
 
 - add `hackney:location/1` to get the final location
