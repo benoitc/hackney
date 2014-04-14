@@ -797,6 +797,9 @@ reply({ok, Data, NState}, _State) ->
 reply({done, NState}, _State) ->
     maybe_update_req(NState),
     done;
+reply({skip, NState}, _State) ->
+    maybe_update_req(NState),
+    ok;
 reply({ok, NState}, _State) ->
     hackney_manager:update_state(NState),
     ok;

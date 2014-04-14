@@ -43,7 +43,7 @@ main(_) ->
     io:format("processing ", []),
     Self = self(),
     Pids = lists:foldr(fun(_, Acc) ->
-                    Pid = spawn(fun() -> request(Self) end),
+                    Pid = spawn(fun() -> timer:sleep(100), request(Self) end),
                     [Pid | Acc]
             end, [], lists:seq(1, ?MAX)),
 

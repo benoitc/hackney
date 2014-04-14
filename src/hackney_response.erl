@@ -265,7 +265,7 @@ body(MaxLength, Client) ->
 skip_body(Client) ->
 	case stream_body(Client) of
 		{ok, _, Client2} -> skip_body(Client2);
-		{done, Client2} -> {ok, Client2};
+		{done, Client2} -> {skip, Client2};
 		{error, Reason} -> {error, Reason}
 	end.
 
