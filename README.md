@@ -1,5 +1,4 @@
 
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2014 Benoît Chesneau.
@@ -375,7 +374,8 @@ Options = [{follow_redirect, true}, {max_redirect, true}],
 
 To use an HTTP tunnel add the option `{proxy, ProxyUrl}` where
 `ProxyUrl` can be a simple url or an `{Host, Port}` tuple. If you need
-to authenticate set the option `{proxy_auth, {User, Password}}`.
+to authenticate set the option `{proxy_auth, {User, Password}}`
+(use binaries for username and password).
 
 #### SOCKS5 proxy
 
