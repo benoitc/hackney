@@ -1,5 +1,4 @@
 
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2014 Benoît Chesneau.
@@ -311,7 +310,7 @@ you to maintain a group of connections.
 ```
 PoolName = mypool,
 Options = [{timeout, 150000}, {pool_size, 100}],
-{ok, Pid} = hackney_pool:start_pool(PoolName, Options),
+ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
