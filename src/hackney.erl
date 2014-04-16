@@ -50,7 +50,7 @@
 -type client_ref() :: term().
 -export_type([client_ref/0]).
 
-%% @doc Start the couchbeam process. Useful when testing using the shell.
+%% @doc Start the hacknet process. Useful when testing using the shell.
 start() ->
     hackney_deps:ensure(),
     application:load(hackney),
@@ -61,7 +61,7 @@ start(PoolHandler) ->
     application:set_env(hackney, pool_handler, PoolHandler),
     start().
 
-%% @doc Stop the couchbeam process. Useful when testing using the shell.
+%% @doc Stop the hackney process. Useful when testing using the shell.
 stop() ->
     application:stop(hackney).
 
