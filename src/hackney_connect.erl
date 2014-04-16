@@ -189,11 +189,16 @@ do_connect(Host, Port, Transport, #client{options=Opts,
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
     %% handle ipv6
-    ConnectOpts1 = case hackney_util:is_ipv6(Host) of
-        true ->
-            [inet6 | ConnectOpts0];
-        false ->
-            ConnectOpts0
+    ConnectOpts1 = case Transport of
+        hackney_http_connect ->
+            ConnectOpts0;
+        _ ->
+            case hackney_util:is_ipv6(Host) of
+                true ->
+                    [inet6 | ConnectOpts0];
+                false ->
+                    ConnectOpts0
+            end
     end,
 
     ConnectOpts2 = case lists:keyfind(nodelay, 1, ConnectOpts1) of
