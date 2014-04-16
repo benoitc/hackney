@@ -50,7 +50,7 @@
 -type client_ref() :: term().
 -export_type([client_ref/0]).
 
-%% @doc Start the hacknet process. Useful when testing using the shell.
+%% @doc Start the hackney process. Useful when testing using the shell.
 start() ->
     hackney_deps:ensure(),
     application:load(hackney),
