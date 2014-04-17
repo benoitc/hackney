@@ -12,7 +12,6 @@
                         asn1,
                         public_key,
                         ssl,
-                        mimetypes,
                         idna]},
         {included_applications, [hackney_lib]},
         {mod, { hackney_app, []}},

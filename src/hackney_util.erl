@@ -12,7 +12,6 @@
 -export([require/1]).
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
--export([content_type/1]).
 
 -include("hackney.hrl").
 
@@ -81,15 +80,4 @@ is_ipv6(Host) ->
                             false
                     end
             end
-    end.
-
-%% get content type
-%%
-%%
-content_type(Name) ->
-    case mimetypes:filename(Name) of
-        [CT | _] ->
-            CT;
-        CT when is_binary(CT) ->
-            CT
     end.

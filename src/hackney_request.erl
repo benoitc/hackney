@@ -269,7 +269,7 @@ stream_multipart({part, Name, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client)
         when is_list(ExtraHeaders) ->
     %% part without content-length
-    CType = hackney_bstr:content_type(Name),
+    CType = hackney_mimetypes:filename(Name),
     Headers = [{<<"Content-Disposition">>,
                 {<<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
                },
@@ -334,8 +334,9 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             {MpLen, CT, MpStream};
         {file, FileName} ->
             S= filelib:file_size(FileName),
+            FileName1 = hackney_bstr:to_binary(FileName),
 	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
-					   hackney_util:content_type(FileName)),
+                                          hackney_mimetypes:filename(FileName1)),
             {S, CT, Body0};
         Func when is_function(Func) ->
             CT = hackney_headers:get_value(<<"content-type">>, Headers,
