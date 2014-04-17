@@ -44,10 +44,15 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
     ProxyPort = proplists:get_value(socks5_port, Opts),
     Transport = proplists:get_value(socks5_transport, Opts),
 
+    %% filter connection options
+    AcceptedOpts =  [linger, nodelay, send_timeout,
+                     send_timeout_close, raw],
+    BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
+                {nodelay, true}],
+    ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+
     %% connect to the socks 5 proxy
-    case gen_tcp:connect(ProxyHost, ProxyPort, [binary, {packet, 0},
-                                                {keepalive, true},
-                                                {active, false}]) of
+    case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts) of
         {ok, Socket} ->
             case do_handshake(Socket, Host, Port, Opts) of
                 ok ->

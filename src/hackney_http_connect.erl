@@ -44,12 +44,20 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
     Port = proplists:get_value(connect_port, Opts),
     Transport = proplists:get_value(connect_transport, Opts),
 
-    case gen_tcp:connect(ProxyHost, ProxyPort, [binary, {packet, 0},
-                                                {keepalive, true},
-                                                {active, false}]) of
+    %% filter connection options
+    AcceptedOpts =  [linger, nodelay, send_timeout,
+                     send_timeout_close, raw],
+    BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
+                {nodelay, true}],
+    ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+
+    %% connnect to the proxy, and upgrade the socket if needed.
+    case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts) of
         {ok, Socket} ->
             case do_handshake(Socket, Host, Port, Opts) of
                 ok ->
+                    %% if we are connecting to a remote https source, we
+                    %% upgrade the connection socket to handle SSL.
                     case Transport of
                         hackney_ssl_transport ->
                             SslOpts0 = proplists:get_value(ssl_options, Opts),
