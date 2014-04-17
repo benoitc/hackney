@@ -576,35 +576,17 @@ maybe_proxy(Transport, Host, Port, Options)
                          host = ProxyHost,
                          port = ProxyPort} = hackney_url:parse_url(Url),
             ProxyAuth = proplists:get_value(proxy_auth, Options),
-            case Transport of
-                hackney_ssl_transport ->
-                    case PTransport of
-                        hackney_tcp_transport ->
-                            do_connect(ProxyHost, ProxyPort, ProxyAuth,
-                                       Transport, Host, Port, Options);
-                        _ ->
-                            {error, invalid_proxy_transport}
-                    end;
+            case {Transport, PTransport} of
+                {hackney_ssl_transport, hackney_ssl_transport} ->
+                    {error, invalid_proxy_transport};
                 _ ->
-                    case hackney_connect:connect(Transport, ProxyHost,
-                                                 ProxyPort,Options, true) of
-                        {ok, Ref} -> {ok, Ref, true};
-                        Error -> Error
-                    end
+                    do_connect(ProxyHost, ProxyPort, ProxyAuth,
+                               Transport, Host, Port, Options)
             end;
         {ProxyHost, ProxyPort} ->
-            case Transport of
-                hackney_ssl_transport ->
-                    ProxyAuth = proplists:get_value(proxy_auth, Options),
-                    do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport,
-                               Host, Port, Options);
-                _ ->
-                    case hackney_connect:connect(Transport, ProxyHost,
-                                                 ProxyPort, Options, true) of
-                        {ok, Ref} -> {ok, Ref, true};
-                        Error -> Error
-                    end
-            end;
+            ProxyAuth = proplists:get_value(proxy_auth, Options),
+            do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
+                       Port, Options);
         {connect, ProxyHost, ProxyPort} ->
             ProxyAuth = proplists:get_value(proxy_auth, Options),
             do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
@@ -650,8 +632,8 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
            Port, Options) ->
     %% create connection options
     ConnectOpts = proplists:get_value(connect_options, Options, []),
-    ConnectOpts1 = [{connect_host, ProxyHost},
-                    {connect_port, ProxyPort},
+    ConnectOpts1 = [{connect_host, Host},
+                    {connect_port, Port},
                     {connect_transport, Transport},
                     {connect_user, ProxyUser},
                     {connect_pass, ProxyPass}| ConnectOpts],
@@ -670,7 +652,8 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
                               {connect_options, ConnectOpts2}),
 
     %% connect using a socks5 proxy
-    hackney_connect:connect(hackney_http_connect, Host, Port, Options1, true).
+    hackney_connect:connect(hackney_http_connect, ProxyHost, ProxyPort,
+                            Options1, true).
 
 
 
