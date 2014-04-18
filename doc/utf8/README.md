@@ -415,6 +415,7 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="hackney_ets_lru.md" class="module">hackney_ets_lru</a></td></tr>
 <tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
 <tr><td><a href="hackney_idna.md" class="module">hackney_idna</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>

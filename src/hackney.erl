@@ -259,6 +259,21 @@ request(Method, URL, Headers, Body) ->
 %%  <bloquote>Note: instead of doing `hackney:request(Method, ...)' you can
 %%  also do `hackney:Method(...)' if you prefer to use the REST
 %%  syntax.</bloquote>
+%%
+%%  Return:
+%%  <ul>
+%%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
+%%  the response succeded. The request reference is used later to
+%%  retrieve the body.</li>
+%%  <li><code>{ok, Ref}</code> Return the request reference when you
+%%  decide to stream the requet. You can use the returned reference to
+%%  stream the request body and continue to handle the response.</li>
+%%  <li><code>{error, {closed, &lt;&lt;&gt;&gt;}}</code> A body was expected but
+%%  instead the remote closed the response after sending the headers.
+%%  Equivalent to the curl  message <code>no chunk, no close, no size.
+%%  Assume close to signal end</code>.</li>
+%%  <li><code>{error, term()}</code> other errors.</li>
+%%  </ul>
 -spec request(term(), url() | binary(), list(), term(), list())
     -> {ok, integer(), list(), client_ref()}
     | {ok, client_ref()}

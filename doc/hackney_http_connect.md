@@ -54,14 +54,14 @@ __See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 
 ### connect/3 ###
 
-`connect(Host, Port, Opts) -> any()`
+`connect(ProxyHost, ProxyPort, Opts) -> any()`
 
 
 <a name="connect-4"></a>
 
 ### connect/4 ###
 
-`connect(Host, Port, Opts, Timeout) -> any()`
+`connect(ProxyHost, ProxyPort, Opts, Timeout) -> any()`
 
 
 <a name="controlling_process-2"></a>

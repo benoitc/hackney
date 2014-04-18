@@ -76,7 +76,7 @@ multipart content</li>
 multipart content</li>
 </ul><p></p>Note: You can calculate the full length of a multipart stream using
 the function <code>hackney_multipart:len_mp_stream/2</code> .</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#send_request-3">send_request/3</a></td><td>send a request using the current client state and pass new
-options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the couchbeam process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the couchbeam process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
+options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the hackney process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the hackney process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -422,9 +422,30 @@ to connect to an HTTP tunnel.
 
 
 
+
 <bloquote>Note: instead of doing `hackney:request(Method, ...)` you can
 also do `hackney:Method(...)` if you prefer to use the REST
 syntax.</bloquote>
+
+
+
+Return:
+
+* `{ok, ResponseStatus, ResponseHeaders, Ref}`: when
+the response succeded. The request reference is used later to
+retrieve the body.
+
+* `{ok, Ref}` Return the request reference when you
+decide to stream the requet. You can use the returned reference to
+stream the request body and continue to handle the response.
+
+* `{error, {closed, <<>>}}` A body was expected but
+instead the remote closed the response after sending the headers.
+Equivalent to the curl  message `no chunk, no close, no size.
+Assume close to signal end`.
+
+* `{error, term()}` other errors.
+
 
 <a name="request_info-1"></a>
 
@@ -590,7 +611,7 @@ Stream the response body.
 
 `start() -> any()`
 
-Start the couchbeam process. Useful when testing using the shell.
+Start the hackney process. Useful when testing using the shell.
 <a name="start-1"></a>
 
 ### start/1 ###
@@ -619,7 +640,7 @@ and headers of the response. and return
 
 `stop() -> any()`
 
-Stop the couchbeam process. Useful when testing using the shell.
+Stop the hackney process. Useful when testing using the shell.
 <a name="stop_async-1"></a>
 
 ### stop_async/1 ###
