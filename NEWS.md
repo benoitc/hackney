@@ -4,6 +4,7 @@
 -------------------
 
 - fix: return the full body on closed connections.
+- fix: make sure to always pass the Host header.
 
 0.12.0 - 2014/04/18
 -------------------
