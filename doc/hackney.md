@@ -439,7 +439,7 @@ retrieve the body.
 decide to stream the requet. You can use the returned reference to
 stream the request body and continue to handle the response.
 
-* `{error, {closed, <<>>}}` A body was expected but
+* `{error, {closed, PartialBody}}` A body was expected but
 instead the remote closed the response after sending the headers.
 Equivalent to the curl  message `no chunk, no close, no size.
 Assume close to signal end`.
