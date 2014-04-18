@@ -304,6 +304,8 @@ read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
 		{done, Client2} ->
 			{ok, Acc, Client2};
+        {error, {closed, Bin}} when is_binary(Bin) ->
+            {error, {closed, << Acc/binary, Bin/binary >>}};
 		{error, Reason} ->
 			{error, Reason}
 	end;
