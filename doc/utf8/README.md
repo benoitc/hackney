@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.12.0
+__Version:__ 0.12.1
 
 # hackney
 
@@ -310,12 +310,12 @@ you to maintain a group of connections.
 
 ```
 PoolName = mypool,
-Options = [{timeout, 150000}, {pool_size, 100}],
-{ok, Pid} = hackney_pool:start_pool(PoolName, Options),
+Options = [{timeout, 150000}, {max_connections, 100}],
+ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
-`pool_size` is the number of connections maintained in the pool. Each
+`max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
 
@@ -415,7 +415,6 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="hackney_ets_lru.md" class="module">hackney_ets_lru</a></td></tr>
 <tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
 <tr><td><a href="hackney_idna.md" class="module">hackney_idna</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>

@@ -1,5 +1,10 @@
 # NEWS
 
+0.12.1 - 2014/04/18
+-------------------
+
+- fix: return the full body on closed connections.
+
 0.12.0 - 2014/04/18
 -------------------
 
