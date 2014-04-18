@@ -24,8 +24,15 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 	(Timeout =:= infinity orelse is_integer(Timeout)) ->
-	gen_tcp:connect(Host, Port,
-		Opts ++ [binary, {active, false}, {packet, raw}], Timeout).
+
+    %% filter options
+    AcceptedOpts =  [linger, nodelay, keepalive, send_timeout,
+                     send_timeout_close, raw],
+    BaseOpts = [binary, {active, false}, {packet, raw}, {nodelay, true}],
+    Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+
+    %% connect
+	gen_tcp:connect(Host, Port, Opts1, Timeout).
 
 recv(Socket, Length) ->
     recv(Socket, Length, infinity).

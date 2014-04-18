@@ -263,7 +263,10 @@ request(Method, URL, Headers, Body) ->
     -> {ok, integer(), list(), client_ref()}
     | {ok, client_ref()}
     | {error, term()}.
-request(Method, #hackney_url{}=URL, Headers, Body, Options0) ->
+request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
+    %% normalize the url encoding
+    URL = hackney_url:normalize(URL0),
+
     #hackney_url{transport=Transport,
                  host = Host,
                  port = Port,
@@ -527,24 +530,16 @@ make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
     {connect, Path, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
-    #hackney_url{host = Host,
-                 port = Port,
-                 path = Path} = URL,
+    #hackney_url{netloc = Netloc} = URL,
 
     %% place the correct host
-    HostHdr = case Port of
-        80 -> list_to_binary(hackney_idna:to_ascii(Host));
-        _ -> iolist_to_binary([hackney_idna:to_ascii(Host), ":",
-                               integer_to_list(Port)])
-    end,
-
     Headers1 = case proplists:get_value(<<"Host">>, Headers0) of
-        undefined -> Headers0 ++ [{<<"Host">>, HostHdr}];
-        _ -> lists:keyreplace(<<"Host">>, 1, Headers0, {<<"Host">>, HostHdr})
+        undefined -> Headers0 ++ [{<<"Host">>, Netloc}];
+        _ -> lists:keyreplace(<<"Host">>, 1, Headers0,
+                              {<<"Host">>, Netloc})
     end,
 
-    Path1 = hackney_url:pathencode(Path),
-    FinalPath = hackney_url:unparse_url(URL#hackney_url{path=Path1}),
+    FinalPath = hackney_url:unparse_url(URL),
     Headers = case proplists:get_value(proxy_auth, Options) of
         undefined ->
             Headers1;
@@ -558,12 +553,11 @@ make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{path = Path,
                  qs = Query} = URL,
 
-    Path1 =  hackney_url:pathencode(Path),
     FinalPath = case Query of
         <<>> ->
-            Path1;
+            Path;
         _ ->
-            <<Path1/binary, "?", Query/binary>>
+            <<Path/binary, "?", Query/binary>>
     end,
     {Method, FinalPath, Headers, Body}.
 
@@ -572,37 +566,35 @@ maybe_proxy(Transport, Host, Port, Options)
         when is_list(Host), is_integer(Port), is_list(Options) ->
     case proplists:get_value(proxy, Options) of
         Url when is_binary(Url) orelse is_list(Url) ->
+            Url1 = hackney_url:normalize(Url),
             #hackney_url{transport = PTransport,
                          host = ProxyHost,
-                         port = ProxyPort} = hackney_url:parse_url(Url),
+                         port = ProxyPort} = hackney_url:parse_url(Url1),
             ProxyAuth = proplists:get_value(proxy_auth, Options),
-            case Transport of
-                hackney_ssl_transport ->
-                    case PTransport of
-                        hackney_tcp_transport ->
-                            do_connect(ProxyHost, ProxyPort, ProxyAuth,
-                                       Transport, Host, Port, Options);
-                        _ ->
-                            {error, invalid_proxy_transport}
-                    end;
+            case {Transport, PTransport} of
+                {hackney_ssl_transport, hackney_ssl_transport} ->
+                    {error, invalid_proxy_transport};
+                {hackney_ssl_transport, _} ->
+                    do_connect(ProxyHost, ProxyPort, ProxyAuth,
+                               Transport, Host, Port, Options);
                 _ ->
                     case hackney_connect:connect(Transport, ProxyHost,
-                                                 ProxyPort,Options, true) of
-                        {ok, Ref} -> {ok, Ref, true};
-                        Error -> Error
+                                                 ProxyPort, Options, true) of
+                          {ok, Ref} -> {ok, Ref, true};
+                          Error -> Error
                     end
             end;
         {ProxyHost, ProxyPort} ->
             case Transport of
                 hackney_ssl_transport ->
                     ProxyAuth = proplists:get_value(proxy_auth, Options),
-                    do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport,
-                               Host, Port, Options);
+                    do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
+                        Port, Options);
                 _ ->
                     case hackney_connect:connect(Transport, ProxyHost,
                                                  ProxyPort, Options, true) of
-                        {ok, Ref} -> {ok, Ref, true};
-                        Error -> Error
+                          {ok, Ref} -> {ok, Ref, true};
+                          Error -> Error
                     end
             end;
         {connect, ProxyHost, ProxyPort} ->
@@ -650,8 +642,8 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
            Port, Options) ->
     %% create connection options
     ConnectOpts = proplists:get_value(connect_options, Options, []),
-    ConnectOpts1 = [{connect_host, ProxyHost},
-                    {connect_port, ProxyPort},
+    ConnectOpts1 = [{connect_host, Host},
+                    {connect_port, Port},
                     {connect_transport, Transport},
                     {connect_user, ProxyUser},
                     {connect_pass, ProxyPass}| ConnectOpts],
@@ -670,7 +662,8 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
                               {connect_options, ConnectOpts2}),
 
     %% connect using a socks5 proxy
-    hackney_connect:connect(hackney_http_connect, Host, Port, Options1, true).
+    hackney_connect:connect(hackney_http_connect, ProxyHost, ProxyPort,
+                            Options1, true).
 
 
 

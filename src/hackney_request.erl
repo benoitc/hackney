@@ -31,22 +31,14 @@
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
     Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
 
-    #client{host=Host, port=Port, options=Options} = Client0,
+    #client{netloc=Netloc, options=Options} = Client0,
 
     %% set initial headers
     %% don't override the host if it's alreay set (especially when
     %% connecting to a proxy.
     DefaultHeaders0 = case proplists:get_value(<<"Host">>, Headers0) of
         undefined ->
-            HostHdr = case is_default_port(Client0) of
-                true ->
-                    list_to_binary(Host);
-                false ->
-                    iolist_to_binary([Host, ":",
-                                      integer_to_list(Port)])
-            end,
-
-            [{<<"Host">>, HostHdr},
+            [{<<"Host">>, Netloc},
              {<<"User-Agent">>, default_ua()}];
         _ ->
             [{<<"User-Agent">>, default_ua()}]
@@ -269,7 +261,7 @@ stream_multipart({part, Name, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client)
         when is_list(ExtraHeaders) ->
     %% part without content-length
-    CType = hackney_bstr:content_type(Name),
+    CType = hackney_mimetypes:filename(Name),
     Headers = [{<<"Content-Disposition">>,
                 {<<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
                },
@@ -334,8 +326,9 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             {MpLen, CT, MpStream};
         {file, FileName} ->
             S= filelib:file_size(FileName),
+            FileName1 = hackney_bstr:to_binary(FileName),
 	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
-					   hackney_util:content_type(FileName)),
+                                          hackney_mimetypes:filename(FileName1)),
             {S, CT, Body0};
         Func when is_function(Func) ->
             CT = hackney_headers:get_value(<<"content-type">>, Headers,

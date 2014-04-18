@@ -196,24 +196,19 @@ do_connect(Host, Port, Transport, #client{options=Opts,
             ConnectOpts0
     end,
 
-    ConnectOpts2 = case lists:keyfind(nodelay, 1, ConnectOpts1) of
-        false -> [{nodelay, true} | ConnectOpts1];
-        _ -> ConnectOpts1
-    end,
-
     ConnectOpts = case {Transport, proplists:get_value(ssl_options, Opts)} of
         {hackney_ssl_transport, undefined} ->
             case proplists:get_value(insecure, Opts) of
                 true ->
-                    ConnectOpts2 ++ [{verify, verify_none},
+                    ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
                 _ ->
-                    ConnectOpts2
+                    ConnectOpts1
             end;
         {hackney_ssl_transport, SslOpts} ->
-            ConnectOpts2 ++ SslOpts;
+            ConnectOpts1 ++ SslOpts;
         {_, _} ->
-            ConnectOpts2
+            ConnectOpts1
     end,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of

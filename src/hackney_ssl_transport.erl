@@ -24,8 +24,18 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 	(Timeout =:= infinity orelse is_integer(Timeout)) ->
-	ssl:connect(Host, Port,
-		Opts ++ [binary, {active, false}, {packet, raw}], Timeout).
+
+    %% filter options
+    AcceptedOpts =  [cacertfile, cacerts, cert, certfile, ciphers,
+                     fail_if_no_peer_cert, hibernate_after, ip, key, keyfile,
+                     linger, next_protocols_advertised, nodelay, password, raw,
+                     reuse_session, reuse_sessions, secure_renegotiate,
+                     send_timeout, send_timeout_close, verify, verify_fun],
+    BaseOpts = [binary, {active, false}, {packet, raw}, {nodelay, true}],
+    Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+
+    %% connect
+	ssl:connect(Host, Port, Opts1, Timeout).
 
 recv(Socket, Length) ->
     recv(Socket, Length, infinity).
