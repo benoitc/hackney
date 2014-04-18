@@ -268,10 +268,10 @@ request(Method, URL, Headers, Body) ->
 %%  <li><code>{ok, Ref}</code> Return the request reference when you
 %%  decide to stream the requet. You can use the returned reference to
 %%  stream the request body and continue to handle the response.</li>
-%%  <li><code>{error, {closed, &lt;&lt;&gt;&gt;}}</code> A body was expected but
+%%  <li><code>{error, {closed, PartialBody}}</code> A body was expected but
 %%  instead the remote closed the response after sending the headers.
 %%  Equivalent to the curl  message <code>no chunk, no close, no size.
-%%  Assume close to signal end</code>.</li>
+%%  Assume close to signal end</code>. </li>
 %%  <li><code>{error, term()}</code> other errors.</li>
 %%  </ul>
 -spec request(term(), url() | binary(), list(), term(), list())
@@ -533,8 +533,6 @@ resume_stream(Ref) ->
 -spec stop_async(client_ref()) -> ok | {error, req_not_found} | {error, term()}.
 stop_async(Ref) ->
     hackney_manager:stop_async_response(Ref).
-
-
 
 %% internal functions
 %%
