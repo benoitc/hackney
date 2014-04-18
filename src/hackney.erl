@@ -539,20 +539,26 @@ stop_async(Ref) ->
 %% internal functions
 %%
 %%
+%%
+host_header(#hackney_url{netloc=Netloc}, Headers) ->
+    case proplists:get_value(<<"Host">>, Headers) of
+        undefined -> Headers ++ [{<<"Host">>, Netloc}];
+        _ -> lists:keyreplace(<<"Host">>, 1, Headers,
+                              {<<"Host">>, Netloc})
+    end.
+
 make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{host = Host,
                  port = Port}= URL,
-    Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
-    {connect, Path, Headers, Body};
-make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
-    #hackney_url{netloc = Netloc} = URL,
 
     %% place the correct host
-    Headers1 = case proplists:get_value(<<"Host">>, Headers0) of
-        undefined -> Headers0 ++ [{<<"Host">>, Netloc}];
-        _ -> lists:keyreplace(<<"Host">>, 1, Headers0,
-                              {<<"Host">>, Netloc})
-    end,
+    Headers1 = host_header(URL, Headers),
+
+    Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
+    {connect, Path, Headers1, Body};
+make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
+    %% place the correct host
+    Headers1 = host_header(URL, Headers0),
 
     FinalPath = hackney_url:unparse_url(URL),
     Headers = case proplists:get_value(proxy_auth, Options) of
@@ -568,13 +574,16 @@ make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
     #hackney_url{path = Path,
                  qs = Query} = URL,
 
+    %% place the correct host
+    Headers1 = host_header(URL, Headers),
+
     FinalPath = case Query of
         <<>> ->
             Path;
         _ ->
             <<Path/binary, "?", Query/binary>>
     end,
-    {Method, FinalPath, Headers, Body}.
+    {Method, FinalPath, Headers1, Body}.
 
 
 maybe_proxy(Transport, Host, Port, Options)
