@@ -31,22 +31,14 @@
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
     Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
 
-    #client{host=Host, port=Port, options=Options} = Client0,
+    #client{netloc=Netloc, options=Options} = Client0,
 
     %% set initial headers
     %% don't override the host if it's alreay set (especially when
     %% connecting to a proxy.
     DefaultHeaders0 = case proplists:get_value(<<"Host">>, Headers0) of
         undefined ->
-            HostHdr = case is_default_port(Client0) of
-                true ->
-                    list_to_binary(Host);
-                false ->
-                    iolist_to_binary([Host, ":",
-                                      integer_to_list(Port)])
-            end,
-
-            [{<<"Host">>, HostHdr},
+            [{<<"Host">>, Netloc},
              {<<"User-Agent">>, default_ua()}];
         _ ->
             [{<<"User-Agent">>, default_ua()}]

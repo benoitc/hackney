@@ -574,14 +574,29 @@ maybe_proxy(Transport, Host, Port, Options)
             case {Transport, PTransport} of
                 {hackney_ssl_transport, hackney_ssl_transport} ->
                     {error, invalid_proxy_transport};
-                _ ->
+                {hackney_ssl_transport, _} ->
                     do_connect(ProxyHost, ProxyPort, ProxyAuth,
-                               Transport, Host, Port, Options)
+                               Transport, Host, Port, Options);
+                _ ->
+                    case hackney_connect:connect(Transport, ProxyHost,
+                                                 ProxyPort, Options, true) of
+                          {ok, Ref} -> {ok, Ref, true};
+                          Error -> Error
+                    end
             end;
         {ProxyHost, ProxyPort} ->
-            ProxyAuth = proplists:get_value(proxy_auth, Options),
-            do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
-                       Port, Options);
+            case Transport of
+                hackney_ssl_transport ->
+                    ProxyAuth = proplists:get_value(proxy_auth, Options),
+                    do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
+                        Port, Options);
+                _ ->
+                    case hackney_connect:connect(Transport, ProxyHost,
+                                                 ProxyPort, Options, true) of
+                          {ok, Ref} -> {ok, Ref, true};
+                          Error -> Error
+                    end
+            end;
         {connect, ProxyHost, ProxyPort} ->
             ProxyAuth = proplists:get_value(proxy_auth, Options),
             do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
