@@ -1,5 +1,29 @@
 # NEWS
 
+0.12.0 - 2014/04/18
+-------------------
+
+- improvement: URI encoding is now fully normalized.
+- improvement: TCP_NODELAY is now available by default for all transports
+- improvements: IDNA parsing is only done during the normalization which
+  makes all the connections faster..
+- fix: connections options are now correctly passed to the transports.
+- fix: HTTP proxying. make sure we reuse the connection
+- fix: HTTP proxying, only resolve the proxy domain.
+- bump hackney_lib to 0.3.0
+
+### Breaking change:
+
+the [mimetypes](https://github.com/spawngrid/mimetypes) has been
+replaced by the
+[hackney_mimetypes](https://github.com/benoitc/hackney_lib/blob/master/doc/hackney_mimetypes.md)
+module. It makes content-type detection a little more efficient. In the
+process the functions `hackney_util:content_type/1` and
+`hackney_bstr:content_type/1` has been removed. You should now use the
+function `hackney_mimetypes:filename/1` .
+
+
+
 0.11.2 - 2014/04/15
 -------------------
 
@@ -8,7 +32,7 @@
 - fix multipart EOF parsing
 - make sure we finish a multipart stream
 - bump hackney_lib to 0.2.5
-- enable TCP_NODELAY by default. (To disable, pass the option 
+- enable TCP_NODELAY by default. (To disable, pass the option
   `{nodelay, false} to `connect_options`.
 
 0.11.1 - 2014/03/03
