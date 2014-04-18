@@ -10,7 +10,7 @@
 - fix: connections options are now correctly passed to the transports.
 - fix: HTTP proxying. make sure we reuse the connection
 - fix: HTTP proxying, only resolve the proxy domain.
-- bump hackney_lib to 0.3.0
+- bump [hackney_lib](https://github.com/benoitc/hackney_lib) to 0.3.0
 
 ### Breaking change:
 
