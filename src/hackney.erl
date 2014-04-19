@@ -749,7 +749,7 @@ maybe_redirect(Resp, _Req, _Tries) ->
 
 redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     %% skip the body
-    {ok, Client} = hackney_response:skip_body(Client0),
+    {skip, Client} = hackney_response:skip_body(Client0),
 
     %% close the connection if we don't use a pool
     RedirectUrl = hackney_url:parse_url(NewLocation),
