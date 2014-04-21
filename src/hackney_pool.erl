@@ -275,6 +275,7 @@ find_connection({_Host, _Port, Transport}=Key, Pid,
                                            sockets=NewSockets},
                     {{ok, S, self()}, NewState};
                 {error, badarg} ->
+                    % Pid has timed out, reuse for someone else
                     Transport:setopts(S, [{active, once}]),
                     {{error, no_socket, self()}, State};
                 _Else ->
