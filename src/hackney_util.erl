@@ -29,6 +29,11 @@ filter_options([Opt = {raw, _, _, _}|Tail], AllowedKeys, Acc) ->
 	case lists:member(raw, AllowedKeys) of
 		true -> filter_options(Tail, AllowedKeys, [Opt|Acc]);
 		false -> filter_options(Tail, AllowedKeys, Acc)
+	end;
+filter_options([Opt|Tail], AllowedKeys, Acc) when is_atom(Opt) ->
+	case lists:member(Opt, AllowedKeys) of
+		true -> filter_options(Tail, AllowedKeys, [Opt|Acc]);
+		false -> filter_options(Tail, AllowedKeys, Acc)
 	end.
 
 %% @doc set the default options in a proplists if not defined
