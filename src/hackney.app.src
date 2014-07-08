@@ -13,7 +13,7 @@
                         public_key,
                         ssl,
                         idna]},
-        {included_applications, [hackney_lib]},
+        {included_applications, []},
         {mod, { hackney_app, []}},
         {env, [{timeout, 150000},
                {max_connections, 25},
