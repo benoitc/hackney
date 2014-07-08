@@ -4,6 +4,10 @@
 -------------------
 
 - put hackney_lib back in the source code and refactor the source repository
+- fix: handle bad socks5 proxy response
+  [#113](http://github.com/benoitc/hackney/issues/113)
+- fix: handle timeout in hackney_socks4:connect/5
+  [#112](http://github.com/benoitc/hackney/issues/112)
 - fix: Accept inet6 tcp option for ssl
 - fix redirection
 - fix: add versions option for ssl
