@@ -158,11 +158,9 @@ if `crash` is used the function will fail with the reason `badarg`.
 
 
 <pre><code>
-urlencode(Bin::binary()) -&gt; binary()
+urlencode(Bin::binary() | string()) -&gt; binary()
 </code></pre>
 <br />
-
-Equivalent to [`urlencode(Bin, [])`](#urlencode-2).
 
 URL encode a string binary.
 <a name="urlencode-2"></a>
@@ -171,7 +169,7 @@ URL encode a string binary.
 
 
 <pre><code>
-urlencode(Bin::binary(), Opts::[noplus | upper]) -&gt; binary()
+urlencode(Bin::binary() | string(), Opts::[noplus | upper]) -&gt; binary()
 </code></pre>
 <br />
 
