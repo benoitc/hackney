@@ -43,9 +43,7 @@ socks5_socket() = {atom(), <a href="inet.md#type-socket">inet:socket()</a>}
 <pre><code>
 close(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; ok
 </code></pre>
-
-<br></br>
-
+<br />
 
 Close a socks5 socket.
 
@@ -72,9 +70,7 @@ __See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 <pre><code>
 controlling_process(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Assign a new controlling process _Pid_ to _Socket_.
 
@@ -94,9 +90,7 @@ Atoms used to identify messages in {active, once | true} mode.
 <pre><code>
 peername(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return the address and port for the other end of a connection.
 
@@ -116,9 +110,7 @@ __See also:__ [inet:peername/1](inet.md#peername-1).
 <pre><code>
 recv(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Receive a packet from a socket in passive mode.
 
@@ -131,9 +123,7 @@ __See also:__ [gen_tcp:recv/3](gen_tcp.md#recv-3).
 <pre><code>
 send(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Send a packet on a socket.
 
@@ -146,9 +136,7 @@ __See also:__ [gen_tcp:send/2](gen_tcp.md#send-2).
 <pre><code>
 setopts(X1::<a href="#type-socks5_socket">socks5_socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Set one or more options for a socket.
 
@@ -161,9 +149,7 @@ __See also:__ [inet:setopts/2](inet.md#setopts-2).
 <pre><code>
 sockname(X1::<a href="#type-socks5_socket">socks5_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Get the local address and port of a socket
 

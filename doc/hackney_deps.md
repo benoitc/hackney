@@ -28,9 +28,7 @@ code path.</td></tr></table>
 <pre><code>
 deps_on_path() -&gt; [ProjNameAndVers]
 </code></pre>
-
-<br></br>
-
+<br />
 
 List of project dependencies on the path.
 <a name="ensure-0"></a>
@@ -41,9 +39,7 @@ List of project dependencies on the path.
 <pre><code>
 ensure() -&gt; ok
 </code></pre>
-
-<br></br>
-
+<br />
 
 Ensure that the ebin and include paths for dependencies of
 this application are on the code path. Equivalent to
@@ -56,9 +52,7 @@ ensure(?Module).
 <pre><code>
 ensure(Module) -&gt; ok
 </code></pre>
-
-<br></br>
-
+<br />
 
 Ensure that all ebin and include paths for dependencies
 of the application for Module are on the code path.
@@ -70,9 +64,7 @@ of the application for Module are on the code path.
 <pre><code>
 get_base_dir() -&gt; string()
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return the application directory for this application. Equivalent to
 get_base_dir(?MODULE).
@@ -84,9 +76,7 @@ get_base_dir(?MODULE).
 <pre><code>
 get_base_dir(Module) -&gt; string()
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return the application directory for Module. It assumes Module is in
 a standard OTP layout application in the ebin or src directory.
@@ -98,9 +88,7 @@ a standard OTP layout application in the ebin or src directory.
 <pre><code>
 local_path(Components) -&gt; string()
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return an application-relative directory for this application.
 Equivalent to local_path(Components, ?MODULE).
@@ -112,9 +100,7 @@ Equivalent to local_path(Components, ?MODULE).
 <pre><code>
 local_path(Components::[string()], Module) -&gt; string()
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return an application-relative directory from Module's application.
 <a name="new_siblings-1"></a>
@@ -125,9 +111,7 @@ Return an application-relative directory from Module's application.
 <pre><code>
 new_siblings(Module) -&gt; [Dir]
 </code></pre>
-
-<br></br>
-
+<br />
 
 Find new siblings paths relative to Module that aren't already on the
 code path.

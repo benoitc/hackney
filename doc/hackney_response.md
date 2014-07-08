@@ -47,9 +47,7 @@ length doesn't go over MaxLength.</td></tr><tr><td valign="top"><a href="#close-
 <pre><code>
 body(Client::#client{}) -&gt; {ok, binary(), #client{}} | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Return the full body sent with the request.
 <a name="body-2"></a>
@@ -60,9 +58,7 @@ Return the full body sent with the request.
 <pre><code>
 body(MaxLength::non_neg_integer() | infinity, Client::#client{}) -&gt; {ok, binary(), #client{}} | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 Return the full body sent with the request as long as the body
@@ -106,9 +102,7 @@ handle Expect header
 <pre><code>
 skip_body(Client::#client{}) -&gt; {ok, #client{}} | {error, atom()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 <a name="skip_multipart-1"></a>
@@ -150,9 +144,7 @@ Start the response It parse the request lines and headers.
 <pre><code>
 stream_multipart(Client::#client{}) -&gt; {headers, list(), #client{}} | {body, binary(), #client{}} | {eof, #client{}} | {end_of_part, #client{}} | {error, term()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 stream a multipart response

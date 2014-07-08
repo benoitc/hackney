@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2013 BenoÃ®t Chesneau.
+Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.10.1
+__Version:__ 0.13.0
 
 # hackney
 
@@ -35,6 +35,21 @@ to go.
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
 informations on what still need to be done.
+
+#### Useful modules are:
+
+- [`hackney_http`](hackney_http.md): HTTP parser in pure Erlang. This parser is able
+to parse HTTP responses and requests in a streaming fashion. If not set
+it will be autodetect if it's a request or a response if needed.
+
+- [`hackney_headers`](hackney_headers.md) Module to manipulate HTTP headers
+- [`hackney_cookie`](hackney_cookie.md): Module to manipulate cookies.
+- [`hackney_multipart`](hackney_multipart.md): Module to encode/decode multipart.
+- [`hackney_url`](hackney_url.md): Module to parse and create URIs.
+- [`hackney_date`](hackney_date.md): Module to parse HTTP dates.
+
+Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
+to get last changelog.
 
 ## Installation
 
@@ -149,7 +164,7 @@ couple of request.
 #### To create a connection:
 
 ```
-Transport = hackney_tcp_protocol,
+Transport = hackney_tcp_transport,
 Host = << "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
@@ -310,12 +325,12 @@ you to maintain a group of connections.
 
 ```
 PoolName = mypool,
-Options = [{timeout, 150000}, {pool_size, 100}],
-{ok, Pid}Â = hackney_pool:start_pool(PoolName, Options),
+Options = [{timeout, 150000}, {max_connections, 100}],
+ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
-`pool_size` is the number of connections maintained in the pool. Each
+`max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
 
@@ -363,7 +378,7 @@ Method = get,
 URL = "http://friendpaste.com/",
 ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
 ReqBody = <<>>,
-Options = [{follow_redirect, true}, {max_redirect, true}],
+Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
 {ok, Body1} = hackney:body(Ref).
@@ -413,10 +428,18 @@ $ make devclean ; # clean all files
 <table width="100%" border="0" summary="list of modules">
 <tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
+<tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
+<tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="hackney_http_proxy.md" class="module">hackney_http_proxy</a></td></tr>
+<tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
+<tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="hackney_idna.md" class="module">hackney_idna</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
+<tr><td><a href="hackney_mimetypes.md" class="module">hackney_mimetypes</a></td></tr>
+<tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
 <tr><td><a href="hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
 <tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
@@ -426,5 +449,6 @@ $ make devclean ; # clean all files
 <tr><td><a href="hackney_stream.md" class="module">hackney_stream</a></td></tr>
 <tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
 <tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

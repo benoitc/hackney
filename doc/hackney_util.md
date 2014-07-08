@@ -51,9 +51,7 @@ filter a proplists and only keep allowed keys
 <pre><code>
 require(Rest::[module()]) -&gt; ok
 </code></pre>
-
-<br></br>
-
+<br />
 
 Start the given applications if they were not already started.
 <a name="set_option_default-3"></a>

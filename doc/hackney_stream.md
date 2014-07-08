@@ -67,8 +67,6 @@
 <pre><code>
 system_terminate(Reason::any(), X2::term(), X3::term(), X4::term()) -&gt; no_return()
 </code></pre>
-
-<br></br>
-
+<br />
 
 
