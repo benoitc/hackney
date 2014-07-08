@@ -16,7 +16,7 @@
 
 
 @copyright 2012-2014 Benoît Chesneau.
-@version 0.12.1
+@version 0.13.0
 @title hackney - HTTP client library in Erlang
 
 @doc
@@ -51,6 +51,23 @@ to go.
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
 informations on what still need to be done.
+
+
+#### Useful modules are:
+
+- {@link hackney_http}: HTTP parser in pure Erlang. This parser is able
+  to parse HTTP responses and requests in a streaming fashion. If not set
+it will be autodetect if it's a request or a response if needed.
+
+- {@link hackney_headers} Module to manipulate HTTP headers
+- {@link hackney_cookie}: Module to manipulate cookies.
+- {@link hackney_multipart}: Module to encode/decode multipart.
+- {@link hackney_url}: Module to parse and create URIs.
+- {@link hackney_date}: Module to parse HTTP dates.
+
+Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
+to get last changelog.
+
 
 ## Installation
 
