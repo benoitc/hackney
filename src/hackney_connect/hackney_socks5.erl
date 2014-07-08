@@ -149,6 +149,8 @@ do_handshake(Socket, Host, Port, Options) ->
             case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
                 {ok, << 5, 0 >>} ->
                     do_connection(Socket, Host, Port);
+                {ok, _Reply} ->
+                    {error, unknown_reply};
                 Error ->
                     Error
             end;
