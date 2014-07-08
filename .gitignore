@@ -4,3 +4,5 @@ ebin
 deps
 .DS_Store
 erl_crash.dump
+.eunit
+mime.types

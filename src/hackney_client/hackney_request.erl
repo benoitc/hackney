@@ -11,7 +11,7 @@
 -module(hackney_request).
 
 -include("hackney.hrl").
--include_lib("hackney_lib/include/hackney_lib.hrl").
+-include("hackney_lib.hrl").
 
 -export([perform/2,
          location/1,

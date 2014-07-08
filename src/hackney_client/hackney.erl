@@ -38,7 +38,7 @@
 -include("hackney_methods.hrl").
 
 -include("hackney.hrl").
--include_lib("hackney_lib/include/hackney_lib.hrl").
+-include("hackney_lib.hrl").
 
 
 -type url() :: #hackney_url{}.

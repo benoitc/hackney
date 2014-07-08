@@ -1,0 +1,50 @@
+%% -*- erlang -*-
+%%%
+%%% This file is part of hackney_lib released under the Apache 2 license.
+%%% See the NOTICE for more information.
+-module(hackney_mimetypes).
+
+-export([extension/1]).
+-export([filename/1]).
+-export([mime_to_exts/1]).
+
+%% @doc Transform an extension to a mimetype
+%%
+%%      Example:
+%%
+%% ```
+%% 1> mimetypes:extension(<<"c">>).
+%% <<"text/x-c">>
+%% '''
+-spec extension(binary()) -> binary().
+extension(Ext) ->
+    extensions(Ext).
+
+%% @doc Return the mimetype for any file by looking at its extension.
+%% Example:
+%%
+%% ```
+%% 1> hackney_mimetypes:filename(<<"test.cpp">>).
+%% <<"text/x-c">>
+%% '''
+-spec filename(file:filename_all()) -> binary().
+filename(Path) ->
+	case filename:extension(Path) of
+		<<>> -> <<"application/octet-stream">>;
+		<< $., Ext/binary >> -> extension(Ext)
+	end.
+
+
+%% @doc Return the list of extensions for a mimetype.
+%% Example:
+%%
+%% ```
+%% 1> hackney_mimetypes:mime_to_exts(<<"text/plain">>).
+%% [<<"txt">>,<<"text">>,<<"conf">>,<<"def">>,<<"list">>,<<"log">>,<<"in">>]
+%% '''
+-spec mime_to_exts(binary()) -> [binary()].
+mime_to_exts(Mimetype) ->
+    mimetypes(Mimetype).
+
+
+%% GENERATED
