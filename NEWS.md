@@ -6,7 +6,7 @@
 - put hackney_lib back in the source code and refactor the source repository
 - fix: Accept inet6 tcp option for ssl
 - fix redirection
-
+- fix: add versions option for ssl
 
 0.12.1 - 2014/04/18
 -------------------
