@@ -228,9 +228,10 @@ mp_file_header({file, Path, ExtraHeaders}, Boundary) ->
 mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
     CType = hackney_mimetypes:filename(Path),
     Len = filelib:file_size(Path),
-    Headers = [{<<"Content-Disposition">>, Disposition, Params},
-               {<<"Content-Type">>, CType},
-               {<<"Content-Length">>, Len}] ++ ExtraHeaders,
+    ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
+    Headers = mp_filter_header([{<<"content-type">>, CType},
+                                {<<"content-length">>, Len}],
+                               [{<<"content-disposition">>, Disposition, Params} | ExtraHeaders0]),
     BinHeader = mp_header(Headers, Boundary),
     {BinHeader, Len}.
 
@@ -248,9 +249,10 @@ mp_data_header({Name, Len, ExtraHeaders}, Boundary) ->
     mp_data_header({Name, Len, Disposition, ExtraHeaders}, Boundary);
 mp_data_header({Name, Len, {Disposition, Params}, ExtraHeaders}, Boundary) ->
     CType = hackney_mimetypes:filename(Name),
-    Headers = [{<<"Content-Disposition">>, Disposition, Params},
-               {<<"Content-Type">>, CType},
-               {<<"Content-Length">>, Len}] ++ ExtraHeaders,
+    ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
+    Headers = mp_filter_header([{<<"content-type">>, CType},
+                                {<<"content-length">>, Len}],
+                               [{<<"content-disposition">>, Disposition, Params} | ExtraHeaders0]),
     BinHeader = mp_header(Headers, Boundary),
     {BinHeader, Len}.
 
@@ -502,3 +504,13 @@ mp_parse_mixed1(eof, Pattern) ->
     {mp_mixed_eof, fun () -> parse_body(<<>>, Pattern) end};
 mp_parse_mixed1(Error, _Pattern) ->
     Error.
+
+mp_filter_header([], Acc) -> Acc;
+mp_filter_header([{Key, Value} | Headers], Acc) ->
+    case proplists:get_value(Key, Acc) of
+        undefined ->
+            mp_filter_header(Headers, [{Key, Value} | Acc]);
+        _Else ->
+            mp_filter_header(Headers, Acc)
+    end.
+
