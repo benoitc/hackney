@@ -55,6 +55,7 @@ informations on what still need to be done.
 
 #### Useful modules are:
 
+- {@link hackney}: main module. It contains all HTTP client functions.
 - {@link hackney_http}: HTTP parser in pure Erlang. This parser is able
   to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetect if it's a request or a response if needed.

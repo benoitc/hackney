@@ -38,6 +38,7 @@ informations on what still need to be done.
 
 #### Useful modules are:
 
+- [`hackney`](http://github.com/benoitc/hackney/blob/feature/merge-hackney-lib/doc/hackney.md): main module. It contains all HTTP client functions.
 - [`hackney_http`](http://github.com/benoitc/hackney/blob/feature/merge-hackney-lib/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
 to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetect if it's a request or a response if needed.
