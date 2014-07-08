@@ -243,21 +243,20 @@ unhex(C) when C >= $a, C =< $f -> C - $a + 10;
 unhex(_) -> error.
 
 %% @doc URL encode a string binary.
-%% @equiv urlencode(Bin, [])
--spec urlencode(binary()) -> binary().
+-spec urlencode(binary() | string()) -> binary().
 urlencode(Bin) ->
-	urlencode(hackney_bstr:to_binary(Bin), []).
+	urlencode(Bin, []).
 
 %% @doc URL encode a string binary.
 %% The `noplus' option disables the default behaviour of quoting space
 %% characters, `\s', as `+'. The `upper' option overrides the default behaviour
 %% of writing hex numbers using lowecase letters to using uppercase letters
 %% instead.
--spec urlencode(binary(), [noplus|upper]) -> binary().
+-spec urlencode(binary() | string(), [noplus|upper]) -> binary().
 urlencode(Bin, Opts) ->
 	Plus = not proplists:get_value(noplus, Opts, false),
 	Upper = proplists:get_value(upper, Opts, false),
-	urlencode(Bin, <<>>, Plus, Upper).
+	urlencode(hackney_bstr:to_binary(Bin), <<>>, Plus, Upper).
 
 -spec urlencode(binary(), binary(), boolean(), boolean()) -> binary().
 urlencode(<<C, Rest/binary>>, Acc, P=Plus, U=Upper) ->
