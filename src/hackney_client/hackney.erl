@@ -541,8 +541,7 @@ stop_async(Ref) ->
 host_header(#hackney_url{netloc=Netloc}, Headers) ->
     case proplists:get_value(<<"Host">>, Headers) of
         undefined -> Headers ++ [{<<"Host">>, Netloc}];
-        _ -> lists:keyreplace(<<"Host">>, 1, Headers,
-                              {<<"Host">>, Netloc})
+        _ -> Headers
     end.
 
 make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
