@@ -86,7 +86,7 @@ The hackney application will start the default socket pool for you.
 To start in the console run:
 
 ```
-$ erl -pa ebin
+$ erl -pa ebin -pa deps/*/ebin
 1>> hackney:start().
 ok
 ```
