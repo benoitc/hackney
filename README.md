@@ -60,7 +60,20 @@ repository](http://github.com/benoitc/hackney)
 To build the application simply run 'make'. This should build .beam, .app
 files and documentation.
 
-To run tests run 'make test'.
+To run tests you need to install `gunicorn` and `httpbin` python packages:
+
+```
+pip install gunicorn httpbin
+```
+
+Run httpbin
+
+```
+gunicorn httpbin:app
+```
+
+Then run 'make test'.
+
 To generate doc, run 'make doc'.
 
 Or add it to your rebar config

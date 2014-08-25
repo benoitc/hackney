@@ -7,3 +7,7 @@ otp_release:
   - R15B02
   - R15B01
   - R15B
+before_install:
+  - sudo pip install -q httpbin
+  - sudo pip install -q gunicorn
+before_script: gunicorn httpbin:app&
