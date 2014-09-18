@@ -125,7 +125,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             From ! {Ref, ok};
         {Ref, close} ->
             hackney_manager:update_state(Client),
-            hackney_reponse:close(Client);
+            hackney_response:close(Client);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
                                   {maybe_continue, Parent, Owner, Ref,

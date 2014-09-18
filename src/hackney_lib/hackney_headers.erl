@@ -180,7 +180,7 @@ parse(Name = <<"accept-language">>, Headers, Default) ->
 parse(Name = <<"authorization">>, Headers, Default) ->
     parse(Name, Headers, Default,
           fun (Value) ->
-                hackney_bstrs:token_ci(Value, fun authorization/2)
+                hackney_bstr:token_ci(Value, fun authorization/2)
         end);
 parse(Name = <<"content-length">>, Headers, Default) ->
     parse(Name, Headers, Default, fun hackney_bstr:digits/1);

@@ -29,4 +29,9 @@ get_value_test()->
     ?assertEqual(hackney_headers:get_value(A,Ha),V),
     ?assertEqual(hackney_headers:get_value(B,Ha),V),
     ?assertEqual(hackney_headers:get_value(C,Ha),V).
-    
+
+authorization_header_test() ->
+    Auth = {<<"Aladdin">>,<<"open sesame">>},
+    AuthValue = <<"Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==">>,
+    Headers = hackney_headers:new([{<<"Authorization">>,AuthValue}]),
+    ?assertEqual({<<"basic">>, Auth}, hackney_headers:parse(<<"authorization">>, Headers)).
