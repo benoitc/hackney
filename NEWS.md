@@ -1,5 +1,18 @@
 # NEWS
 
+0.14.0 - 2014/09/18
+-------------------
+
+- fix HEAD request. Remove the need to call the body method
+
+
+### Breaking change:
+
+When doing an HEAD request, the signature of the response when it
+succeded is now `{ok, Status, ResponseHeaders}` and do not contains a
+client reference any more.
+
+
 0.13.0 - 2014/07/08
 -------------------
 
