@@ -120,6 +120,8 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             end
     end.
 
+location(#client{location=Location}) when is_binary(Location) ->
+    Location;
 location(Client) ->
     #client{transport=Transport,
             host=Host,
