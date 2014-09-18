@@ -119,6 +119,7 @@ wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
     end,
     wait_headers(hackney_http:execute(Parser), Client1, Status,
                  [KV | Headers]);
+
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
     {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 

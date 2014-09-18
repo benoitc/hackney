@@ -262,6 +262,8 @@ request(Method, URL, Headers, Body) ->
 %%
 %%  Return:
 %%  <ul>
+%%  li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
+%%  request if the response succeded.</li>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
 %%  the response succeded. The request reference is used later to
 %%  retrieve the body.</li>
@@ -847,6 +849,11 @@ mp_reply(Error, State) ->
     Error.
 
 %% response reply
+reply_response({ok, Status, Headers, #client{method= <<"HEAD">>}=NState},
+               _State) ->
+    {skip, NState2} = hackney_response:skip_body(NState),
+    maybe_update_req(NState2),
+    {ok, Status, Headers};
 reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
                _State) ->
     hackney_manager:update_state(NState),
