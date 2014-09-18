@@ -3,6 +3,8 @@
 0.14.0 - 2014/09/18
 -------------------
 
+- fix: return location from headers when possible in
+  `hackney:location/1`.
 - fix HEAD request. Remove the need to call the body method
 
 
