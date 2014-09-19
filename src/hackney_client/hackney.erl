@@ -692,49 +692,18 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
     Resp;
-maybe_redirect({ok, S, H, #client{follow_redirect=true,
-                                  max_redirect=Max,
-                                  force_redirect=ForceRedirect}=Client}=Resp,
-               Req, Tries) when Tries < Max ->
+maybe_redirect({ok, _S, H, #client{follow_redirect=true,
+                                   max_redirect=Max}}=Resp, Req, Tries)
+        when Tries < Max ->
 
-    {Method, _Path, Headers, Body} = Req,
-    case lists:member(S, [301, 302, 307]) of
+    %% check if the given location is an absolute url,
+    %% else return an error.
+    Location = redirect_location(H),
+    case is_absolute_url(Location) of
         true ->
-            Location = redirect_location(H),
-            %% redirect the location if possible. If the method is
-            %% different from  get or head it will return
-            %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
-            %% the  user make his choice.
-            case {Location, lists:member(Method, [get, head])} of
-                {undefined, _} ->
-                    {error, {invalid_redirection, Resp}};
-                {_, true} ->
-                        NewReq = {Method, Location, Headers, Body},
-                        maybe_redirect(redirect(Client, NewReq), Req,
-                                       Tries+1);
-                {_, _} when ForceRedirect =:= true ->
-                        NewReq = {Method, Location, Headers, Body},
-                        maybe_redirect(redirect(Client, NewReq), Req,
-                                       Tries+1);
-                {_, _} ->
-                    {ok, {maybe_redirect, S, H, Client}}
-            end;
-        false when S =:= 303 ->
-            %% see other. If methos is not POST we consider it as an
-            %% invalid redirection
-            Location = redirect_location(H),
-            case {Location, Method} of
-                {undefined, _} ->
-                    {error, {invalid_redirection, Resp}};
-                {_, post} ->
-                    NewReq = {get, Location, [], <<>>},
-                    maybe_redirect(redirect(Client, NewReq), Req, Tries+1);
-                {_, _} ->
-
-                    {error, {invalid_redirection, Resp}}
-            end;
-        _ ->
-            Resp
+            maybe_redirect1(Location, Resp, Req, Tries);
+        false ->
+            {error, {invalid_redirection_url, Resp}}
     end;
 maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
                _Req, _Tries) ->
@@ -747,6 +716,45 @@ maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
 maybe_redirect(Resp, _Req, _Tries) ->
     Resp.
 
+
+maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
+    {Method, _Path, Headers, Body} = Req,
+    case lists:member(S, [301, 302, 307]) of
+        true  ->
+            %% redirect the location if possible. If the method is
+            %% different from  get or head it will return
+            %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
+            %% the  user make his choice.
+            case {Location, lists:member(Method, [get, head])} of
+                {undefined, _} ->
+                    {error, {invalid_redirection, Resp}};
+                {_, true} ->
+                        NewReq = {Method, Location, Headers, Body},
+                        maybe_redirect(redirect(Client, NewReq), Req,
+                                       Tries+1);
+                {_, _} when Client#client.force_redirect =:= true ->
+                        NewReq = {Method, Location, Headers, Body},
+                        maybe_redirect(redirect(Client, NewReq), Req,
+                                       Tries+1);
+                {_, _} ->
+                    {ok, {maybe_redirect, S, H, Client}}
+            end;
+        false ->
+            %% see other. If methos is not POST we consider it as an
+            %% invalid redirection
+            case {Location, Method} of
+                {undefined, _} ->
+                    {error, {invalid_redirection, Resp}};
+                {_, post} ->
+                    NewReq = {get, Location, [], <<>>},
+                    maybe_redirect(redirect(Client, NewReq), Req, Tries+1);
+                {_, _} ->
+
+                    {error, {invalid_redirection, Resp}}
+            end;
+        _ ->
+            Resp
+    end.
 
 redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     %% skip the body
@@ -804,6 +812,13 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
 
 redirect_location(Headers) ->
     hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).
+
+is_absolute_url(<<"http://", _/binary >>) ->
+    true;
+is_absolute_url(<<"https://", _/binary >>) ->
+    true;
+is_absolute_url(_) ->
+    false.
 
 
 %% handle send response

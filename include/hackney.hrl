@@ -14,7 +14,7 @@
         max_redirect = 5,
         force_redirect = false,
         redirect = nil,
-        location,
+        location=nil,
         parser=nil,
         state,
         response_state = start,
