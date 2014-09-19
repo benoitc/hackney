@@ -262,7 +262,7 @@ request(Method, URL, Headers, Body) ->
 %%
 %%  Return:
 %%  <ul>
-%%  li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
+%%  <li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
 %%  request if the response succeded.</li>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
 %%  the response succeded. The request reference is used later to
