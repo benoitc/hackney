@@ -8,7 +8,7 @@
   `hackney:location/1`.
 - fix HEAD request. Remove the need to call the body method
 - fix: remove undefined function references
-- tests: start to handle tests with httpbib
+- tests: start to handle tests with httpbin
 
 ### Breaking change:
 
