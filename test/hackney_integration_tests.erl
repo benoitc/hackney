@@ -7,11 +7,14 @@ http_requests_test_() ->
    fun start/0,
    fun stop/1,
    fun(SetupData) ->
-     [get_request(SetupData),
+     {inparallel, [get_request(SetupData),
       basic_auth_request_failed(SetupData),
       basic_auth_request(SetupData),
       set_cookie_request(SetupData),
-      send_cookies_request(SetupData)]
+      send_cookies_request(SetupData),
+      absolute_redirect_request_no_follow(SetupData),
+      absolute_redirect_request_follow(SetupData),
+      relative_redirect_request_no_follow(SetupData)]}
    end}.
 
 start() -> hackney:start().
@@ -49,3 +52,23 @@ send_cookies_request(_) ->
   {ok, Body} = hackney:body(Client),
   Match = re:run(Body, <<".*\"SESSION\".*\"123\".*">>),
   ?_assertMatch({match, _}, Match).
+
+absolute_redirect_request_no_follow(_) ->
+  URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
+  Options = [{follow_redirect, false}],
+  {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+  Location = hackney:location(Client),
+  [?_assertEqual(StatusCode, 302), ?_assertEqual(Location, <<"http://localhost:8000/get">>)].
+
+absolute_redirect_request_follow(_) ->
+  URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
+  Options = [{follow_redirect, true}],
+  {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
+  ?_assertEqual(StatusCode, 200).
+
+relative_redirect_request_no_follow(_) ->
+  URL = <<"http://localhost:8000/relative-redirect/1">>,
+  Options = [{follow_redirect, false}],
+  {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+  Location = hackney:location(Client),
+  [?_assertEqual(StatusCode, 302), ?_assertEqual(Location, <<"/get">>)].
