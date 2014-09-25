@@ -1,3 +1,4 @@
+% coding: latin-1
 -module(hackney_url_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("hackney_lib.hrl").
