@@ -298,7 +298,7 @@ end_stream_body(Rest, Client0) ->
 
 
 -spec read_body(non_neg_integer() | infinity, #client{}, binary())
-	-> {ok, binary(), #client{}} | {error, atom()}.
+	-> {ok, binary(), #client{}} | {error, any()}.
 read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 	case stream_body(Client) of
 		{ok, Data, Client2} ->

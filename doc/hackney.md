@@ -407,6 +407,9 @@ syntax.</bloquote>
 
 Return:
 
+* `{ok, ResponseStatus, ResponseHeaders}`: On HEAD
+request if the response succeded.
+
 * `{ok, ResponseStatus, ResponseHeaders, Ref}`: when
 the response succeded. The request reference is used later to
 retrieve the body.
