@@ -298,18 +298,22 @@ parse_header(Line, St) ->
         [K] -> [K, <<>>];
         [K, V] -> [K, V]
     end,
-    St1 = case hackney_bstr:to_lower(Key) of
+    St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
         <<"content-length">> ->
-            CLen = list_to_integer(binary_to_list(Value)),
+            CLen = list_to_integer(binary_to_list(hackney_bstr:trim(Value))),
             St#hparser{clen=CLen};
         <<"transfer-encoding">> ->
-            St#hparser{te=hackney_bstr:to_lower(Value)};
+            TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
+            St#hparser{te=TE};
         <<"connection">> ->
-            St#hparser{connection=hackney_bstr:to_lower(Value)};
+            Connection = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
+            St#hparser{connection=Connection};
         <<"content-type">> ->
-            St#hparser{ctype=hackney_bstr:to_lower(Value)};
+            CType=hackney_bstr:to_lower(hackney_bstr:trim(Value)),
+            St#hparser{ctype=CType};
         <<"location">> ->
-            St#hparser{location=Value};
+            Location = hackney_bstr:trim(Value),
+            St#hparser{location=Location};
         _ ->
            St
     end,
