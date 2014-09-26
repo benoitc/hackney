@@ -692,17 +692,19 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
 
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
     Resp;
-maybe_redirect({ok, _S, H, #client{follow_redirect=true,
-                                   max_redirect=Max}}=Resp, Req, Tries)
+maybe_redirect({ok, S, H, #client{follow_redirect=true,
+                                  max_redirect=Max}}=Resp, Req, Tries)
         when Tries < Max ->
-
     %% check if the given location is an absolute url,
     %% else return an error.
     Location = redirect_location(H),
-    case is_absolute_url(Location) of
-        true ->
+    IsRedirect = lists:member(S, [301, 302, 303, 307]),
+    case {IsRedirect, is_absolute_url(Location)} of
+        {false, _} ->
+            Resp;
+        {_, true} ->
             maybe_redirect1(Location, Resp, Req, Tries);
-        false ->
+        {_, false} ->
             {error, {invalid_redirection_url, Resp}}
     end;
 maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
@@ -739,7 +741,7 @@ maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
                 {_, _} ->
                     {ok, {maybe_redirect, S, H, Client}}
             end;
-        false ->
+        false when S =:= 303 ->
             %% see other. If methos is not POST we consider it as an
             %% invalid redirection
             case {Location, Method} of
@@ -772,6 +774,8 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             host=Host,
             port=Port,
             options=Opts0,
+            follow_redirect=FollowRedirect,
+            max_redirect=MaxRedirect,
             redirect=Redirect} = Client,
 
     Opts = lists:keystore(follow_redirect, 1, Opts0,
@@ -790,20 +794,28 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             RedirectState1 = case Redirect of
                 nil ->
                     RedirectState#client{redirect=Redirect,
+                                         follow_redirect=FollowRedirect,
+                                         max_redirect=MaxRedirect,
                                          options=Opts0};
                 _ ->
                     NewRedirect = {Transport, Host, Port, Opts0},
                     RedirectState#client{redirect=NewRedirect,
+                                         follow_redirect=FollowRedirect,
+                                         max_redirect=MaxRedirect,
                                          options=Opts0}
             end,
             {ok, S, H, RedirectState1};
         {ok,  S, H, RedirectClient} when Redirect /= nil ->
             NewClient = RedirectClient#client{redirect=Redirect,
+                                              follow_redirect=FollowRedirect,
+                                              max_redirect=MaxRedirect,
                                               options=Opts0},
             {ok, S, H, NewClient};
         {ok, S, H, RedirectClient} ->
             NewRedirect = {Transport, Host, Port, Opts0},
             NewClient = RedirectClient#client{redirect=NewRedirect,
+                                              follow_redirect=FollowRedirect,
+                                              max_redirect=MaxRedirect,
                                               options=Opts0},
             {ok, S, H, NewClient};
         Error ->

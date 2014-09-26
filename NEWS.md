@@ -1,5 +1,9 @@
 # NEWS
 
+0.14.1 - unreleased
+
+- fix redirection: make sure to follow redirections
+
 0.14.0 - 2014/09/18
 -------------------
 
