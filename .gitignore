@@ -6,3 +6,4 @@ deps
 erl_crash.dump
 .eunit
 mime.types
+.rebar
