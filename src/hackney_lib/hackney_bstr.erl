@@ -20,7 +20,8 @@
          whitespace/2,
          digits/1, digits/2, digits/3,
          alpha/2,
-         word/2]).
+         word/2,
+         trim/1]).
 
 -export([quoted_string/2]).
 
@@ -339,6 +340,10 @@ word(Data, Fun) ->
                 fun (_Rest, <<>>) -> {error, badarg};
                         (Rest, Token) -> Fun(Rest, Token)
                 end).
+
+-spec trim(binary()) -> binary().
+trim(Data) ->
+    re:replace(Data, "^\\s+|\\s+$", "", [{return, binary}, global]).
 
 -spec quoted_string(binary(), fun()) -> any().
 quoted_string(<< $", Rest/binary >>, Fun) ->

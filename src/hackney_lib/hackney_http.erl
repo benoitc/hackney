@@ -295,8 +295,8 @@ parse_header(#hparser{buffer=Buf}=St) ->
 
 parse_header(Line, St) ->
     [Key, Value] = case binary:split(Line, <<": ">>, [trim]) of
-        [K] -> [K, <<>>];
-        [K, V] -> [K, V]
+        [K]    -> [hackney_bstr:trim(K), <<>>];
+        [K, V] -> [hackney_bstr:trim(K), hackney_bstr:trim(V)]
     end,
     St1 = case hackney_bstr:to_lower(Key) of
         <<"content-length">> ->
