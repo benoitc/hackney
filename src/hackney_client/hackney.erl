@@ -693,19 +693,20 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
 maybe_redirect({ok, _}=Resp, _Req, _Tries) ->
     Resp;
 maybe_redirect({ok, S, H, #client{follow_redirect=true,
-                                  max_redirect=Max}}=Resp, Req, Tries)
+                                  max_redirect=Max}=Client}=Resp, Req, Tries)
         when Tries < Max ->
     %% check if the given location is an absolute url,
     %% else return an error.
-    Location = redirect_location(H),
-    IsRedirect = lists:member(S, [301, 302, 303, 307]),
-    case {IsRedirect, is_absolute_url(Location)} of
-        {false, _} ->
-            Resp;
-        {_, true} ->
-            maybe_redirect1(Location, Resp, Req, Tries);
-        {_, false} ->
-            {error, {invalid_redirection_url, Resp}}
+    case redirect_location(H) of
+        undefined -> Resp;
+        Location ->
+            IsRedirect = lists:member(S, [301, 302, 303, 307]),
+            case IsRedirect of
+                false -> Resp;
+                _ ->
+                    URL = absolute_url(Location, Client),
+                    maybe_redirect1(URL, Resp, Req, Tries)
+            end
     end;
 maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
                _Req, _Tries) ->
@@ -825,12 +826,19 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
 redirect_location(Headers) ->
     hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).
 
-is_absolute_url(<<"http://", _/binary >>) ->
-    true;
-is_absolute_url(<<"https://", _/binary >>) ->
-    true;
-is_absolute_url(_) ->
-    false.
+absolute_url(<<"http://", _Rest/binary >>= URL, _Client) ->
+    URL;
+absolute_url(<<"https://", _Rest/binary >>= URL, _Client) ->
+    URL;
+absolute_url(RelativeUrl, #client{transport=T, host=Host, port=Port,
+                                  netloc=Netloc}) ->
+    Scheme = hackney_url:transport_scheme(T),
+    Parsed = hackney_url:normalize(#hackney_url{scheme=Scheme,
+                                                host=Host,
+                                                port=Port,
+                                                netloc=Netloc,
+                                                path=RelativeUrl}),
+    hackney_url:unparse_url(Parsed).
 
 
 %% handle send response
