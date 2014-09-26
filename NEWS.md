@@ -2,7 +2,10 @@
 
 0.14.1 - unreleased
 
+- fix redirect location: make sure we use absolute urls
 - fix redirection: make sure to follow redirections
+- fix hackney_response:read_body/3 spec
+- add redirection basic tests
 
 0.14.0 - 2014/09/18
 -------------------
