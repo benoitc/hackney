@@ -1,6 +1,6 @@
 # NEWS
 
-0.14.1 - unreleased
+0.14.1 - 2014/11/24
 
 - fix redirect location: make sure we use absolute urls
 - fix redirection: make sure to follow redirections
