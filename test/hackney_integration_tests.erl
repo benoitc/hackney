@@ -14,7 +14,8 @@ http_requests_test_() ->
       send_cookies_request(SetupData),
       absolute_redirect_request_no_follow(SetupData),
       absolute_redirect_request_follow(SetupData),
-      relative_redirect_request_no_follow(SetupData)]}
+      relative_redirect_request_no_follow(SetupData),
+      relative_redirect_request_follow(SetupData)]}
    end}.
 
 start() -> hackney:start().
@@ -63,8 +64,9 @@ absolute_redirect_request_no_follow(_) ->
 absolute_redirect_request_follow(_) ->
   URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
   Options = [{follow_redirect, true}],
-  {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
-  ?_assertEqual(StatusCode, 200).
+  {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+  Location = hackney:location(Client),
+  [?_assertEqual(StatusCode, 200), ?_assertEqual(Location, <<"http://localhost:8000/get">>)].
 
 relative_redirect_request_no_follow(_) ->
   URL = <<"http://localhost:8000/relative-redirect/1">>,
@@ -72,3 +74,10 @@ relative_redirect_request_no_follow(_) ->
   {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
   Location = hackney:location(Client),
   [?_assertEqual(StatusCode, 302), ?_assertEqual(Location, <<"/get">>)].
+
+relative_redirect_request_follow(_) ->
+  URL = <<"http://localhost:8000/redirect-to?url=/get">>,
+  Options = [{follow_redirect, true}],
+  {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+  Location = hackney:location(Client),
+  [?_assertEqual(StatusCode, 200), ?_assertEqual(Location, <<"/get">>)].
