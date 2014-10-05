@@ -10,7 +10,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#alpha-2">alpha/2</a></td><td>Parse a list of case-insensitive alpha characters.</td></tr><tr><td valign="top"><a href="#char_to_lower-1">char_to_lower/1</a></td><td>Convert [A-Z] characters to lowercase.</td></tr><tr><td valign="top"><a href="#char_to_upper-1">char_to_upper/1</a></td><td>Convert [a-z] characters to uppercase.</td></tr><tr><td valign="top"><a href="#digits-1">digits/1</a></td><td>Parse a list of digits as a non negative integer.</td></tr><tr><td valign="top"><a href="#digits-2">digits/2</a></td><td></td></tr><tr><td valign="top"><a href="#digits-3">digits/3</a></td><td></td></tr><tr><td valign="top"><a href="#join-2">join/2</a></td><td></td></tr><tr><td valign="top"><a href="#list-2">list/2</a></td><td>Parse a list of the given type.</td></tr><tr><td valign="top"><a href="#nonempty_list-2">nonempty_list/2</a></td><td>Parse a non-empty list of the given type.</td></tr><tr><td valign="top"><a href="#parameterized_tokens-1">parameterized_tokens/1</a></td><td>Parse a non empty list of tokens followed with optional parameters.</td></tr><tr><td valign="top"><a href="#params-2">params/2</a></td><td>Parse a list of parameters (a=b;c=d).</td></tr><tr><td valign="top"><a href="#quoted_string-2">quoted_string/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_binary-1">to_binary/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_hex-1">to_hex/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_lower-1">to_lower/1</a></td><td>Convert a binary string to lowercase.</td></tr><tr><td valign="top"><a href="#to_upper-1">to_upper/1</a></td><td></td></tr><tr><td valign="top"><a href="#token-2">token/2</a></td><td>Parse a token.</td></tr><tr><td valign="top"><a href="#token_ci-2">token_ci/2</a></td><td>Parse a case-insensitive token.</td></tr><tr><td valign="top"><a href="#whitespace-2">whitespace/2</a></td><td>Skip whitespace.</td></tr><tr><td valign="top"><a href="#word-2">word/2</a></td><td>Parse either a token or a quoted string.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#alpha-2">alpha/2</a></td><td>Parse a list of case-insensitive alpha characters.</td></tr><tr><td valign="top"><a href="#char_to_lower-1">char_to_lower/1</a></td><td>Convert [A-Z] characters to lowercase.</td></tr><tr><td valign="top"><a href="#char_to_upper-1">char_to_upper/1</a></td><td>Convert [a-z] characters to uppercase.</td></tr><tr><td valign="top"><a href="#digits-1">digits/1</a></td><td>Parse a list of digits as a non negative integer.</td></tr><tr><td valign="top"><a href="#digits-2">digits/2</a></td><td></td></tr><tr><td valign="top"><a href="#digits-3">digits/3</a></td><td></td></tr><tr><td valign="top"><a href="#join-2">join/2</a></td><td></td></tr><tr><td valign="top"><a href="#list-2">list/2</a></td><td>Parse a list of the given type.</td></tr><tr><td valign="top"><a href="#nonempty_list-2">nonempty_list/2</a></td><td>Parse a non-empty list of the given type.</td></tr><tr><td valign="top"><a href="#parameterized_tokens-1">parameterized_tokens/1</a></td><td>Parse a non empty list of tokens followed with optional parameters.</td></tr><tr><td valign="top"><a href="#params-2">params/2</a></td><td>Parse a list of parameters (a=b;c=d).</td></tr><tr><td valign="top"><a href="#quoted_string-2">quoted_string/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_binary-1">to_binary/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_hex-1">to_hex/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_lower-1">to_lower/1</a></td><td>Convert a binary string to lowercase.</td></tr><tr><td valign="top"><a href="#to_upper-1">to_upper/1</a></td><td></td></tr><tr><td valign="top"><a href="#token-2">token/2</a></td><td>Parse a token.</td></tr><tr><td valign="top"><a href="#token_ci-2">token_ci/2</a></td><td>Parse a case-insensitive token.</td></tr><tr><td valign="top"><a href="#trim-1">trim/1</a></td><td></td></tr><tr><td valign="top"><a href="#whitespace-2">whitespace/2</a></td><td>Skip whitespace.</td></tr><tr><td valign="top"><a href="#word-2">word/2</a></td><td>Parse either a token or a quoted string.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -207,6 +207,17 @@ Parse a case-insensitive token.
 
 
 Changes all characters to lowercase.
+<a name="trim-1"></a>
+
+### trim/1 ###
+
+
+<pre><code>
+trim(Data::binary()) -&gt; binary()
+</code></pre>
+<br />
+
+
 <a name="whitespace-2"></a>
 
 ### whitespace/2 ###
