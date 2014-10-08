@@ -830,9 +830,13 @@ absolute_url(<<"http://", _Rest/binary >>= URL, _Client) ->
     URL;
 absolute_url(<<"https://", _Rest/binary >>= URL, _Client) ->
     URL;
-absolute_url(RelativeUrl, #client{transport=T, host=Host, port=Port,
-                                  netloc=Netloc}) ->
+absolute_url(RelativeUrl0, #client{transport=T, host=Host, port=Port,
+                                   netloc=Netloc}) ->
     Scheme = hackney_url:transport_scheme(T),
+    RelativeUrl = case RelativeUrl0 of
+                      <<"/", _Rest/binary>> -> RelativeUrl0;
+                      _                     -> <<"/", RelativeUrl0/binary>>
+                  end,
     Parsed = hackney_url:normalize(#hackney_url{scheme=Scheme,
                                                 host=Host,
                                                 port=Port,
