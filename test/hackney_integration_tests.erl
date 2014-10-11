@@ -15,7 +15,8 @@ http_requests_test_() ->
       absolute_redirect_request_no_follow(SetupData),
       absolute_redirect_request_follow(SetupData),
       relative_redirect_request_no_follow(SetupData),
-      relative_redirect_request_follow(SetupData)]}
+      relative_redirect_request_follow(SetupData),
+      async_request(SetupData)]}
    end}.
 
 start() -> hackney:start().
@@ -81,3 +82,26 @@ relative_redirect_request_follow(_) ->
   {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
   Location = hackney:location(Client),
   [?_assertEqual(StatusCode, 200), ?_assertEqual(Location, <<"/get">>)].
+
+async_request(_) ->
+  URL = <<"http://localhost:8000/get">>,
+  Opts = [async],
+  LoopFun = fun(Loop, Ref, Dict) ->
+                receive
+                  {hackney_response, Ref, {status, StatusInt, _Reason}} ->
+                    Dict2 = orddict:store(status, StatusInt, Dict),
+                    Loop(Loop, Ref, Dict2);
+                  {hackney_response, Ref, {headers, Headers}} ->
+                    Dict2 = orddict:store(headers, Headers, Dict),
+                    Loop(Loop, Ref, Dict2);
+                  {hackney_response, Ref, done} -> Dict;
+                  {hackney_response, Ref, Bin} ->
+                    Dict2 = orddict:append(body, Bin, Dict),
+                    Loop(Loop, Ref, Dict2)
+                end
+            end,
+  {ok, ClientRef} = hackney:get(URL, [], <<>>, Opts),
+  Dict = LoopFun(LoopFun, ClientRef, orddict:new()),
+  Keys = orddict:fetch_keys(Dict),
+  Status = orddict:fetch(status, Dict),
+  [?_assertEqual(Keys, [body, headers, status]), ?_assertEqual(Status, 200)].
