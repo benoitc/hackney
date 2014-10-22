@@ -81,11 +81,11 @@ stop_async_response(Ref) ->
             {error, req_not_found};
         [{_Ref, #request{async_pid=nil}}] ->
             {error, req_not_async};
-        [{_Ref, #request{async_pid=Pid}=Req}] ->
+        [{_Ref, #request{async_pid=Pid}}] ->
             Pid ! {Ref, stop_async, self()},
             receive
                 {Ref, ok} ->
-                    ets:insert(?MODULE, {Ref, Req#request{async_pid=nil}}),
+                    ok = gen_server:call(?MODULE, {stop_async_response, Ref, self()}),
                     {ok, Ref};
                 Error ->
                     Error
@@ -197,6 +197,31 @@ handle_call({start_async_response, #request{ref=Ref}=Req}, _From, Children) ->
         Error ->
             {reply, Error, Children}
     end;
+handle_call({stop_async_response, Ref, To}, _From, Children) ->
+    case ets:lookup(?MODULE, Ref) of
+        [] ->
+            {reply, req_not_found, Children};
+        [{Ref, #request{pid=Owner, async_pid=AsyncPid}=Req}] ->
+            Children1 = case dict:is_key(Owner, Children) of
+                            true ->
+                                unlink(Owner),
+                                dict:erase(Owner, Children);
+                            false ->
+                                Children
+                        end,
+            Children2 = case dict:is_key(AsyncPid, Children1) of
+                            true ->
+                                unlink(AsyncPid),
+                                dict:erase(AsyncPid, Children1);
+                            false ->
+                                Children1
+                        end,
+            ets:insert(?MODULE, {Ref, Req#request{pid=To, async_pid=nil}}),
+            NChildren = dict:store(To, Ref, Children2),
+            link(To),
+            {reply, ok, NChildren}
+    end;
+
 handle_call({controlling_process, Ref, Pid}, _From, Children) ->
     Self = self(),
     case ets:lookup(?MODULE, Ref) of
@@ -205,7 +230,7 @@ handle_call({controlling_process, Ref, Pid}, _From, Children) ->
         [{Ref, #request{pid=Owner, state=St}=Req}]
                 when Owner =:= Self ->
             %% the manager is actually controlling the process
-            ets:insert(?MODULE, Req#request{pid=Pid}),
+            ets:insert(?MODULE, {Ref, Req#request{pid=Pid}}),
             NChildren = dict:store(Pid, Ref, Children),
             link(Pid),
             %% pas the control to the new client process
@@ -220,7 +245,7 @@ handle_call({controlling_process, Ref, Pid}, _From, Children) ->
                 false ->
                     Children
             end,
-            ets:insert(?MODULE, Req#request{pid=Pid}),
+            ets:insert(?MODULE, {Ref, Req#request{pid=Pid}}),
             NChildren = dict:store(Pid, Ref, Children1),
             link(Pid),
             #client{transport=Transport, socket=Socket} = St,
