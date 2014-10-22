@@ -340,8 +340,10 @@ do_start_async_response(#request{ref=Ref, pid=Owner, state=Client}=Req,
         To ->
             link(To),
             Children1 = case dict:is_key(Owner, Children) of
-                true ->
+                true when To /= Owner ->
                     unlink(Owner),
+                    dict:erase(Owner, Children);
+                true ->
                     dict:erase(Owner, Children);
                 false ->
                     Children
