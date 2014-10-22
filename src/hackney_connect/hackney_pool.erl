@@ -309,6 +309,7 @@ store_connection({_Host, _Port, Transport} = Key, Socket,
             [Socket | OldSockets];
         error -> [Socket]
     end,
+    ok = Transport:controlling_process(Socket, self()),
     State#state{connections = dict:store(Key, ConnSockets, Conns),
                 sockets = dict:store(Socket, {Key, Timer}, Sockets)}.
 
