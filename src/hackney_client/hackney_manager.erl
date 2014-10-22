@@ -297,7 +297,7 @@ handle_cast(_Msg, Children) ->
 
 handle_info({'EXIT', Pid, Reason}, Children) ->
     NChildren = case dict:find(Pid, Children) of
-        {value, Ref} ->
+        {ok, Ref} ->
             case ets:lookup(?MODULE, Ref) of
                 [] ->
                     dict:erase(Pid, Children);
@@ -385,7 +385,6 @@ handle_exit(Pid, #request{ref=Ref, pid=Pid, async_pid=nil}, _Reason,
     dict:erase(Pid, Children);
 handle_exit(Pid, #request{pid=Pid, async_pid=AsyncPId}=Req,
             Reason, Children) ->
-
     %% delete the async response process from the children
     NChildren = dict:erase(AsyncPId, Children),
     %% terminate the async request
