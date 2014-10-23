@@ -373,7 +373,7 @@ do_start_async_response(#request{ref=Ref, pid=Owner, state=Client}=Req,
                 false ->
                     Children
             end,
-            {To, dict:store(To, Ref, Children1)}
+            {To, dict:store(To, Ref#request{pid=To}, Children1)}
 
     end,
     case catch hackney_stream:start_link(StreamTo, Ref, Client) of
