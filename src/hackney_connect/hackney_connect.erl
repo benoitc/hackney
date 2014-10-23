@@ -42,12 +42,34 @@ create_connection(Transport, Host, Port, Options) ->
 
 create_connection(Transport, Host, Port, Options, Dynamic)
         when is_list(Options) ->
+    Netloc = case {Transport, Port} of
+                 {hackney_tcp_transport, 80}  -> list_to_binary(Host);
+                 {hackney_ssl_transport, 443} -> list_to_binary(Host);
+                 _ ->
+                     iolist_to_binary([Host, ":", integer_to_list(Port)])
+             end,
     %% default timeout
     Timeout = proplists:get_value(recv_timeout, Options, infinity),
+    FollowRedirect = proplists:get_value(follow_redirect, Options, false),
+    MaxRedirect = proplists:get_value(max_redirect, Options, 5),
+    ForceRedirect = proplists:get_value(force_redirect, Options, false),
+    Async =  proplists:get_value(async, Options, false),
+    StreamTo = proplists:get_value(stream_to, Options, false),
+
     %% initial state
-    InitialState = #client{dynamic=Dynamic,
+    InitialState = #client{transport=Transport,
+                           host=Host,
+                           port=Port,
+                           netloc=Netloc,
+                           options=Options,
+                           dynamic=Dynamic,
                            recv_timeout=Timeout,
-                           options=Options},
+                           follow_redirect=FollowRedirect,
+                           max_redirect=MaxRedirect,
+                           force_redirect=ForceRedirect,
+                           async=Async,
+                           stream_to=StreamTo,
+                           buffer = <<>>},
     %% if we use a pool then checkout the connection from the pool, else
     %% connect the socket to the remote
     case is_pool(InitialState) of
@@ -141,32 +163,15 @@ reconnect(Host, Port, Transport, State) ->
 %% internal functions
 %%
 
-socket_from_pool(Host, Port, Transport, #client{options=Opts,
-                                                request_ref=ReqRef0}=Client) ->
+socket_from_pool(Host, Port, Transport, #client{request_ref=ReqRef0}=Client) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
-            FollowRedirect = proplists:get_value(follow_redirect,
-                                                 Opts, false),
-            MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
-            Async =  proplists:get_value(async, Opts, false),
-            StreamTo = proplists:get_value(stream_to, Opts, false),
-
-
-            Client1 = Client#client{transport=Transport,
-                                    host=Host,
-                                    port=Port,
-                                    socket=Skt,
+            Client1 = Client#client{socket=Skt,
                                     socket_ref=Ref,
                                     pool_handler=PoolHandler,
-                                    state = connected,
-                                    follow_redirect=FollowRedirect,
-                                    max_redirect=MaxRedirect,
-                                    async=Async,
-                                    stream_to=StreamTo,
-                                    buffer = <<>>},
-
+                                    state = connected},
 
             FinalClient = case is_reference(ReqRef0) of
                 true ->
@@ -213,26 +218,8 @@ do_connect(Host, Port, Transport, #client{options=Opts,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
-            FollowRedirect = proplists:get_value(follow_redirect,
-                                                 Opts, false),
-            MaxRedirect = proplists:get_value(max_redirect, Opts, 5),
-            ForceRedirect = proplists:get_value(force_redirect, Opts,
-                                                false),
-            Async =  proplists:get_value(async, Opts, false),
-            StreamTo = proplists:get_value(stream_to, Opts, false),
-
-            Client1 = Client#client{transport=Transport,
-                                    host=Host,
-                                    port=Port,
-                                    socket=Skt,
-                                    state = connected,
-                                    follow_redirect=FollowRedirect,
-                                    max_redirect=MaxRedirect,
-                                    force_redirect=ForceRedirect,
-                                    async=Async,
-                                    stream_to=StreamTo,
-                                    buffer = <<>>},
-
+            Client1 = Client#client{socket=Skt,
+                                    state = connected},
             FinalClient = case is_reference(Ref0) of
                 true ->
                     ok = hackney_manager:take_control(Ref0, Client1),

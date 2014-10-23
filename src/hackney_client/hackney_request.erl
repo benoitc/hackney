@@ -123,22 +123,10 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 location(#client{location=Location}) when is_binary(Location) ->
     Location;
 location(Client) ->
-    #client{transport=Transport,
-            host=Host,
-            port=Port,
-            path=Path} = Client,
+    #client{transport=Transport, netloc=Netloc, path=Path} = Client,
 
     Scheme = hackney_url:transport_scheme(Transport),
-    Netloc = case is_default_port(Client) of
-        true ->
-            list_to_binary(Host);
-        _ ->
-            iolist_to_binary([Host, ":",
-                              integer_to_list(Port)])
-    end,
-    Url = #hackney_url{scheme=Scheme, netloc=Netloc,
-                       path=Path},
-
+    Url = #hackney_url{scheme=Scheme, netloc=Netloc, path=Path},
     hackney_url:unparse_url(Url).
 
 stream_body(Msg, #client{expect=true}=Client) ->
