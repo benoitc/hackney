@@ -272,7 +272,7 @@ handle_call({stop_async_response, Ref, To}, _From, Pids) ->
             {ok, Ref};
         [{Ref, {Owner, Stream}}] ->
             %% tell to the stream to stop
-            Stream ! {Ref, stop_async, self()},
+            Stream ! {Ref, stop_async, To},
             receive
                 {Ref, ok} ->
                     %% if the stream return, we unlink it and update the
