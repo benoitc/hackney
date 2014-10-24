@@ -65,11 +65,13 @@ To generate doc, run 'make doc'.
 
 Or add it to your rebar config
 
-```
+```erlang
+
 {deps, [
     ....
     {hackney, ".*", {git, "git://github.com/benoitc/hackney.git", {branch, "master"}}}
 ]}.
+
 ```
 
 ## Basic usage
@@ -85,19 +87,23 @@ The hackney application will start the default socket pool for you.
 
 To start in the console run:
 
-```
+```erlang-repl
+
 $ erl -pa ebin -pa deps/*/ebin
 1>> hackney:start().
 ok
+
 ```
 
 It will start hackney and all of the application it depends on:
 
-```
+```erlang
+
 application:start(crypto),
 application:start(public_key),
 application:start(ssl),
 application:start(hackney).
+
 ```
 
 Or add hackney to the applications property of your .app in a release
@@ -106,7 +112,8 @@ Or add hackney to the applications property of your .app in a release
 
 Do a simple request that will return a client state:
 
-```
+```erlang
+
 Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
@@ -115,6 +122,7 @@ Options = [],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL,
                                                         Headers, Payload,
                                                         Options).
+
 ```
 
 The request method return the tuple `{ok, StatusCode, Headers, ClientRef}`
@@ -123,22 +131,27 @@ request that you can reuse.
 
 If you prefer the REST syntax, you can also do:
 
-```
+```erlang
+
 hackney:Method(URL, Headers, Payload, Options)
+
 ```
 
 where `Method`, can be any HTTP methods in lowercase.
 
 ### Read the body
 
-```
+```erlang
+
 {ok, Body} = hackney:body(Client).
+
 ```
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
 `hackney:stream_body/1` function:
 
-```
+```erlang
+
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 	case stream_body(Ref) of
 		{ok, Data} ->
@@ -148,6 +161,7 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 		{error, Reason} ->
 			{error, Reason}
 	end.
+
 ```
 
 > Note: you can also fetch a multipart response using the functions
@@ -164,12 +178,14 @@ couple of request.
 
 #### To create a connection:
 
-```
+```erlang
+
 Transport = hackney_tcp_transport,
 Host = << "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
 {ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
+
 ```
 
 > To create a connection that will use an HTTP proxy use
@@ -180,7 +196,8 @@ Options = [],
 Once you created a connection use the `hackney:send_request/2` function
 to make a request:
 
-```
+```erlang
+
 ReqBody = << "{	\"snippet\": \"some snippet\" }" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
@@ -188,6 +205,7 @@ NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 {ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
 {ok, Body1} = hackney:body(ConnRef),
+
 ```
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
@@ -233,7 +251,8 @@ function `hackney:send_body/2` to stream the request body and
 
 Ex:
 
-```
+```erlang
+
 ReqBody = << "{
       \"id\": \"some_paste_id2\",
       \"rev\": \"some_revision_id\",
@@ -246,6 +265,7 @@ Method = post,
 ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, _Status, _Headers, ClientRef} = hackney:start_response(ClientRef),
 {ok, Body} = hackney:body(ClientRef),
+
 ```
 
 > Note: to send a **multipart** body  in a streaming fashion use the
@@ -256,7 +276,8 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 Since the 0.6 version, hackney is able to fetch the response
 asynchrnously using the `async` option:
 
-```
+```erlang
+
 Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
 LoopFun = fun(Loop, Ref) ->
@@ -282,6 +303,7 @@ LoopFun = fun(Loop, Ref) ->
 
 {ok, ClientRef} = hackney:get(Url, [], <<>>, Opts),
 LoopFun(LoopFun, ClientRef).
+
 ```
 
 > **Note 1**: When `{async, once}` is used the socket will receive only once.
@@ -308,7 +330,8 @@ To reuse a connection globally in your application you can also use a
 socket pool. On startup, hackney launches a pool named default. To use it
 do the following:
 
-```
+```erlang
+
 Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
@@ -316,6 +339,7 @@ Payload = <<>>,
 Options = [{pool, default}],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL, Headers,
                                                         Payload, Options).
+
 ```
 
 By adding the tuple `{pool, default}` to the options, hackney will use
@@ -324,10 +348,12 @@ the connections stored in that pool.
 You can also use different pools in your application which allows
 you to maintain a group of connections.
 
-```
+```erlang
+
 PoolName = mypool,
 Options = [{timeout, 150000}, {max_connections, 100}],
-ok = hackney_pool:start_pool(PoolName, Options),
+ok = hackney_pool:start_pool(PoolName, Options),
+
 ```
 
 `timeout` is the time we keep the connection alive in the pool,
@@ -337,8 +363,10 @@ automatically.
 
 To close a pool do:
 
-```
+```erlang
+
 hackney_pool:stop_pool(PoolName).
+
 ```
 
 > Note: Sometimes you want to always use the default pool in your app
@@ -374,7 +402,8 @@ Last Location is stored in the `location` property of the client state.
 
 ex:
 
-```
+```erlang
+
 Method = get,
 URL = "http://friendpaste.com/",
 ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
@@ -383,6 +412,7 @@ Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
 {ok, Body1} = hackney:body(Ref).
+
 ```
 
 ### Proxy a connection
@@ -417,9 +447,11 @@ If you want to contribute patches or improve the docs, you will need to
 build hackney using the `rebar_dev.config`  file. It can also be built
 using the **Makefile**:
 
-```
+```sh
+
 $ make dev ; # compile & get deps
 $ make devclean ; # clean all files
+
 ```
 
 
