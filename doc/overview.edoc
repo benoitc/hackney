@@ -88,8 +88,7 @@ Or add it to your rebar config
 {deps, [
     ....
     {hackney, ".*", {git, "git://github.com/benoitc/hackney.git", {branch, "master"}}}
-]}.
-</pre>
+]}.</pre>
 
 ## Basic usage
 
@@ -107,8 +106,7 @@ To start in the console run:
 <pre lang="erlang-repl">
 $ erl -pa ebin -pa deps/*/ebin
 1>> hackney:start().
-ok
-</pre>
+ok</pre>
 
 It will start hackney and all of the application it depends on:
 
@@ -116,8 +114,7 @@ It will start hackney and all of the application it depends on:
 application:start(crypto),
 application:start(public_key),
 application:start(ssl),
-application:start(hackney).
-</pre>
+application:start(hackney).</pre>
 
 Or add hackney to the applications property of your .app in a release
 
@@ -134,8 +131,7 @@ Payload = &lt;&lt;>>,
 Options = [],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL,
                                                         Headers, Payload,
-                                                        Options).
-</pre>
+                                                        Options).</pre>
 
 The request method return the tuple `{ok, StatusCode, Headers, ClientRef}'
 or `{error, Reason}'. A `ClientRef' is simply a reference to the current
@@ -144,18 +140,14 @@ request that you can reuse.
 
 If you prefer the REST syntax, you can also do:
 
-<pre lang="erlang">
-hackney:Method(URL, Headers, Payload, Options)
-</pre>
+<pre lang="erlang">hackney:Method(URL, Headers, Payload, Options)</pre>
 
 where `Method', can be any HTTP methods in lowercase.
 
 
 ### Read the body
 
-<pre lang="erlang">
-{ok, Body} = hackney:body(Client).
-</pre>
+<pre lang="erlang">{ok, Body} = hackney:body(Client).</pre>
 
 `hackney:body/1' fetch the body. To fetch it by chunk you can use the
 `hackney:stream_body/1' function:
@@ -169,8 +161,7 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 			{ok, Acc};
 		{error, Reason} ->
 			{error, Reason}
-	end.
-</pre>
+	end.</pre>
 
 > Note: you can also fetch a multipart response using the functions
 > `hackney:stream_multipart/1` and  `hackney:skip_multipart/1'.
@@ -191,8 +182,7 @@ Transport = hackney_tcp_transport,
 Host = &lt;&lt; "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
-{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
-</pre>
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)</pre>
 
 > To create a connection that will use an HTTP proxy use
 > `hackney_http_proxy:connect_proxy/5' instead.
@@ -209,8 +199,7 @@ NextPath = &lt;&lt;"/">>,
 NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 {ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
-{ok, Body1} = hackney:body(ConnRef),
-</pre>
+{ok, Body1} = hackney:body(ConnRef),</pre>
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
@@ -269,8 +258,7 @@ Method = post,
 {ok, ClientRef} = hackney:request(Method, Path, ReqHeaders, stream, []),
 ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, _Status, _Headers, ClientRef} = hackney:start_response(ClientRef),
-{ok, Body} = hackney:body(ClientRef),
-</pre>
+{ok, Body} = hackney:body(ClientRef),</pre>
 
 > Note: to send a **multipart** body  in a streaming fashion use the
 > `hackney:sen_multipart_body/2' function.
@@ -307,8 +295,7 @@ LoopFun = fun(Loop, Ref) ->
     end.
 
 {ok, ClientRef} = hackney:get(Url, [], &lt;&lt;>>, Opts),
-LoopFun(LoopFun, ClientRef).
-</pre>
+LoopFun(LoopFun, ClientRef).</pre>
 
 > **Note 1**: When `{async, once}' is used the socket will receive only once.
 > To receive the other messages use the function `hackney:stream_next/1'.
@@ -341,8 +328,7 @@ Headers = [],
 Payload = &lt;&lt;>>,
 Options = [{pool, default}],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL, Headers,
-                                                        Payload, Options).
-</pre>
+                                                        Payload, Options).</pre>
 
 By adding the tuple `{pool, default}' to the options, hackney will use
 the connections stored in that pool.
@@ -353,8 +339,7 @@ you to maintain a group of connections.
 <pre lang="erlang">
 PoolName = mypool,
 Options = [{timeout, 150000}, {max_connections, 100}],
-ok = hackney_pool:start_pool(PoolName, Options),
-</pre>
+ok = hackney_pool:start_pool(PoolName, Options),</pre>
 
 `timeout' is the time we keep the connection alive in the pool,
 `max_connections' is the number of connections maintained in the pool. Each
@@ -364,9 +349,7 @@ automatically.
 
 To close a pool do:
 
-<pre lang="erlang">
-hackney_pool:stop_pool(PoolName).
-</pre>
+<pre lang="erlang">hackney_pool:stop_pool(PoolName).</pre>
 
 > Note: Sometimes you want to always use the default pool in your app
 > without having to set the client option each time. You can now do this
@@ -412,8 +395,7 @@ ReqBody = &lt;&lt;>>,
 Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
-{ok, Body1} = hackney:body(Ref).
-</pre>
+{ok, Body1} = hackney:body(Ref).</pre>
 
 ### Proxy a connection
 
@@ -449,8 +431,7 @@ using the **Makefile**:
 
 <pre lang="sh">
 $ make dev ; # compile &amp; get deps
-$ make devclean ; # clean all files
-</pre>
+$ make devclean ; # clean all files</pre>
 
 
 @end
