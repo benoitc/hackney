@@ -71,7 +71,7 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     end.
 
 %% @doc release a socket in the pool
-checkin({_Name, Key, Owner, Transport}=K, Socket) ->
+checkin({_Name, Key, Owner, Transport}, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
             gen_server:call(Owner, {checkin, Key, Socket, Transport});
