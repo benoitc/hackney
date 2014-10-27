@@ -35,7 +35,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### close_request/1 ###
 
-`close_request(Ref) -> any()`
+`close_request(Client) -> any()`
 
 
 <a name="code_change-3"></a>
@@ -70,7 +70,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### handle_call/3 ###
 
-`handle_call(X1, From, Children) -> any()`
+`handle_call(X1, From, Pids) -> any()`
 
 
 <a name="handle_cast-2"></a>
@@ -91,7 +91,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### handle_info/2 ###
 
-`handle_info(Info, Children) -> any()`
+`handle_info(Info, Pids) -> any()`
 
 
 <a name="init-1"></a>
