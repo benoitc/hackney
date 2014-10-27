@@ -8,6 +8,8 @@
 - fix ssl race condition (#130)
 - fix: check if relative url contains a forward slash
 - refactor integration tests and add more tests
+- fix socket pool: make sure to close all sockets when the pool is terminated,
+  and do not store closed sockets if we know it.
 
 0.14.1 - 2014/09/24
 -------------------
