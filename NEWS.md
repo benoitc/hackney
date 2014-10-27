@@ -1,6 +1,16 @@
 # NEWS
 
-0.14.1 - 2014/11/24
+0.14.2 - 2014/10/27
+-------------------
+
+- fix memory leak (#77): some requests were not cleaned correctly in
+  hackney_manager.
+- fix ssl race condition (#130)
+- fix: check if relative url contains a forward slash
+- refactor integration tests and add more tests
+
+0.14.1 - 2014/09/24
+-------------------
 
 - fix redirect location: make sure we use absolute urls
 - fix redirection: make sure to follow redirections
