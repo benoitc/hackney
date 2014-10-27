@@ -71,11 +71,12 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     end.
 
 %% @doc release a socket in the pool
-checkin({_Name, Key, Owner, Transport}, Socket) ->
+checkin({_Name, Key, Owner, Transport}=K, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
             gen_server:call(Owner, {checkin, Key, Socket, Transport});
         _Error ->
+            io:format("got ~p~n", [K]),
             Transport:close(Socket)
     end.
 
@@ -252,7 +253,7 @@ code_change(_OldVsn, State, _Extra) ->
    {ok, State}.
 
 terminate(_Reason, #state{sockets=Sockets}) ->
-    lists:foreach(fun({Socket, {{Transport, _, _}, Timer}}) ->
+    lists:foreach(fun({Socket, {{_, _, Transport}, Timer}}) ->
                 cancel_timer(Socket, Timer),
                 Transport:close(Socket)
         end, dict:to_list(Sockets)),
@@ -309,10 +310,15 @@ store_connection({_Host, _Port, Transport} = Key, Socket,
             [Socket | OldSockets];
         error -> [Socket]
     end,
-    ok = Transport:controlling_process(Socket, self()),
-    State#state{connections = dict:store(Key, ConnSockets, Conns),
-                sockets = dict:store(Socket, {Key, Timer}, Sockets)}.
+    case Transport:controlling_process(Socket, self()) of
+        ok ->
 
+            State#state{connections = dict:store(Key, ConnSockets, Conns),
+                        sockets = dict:store(Socket, {Key, Timer}, Sockets)};
+        _ ->
+            erlang:cancel_timer(Timer),
+            State
+    end.
 
 update_connections([], Key, Connections) ->
     dict:erase(Key, Connections);
