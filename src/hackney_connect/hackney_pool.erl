@@ -76,7 +76,6 @@ checkin({_Name, Key, Owner, Transport}=K, Socket) ->
         ok ->
             gen_server:call(Owner, {checkin, Key, Socket, Transport});
         _Error ->
-            io:format("got ~p~n", [K]),
             Transport:close(Socket)
     end.
 
