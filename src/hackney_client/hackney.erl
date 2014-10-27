@@ -101,7 +101,7 @@ controlling_process(Ref, Pid) ->
 %% <li>`Buffer': Data fetched but not yet processed</li>
 %% </ul>
 -spec cancel_request(client_ref()) ->
-    {atom(), inet:socket(), binary(), hackney_response:response_state()}
+    {ok, {atom(), inet:socket(), binary(), hackney_response:response_state()}}
     | {error, term()}.
 cancel_request(Ref) ->
     hackney_manager:cancel_request(Ref).
@@ -908,7 +908,7 @@ reply_response(Error, State) ->
 
 
 maybe_update_req(#client{dynamic=true, response_state=done}=State) ->
-    hackney_manager:cancel_request(State);
+    hackney_manager:close_request(State);
 maybe_update_req(State) ->
     hackney_manager:update_state(State).
 

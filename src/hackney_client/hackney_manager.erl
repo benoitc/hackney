@@ -70,7 +70,7 @@ cancel_request(Ref) when is_reference(Ref) ->
                     case gen_server:call(?MODULE, {cancel_request, Ref}) of
                         ok ->
                             %% return the latest state
-                            {Transport, Socket, Buffer, RespState};
+                            {ok, {Transport, Socket, Buffer, RespState}};
                         Error ->
                             Error
                     end;
@@ -79,6 +79,8 @@ cancel_request(Ref) when is_reference(Ref) ->
             end
     end.
 
+close_request(#client{request_ref=Ref}) ->
+    close_request(Ref);
 close_request(Ref) ->
     case ets:lookup(?MODULE, Ref) of
         [] ->
