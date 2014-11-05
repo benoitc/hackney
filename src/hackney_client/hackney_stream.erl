@@ -41,7 +41,9 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
                                          method= <<"HEAD">>,
                                          parser=Parser}=Client) ->
     Buffer = hackney_http:get(Parser, buffer),
-    hackney_manager:update_state(finish_response(Buffer, Client)),
+
+
+    hackney_manager:store_state(finish_response(Buffer, Client)),
     %% pass the control of the socket to the manager so we make
     %% sure a new request will be able to use it
     Transport:controlling_process(Socket, Parent),
@@ -54,7 +56,7 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
                                          parser=Parser}=Client)
         when TE /= <<"chunked">> ->
     Buffer = hackney_http:get(Parser, buffer),
-    hackney_manager:update_state(finish_response(Buffer, Client)),
+    hackney_manager:store_state(finish_response(Buffer, Client)),
     %% pass the control of the socket to the manager so we make
     %% sure a new request will be able to use it
     Transport:controlling_process(Socket, Parent),
@@ -96,12 +98,11 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             erlang:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
                                                        Client]);
         {Ref, stop_async, From} ->
-            hackney_manager:update_state(Client#client{async=false}),
+            hackney_manager:store_state(Client#client{async=false}),
             Transport:setopts(Socket, [{active, false}]),
             Transport:controlling_process(Socket, From),
             From ! {Ref, ok};
         {Ref, close} ->
-            hackney_manager:update_state(Client),
             hackney_response:close(Client);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -119,12 +120,11 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
         {Ref, stream_next} ->
             stream_loop(Parent, Owner, Ref, Client);
         {Ref, stop_async, From} ->
-            hackney_manager:update_state(Client),
+            hackney_manager:store_state(Client),
             Transport:setopts(Socket, [{active, false}]),
             Transport:controlling_process(Socket, From),
             From ! {Ref, ok};
         {Ref, close} ->
-            hackney_manager:update_state(Client),
             hackney_response:close(Client);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
@@ -169,7 +169,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                         {_, _} ->
                             case hackney_response:skip_body(Client2) of
                                 {ok, Client3} ->
-                                    hackney_manager:update_state(Client3),
+                                    hackney_manager:store_state(Client3),
                                     Owner ! {hackney_response, Ref,
                                              {redirect, Location, Headers}};
                                 Error ->
@@ -196,7 +196,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                         Location ->
                             case hackney_response:skip_body(Client2) of
                                 {ok, Client3} ->
-                                    hackney_manager:update_state(Client3),
+                                    hackney_manager:store_state(Client3),
                                     Owner ! {hackney_response, Ref,
                                              {see_other, Location, Headers}};
                                 Error ->
@@ -240,7 +240,7 @@ async_recv(Parent, Owner, Ref,
         {Ref, close} ->
             Transport:close(Sock);
         {Ref, stop_async, From} ->
-            hackney_manager:update_state(Client#client{async=false}),
+            hackney_manager:store_state(Client#client{async=false}),
             Transport:setopts(Sock, [{active, false}]),
             Transport:controlling_process(Sock, From),
             From ! {Ref, ok};
@@ -331,11 +331,11 @@ process({ok, Data, NParser}, Client) ->
     {ok, Data, NClient};
 process({done, Rest}, Client) ->
     Client2 = finish_response(Rest, Client),
-    hackney_manager:update_state(Client2),
+    hackney_manager:store_state(Client2),
     done;
 process(done, Client) ->
     Client2 = finish_response(<<>>, Client),
-    hackney_manager:update_state(Client2),
+    hackney_manager:store_state(Client2),
     done;
 process({error, Reason}, _Client) ->
     {error, Reason};
@@ -343,9 +343,7 @@ process(Error, _Client) ->
     {error, Error}.
 
 update_client(Parser, Client) ->
-    NClient = Client#client{parser=Parser},
-    hackney_manager:update_state(NClient),
-    NClient.
+    Client#client{parser=Parser}.
 
 finish_response(Rest, Client0) ->
     Client = Client0#client{response_state=done,

@@ -16,6 +16,7 @@
 
 -export([get_state/1, get_state/2,
          update_state/1, update_state/2,
+         store_state/1, store_state/2,
          take_control/2,
          handle_error/1]).
 
@@ -41,9 +42,8 @@
 new_request(InitialState) ->
     %% initialize the request
     Ref = make_ref(),
-    Req = #request{ref=Ref,
-                   state=InitialState#client{request_ref=Ref}},
-    ets:insert(?MODULE, {Ref, Req}),
+    %% store the current state in the process dictionnary
+    put(Ref, InitialState#client{request_ref=Ref}),
     %% supervise the process owner
     ok = gen_server:call(?MODULE, {new_request, self(), Ref}),
     Ref.
@@ -53,10 +53,10 @@ new_request(InitialState) ->
 cancel_request(#client{request_ref=Ref}) ->
     cancel_request(Ref);
 cancel_request(Ref) when is_reference(Ref) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
+    case get_state(Ref) of
+        req_not_found ->
             req_not_found;
-        [{Ref, #request{state=Client}}] ->
+        Client ->
             #client{transport=Transport, socket=Socket,
                     buffer=Buffer, response_state=RespState} = Client,
 
@@ -64,7 +64,7 @@ cancel_request(Ref) when is_reference(Ref) ->
             case Transport:controlling_process(Socket, self()) of
                 ok ->
                     %% remove the request
-                    ets:delete(?MODULE, Ref),
+                    erase(Ref),
 
                     %% stop to monitor the request
                     case gen_server:call(?MODULE, {cancel_request, Ref}) of
@@ -81,16 +81,17 @@ cancel_request(Ref) when is_reference(Ref) ->
 
 close_request(#client{request_ref=Ref}) ->
     close_request(Ref);
+
 close_request(Ref) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
+    case get_state(Ref) of
+        req_not_found ->
             req_not_found;
-        [{Ref, #request{state=Client}}] ->
+        Client ->
             #client{transport=Transport, socket=Socket,
                     state=Status} = Client,
 
             %% remove the request
-            ets:delete(?MODULE, Ref),
+            erase(Ref),
 
             %% stop to monitor the request
             Reply = gen_server:call(?MODULE, {cancel_request, Ref}),
@@ -107,30 +108,41 @@ close_request(Ref) ->
     end.
 
 controlling_process(Ref, Pid) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
-            req_not_found;
-        [{Ref, #request{state=Client}}] ->
+    case get(Ref) of
+        undefined ->
+            {error, not_owner};
+        Client ->
             Reply = gen_server:call(?MODULE, {controlling_process, Ref, Pid}),
             case Reply of
                 ok ->
                     #client{transport=Transport, socket=Socket} = Client,
-                    Transport:controlling_process(Socket, Pid);
+                    Transport:controlling_process(Socket, Pid),
+                    ets:insert(?MODULE, #request{ref=Ref, state=Client}),
+                    ok;
                 Error ->
                     Error
             end
     end.
 
 start_async_response(Ref) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
+    case get_state(Ref)of
+        req_not_found ->
             req_not_found;
-        [{Ref, #request{state=Client}}] ->
+        Client ->
             #client{transport=Transport, socket=Socket,
                     stream_to=StreamTo} = Client,
             case gen_server:call(?MODULE, {start_async_response, Ref,
                                            StreamTo, Client}) of
                 {ok, Pid} ->
+                    %% store temporarely the socket in the the ets so it can
+                    %% be used by the other process later
+                    true = ets:insert(?MODULE, #request{ref=Ref,
+                                                        state=Client}),
+                    %% delete the current state from the process dictionnary
+                    %% since it's not the owner
+                    erase(Ref),
+
+                    %% transfert the control of the socket
                     Transport:controlling_process(Socket, Pid);
                 Error ->
                     Error
@@ -138,12 +150,7 @@ start_async_response(Ref) ->
     end.
 
 stop_async_response(Ref) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
-            {error, req_not_found};
-        [{Ref, _Req}] ->
-            gen_server:call(?MODULE, {stop_async_response, Ref, self()})
-    end.
+    gen_server:call(?MODULE, {stop_async_response, Ref, self()}, infinity).
 
 async_response_pid(Ref) ->
     case ets:lookup(?REFS, Ref) of
@@ -167,10 +174,20 @@ get_state(#client{request_ref=Ref}) ->
     get_state(Ref);
 
 get_state(Ref) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] ->
-            req_not_found;
-        [{Ref, #request{state=State}}] ->
+    case get(Ref) of
+        undefined ->
+            case ets:lookup(?MODULE, Ref) of
+                [] ->
+                    req_not_found;
+                [{Ref, #request{state=State}}] ->
+                    %% store the state in the new context, only the current
+                    %% owner can handle it.
+                    put(Ref, State),
+                    %% delete the state, from ets
+                    ets:delete(?MODULE, Ref),
+                    State
+            end;
+        State ->
             State
     end.
 
@@ -184,19 +201,22 @@ update_state(#client{request_ref=Ref}=NState) ->
     update_state(Ref, NState).
 
 update_state(Ref, NState) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] -> ok;
-        [{Ref, Req}] ->
-            true = ets:insert(?MODULE, {Ref, Req#request{state=NState}}),
-            ok
-    end.
+    put(Ref, NState).
+
+store_state(#client{request_ref=Ref}=NState) ->
+    store_state(Ref, NState).
+
+store_state(Ref, NState) ->
+    true = ets:insert(?MODULE, #request{ref=Ref, state=NState}),
+    ok.
+
 
 take_control(Ref, NState) ->
     case ets:lookup(?MODULE, Ref) of
         [] -> {error, req_not_found};
-        [{Ref, Req}] ->
-            true = ets:insert(?MODULE, {Ref, Req#request{pid=self(),
-                                                         state=NState}}),
+        [{Ref, _Req}] ->
+            ets:delete(?MODULE, Ref),
+            put(Ref, NState),
             ok
     end.
 
