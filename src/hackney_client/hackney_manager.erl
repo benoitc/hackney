@@ -87,8 +87,7 @@ close_request(Ref) ->
         req_not_found ->
             req_not_found;
         Client ->
-            #client{transport=Transport, socket=Socket,
-                    state=Status} = Client,
+            #client{transport=Transport, socket=Socket, state=Status} = Client,
 
             %% remove the request
             erase(Ref),
@@ -117,7 +116,7 @@ controlling_process(Ref, Pid) ->
                 ok ->
                     #client{transport=Transport, socket=Socket} = Client,
                     Transport:controlling_process(Socket, Pid),
-                    ets:insert(?MODULE, #request{ref=Ref, state=Client}),
+                    ets:insert(?MODULE, {Ref, #request{ref=Ref, state=Client}}),
                     ok;
                 Error ->
                     Error
@@ -136,8 +135,8 @@ start_async_response(Ref) ->
                 {ok, Pid} ->
                     %% store temporarely the socket in the the ets so it can
                     %% be used by the other process later
-                    true = ets:insert(?MODULE, #request{ref=Ref,
-                                                        state=Client}),
+                    true = ets:insert(?MODULE, {Ref, #request{ref=Ref,
+                                                        state=Client}}),
                     %% delete the current state from the process dictionnary
                     %% since it's not the owner
                     erase(Ref),
@@ -207,37 +206,35 @@ store_state(#client{request_ref=Ref}=NState) ->
     store_state(Ref, NState).
 
 store_state(Ref, NState) ->
-    true = ets:insert(?MODULE, #request{ref=Ref, state=NState}),
+    true = ets:insert(?MODULE, {Ref, #request{ref=Ref, state=NState}}),
     ok.
 
-
 take_control(Ref, NState) ->
+    %% maybe delete the state from ets
     case ets:lookup(?MODULE, Ref) of
-        [] -> {error, req_not_found};
+        [] -> ok;
         [{Ref, _Req}] ->
-            ets:delete(?MODULE, Ref),
-            put(Ref, NState),
-            ok
-    end.
+            ets:delete(?MODULE, Ref)
+    end,
+    %% add the state to the current context
+    put(Ref, NState),
+    ok.
+
 
 handle_error(#client{request_ref=Ref, dynamic=true}) ->
     close_request(Ref);
 
 handle_error(#client{request_ref=Ref, transport=Transport,
-                    socket=Socket}) ->
-    case ets:lookup(?MODULE, Ref) of
-        [] -> ok;
-        [{Ref, #request{state=State}}] ->
-            Transport:controlling_process(Socket, self()),
-            Transport:close(Socket),
-            NState = State#client{socket=nil,
-                                  state=closed},
-            true = ets:insert(?MODULE, {Ref, NState}),
+                    socket=Socket}=Client) ->
+    case get_state(Ref) of
+        req_not_found -> ok;
+        _ ->
+            catch Transport:controlling_process(Socket, self()),
+            catch Transport:close(Socket),
+            NClient = Client#client{socket=nil, state=closed},
+            put(Ref, NClient),
             ok
     end.
-
-
-
 
 
 start_link() ->
