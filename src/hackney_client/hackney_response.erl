@@ -139,6 +139,7 @@ stream_body(Client=#client{parser=Parser}) ->
 
 stream_body(Data, #client{parser=Parser}=Client) ->
     stream_body1(hackney_http:execute(Parser, Data), Client).
+
 stream_body1({more, Parser, Buffer}, Client) ->
     stream_body_recv(Buffer, Client#client{parser=Parser});
 stream_body1({ok, Data, Parser}, Client) ->
@@ -272,7 +273,6 @@ skip_body(Client) ->
 		{error, Reason} -> {error, Reason}
 	end.
 
-
 end_stream_body(Rest, Client0) ->
     Client = Client0#client{response_state=done,
                             body_state=done,
@@ -282,6 +282,7 @@ end_stream_body(Rest, Client0) ->
                             async=false},
 
     Pool = hackney_connect:is_pool(Client),
+
     case maybe_close(Client) of
         true ->
             close(Client);
@@ -289,6 +290,7 @@ end_stream_body(Rest, Client0) ->
             #client{socket=Socket,
                     socket_ref=Ref,
                     pool_handler=Handler}=Client,
+
             Handler:checkin(Ref, Socket),
             Client#client{state=closed, socket=nil, socket_ref=nil,
                           buffer = <<>>};
@@ -315,6 +317,8 @@ read_body(_MaxLength, Client, Acc) ->
 	{ok, Acc, Client}.
 
 
+maybe_close(#client{socket=nil}) ->
+    true;
 maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
     case Connection of
         <<"close">> -> true;

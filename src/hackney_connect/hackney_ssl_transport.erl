@@ -33,7 +33,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                      send_timeout, send_timeout_close, verify,
                      verify_fun, inet6, versions, server_name_indication,
                      depth, reuseaddr],
-    BaseOpts = [binary, {active, false}, {packet, raw}, {nodelay, true}, {reuseaddr, true}],
+    BaseOpts = [binary, {active, false}, {packet, raw}],
     Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
     %% connect

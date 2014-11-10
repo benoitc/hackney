@@ -40,6 +40,8 @@
 -record(state, {
         max_connections,
         timeout,
+        clients = dict:new(),
+        queues = dict:new(),  % Dest => queue of Froms
         connections = dict:new(),
         sockets = dict:new()}).
 
@@ -55,9 +57,8 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     Pid = self(),
     Name = proplists:get_value(pool, Opts, default),
     Pool = find_pool(Name, Opts),
-
     case gen_server:call(Pool, {checkout, {Host, Port, Transport},
-                                           Pid}) of
+                                           Pid}, infinity) of
         {ok, Socket, Owner} ->
             CheckinReference = {Host, Port, Transport},
             {ok, {Name, CheckinReference, Owner, Transport}, Socket};
@@ -71,12 +72,14 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     end.
 
 %% @doc release a socket in the pool
-checkin({_Name, Key, Owner, Transport}, Socket) ->
+checkin({_Name, Dest, Owner, Transport}, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
-            gen_server:call(Owner, {checkin, Key, Socket, Transport});
+            gen_server:call(Owner, {checkin, Dest, Socket, Transport},
+                            infinity);
         _Error ->
-            Transport:close(Socket)
+            catch Transport:close(Socket),
+            ok
     end.
 
 
@@ -180,6 +183,16 @@ start_link(Name, Options0) ->
     gen_server:start_link(?MODULE, [Name, Options], []).
 
 init([Name, Options]) ->
+    process_flag(priority, high),
+    case lists:member({seed,1}, ssl:module_info(exports)) of
+        true ->
+            % Make sure that the ssl random number generator is seeded
+            % This was new in R13 (ssl-3.10.1 in R13B vs. ssl-3.10.0 in R12B-5)
+            apply(ssl, seed, [crypto:rand_bytes(255)]);
+        false ->
+            ok
+    end,
+
     MaxConn = case proplists:get_value(pool_size, Options) of
         undefined ->
             proplists:get_value(max_connections, Options);
@@ -193,27 +206,40 @@ init([Name, Options]) ->
 
     {ok, #state{max_connections=MaxConn, timeout=Timeout}}.
 
+handle_call(count, _From, #state{sockets=Sockets}=State) ->
+    {reply, dict:size(Sockets), State};
 handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
     {reply, Timeout, State};
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
     {reply, MaxConn, State};
-handle_call({checkout, Key, Pid}, _From, State) ->
-    {Reply, NewState} = find_connection(Key, Pid, State),
-    {reply, Reply, NewState};
-handle_call({checkin, Key, Socket, Transport}, From,
-            #state{sockets=Sockets, max_connections=MaxConn}=State) ->
+handle_call({checkout, Dest, Pid}, From, State) ->
+    #state{max_connections=MaxConn,
+           clients=Clients,
+           queues = Queues} = State,
+
+    {Reply, State2} = find_connection(Dest, Pid, State),
+    case Reply of
+        {ok, _Socket, _Owner} ->
+            State3 = monitor_client(Dest, From, State2),
+            {reply, Reply, State3};
+        no_socket ->
+            case dict:size(Clients) >= MaxConn of
+                true ->
+                     Queues2 = add_to_queue(Dest, From, Queues),
+                    {noreply, State2#state{queues = Queues2}};
+                false ->
+                     State3 = monitor_client(Dest, From, State2),
+                    {reply, {error, no_socket, self()}, State3}
+            end
+    end;
+handle_call({checkin, Dest, Socket, _Transport}, {Pid, _} = From, State) ->
     gen_server:reply(From, ok),
-    PoolSize = dict:size(Sockets),
-    NewState = if PoolSize =< MaxConn ->
-            store_connection(Key, Socket, State);
-        true ->
-            %% don't store more than MaxConn
-            catch Transport:close(Socket),
-            State
-    end,
-    {noreply, NewState};
-handle_call(count, _From, #state{sockets=Sockets}=State) ->
-    {reply, dict:size(Sockets), State};
+    {Dest, MonRef} = dict:fetch(Pid, State#state.clients),
+    true = erlang:demonitor(MonRef, [flush]),
+    Clients2 = dict:erase(Pid, State#state.clients),
+    State2 = deliver_socket(Socket, Dest, State#state{clients=Clients2}),
+    {noreply, State2};
+
 handle_call({count, Key}, _From, #state{connections=Conns}=State) ->
     Size = case dict:find(Key, Conns) of
         {ok, Sockets} ->
@@ -245,6 +271,17 @@ handle_info({tcp, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({ssl, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
+handle_info({'DOWN', MonRef, process, Pid, _Reason}, State) ->
+    {Dest, MonRef} = dict:fetch(Pid, State#state.clients),
+    Clients2 = dict:erase(Pid, State#state.clients),
+    case queue_out(Dest, State#state.queues) of
+        empty ->
+            {noreply, State#state{clients = Clients2}};
+        {ok, From, Queues2} ->
+            gen_server:reply(From, {error, no_socket, self()}),
+            State2 = State#state{queues = Queues2, clients = Clients2},
+            {noreply, monitor_client(Dest, From, State2)}
+    end;
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -260,16 +297,16 @@ terminate(_Reason, #state{sockets=Sockets}) ->
 
 %% internals
 
-find_connection({_Host, _Port, Transport}=Key, Pid,
+find_connection({_Host, _Port, Transport}=Dest, Pid,
                 #state{connections=Conns, sockets=Sockets}=State) ->
-    case dict:find(Key, Conns) of
+    case dict:find(Dest, Conns) of
         {ok, [S | Rest]} ->
             Transport:setopts(S, [{active, false}]),
             case Transport:controlling_process(S, Pid) of
                 ok ->
                     {_, Timer} = dict:fetch(S, Sockets),
                     cancel_timer(S, Timer),
-                    NewConns = update_connections(Rest, Key, Conns),
+                    NewConns = update_connections(Rest, Dest, Conns),
                     NewSockets = dict:erase(S, Sockets),
                     NewState = State#state{connections=NewConns,
                                            sockets=NewSockets},
@@ -277,19 +314,19 @@ find_connection({_Host, _Port, Transport}=Key, Pid,
                 {error, badarg} ->
                     % Pid has timed out, reuse for someone else
                     Transport:setopts(S, [{active, once}]),
-                    {{error, no_socket, self()}, State};
+                    {no_socket, State};
                 _Else ->
-                    find_connection(Key, Pid, remove_socket(S, State))
+                    find_connection(Dest, Pid, remove_socket(S, State))
             end;
-        _ ->
-            {{error, no_socket, self()}, State}
+        _Else ->
+            {no_socket, State}
     end.
 
 remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     case dict:find(Socket, Sockets) of
         {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
             cancel_timer(Socket, Timer),
-            Transport:close(Socket),
+            catch Transport:close(Socket),
             ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
             NewConns = update_connections(ConnSockets, Key, Conns),
             NewSockets = dict:erase(Socket, Sockets),
@@ -299,25 +336,18 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     end.
 
 
-store_connection({_Host, _Port, Transport} = Key, Socket,
+store_socket({_Host, _Port, Transport} = Dest, Socket,
                  #state{timeout=Timeout, connections=Conns,
                         sockets=Sockets}=State) ->
     Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
-    Transport:setopts(Socket, [{active, once}]),
-    ConnSockets = case dict:find(Key, Conns) of
+    ok = Transport:setopts(Socket, [{active, once}]),
+    ConnSockets = case dict:find(Dest, Conns) of
         {ok, OldSockets} ->
             [Socket | OldSockets];
         error -> [Socket]
     end,
-    case Transport:controlling_process(Socket, self()) of
-        ok ->
-
-            State#state{connections = dict:store(Key, ConnSockets, Conns),
-                        sockets = dict:store(Socket, {Key, Timer}, Sockets)};
-        _ ->
-            erlang:cancel_timer(Timer),
-            State
-    end.
+    State#state{connections = dict:store(Dest, ConnSockets, Conns),
+                sockets = dict:store(Socket, {Dest, Timer}, Sockets)}.
 
 update_connections([], Key, Connections) ->
     dict:erase(Key, Connections);
@@ -334,3 +364,64 @@ cancel_timer(Socket, Timer) ->
             end;
         _ -> ok
     end.
+
+%------------------------------------------------------------------------------
+%% @private
+%%------------------------------------------------------------------------------
+add_to_queue({_Host, _Port, _Transport} = Dest, From, Queues) ->
+    case dict:find(Dest, Queues) of
+        error ->
+            dict:store(Dest, queue:in(From, queue:new()), Queues);
+        {ok, Q} ->
+            dict:store(Dest, queue:in(From, Q), Queues)
+    end.
+
+%------------------------------------------------------------------------------
+%% @private
+%%------------------------------------------------------------------------------
+queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
+    case dict:find(Dest, Queues) of
+        error ->
+            empty;
+        {ok, Q} ->
+            {{value, From}, Q2} = queue:out(Q),
+            Queues2 = case queue:is_empty(Q2) of
+                true ->
+                    dict:erase(Dest, Queues);
+                false ->
+                    dict:store(Dest, Q2, Queues)
+            end,
+            {ok, From, Queues2}
+    end.
+
+%------------------------------------------------------------------------------
+%% @private
+%%------------------------------------------------------------------------------
+deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
+    case queue_out(Dest, State#state.queues) of
+        empty ->
+            store_socket(Dest, Socket, State);
+        {ok, {PidWaiter, _} = FromWaiter, Queues2} ->
+            Transport:setopts(Socket, [{active, false}]),
+            case Transport:controlling_process(Socket, PidWaiter) of
+                ok ->
+                    gen_server:reply(FromWaiter, {ok, Socket, self()}),
+                    monitor_client(Dest, FromWaiter,
+                                   State#state{queues = Queues2});
+                {error, badarg} -> % Pid died, reuse for someone else
+                    Transport:setopts(Socket, [{active, once}]),
+                    deliver_socket(Socket, Dest,
+                                   State#state{queues = Queues2});
+                _Error -> % Something wrong with the socket; just remove it
+                    catch Transport:close(Socket),
+                    State
+            end
+    end.
+
+%------------------------------------------------------------------------------
+%% @private
+%%------------------------------------------------------------------------------
+monitor_client(Dest, {Pid, _} = _From, State) ->
+    MonRef = erlang:monitor(process, Pid),
+    Clients2 = dict:store(Pid, {Dest, MonRef}, State#state.clients),
+    State#state{clients = Clients2}.

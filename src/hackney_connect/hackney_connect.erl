@@ -190,6 +190,7 @@ socket_from_pool(Host, Port, Transport, #client{request_ref=ReqRef0}=Client) ->
 
 do_connect(Host, Port, Transport, #client{options=Opts,
                                           request_ref=Ref0}=Client) ->
+
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
@@ -208,7 +209,7 @@ do_connect(Host, Port, Transport, #client{options=Opts,
                     ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
                 _ ->
-                    ConnectOpts1
+                       ConnectOpts1
             end;
         {hackney_ssl_transport, SslOpts} ->
             ConnectOpts1 ++ SslOpts;

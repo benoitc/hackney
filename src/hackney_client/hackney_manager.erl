@@ -48,8 +48,6 @@ new_request(InitialState) ->
     ok = gen_server:call(?MODULE, {new_request, self(), Ref}),
     Ref.
 
-
-
 cancel_request(#client{request_ref=Ref}) ->
     cancel_request(Ref);
 cancel_request(Ref) when is_reference(Ref) ->
@@ -79,32 +77,35 @@ cancel_request(Ref) when is_reference(Ref) ->
             end
     end.
 
-close_request(#client{request_ref=Ref}) ->
-    close_request(Ref);
+close_request(#client{}=Client) ->
+    #client{transport=Transport,
+            socket=Socket,
+            state=Status,
+            request_ref=Ref} = Client,
 
+    %% remove the request
+    erase(Ref),
+
+    %% stop to monitor the request
+    Reply = gen_server:call(?MODULE, {cancel_request, Ref}),
+
+    case Status of
+        done -> ok;
+        _ when Socket /= nil ->
+            catch Transport:controlling_process(Socket, self()),
+            catch Transport:close(Socket),
+            ok;
+        _ -> ok
+    end,
+    Reply;
 close_request(Ref) ->
     case get_state(Ref) of
         req_not_found ->
             req_not_found;
         Client ->
-            #client{transport=Transport, socket=Socket, state=Status} = Client,
-
-            %% remove the request
-            erase(Ref),
-
-            %% stop to monitor the request
-            Reply = gen_server:call(?MODULE, {cancel_request, Ref}),
-
-            case Status of
-                done -> ok;
-                _ when Socket /= nil ->
-                    catch Transport:controlling_process(Socket, self()),
-                    catch Transport:close(Socket),
-                    ok;
-                _ -> ok
-            end,
-            Reply
+            close_request(Client)
     end.
+
 
 controlling_process(Ref, Pid) ->
     case get(Ref) of
@@ -211,11 +212,7 @@ store_state(Ref, NState) ->
 
 take_control(Ref, NState) ->
     %% maybe delete the state from ets
-    case ets:lookup(?MODULE, Ref) of
-        [] -> ok;
-        [{Ref, _Req}] ->
-            ets:delete(?MODULE, Ref)
-    end,
+    ets:delete(?MODULE, Ref),
     %% add the state to the current context
     put(Ref, NState),
     ok.
