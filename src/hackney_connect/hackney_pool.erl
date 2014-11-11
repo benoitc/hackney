@@ -234,9 +234,13 @@ handle_call({checkout, Dest, Pid}, From, State) ->
     end;
 handle_call({checkin, Dest, Socket, _Transport}, {Pid, _} = From, State) ->
     gen_server:reply(From, ok),
-    {Dest, MonRef} = dict:fetch(Pid, State#state.clients),
-    true = erlang:demonitor(MonRef, [flush]),
-    Clients2 = dict:erase(Pid, State#state.clients),
+    Clients2 = case dict:find(Pid, State#state.clients) of
+                   {ok, {Dest, MonRef}} ->
+                       true = erlang:demonitor(MonRef, [flush]),
+                       dict:erase(Pid, State#state.clients);
+                   error ->
+                        State#state.clients
+               end,
     State2 = deliver_socket(Socket, Dest, State#state{clients=Clients2}),
     {noreply, State2};
 
