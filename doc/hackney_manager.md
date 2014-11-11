@@ -10,7 +10,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#async_response_pid-1">async_response_pid/1</a></td><td></td></tr><tr><td valign="top"><a href="#cancel_request-1">cancel_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#close_request-1">close_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_state-1">get_state/1</a></td><td></td></tr><tr><td valign="top"><a href="#get_state-2">get_state/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_error-1">handle_error/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#new_request-1">new_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_async_response-1">start_async_response/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#stop_async_response-1">stop_async_response/1</a></td><td></td></tr><tr><td valign="top"><a href="#take_control-2">take_control/2</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_state-1">update_state/1</a></td><td></td></tr><tr><td valign="top"><a href="#update_state-2">update_state/2</a></td><td></td></tr><tr><td valign="top"><a href="#with_async_response_pid-2">with_async_response_pid/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#async_response_pid-1">async_response_pid/1</a></td><td></td></tr><tr><td valign="top"><a href="#cancel_request-1">cancel_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#close_request-1">close_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_state-1">get_state/1</a></td><td></td></tr><tr><td valign="top"><a href="#get_state-2">get_state/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_error-1">handle_error/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#new_request-1">new_request/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_async_response-1">start_async_response/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#stop_async_response-1">stop_async_response/1</a></td><td></td></tr><tr><td valign="top"><a href="#store_state-1">store_state/1</a></td><td></td></tr><tr><td valign="top"><a href="#store_state-2">store_state/2</a></td><td></td></tr><tr><td valign="top"><a href="#take_control-2">take_control/2</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_state-1">update_state/1</a></td><td></td></tr><tr><td valign="top"><a href="#update_state-2">update_state/2</a></td><td></td></tr><tr><td valign="top"><a href="#with_async_response_pid-2">with_async_response_pid/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -127,6 +127,20 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 ### stop_async_response/1 ###
 
 `stop_async_response(Ref) -> any()`
+
+
+<a name="store_state-1"></a>
+
+### store_state/1 ###
+
+`store_state(Client) -> any()`
+
+
+<a name="store_state-2"></a>
+
+### store_state/2 ###
+
+`store_state(Ref, NState) -> any()`
 
 
 <a name="take_control-2"></a>

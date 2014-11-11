@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.14.3
+__Version:__ 0.15.0
 
 # hackney
 
@@ -27,30 +27,30 @@ Main features:
 - Optional socket pool
 - REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
-Hackney use [hackney_lib](http://github.com/benoitc/hackney_lib) to
+Hackney uses [hackney_lib](http://github.com/benoitc/hackney_lib) to
 handle any web protocols. If you want to manipulate headers, cookies,
 multipart or any other thing related to web protocols this is the place
 to go.
 
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
-informations on what still need to be done.
+information on what still needs to be done.
 
 #### Useful modules are:
 
 - [`hackney`](hackney.md): main module. It contains all HTTP client functions.
 - [`hackney_http`](hackney_http.md): HTTP parser in pure Erlang. This parser is able
 to parse HTTP responses and requests in a streaming fashion. If not set
-it will be autodetect if it's a request or a response if needed.
+it will be autodetected if it's a request or a response that's needed.
 
-- [`hackney_headers`](hackney_headers.md) Module to manipulate HTTP headers
+- [`hackney_headers`](hackney_headers.md) Module to manipulate HTTP headers.
 - [`hackney_cookie`](hackney_cookie.md): Module to manipulate cookies.
 - [`hackney_multipart`](hackney_multipart.md): Module to encode/decode multipart.
 - [`hackney_url`](hackney_url.md): Module to parse and create URIs.
 - [`hackney_date`](hackney_date.md): Module to parse HTTP dates.
 
 Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
-to get last changelog.
+to get the last changelog.
 
 ## Installation
 
@@ -121,7 +121,7 @@ Options = [],
                                                         Options).
 ```
 
-The request method return the tuple `{ok, StatusCode, Headers, ClientRef}`
+The request method returns the tuple `{ok, StatusCode, Headers, ClientRef}`
 or `{error, Reason}`. A `ClientRef` is simply a reference to the current
 request that you can reuse.
 
@@ -131,7 +131,7 @@ If you prefer the REST syntax, you can also do:
 hackney:Method(URL, Headers, Payload, Options)
 ```
 
-where `Method`, can be any HTTP methods in lowercase.
+where `Method`, can be any HTTP method in lowercase.
 
 ### Read the body
 
@@ -162,8 +162,8 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 
 By default all connections are created and closed dynamically by
 hackney but sometimes you may want to reuse the same reference for your
-connections. It's especially usefull you just want to handle serially a
-couple of request.
+connections. It's especially useful if you just want to handle serially a
+couple of requests.
 
 > A closed connection will automatically be reconnected.
 
@@ -262,7 +262,7 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 ### Get a response asynchronously
 
 Since the 0.6 version, hackney is able to fetch the response
-asynchrnously using the `async` option:
+asynchronously using the `async` option:
 
 ```erlang
 
@@ -298,7 +298,7 @@ LoopFun(LoopFun, ClientRef).
 
 > **Note 2**:  Asynchronous responses automatically checkout the socket at the end.
 
-> **Note 3**:  At any time you can go back and received your response
+> **Note 3**:  At any time you can go back and receive your response
 > synchronously using the function `hackney:stop_async/1` See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
@@ -362,7 +362,7 @@ hackney_pool:stop_pool(PoolName).
 Since the version 0.8 it is now possible to use your own Pool to
 maintain the connections in hackney.
 
-A pool handler is a module that handle the `hackney_pool_handler`
+A pool handler is a module that handles the `hackney_pool_handler`
 behaviour.
 
 See for example the
@@ -378,7 +378,7 @@ retrieve the body. The maximum number of connections can be set using the
 
 The client will follow redirects on 301, 302 & 307 if the method is
 get or head. If another method is used the tuple
-`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It
+`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It will
 only follow 303 redirects (see other) if the method is a POST.
 
 Last Location is stored in the `location` property of the client state.

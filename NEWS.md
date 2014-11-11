@@ -1,5 +1,11 @@
 # NEWS
 
+0.15.0 - 2014/11/11
+-------------------
+
+- improve hackney performance and concurrency
+- fix pool handling: make sure to reuse the connections
+
 0.14.3 - 2014/10/28
 -------------------
 
