@@ -85,6 +85,7 @@ close_request(#client{}=Client) ->
 
     %% remove the request
     erase(Ref),
+    ets:delete(?MODULE, Ref),
 
     %% stop to monitor the request
     Reply = gen_server:call(?MODULE, {cancel_request, Ref}),
