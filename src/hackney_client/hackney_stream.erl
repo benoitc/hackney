@@ -168,7 +168,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                             hackney_manager:handle_error(Client2);
                         {_, _} ->
                             case hackney_response:skip_body(Client2) of
-                                {ok, Client3} ->
+                                {skip, Client3} ->
                                     hackney_manager:store_state(Client3),
                                     Owner ! {hackney_response, Ref,
                                              {redirect, Location, Headers}};
@@ -195,7 +195,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                             hackney_manager:handle_error(Client2);
                         Location ->
                             case hackney_response:skip_body(Client2) of
-                                {ok, Client3} ->
+                                {skip, Client3} ->
                                     hackney_manager:store_state(Client3),
                                     Owner ! {hackney_response, Ref,
                                              {see_other, Location, Headers}};

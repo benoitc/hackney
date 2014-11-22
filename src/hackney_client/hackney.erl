@@ -155,25 +155,33 @@ location(Ref) ->
 
 %% @doc make a request
 -spec request(binary()|list())
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
+    -> {ok, integer(), list(), client_ref()}
+    | {ok, integer(), list()}
+    | {error, term()}.
 request(URL) ->
     request(get, URL).
 
 %% @doc make a request
 -spec request(term(), binary()|list())
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
+    -> {ok, integer(), list(), client_ref()}
+    | {ok, integer(), list()}
+    | {error, term()}.
 request(Method, URL) ->
     request(Method, URL, [], <<>>, []).
 
 %% @doc make a request
 -spec request(term(), binary()|list(), list())
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
+    -> {ok, integer(), list(), client_ref()}
+    | {ok, integer(), list()}
+    | {error, term()}.
 request(Method, URL, Headers) ->
     request(Method, URL, Headers, <<>>, []).
 
 %% @doc make a request
 -spec request(term(), binary()|list(), list(), term())
-    -> {ok, integer(), list(), #client{}} | {error, term()}.
+    -> {ok, integer(), list(), client_ref()}
+    | {ok, integer(), list()}
+    | {error, term()}.
 request(Method, URL, Headers, Body) ->
     request(Method, URL, Headers, Body, []).
 
@@ -589,10 +597,10 @@ maybe_proxy(Transport, Host, Port, Options)
         when is_list(Host), is_integer(Port), is_list(Options) ->
     case proplists:get_value(proxy, Options) of
         Url when is_binary(Url) orelse is_list(Url) ->
-            Url1 = hackney_url:normalize(Url),
+            Url1 = hackney_url:parse_url(Url),
             #hackney_url{transport = PTransport,
                          host = ProxyHost,
-                         port = ProxyPort} = hackney_url:parse_url(Url1),
+                         port = ProxyPort} = hackney_url:normalize(Url1),
             ProxyAuth = proplists:get_value(proxy_auth, Options),
             case {Transport, PTransport} of
                 {hackney_ssl_transport, hackney_ssl_transport} ->
@@ -729,8 +737,6 @@ maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
             %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
             %% the  user make his choice.
             case {Location, lists:member(Method, [get, head])} of
-                {undefined, _} ->
-                    {error, {invalid_redirection, Resp}};
                 {_, true} ->
                         NewReq = {Method, Location, Headers, Body},
                         maybe_redirect(redirect(Client, NewReq), Req,
@@ -746,8 +752,6 @@ maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
             %% see other. If methos is not POST we consider it as an
             %% invalid redirection
             case {Location, Method} of
-                {undefined, _} ->
-                    {error, {invalid_redirection, Resp}};
                 {_, post} ->
                     NewReq = {get, Location, [], <<>>},
                     maybe_redirect(redirect(Client, NewReq), Req, Tries+1);
@@ -882,10 +886,7 @@ mp_reply({end_of_part, NState}, _State) ->
     end_of_part;
 mp_reply({ok, NState}, _State) ->
     hackney_manager:update_state(NState),
-    ok;
-mp_reply(Error, State) ->
-    hackney_manager:handle_error(State),
-    Error.
+    ok.
 
 %% response reply
 reply_response({ok, Status, Headers, #client{method= <<"HEAD">>}=NState},

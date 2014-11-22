@@ -188,8 +188,7 @@ stream_body_recv(Buffer, Client=#client{version=Version,
 %% is no part to parse anymore, <em>{eof, Req}</em> is returned.
 -spec stream_multipart(#client{})
     -> {headers, list(), #client{}} | {body, binary(), #client{}}
-    | {eof, #client{}} | {end_of_part, #client{}}
-    | {error, term()}.
+    | {eof|end_of_part|mp_mixed|mp_mixed_eof, #client{}}.
 stream_multipart(Client=#client{body_state=waiting,
                                 ctype=CType,
                                 clen=Length}) ->
@@ -219,7 +218,7 @@ multipart_data(Client, Length, eof)
     {eof, Client2#client{body_state=done, multipart=nil}};
 multipart_data(Client, _, eof) ->
     %% We just want to skip so no need to stream data here.
-    {ok, Client2} = skip_body(Client),
+    {skip, Client2} = skip_body(Client),
     {eof, Client2#client{multipart=nil}};
 multipart_data(Client, Length, {more, Parser})
         when Length > 0 orelse Length =:= nil->
@@ -306,9 +305,9 @@ read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
 		{ok, Data, Client2} ->
 			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
 		{done, Client2} ->
-			{ok, Acc, Client2};
-        {error, {closed, Bin}} when is_binary(Bin) ->
-            {error, {closed, << Acc/binary, Bin/binary >>}};
+      {ok, Acc, Client2};
+    {error, {closed, Bin}} when is_binary(Bin) ->
+      {error, {closed, << Acc/binary, Bin/binary >>}};
 		{error, Reason} ->
 			{error, Reason}
 	end;

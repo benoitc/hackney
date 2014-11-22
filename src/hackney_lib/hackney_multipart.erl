@@ -51,6 +51,7 @@
 encode_form(Parts) ->
     encode_form(Parts, boundary()).
 
+-spec encode_form(list(), binary()) -> {binary(), integer()}.
 encode_form(Parts, Boundary) ->
     {Size, Acc} = lists:foldl(fun
                 ({file, Path}, {AccSize, AccBin}) ->
@@ -80,7 +81,7 @@ encode_form(Parts, Boundary) ->
                     {AccSize1, << AccBin/binary, MpHeader/binary, "\r\n" >>};
                 ({mp_mixed_eof, MixedBoundary}, {AccSize, AccBin}) ->
                     Eof = mp_eof(MixedBoundary),
-                    {AccSize + byte_size(Eof + 2), <<AccBin/binary,
+                    {AccSize + byte_size(Eof) + 2, <<AccBin/binary,
                                                      Eof/binary, "\r\n" >>};
                 ({Name, Bin}, {AccSize, AccBin}) when is_binary(Bin) ->
                     Len = byte_size(Bin),
@@ -122,7 +123,7 @@ decode_form(Boundary, Body) ->
 parser(Boundary) when is_binary(Boundary) ->
         fun (Bin) when is_binary(Bin) -> parse(Bin, Boundary) end.
 
-
+-spec boundary() -> binary().
 boundary() ->
     Unique = unique(16),
     <<"---------------------------", Unique/binary>>.
@@ -214,7 +215,10 @@ mp_mixed_header(Name, Boundary) ->
 %% @doc return the multipart header for a file that will be sent later
 -spec mp_file_header({file, Path :: binary()} |
                      {file, Path :: binary(),
-                      ExtraHeaders ::[{binary(), binary()}]},
+                            ExtraHeaders :: [{binary(), binary()}]} |
+                     {file, Path :: binary(),
+                            {Disposition :: binary(), Params :: [{binary(), binary()}]},
+                            ExtraHeaders :: [{binary(), binary()}]},
                      Boundary :: binary()) ->
     {binary(), FileSize :: integer()}.
 mp_file_header({file, Path}, Boundary) ->
@@ -238,7 +242,10 @@ mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
 %% @doc return the multipart header for a data
 -spec mp_data_header({Name:: binary(), DataLen :: integer()} |
                      {Name:: binary(), DataLen :: integer(),
-                      ExtraHeaders ::[{binary(), binary()}]},
+                      ExtraHeaders ::[{binary(), binary()}]} |
+                     {Name:: binary(), DataLen :: integer(),
+                            {Disposition :: binary(), Params :: [{binary(), binary()}]},
+                            ExtraHeaders :: [{binary(), binary()}]},
                      Boundary :: binary()) ->
     {binary(), DataLen :: integer()}.
 mp_data_header({Name, Len}, Boundary) ->
