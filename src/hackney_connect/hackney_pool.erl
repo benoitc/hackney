@@ -18,7 +18,8 @@
          checkin/2]).
 
 -export([start_pool/2,
-         stop_pool/1]).
+         stop_pool/1,
+         find_pool/1]).
 
 
 -export([count/1, count/2,
@@ -118,7 +119,7 @@ stop_pool(Name) ->
 child_spec(Name, Options0) ->
     Options = [{name, Name} | Options0],
     {Name, {hackney_pool, start_link, [Name, Options]},
-      permanent, 10000, worker, [Name]}.
+      permanent, 10000, worker, [hackney_pool]}.
 
 
 %% @doc get the number of connections in the pool
