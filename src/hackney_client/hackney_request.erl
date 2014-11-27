@@ -40,7 +40,9 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
         undefined ->
             DefaultHeaders0;
         {User, Pwd} ->
-            Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
+            User1 = hackney_bstr:to_binary(User),
+            Pwd1 = hackney_bstr:to_binary(Pwd),
+            Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
             DefaultHeaders0 ++ [{<<"Authorization">>,
                                  <<"Basic ", Credentials/binary>>}]
     end,
