@@ -40,19 +40,22 @@ new({dict, _}=D) ->
 new(Headers) when is_list(Headers) ->
     lists:foldl(fun
             ({K, V}, D) ->
-                insert(K, V, D);
+                insert(hackney_bstr:to_binary(K), hackney_bstr:to_binary(V), D);
             ({K, V, P}, D) ->
-                insert(K, header_value(V, P), D)
+                insert(hackney_bstr:to_binary(K), header_value(V, P), D)
         end, dict:new(), Headers).
 
 %% @doc extend the headers with a new list of `{Key, Value}' pair.
 update(Headers, KVs) ->
     lists:foldl(fun
-            ({K,_V}=KV, D) ->
-                dict:store(hackney_bstr:to_lower(K), KV, D);
+            ({K, V}, D) ->
+                K1 = hackney_bstr:to_binary(K),
+                V1 = hackney_bstr:to_binary(V),
+                dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D);
             ({K, V, P}, D) ->
+                K1 = hackney_bstr:to_binary(K),
                 V1 = header_value(V, P),
-                dict:store(hackney_bstr:to_lower(K), {K, V1}, D)
+                dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D)
         end, Headers, KVs).
 
 %% convert the header to a list
@@ -130,6 +133,8 @@ make_header(Name, Value, Params) ->
     << Name/binary, ": ", Value1/binary >>.
 
 %% @doc join value and params in a binary
+header_value(Value, Params) when is_list(Value) ->
+    header_value(list_to_binary(Value), Params);
 header_value(Value, Params) ->
     Params1 = lists:foldl(fun({K, V}, Acc) ->
                     K1 = hackney_bstr:to_binary(K),
