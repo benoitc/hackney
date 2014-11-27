@@ -70,6 +70,8 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
             handle_body(HeadersDict, ReqType0, Body0, Client0);
         <<>> ->
             {HeadersDict, ReqType0, Body0, Client0};
+        [] ->
+            {HeadersDict, ReqType0, Body0, Client0};
         _ ->
             handle_body(HeadersDict, ReqType0, Body0, Client0)
     end,
