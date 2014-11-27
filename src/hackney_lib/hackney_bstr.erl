@@ -36,9 +36,13 @@ to_binary(V) when is_binary(V) ->
 
 %% @doc Convert a binary string to lowercase.
 -spec to_lower(binary()) -> binary().
+to_lower(L) when is_list(L) ->
+    to_lower(list_to_binary(L));
 to_lower(L) ->
 	<< << (char_to_lower(C)) >> || << C >> <= L >>.
 
+to_upper(L) when is_list(L) ->
+    to_upper(list_to_binary(L));
 to_upper(U) ->
     << << (char_to_upper(C)) >> || << C >> <= U >>.
 
