@@ -1,5 +1,12 @@
 # NEWS
 
+0.15.2 - 2014/11/27
+-------------------
+
+- fix: handle strings in headers
+- fix; convert User/Password as string if needed
+- fix: handle body given as an empty list 
+
 0.15.1 - 2014/11/26
 -------------------
 

@@ -178,7 +178,7 @@ Convert a binary string to lowercase.
 
 ### to_upper/1 ###
 
-`to_upper(U) -> any()`
+`to_upper(L) -> any()`
 
 
 <a name="token-2"></a>
