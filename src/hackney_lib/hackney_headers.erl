@@ -149,7 +149,8 @@ header_value(Value, Params) ->
 parse(Name, Headers) when is_list(Headers) ->
     parse(Name, new(Headers));
 parse(Name, Headers) ->
-    parse(hackney_bstr:to_lower(Name), Headers, header_default(Name)).
+    Name1 = hackney_bstr:to_lower(Name),
+    parse(Name1, Headers, header_default(Name1)).
 
 
 %% @doc Semantically parse headers.
