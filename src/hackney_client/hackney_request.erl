@@ -521,7 +521,7 @@ sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
 sendfile_fallback(_, _, _, _, Sent) ->
     {ok, Sent}.
 
-
+-spec make_multipart_stream(list(), binary()) -> {fun(), list()}.
 make_multipart_stream(Parts, Boundary) ->
     Stream = lists:foldl(fun
                 ({file, Path}, Acc) ->
@@ -530,7 +530,7 @@ make_multipart_stream(Parts, Boundary) ->
                     [<<"\r\n">>, {file, Path}, MpHeader | Acc];
                 ({file, Path, ExtraHeaders}, Acc) ->
                     {MpHeader, _} = hackney_multipart:mp_file_header(
-                            {file, Path, ExtraHeaders},Boundary),
+                            {file, Path, ExtraHeaders}, Boundary),
                     [<<"\r\n">>, {file, Path}, MpHeader | Acc];
                 ({file, Path, Disposition, ExtraHeaders}, Acc) ->
                     {MpHeader, _} = hackney_multipart:mp_file_header(

@@ -29,11 +29,12 @@
 
 -type disposition() :: {binary(), [{binary(), binary()}]}.
 
-
 %% @doc initialise an header dict
+-spec new() -> dict().
 new() ->
     dict:new().
 
+-spec new({dict, dict()} | list()) -> dict().
 new({dict, _}=D) ->
     D;
 
@@ -149,7 +150,7 @@ header_value(Value, Params) ->
 %% When the value isn't found, a proper default value for the type
 %% returned is used as a return value.
 %% @see parse/3
--spec parse(binary(), list())
+-spec parse(binary(), list() | dict())
     -> any() | undefined | {error, badarg}.
 parse(Name, Headers) when is_list(Headers) ->
     parse(Name, new(Headers));
@@ -161,7 +162,7 @@ parse(Name, Headers) ->
 %% @doc Semantically parse headers.
 %%
 %% When the header is unknown, the value is returned directly without parsing.
--spec parse(binary(), list(), any())
+-spec parse(binary(), dict(), any())
     -> any() | undefined | {error, badarg}.
 parse(Name = <<"accept">>, Headers, Default) ->
     parse(Name, Headers, Default,

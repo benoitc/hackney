@@ -262,16 +262,14 @@ parse_version(_, _, _, _) ->
      {error, bad_request}.
 
 %% @doc fetch all headers
-parse_headers(#hparser{partial_headers=Headers}=St) ->
+parse_headers(#hparser{}=St) ->
     case parse_header(St) of
         {more, St2} ->
             {more, St2};
         {headers_complete, St2} ->
             {headers_complete, St2};
         {header, KV, St2} ->
-            {header, KV, St2};
-        {error, Reason, Acc} ->
-            {error, {Reason, {Acc, Headers}}}
+            {header, KV, St2}
     end.
 
 

@@ -435,6 +435,24 @@ $ make dev ; # compile & get deps
 $ make devclean ; # clean all files
 ```
 
+For successfully running the hackney test suite locally it is
+necessary to install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
+
+An example installation using virtualenv::
+
+```sh
+$ mkvirtualenv hackney
+$ pip install gunicorn httpbin
+```
+
+Running the tests:
+
+```sh
+$ gunicorn --daemon --pid httpbin.pid httpbin:app
+$ make test
+$ kill `cat httpbin.pid`
+```
+
 
 ## Modules ##
 
