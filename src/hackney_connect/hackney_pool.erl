@@ -19,7 +19,8 @@
 
 -export([start_pool/2,
          stop_pool/1,
-         find_pool/1]).
+         find_pool/1,
+         notify/2]).
 
 
 -export([count/1, count/2,
@@ -53,19 +54,20 @@ start() ->
     ok.
 
 %% @doc fetch a socket from the pool
-checkout(Host0, Port, Transport, #client{options=Opts}) ->
+checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
     Host = string:to_lower(Host0),
     Pid = self(),
+    RequestRef = Client#client.request_ref,
     Name = proplists:get_value(pool, Opts, default),
     Pool = find_pool(Name, Opts),
     case gen_server:call(Pool, {checkout, {Host, Port, Transport},
-                                           Pid}, infinity) of
+                                           Pid, RequestRef}, infinity) of
         {ok, Socket, Owner} ->
             CheckinReference = {Host, Port, Transport},
-            {ok, {Name, CheckinReference, Owner, Transport}, Socket};
+            {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
         {error, no_socket, Owner} ->
             CheckinReference = {Host, Port, Transport},
-            {error, no_socket, {Name, CheckinReference, Owner,
+            {error, no_socket, {Name, RequestRef, CheckinReference, Owner,
                                 Transport}};
 
         {error, Reason} ->
@@ -73,10 +75,10 @@ checkout(Host0, Port, Transport, #client{options=Opts}) ->
     end.
 
 %% @doc release a socket in the pool
-checkin({_Name, Dest, Owner, Transport}, Socket) ->
+checkin({_Name, Ref, Dest, Owner, Transport}, Socket) ->
     case Transport:controlling_process(Socket, Owner) of
         ok ->
-            gen_server:call(Owner, {checkin, Dest, Socket, Transport},
+            gen_server:call(Owner, {checkin, Ref, Dest, Socket, Transport},
                             infinity);
         _Error ->
             catch Transport:close(Socket),
@@ -109,6 +111,16 @@ stop_pool(Name) ->
                     Error
             end
     end.
+
+
+notify(Pool, Msg) ->
+    case find_pool(Pool) of
+        undefined -> ok;
+        Pid ->
+            Pid ! Msg
+    end.
+
+
 
 %%
 %%  util functions for this pool
@@ -213,7 +225,7 @@ handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
     {reply, Timeout, State};
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
     {reply, MaxConn, State};
-handle_call({checkout, Dest, Pid}, From, State) ->
+handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
     #state{max_connections=MaxConn,
            clients=Clients,
            queues = Queues} = State,
@@ -221,24 +233,23 @@ handle_call({checkout, Dest, Pid}, From, State) ->
     {Reply, State2} = find_connection(Dest, Pid, State),
     case Reply of
         {ok, _Socket, _Owner} ->
-            State3 = monitor_client(Dest, From, State2),
+            State3 = monitor_client(Dest, RequestRef, State2),
             {reply, Reply, State3};
         no_socket ->
             case dict:size(Clients) >= MaxConn of
                 true ->
-                     Queues2 = add_to_queue(Dest, From, Queues),
+                    Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
                     {noreply, State2#state{queues = Queues2}};
                 false ->
-                     State3 = monitor_client(Dest, From, State2),
+                     State3 = monitor_client(Dest, RequestRef, State2),
                     {reply, {error, no_socket, self()}, State3}
             end
     end;
-handle_call({checkin, Dest, Socket, _Transport}, {Pid, _} = From, State) ->
+handle_call({checkin, Ref, Dest, Socket, _Transport}, From, State) ->
     gen_server:reply(From, ok),
-    Clients2 = case dict:find(Pid, State#state.clients) of
-                   {ok, {Dest, MonRef}} ->
-                       true = erlang:demonitor(MonRef, [flush]),
-                       dict:erase(Pid, State#state.clients);
+    Clients2 = case dict:find(Ref, State#state.clients) of
+                   {ok, Dest} ->
+                       dict:erase(Ref, State#state.clients);
                    error ->
                         State#state.clients
                end,
@@ -276,16 +287,20 @@ handle_info({tcp, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({ssl, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
-handle_info({'DOWN', MonRef, process, Pid, _Reason}, State) ->
-    {Dest, MonRef} = dict:fetch(Pid, State#state.clients),
-    Clients2 = dict:erase(Pid, State#state.clients),
-    case queue_out(Dest, State#state.queues) of
-        empty ->
-            {noreply, State#state{clients = Clients2}};
-        {ok, From, Queues2} ->
-            gen_server:reply(From, {error, no_socket, self()}),
-            State2 = State#state{queues = Queues2, clients = Clients2},
-            {noreply, monitor_client(Dest, From, State2)}
+handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
+    case dict:find(Ref, State#state.clients) of
+        {ok, Dest} ->
+            Clients2 = dict:erase(Ref, State#state.clients),
+            case queue_out(Dest, State#state.queues) of
+                empty ->
+                    {noreply, State#state{clients = Clients2}};
+                {ok, {From, Ref2}, Queues2} ->
+                    gen_server:reply(From, {error, no_socket, self()}),
+                    State2 = State#state{queues = Queues2, clients = Clients2},
+                    {noreply, monitor_client(Dest, Ref2, State2)}
+            end;
+        error ->
+            {noreply, State}
     end;
 handle_info(_, State) ->
     {noreply, State}.
@@ -373,12 +388,12 @@ cancel_timer(Socket, Timer) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-add_to_queue({_Host, _Port, _Transport} = Dest, From, Queues) ->
+add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
     case dict:find(Dest, Queues) of
         error ->
-            dict:store(Dest, queue:in(From, queue:new()), Queues);
+            dict:store(Dest, queue:in({From, Ref}, queue:new()), Queues);
         {ok, Q} ->
-            dict:store(Dest, queue:in(From, Q), Queues)
+            dict:store(Dest, queue:in({From, Ref}, Q), Queues)
     end.
 
 %------------------------------------------------------------------------------
@@ -389,14 +404,14 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
         error ->
             empty;
         {ok, Q} ->
-            {{value, From}, Q2} = queue:out(Q),
+            {{value, {From, Ref}}, Q2} = queue:out(Q),
             Queues2 = case queue:is_empty(Q2) of
                 true ->
                     dict:erase(Dest, Queues);
                 false ->
                     dict:store(Dest, Q2, Queues)
             end,
-            {ok, From, Queues2}
+            {ok, {From, Ref}, Queues2}
     end.
 
 %------------------------------------------------------------------------------
@@ -406,12 +421,12 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
     case queue_out(Dest, State#state.queues) of
         empty ->
             store_socket(Dest, Socket, State);
-        {ok, {PidWaiter, _} = FromWaiter, Queues2} ->
+        {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
             Transport:setopts(Socket, [{active, false}]),
             case Transport:controlling_process(Socket, PidWaiter) of
                 ok ->
                     gen_server:reply(FromWaiter, {ok, Socket, self()}),
-                    monitor_client(Dest, FromWaiter,
+                    monitor_client(Dest, Ref,
                                    State#state{queues = Queues2});
                 {error, badarg} -> % Pid died, reuse for someone else
                     Transport:setopts(Socket, [{active, once}]),
@@ -426,7 +441,6 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-monitor_client(Dest, {Pid, _} = _From, State) ->
-    MonRef = erlang:monitor(process, Pid),
-    Clients2 = dict:store(Pid, {Dest, MonRef}, State#state.clients),
+monitor_client(Dest, Ref, State) ->
+    Clients2 = dict:store(Ref, Dest, State#state.clients),
     State#state{clients = Clients2}.

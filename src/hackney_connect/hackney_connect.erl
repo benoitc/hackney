@@ -163,8 +163,11 @@ reconnect(Host, Port, Transport, State) ->
 %% internal functions
 %%
 
-socket_from_pool(Host, Port, Transport, #client{request_ref=ReqRef0}=Client) ->
+socket_from_pool(Host, Port, Transport, Client0) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+
+    %% new request
+    {_RequestRef, Client} = hackney_manager:new_request(Client0),
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
@@ -173,23 +176,27 @@ socket_from_pool(Host, Port, Transport, #client{request_ref=ReqRef0}=Client) ->
                                     pool_handler=PoolHandler,
                                     state = connected},
 
-            FinalClient = case is_reference(ReqRef0) of
-                true ->
-                    ok = hackney_manager:take_control(ReqRef0, Client1),
-                    Client1;
-                false ->
-                    RequestRef = hackney_manager:new_request(Client1),
-                    Client1#client{request_ref=RequestRef}
-            end,
-            {ok, FinalClient};
+            hackney_manager:update_state(Client1),
+            {ok, Client1};
         {error, no_socket, Ref} ->
-            do_connect(Host, Port, Transport, Client#client{socket_ref=Ref});
+            do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
+                       pool);
         Error ->
             Error
     end.
 
-do_connect(Host, Port, Transport, #client{options=Opts,
-                                          request_ref=Ref0}=Client) ->
+do_connect(Host, Port, Transport, Client) ->
+    do_connect(Host, Port, Transport, Client, direct).
+
+
+
+do_connect(Host, Port, Transport, #client{options=Opts}=Client0, Type) ->
+    {_RequestRef, Client} = case Type of
+                               pool ->
+                                   {Client0#client.request_ref, Client0};
+                               direct ->
+                                   hackney_manager:new_request(Client0)
+                           end,
 
     ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
@@ -221,18 +228,13 @@ do_connect(Host, Port, Transport, #client{options=Opts,
         {ok, Skt} ->
             Client1 = Client#client{socket=Skt,
                                     state = connected},
-            FinalClient = case is_reference(Ref0) of
-                true ->
-                    ok = hackney_manager:take_control(Ref0, Client1),
-                    Client1;
-                false ->
-                    Ref = hackney_manager:new_request(Client1),
-                    Client1#client{request_ref=Ref}
-            end,
-            {ok, FinalClient};
+            hackney_manager:update_state(Client1),
+            {ok, Client1};
         {error, timeout} ->
+            hackney_manager:cancel_request(Client),
             {error, connect_timeout};
         Error ->
+            hackney_manager:cancel_request(Client),
             Error
     end.
 

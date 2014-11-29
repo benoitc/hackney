@@ -39,14 +39,27 @@
 
 -define(REFS, hackney_manager_refs).
 
-new_request(InitialState) ->
+
+new_request(#client{request_ref=Ref}=Client) when is_reference(Ref) ->
+     ok = take_control(Ref, Client),
+     {Ref, Client};
+new_request(Client) ->
+    Ref = init_request(Client),
+    {Ref, Client#client{request_ref=Ref}}.
+
+
+init_request(#client{options=Opts}=InitialState) ->
+    %% get pool name
+    Pool = proplists:get_value(pool, Opts),
+
     %% initialize the request
     Ref = make_ref(),
     %% store the current state in the process dictionnary
     put(Ref, InitialState#client{request_ref=Ref}),
     %% supervise the process owner
-    ok = gen_server:call(?MODULE, {new_request, self(), Ref}),
+    ok = gen_server:call(?MODULE, {new_request, self(), Ref, Pool}),
     Ref.
+
 
 cancel_request(#client{request_ref=Ref}) ->
     cancel_request(Ref);
@@ -54,7 +67,7 @@ cancel_request(Ref) when is_reference(Ref) ->
     case get_state(Ref) of
         req_not_found ->
             req_not_found;
-        Client ->
+        #client{socket=Skt}=Client when Skt /= nil ->
             #client{transport=Transport, socket=Socket,
                     buffer=Buffer, response_state=RespState} = Client,
 
@@ -72,6 +85,21 @@ cancel_request(Ref) when is_reference(Ref) ->
                         Error ->
                             Error
                     end;
+                Error ->
+                    Error
+            end;
+        Client ->
+            %% remove the request
+            erase(Ref),
+
+            #client{transport=Transport, socket=Socket,
+                    buffer=Buffer, response_state=RespState} = Client,
+
+            %% stop to monitor the request
+            case gen_server:call(?MODULE, {cancel_request, Ref}) of
+                ok ->
+                    %% return the latest state
+                    {ok, {Transport, Socket, Buffer, RespState}};
                 Error ->
                     Error
             end
@@ -157,9 +185,9 @@ async_response_pid(Ref) ->
     case ets:lookup(?REFS, Ref) of
         [] ->
             {error, req_not_found};
-        [{Ref, {_, nil}}] ->
+        [{Ref, {_, nil, _}}] ->
             {error, req_not_async};
-        [{Ref, {_, Pid}}] ->
+        [{Ref, {_, Pid, _}}] ->
             {ok, Pid}
     end.
 
@@ -264,12 +292,12 @@ init(_) ->
     {ok, dict:new()}.
 
 
-handle_call({new_request, Pid, Ref}, _From, Pids) ->
+handle_call({new_request, Pid, Ref, Pool}, _From, Pids) ->
     %% link the request owner
     link(Pid),
     %% store the pid
     Pids2 = dict:store(Pid, {Ref, owner}, Pids),
-    ets:insert(?REFS, {Ref, {Pid, nil}}),
+    ets:insert(?REFS, {Ref, {Pid, nil, Pool}}),
     {reply, ok, Pids2};
 
 handle_call({start_async_response, Ref, StreamTo, Client}, _From, State) ->
@@ -284,10 +312,10 @@ handle_call({start_async_response, Ref, StreamTo, Client}, _From, State) ->
 handle_call({stop_async_response, Ref, To}, _From, Pids) ->
     case ets:lookup(?REFS, Ref) of
         [] -> {reply, {ok, Ref}, Pids};
-        [{Ref, {_Owner, nil}}] ->
+        [{Ref, {_Owner, nil, _Pool}}] ->
             %% there is no async request to handle, just return
             {ok, Ref};
-        [{Ref, {Owner, Stream}}] ->
+        [{Ref, {Owner, Stream, Pool}}] ->
             %% tell to the stream to stop
             Stream ! {Ref, stop_async, self()},
             receive
@@ -297,7 +325,7 @@ handle_call({stop_async_response, Ref, To}, _From, Pids) ->
                     %% in another process, make sure to unlink the old owner
                     %% and link the new one.
                     unlink(Stream),
-                    ets:insert(?REFS, {Ref, {To, nil}}),
+                    ets:insert(?REFS, {Ref, {To, nil, Pool}}),
                     Pids1 = dict:erase(Stream, Pids),
 
                     Pids2 = case To of
@@ -324,32 +352,38 @@ handle_call({stop_async_response, Ref, To}, _From, Pids) ->
 handle_call({controlling_process, Ref, Pid}, _From, Pids) ->
     case ets:lookup(?REFS, Ref) of
         [] -> {reply, badarg, Pids};
-        [{Ref, {Pid, _}}] ->
+        [{Ref, {Pid, _, _}}] ->
             %% the request is already controlled by this process just return
             {reply, ok, Pids};
-        [{Ref, {Owner, Stream}}] ->
+        [{Ref, {Owner, Stream, Pool}}] ->
             %% new owner, link it.
             unlink(Owner),
             link(Pid),
             Pids2 = dict:store(Pid, {Ref, owner}, dict:erase(Owner, Pids)),
-            ets:insert(?REFS, {Ref, {Pid, Stream}}),
+            ets:insert(?REFS, {Ref, {Pid, Stream, Pool}}),
             {reply, ok, Pids2}
     end;
 
 handle_call({cancel_request, Ref}, _From, Pids) ->
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     case ets:lookup(?REFS, Ref) of
         [] -> {reply, badarg, Pids};
-        [{Ref, {Owner, nil}}] ->
+        [{Ref, {Owner, nil, Pool}}] ->
             %% no stream just cancel the request and unlink the owner.
             unlink(Owner),
             ets:delete(?REFS, Ref),
             Pids2 = dict:erase(Owner, Pids),
+            %% notify the pool that the request have been canceled
+            PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
             {reply, ok, Pids2};
-        [{Ref, {Owner, Stream}}] when is_pid(Stream) ->
+        [{Ref, {Owner, Stream, Pool}}] when is_pid(Stream) ->
             unlink(Owner),
             unlink(Stream),
             Pids2 = dict:erase(Stream, dict:erase(Owner, Pids)),
             ets:delete(?REFS, Ref),
+            %% notify the pool that the request have been canceled
+            PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
+            %% terminate the async response
             case terminate_async_response(Stream) of
                 ok ->
                     {reply, ok, Pids2};
@@ -382,7 +416,7 @@ terminate(_Reason, _Ring) ->
 
 do_start_async_response(Ref, StreamTo, Client, Pids) ->
     %% get current owner
-    [{Ref, {Owner, _}}] = ets:lookup(?REFS, Ref),
+    [{Ref, {Owner, _, Pool}}] = ets:lookup(?REFS, Ref),
 
     %% if not stream target we use the owner
     StreamTo2 = case StreamTo of
@@ -393,7 +427,7 @@ do_start_async_response(Ref, StreamTo, Client, Pids) ->
     %% start the stream process
     case catch hackney_stream:start_link(StreamTo2, Ref, Client) of
         {ok, Pid} when is_pid(Pid) ->
-            ets:insert(?REFS, {Ref, {StreamTo2, Pid}}),
+            ets:insert(?REFS, {Ref, {StreamTo2, Pid, Pool}}),
             Pids2 = case StreamTo2 of
                         Owner ->
                             dict:store(Pid, {Ref, stream}, Pids);
@@ -423,7 +457,7 @@ handle_exit(Pid, {Ref, stream}, Reason, Pids) ->
         [] ->
             %% ref already removed just return
             {noreply, Pids1};
-        [{Ref, {Owner, Pid}}] ->
+        [{Ref, {Owner, Pid, Pool}}] ->
             %% unlink the owner
             unlink(Owner),
             Pids2 = dict:erase(Pid, Pids1),
@@ -437,25 +471,33 @@ handle_exit(Pid, {Ref, stream}, Reason, Pids) ->
             %% remove the reference
             ets:delete(?REFS, Ref),
             ets:delete(?MODULE, Ref),
+
+            %% notify the pool that the request have been canceled
+            PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+            PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, Reason}),
+
             %% reply
             {noreply, Pids2}
     end;
 %% owner exited
-handle_exit(Pid, {Ref, owner}, _Reason, Pids) ->
+handle_exit(Pid, {Ref, owner}, Reason, Pids) ->
+    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     %% delete the pid from our list
     Pids1 = dict:erase(Pid, Pids),
     case ets:lookup(?REFS, Ref) of
         [] ->
             %% ref already removed just return
             {noreply, Pids1};
-        [{Ref, {Pid, nil}}] ->
+        [{Ref, {Pid, nil, Pool}}] ->
             %% no stream
             %% remove the reference
             ets:delete(?REFS, Ref),
             ets:delete(?MODULE, Ref),
+            %% notify the pool that the request have been canceled
+            PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
             %% reply
             {noreply, Pids1};
-        [{Ref, {Pid, Stream}}] ->
+        [{Ref, {Pid, Stream, Pool}}] ->
             unlink(Stream),
             Pids2 = dict:erase(Stream, Pids1),
             %% terminate the async stream
@@ -463,6 +505,8 @@ handle_exit(Pid, {Ref, owner}, _Reason, Pids) ->
             %% remove the reference
             ets:delete(?REFS, Ref),
             ets:delete(?MODULE, Ref),
+            %% notify the pool that the request have been canceled
+            PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
             {noreply, Pids2}
     end.
 
