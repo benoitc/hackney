@@ -13,7 +13,7 @@
                         public_key,
                         ssl,
                         idna]},
-        {included_applications, []},
+        {included_applications, [ssl_verify_hostname]},
         {mod, { hackney_app, []}},
         {env, [{timeout, 150000},
                {max_connections, 50},

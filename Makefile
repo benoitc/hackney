@@ -34,6 +34,16 @@ devdeps:
 	$(REBAR) -C rebar_dev.config get-deps
 
 
+# CA generation
+#
+CA_BUNDLE_BIN=./mk-ca-bundle.pl
+CA_BUNDLE=ca-bundle.crt
+
+mkcert:
+	$(CA_BUNDLE_BIN) -u
+	mv $(CA_BUNDLE) priv/
+
+
 # Mimetypes module generator.
 
 GEN_URL = http://svn.apache.org/repos/asf/httpd/httpd/trunk/docs/conf/mime.types

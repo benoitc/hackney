@@ -216,7 +216,15 @@ do_connect(Host, Port, Transport, #client{options=Opts}=Client0, Type) ->
                     ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
                 _ ->
-                       ConnectOpts1
+                    CACertFile = filename:join(hackney_util:privdir(),
+                                               "ca-bundle.crt"),
+                    SslOpts = [{verify_fun, {fun ssl_verify_hostname:verify_fun/3,
+                                             [{check_hostname, Host}]}},
+                               {cacertfile, CACertFile },
+                               {server_name_indication, Host},
+                               {verify, verify_peer}, {depth, 99}],
+
+                    ConnectOpts1 ++ SslOpts
             end;
         {hackney_ssl_transport, SslOpts} ->
             ConnectOpts1 ++ SslOpts;

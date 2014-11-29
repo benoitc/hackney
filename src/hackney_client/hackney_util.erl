@@ -12,6 +12,7 @@
 -export([require/1]).
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
+-export([privdir/0]).
 
 -include("hackney.hrl").
 
@@ -85,4 +86,14 @@ is_ipv6(Host) ->
                             false
                     end
             end
+    end.
+
+privdir() ->
+    case code:priv_dir(hackney) of
+        {error, _} ->
+            %% try to get relative priv dir. useful for tests.
+            EbinDir = filename:dirname(code:which(?MODULE)),
+            AppPath = filename:dirname(EbinDir),
+            filename:join(AppPath, "priv");
+        Dir -> Dir
     end.
