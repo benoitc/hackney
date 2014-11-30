@@ -59,7 +59,11 @@ encode a list of properties in a form.
 
 ### make_multipart_stream/2 ###
 
-`make_multipart_stream(Parts, Boundary) -> any()`
+
+<pre><code>
+make_multipart_stream(Parts::list(), Boundary::binary()) -&gt; {function(), list()}
+</code></pre>
+<br />
 
 
 <a name="perform-2"></a>

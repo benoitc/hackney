@@ -232,7 +232,7 @@ be woken later by the resume function
 
 
 <pre><code>
-request(URL::binary() | list()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
+request(URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -243,7 +243,7 @@ make a request
 
 
 <pre><code>
-request(Method::term(), URL::binary() | list()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
+request(Method::term(), URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -254,7 +254,7 @@ make a request
 
 
 <pre><code>
-request(Method::term(), URL::binary() | list(), Headers::list()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
+request(Method::term(), URL::binary() | list(), Headers::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -265,7 +265,7 @@ make a request
 
 
 <pre><code>
-request(Method::term(), URL::binary() | list(), Headers::list(), Body::term()) -&gt; {ok, integer(), list(), #client{}} | {error, term()}
+request(Method::term(), URL::binary() | list(), Headers::list(), Body::term()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 

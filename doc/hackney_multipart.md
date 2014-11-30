@@ -150,7 +150,11 @@ part_result() = <a href="#type-headers">headers()</a> | eof
 
 ### boundary/0 ###
 
-`boundary() -> any()`
+
+<pre><code>
+boundary() -&gt; binary()
+</code></pre>
+<br />
 
 
 <a name="decode_form-2"></a>
@@ -184,7 +188,11 @@ headers.
 
 ### encode_form/2 ###
 
-`encode_form(Parts, Boundary) -> any()`
+
+<pre><code>
+encode_form(Parts::list(), Boundary::binary()) -&gt; {binary(), integer()}
+</code></pre>
+<br />
 
 
 <a name="len_mp_stream-2"></a>
@@ -213,7 +221,7 @@ headers.
 
 
 <pre><code>
-mp_data_header(X1::{Name::binary(), DataLen::integer()} | {Name::binary(), DataLen::integer(), ExtraHeaders::[{binary(), binary()}]}, Boundary::binary()) -&gt; {binary(), DataLen::integer()}
+mp_data_header(X1::{Name::binary(), DataLen::integer()} | {Name::binary(), DataLen::integer(), ExtraHeaders::[{binary(), binary()}]} | {Name::binary(), DataLen::integer(), {Disposition::binary(), Params::[{binary(), binary()}]}, ExtraHeaders::[{binary(), binary()}]}, Boundary::binary()) -&gt; {binary(), DataLen::integer()}
 </code></pre>
 <br />
 
@@ -231,7 +239,7 @@ return the boundary ennding a multipart
 
 
 <pre><code>
-mp_file_header(X1::{file, Path::binary()} | {file, Path::binary(), ExtraHeaders::[{binary(), binary()}]}, Boundary::binary()) -&gt; {binary(), FileSize::integer()}
+mp_file_header(X1::{file, Path::binary()} | {file, Path::binary(), ExtraHeaders::[{binary(), binary()}]} | {file, Path::binary(), {Disposition::binary(), Params::[{binary(), binary()}]}, ExtraHeaders::[{binary(), binary()}]}, Boundary::binary()) -&gt; {binary(), FileSize::integer()}
 </code></pre>
 <br />
 

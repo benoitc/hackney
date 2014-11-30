@@ -13,6 +13,9 @@
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
 -export([privdir/0]).
+-export([mod_metrics/0]).
+-export([to_atom/1]).
+
 
 -include("hackney.hrl").
 
@@ -97,3 +100,32 @@ privdir() ->
             filename:join(AppPath, "priv");
         Dir -> Dir
     end.
+
+
+mod_metrics() ->
+    case application:get_env(hackney, mod_metrics) of
+        {ok, folsom} -> hackney_folsom_metrics;
+        {ok, exometer} -> hackney_exometer_metrics;
+        {ok, dummy} -> hackney_dummy_metrics;
+        {ok, Mod} ->
+            _ = code:ensure_loaded(Mod),
+            case erlang:function_exported(Mod, new, 2) of
+                false ->
+                    {error, badarg};
+                true ->
+                    Mod
+            end;
+        _ -> hackney_dummy_metrics
+    end.
+
+
+to_atom(V) when is_list(V) ->
+    try
+        list_to_existing_atom(V)
+    catch
+        _:_ -> list_to_atom(V)
+    end;
+to_atom(V) when is_binary(V) ->
+    to_atom(binary_to_list(V));
+to_atom(V) when is_atom(V) ->
+    V.

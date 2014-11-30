@@ -418,6 +418,49 @@ proxy, use the following settings:
 SSL and TCP connections can be forwarded via a socks5 proxy. hackney is
 automatically upgrading to an SSL connection if needed.
 
+### Metrics
+
+Hackney offers the following metrics
+
+You can enable metrics collection by adding a `mod_metrics` entry to hackney’s
+app config. Metrics are disabled by default. The module specified must have an
+API matching that of the hackney metrics module.
+
+To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
+folsom}`, or if you want to use
+[exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
+exometers}` and ensure that folsom or exometer is in your code path and has
+been started.
+
+#### Generic Hackney metrics
+
+|Name                     |Type   | Description                        |
+|-------------------------|-------|------------------------------------|
+|hackney.nb_requests      |counter| Number of running requests         |
+|hackney.total_requests   |counter| Total number of requests           |
+|hackney.finished_requests|counter| Total number of requests finished  |
+
+#### Metrics per Hosts
+
+|Name                        |Type     | Description                |
+|----------------------------|---------|----------------------------|
+|hackney.HOST.nb_requests    |counter  | Number of running requests |
+|hackney.HOST.request_time   |histogram| Request time               |
+|hackney.HOST.connect_time   |counter  | Connect time               |
+|hackney.HOST.response_time  |histogram| Response time              |
+|hackney.HOST.connect_timeout|counter  | Number of connect timeout  |
+|hackney.HOST.connect_error  |counter  | Number of timeout errors   |
+
+#### Metrics per Pool
+
+|Name                          |Type       | Description                                                        |
+|------------------------------|-----------|--------------------------------------------------------------------|
+|hackney.POOLNAME.take_rate    |meter    | meter recording rate at which a connection is retrieved from the pool|
+|hackney.POOLNAME.no_socket    |counter  | Count of new connections                                             |
+|hackney.POOLNAME.in_use_count |histogram| How many connections from the pool are used                          |
+|hackney.POOLNAME.free_count   |counter  | Number of free sockets in the pool                                   |
+|hackney.POOLNAME.queue_counter|histogram| queued clients                                                       |
+
 ## Contribute
 
 For issues, comments or feedback please [create an
@@ -435,24 +478,6 @@ $ make dev ; # compile & get deps
 $ make devclean ; # clean all files
 ```
 
-For successfully running the hackney test suite locally it is
-necessary to install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
-
-An example installation using virtualenv::
-
-```sh
-$ mkvirtualenv hackney
-$ pip install gunicorn httpbin
-```
-
-Running the tests:
-
-```sh
-$ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
-$ kill `cat httpbin.pid`
-```
-
 
 ## Modules ##
 
@@ -465,6 +490,9 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_dummy_metrics.md" class="module">hackney_dummy_metrics</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_exometer_metrics.md" class="module">hackney_exometer_metrics</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_folsom_metrics.md" class="module">hackney_folsom_metrics</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>

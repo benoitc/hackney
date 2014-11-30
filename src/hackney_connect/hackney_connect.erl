@@ -56,8 +56,12 @@ create_connection(Transport, Host, Port, Options, Dynamic)
     Async =  proplists:get_value(async, Options, false),
     StreamTo = proplists:get_value(stream_to, Options, false),
 
+    %% get mod metrics
+    Mod = hackney_util:mod_metrics(),
+
     %% initial state
-    InitialState = #client{transport=Transport,
+    InitialState = #client{mod_metrics=Mod,
+                           transport=Transport,
                            host=Host,
                            port=Port,
                            netloc=Netloc,
@@ -72,13 +76,8 @@ create_connection(Transport, Host, Port, Options, Dynamic)
                            buffer = <<>>},
     %% if we use a pool then checkout the connection from the pool, else
     %% connect the socket to the remote
-    case is_pool(InitialState) of
-        false ->
-            %% the client won't use any pool
-            do_connect(Host, Port, Transport, InitialState);
-        true ->
-            socket_from_pool(Host, Port, Transport, InitialState)
-    end.
+    %%
+    reconnect(Host, Port, Transport, InitialState).
 
 
 %% @doc connect a socket and create a client state.
@@ -97,7 +96,7 @@ maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
                             redirect=nil},
     reconnect(Host, Port, Transport, Client1);
 maybe_connect(#client{redirect=nil}=Client) ->
-    {ok, Client};
+    {ok, check_mod_metrics(Client)};
 maybe_connect(#client{redirect=Redirect}=Client) ->
     #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
     %% the connection was redirected. If we are using a pool, checkin
@@ -154,9 +153,9 @@ reconnect(Host, Port, Transport, State) ->
     case is_pool(State) of
         false ->
             %% the client won't use any pool
-            do_connect(Host, Port, Transport, State);
+            do_connect(Host, Port, Transport, check_mod_metrics(State));
         true ->
-            socket_from_pool(Host, Port, Transport, State)
+            socket_from_pool(Host, Port, Transport, check_mod_metrics(State))
     end.
 
 %%
@@ -165,12 +164,16 @@ reconnect(Host, Port, Transport, State) ->
 
 socket_from_pool(Host, Port, Transport, Client0) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+    PoolName = proplists:get_value(pool, Client0#client.options, default),
+    Mod = Client0#client.mod_metrics,
 
     %% new request
     {_RequestRef, Client} = hackney_manager:new_request(Client0),
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
+            Mod:update_meter([hackney_pool, PoolName, take_rate], 1),
+
             Client1 = Client#client{socket=Skt,
                                     socket_ref=Ref,
                                     pool_handler=PoolHandler,
@@ -179,6 +182,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, no_socket, Ref} ->
+            Mod:increment_counter([hackney_pool, PoolName, no_socket]),
             do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
                        pool);
         Error ->
@@ -190,7 +194,9 @@ do_connect(Host, Port, Transport, Client) ->
 
 
 
-do_connect(Host, Port, Transport, #client{options=Opts}=Client0, Type) ->
+do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
+                                          options=Opts}=Client0, Type) ->
+    Begin = os:timestamp(),
     {_RequestRef, Client} = case Type of
                                pool ->
                                    {Client0#client.request_ref, Client0};
@@ -234,17 +240,22 @@ do_connect(Host, Port, Transport, #client{options=Opts}=Client0, Type) ->
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
+            ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
+            Mod:update_histogram([hackney, Host, connect_time], ConnectTime),
             Client1 = Client#client{socket=Skt,
                                     state = connected},
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, timeout} ->
+            Mod:increment_counter([hackney, Host, connect_timeout]),
             hackney_manager:cancel_request(Client),
             {error, connect_timeout};
         Error ->
+            Mod:increment_counter([hackney, Host, connect_error]),
             hackney_manager:cancel_request(Client),
             Error
     end.
+
 
 use_default_pool() ->
     case application:get_env(hackney, use_default_pool) of
@@ -253,3 +264,9 @@ use_default_pool() ->
         _ ->
             true
     end.
+
+check_mod_metrics(#client{mod_metrics=Mod}=State)
+  when Mod /= nil, Mod /= undefined ->
+    State;
+check_mod_metrics(State) ->
+    State#client{mod_metrics=hackney_util:mod_metrics()}.

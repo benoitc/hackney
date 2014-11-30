@@ -133,14 +133,22 @@ Create a binary header
 
 ### new/0 ###
 
-`new() -> any()`
+
+<pre><code>
+new() -&gt; dict()
+</code></pre>
+<br />
 
 initialise an header dict
 <a name="new-1"></a>
 
 ### new/1 ###
 
-`new(D) -> any()`
+
+<pre><code>
+new(D::{dict, dict()} | list()) -&gt; dict()
+</code></pre>
+<br />
 
 
 <a name="parse-2"></a>
@@ -149,7 +157,7 @@ initialise an header dict
 
 
 <pre><code>
-parse(Name::binary(), Headers::list()) -&gt; any() | undefined | {error, badarg}
+parse(Name::binary(), Headers::list() | dict()) -&gt; any() | undefined | {error, badarg}
 </code></pre>
 <br />
 

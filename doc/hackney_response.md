@@ -142,7 +142,7 @@ Start the response It parse the request lines and headers.
 
 
 <pre><code>
-stream_multipart(Client::#client{}) -&gt; {headers, list(), #client{}} | {body, binary(), #client{}} | {eof, #client{}} | {end_of_part, #client{}} | {error, term()}
+stream_multipart(Client::#client{}) -&gt; {headers, list(), #client{}} | {body, binary(), #client{}} | {eof | end_of_part | mp_mixed | mp_mixed_eof, #client{}}
 </code></pre>
 <br />
 

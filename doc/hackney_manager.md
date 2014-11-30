@@ -70,7 +70,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### handle_call/3 ###
 
-`handle_call(X1, From, Pids) -> any()`
+`handle_call(X1, From, Mstate) -> any()`
 
 
 <a name="handle_cast-2"></a>
@@ -91,7 +91,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### handle_info/2 ###
 
-`handle_info(Info, Pids) -> any()`
+`handle_info(Info, State) -> any()`
 
 
 <a name="init-1"></a>
@@ -105,7 +105,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### new_request/1 ###
 
-`new_request(InitialState) -> any()`
+`new_request(Client) -> any()`
 
 
 <a name="start_async_response-1"></a>
@@ -154,7 +154,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### terminate/2 ###
 
-`terminate(Reason, Ring) -> any()`
+`terminate(Reason, State) -> any()`
 
 
 <a name="update_state-1"></a>

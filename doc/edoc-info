@@ -2,9 +2,10 @@
 {application,hackney}.
 {packages,[]}.
 {modules,[hackney,hackney_app,hackney_bstr,hackney_connect,hackney_cookie,
-          hackney_date,hackney_deps,hackney_headers,hackney_http,
-          hackney_http_connect,hackney_idna,hackney_manager,hackney_mimetypes,
-          hackney_multipart,hackney_pool,hackney_pool_handler,hackney_request,
-          hackney_response,hackney_socks5,hackney_ssl_transport,
-          hackney_stream,hackney_sup,hackney_tcp_transport,hackney_url,
-          hackney_util]}.
+          hackney_date,hackney_deps,hackney_dummy_metrics,
+          hackney_exometer_metrics,hackney_folsom_metrics,hackney_headers,
+          hackney_http,hackney_http_connect,hackney_idna,hackney_manager,
+          hackney_mimetypes,hackney_multipart,hackney_pool,
+          hackney_pool_handler,hackney_request,hackney_response,
+          hackney_socks5,hackney_ssl_transport,hackney_stream,hackney_sup,
+          hackney_tcp_transport,hackney_url,hackney_util]}.
