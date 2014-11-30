@@ -74,7 +74,7 @@ increment_counter(Name::any(), Value::pos_integer()) -&gt; ok | {error, term()}
 
 
 <pre><code>
-new(X1::atom(), Name::any()) -&gt; ok | {error, metric_exists | unsupported_type}
+new(X1::atom(), Name::any()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 

@@ -13,7 +13,7 @@ dummy metric module.
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#decrement_counter-1">decrement_counter/1</a></td><td></td></tr><tr><td valign="top"><a href="#decrement_counter-2">decrement_counter/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#increment_counter-1">increment_counter/1</a></td><td></td></tr><tr><td valign="top"><a href="#increment_counter-2">increment_counter/2</a></td><td></td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_gauge-2">update_gauge/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_histogram-2">update_histogram/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#decrement_counter-1">decrement_counter/1</a></td><td></td></tr><tr><td valign="top"><a href="#decrement_counter-2">decrement_counter/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#increment_counter-1">increment_counter/1</a></td><td></td></tr><tr><td valign="top"><a href="#increment_counter-2">increment_counter/2</a></td><td></td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_gauge-2">update_gauge/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_histogram-2">update_histogram/2</a></td><td></td></tr><tr><td valign="top"><a href="#update_meter-2">update_meter/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -74,5 +74,12 @@ dummy metric module.
 ### update_histogram/2 ###
 
 `update_histogram(X1, Fun) -> any()`
+
+
+<a name="update_meter-2"></a>
+
+### update_meter/2 ###
+
+`update_meter(X1, X2) -> any()`
 
 
