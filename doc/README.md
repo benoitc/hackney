@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2014 Benoît Chesneau.
 
-__Version:__ 0.15.2
+__Version:__ 1.0.0
 
 # hackney
 
@@ -478,7 +478,8 @@ $ make dev ; # compile & get deps
 $ make devclean ; # clean all files
 ```
 
-For successfully running the hackney test suite locally it is necessary to install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
+For successfully running the hackney test suite locally it is necessary to
+install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
 
 An example installation using virtualenv::
 
