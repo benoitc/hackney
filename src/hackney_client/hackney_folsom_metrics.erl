@@ -17,27 +17,15 @@
     update_gauge/2,
     update_meter/2]).
 
--spec new(atom(), any()) -> ok | {error, metric_exists | unsupported_type}.
+-spec new(atom(), any()) -> ok | {error, term()}.
 new(counter, Name) ->
-    case folsom_metrics:new_counter(Name) of
-        ok -> ok;
-        {error, Name, metric_already_exists} -> {error, metric_exists}
-    end;
+    folsom_metrics:new_counter(Name);
 new(histogram, Name) ->
-    case folsom_metrics:new_histogram(Name) of
-        ok -> ok;
-        {error, Name, metric_already_exists} -> {error, metric_exists}
-    end;
+    folsom_metrics:new_histogram(Name);
 new(gauge, Name) ->
-    case folsom_metrics:new_gauge(Name) of
-        ok -> ok;
-        {error, Name, metric_already_exists} -> {error, metric_exists}
-    end;
+    folsom_metrics:new_gauge(Name);
 new(meter, Name) ->
-    case folsom_metrics:new_meter(Name) of
-        ok -> ok;
-        {error, Name, metric_already_exists} -> {error, metric_exists}
-    end;
+    folsom_metrics:new_meter(Name);
 new(_, _) ->
     {error, unsupported_type}.
 
