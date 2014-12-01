@@ -3,8 +3,9 @@
 1.0.1 - 2014/12/01
 ------------------
 
-- update default certification file authority. Make sure we can valid all SSL
+- update default certification authority file. Make sure we can validate all SSL
   connections even on the AWS platform.
+- fix typo
 
 1.0.0 - 2014/11/30
 ------------------
