@@ -313,7 +313,7 @@ handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
                     {noreply, State#state{clients = Clients2}};
                 {ok, {From, Ref2}, Queues2} ->
                     NbWaiters = State#state.nb_waiters - 1,
-                    Mod:update_historgram([hackney_pool, State#state.name,
+                    Mod:update_histogram([hackney_pool, State#state.name,
                                            queue_count], NbWaiters),
                     gen_server:reply(From, {error, no_socket, self()}),
                     State2 = State#state{queues = Queues2, clients = Clients2,
