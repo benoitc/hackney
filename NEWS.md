@@ -1,5 +1,11 @@
 # NEWS
 
+1.0.1 - 2014/12/01
+------------------
+
+- update default certification file authority. Make sure we can valid all SSL
+  connections even on the AWS platform.
+
 1.0.0 - 2014/11/30
 ------------------
 
