@@ -51,7 +51,7 @@ CA_BUNDLE_BIN=./mk-ca-bundle.pl
 CA_BUNDLE=ca-bundle.crt
 
 mkcert:
-	$(CA_BUNDLE_BIN) -u
+	$(CA_BUNDLE_BIN) -p ALL:ALL -l -u
 	mv $(CA_BUNDLE) priv/
 
 
