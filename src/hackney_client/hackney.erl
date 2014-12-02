@@ -772,7 +772,9 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     #hackney_url{transport=RedirectTransport,
                  host=RedirectHost,
                  port=RedirectPort}=RedirectUrl,
-    RedirectRequest = make_request(Method, RedirectUrl, Headers, Body,
+    NewHeaders = lists:keystore(<<"Host">>, 1, Headers,
+                                {<<"Host">>, RedirectHost}),
+    RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
                                    Client#client.options, false),
     %% make a request without any redirection
     #client{transport=Transport,
