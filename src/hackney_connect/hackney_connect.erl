@@ -234,7 +234,6 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
                     ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
                 {_, host} ->
-                    io:format("ici~n", []),
                     CACertFile = filename:join(hackney_util:privdir(),
                                                "ca-bundle.crt"),
                     SslOpts = [{verify_fun, {fun ssl_verify_hostname:verify_fun/3,
