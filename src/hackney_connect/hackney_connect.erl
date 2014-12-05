@@ -17,14 +17,10 @@
 
 -include("hackney.hrl").
 
--ifdef(broken_ssl).
+-ifdef(no_ssl_validation).
 -define(VALIDATE_SSL, false).
 -else.
--ifdef(no_ssl_name_validation).
--define(VALIDATE_SSL, normal).
--else.
 -define(VALIDATE_SSL, host).
--endif.
 -endif.
 
 connect(Transport, Host, Port) ->
@@ -243,13 +239,6 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
                                {verify, verify_peer}, {depth, 99}],
 
                     ConnectOpts1 ++ SslOpts;
-                {_, normal} ->
-                    CACertFile = filename:join(hackney_util:privdir(),
-                                               "ca-bundle.crt"),
-                    SslOpts = [{cacertfile, CACertFile },
-                               {verify, verify_peer}, {depth, 99}],
-
-                    ConnectOpts1 + SslOpts;
                 _ ->
                     ConnectOpts1
             end;
