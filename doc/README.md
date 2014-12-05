@@ -1,25 +1,10 @@
-%%==============================================================================
-%% Copyright 2013 Benoît Chesneau
-%%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
-%%
-%% http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
-%%==============================================================================
 
 
-@copyright 2012-2014 Benoît Chesneau.
-@version 1.0.3
-@title hackney - HTTP client library in Erlang
+# hackney - HTTP client library in Erlang #
 
-@doc
+Copyright (c) 2012-2014 Benoît Chesneau.
+
+__Version:__ 1.0.3
 
 # hackney
 
@@ -28,7 +13,7 @@
 Main features:
 
 - no message passing (except for asynchronous responses): response is
-  directly streamed to the current process and state is kept in a `#client{}' record.
+  directly streamed to the current process and state is kept in a `#client{}` record.
 - binary streams
 - SSL support
 - Keepalive handling
@@ -39,11 +24,10 @@ Main features:
 - chunked encoding support
 - Can send files using the sendfile API
 - Optional socket pool
-- REST syntax: `hackney:Method(URL)' (where a method can be get, post, put, delete, ...)
+- REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
 **Supported versions** of Erlang are R16B03-1, 17.3.4 and above. It is
 reported to work with R14B04 and R15B03-1.
-
 
 **WARNING**: Erlang 17.3 and 17.3.1 have a broken SSL module which
 prevents the usage of SSL connection with some servers. You **must** upgrade
@@ -55,23 +39,21 @@ or superior.
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
 information on what still needs to be done.
 
-
 #### Useful modules are:
 
-- {@link hackney}: main module. It contains all HTTP client functions.
-- {@link hackney_http}: HTTP parser in pure Erlang. This parser is able
-  to parse HTTP responses and requests in a streaming fashion. If not set
+- [`hackney`](hackney.md): main module. It contains all HTTP client functions.
+- [`hackney_http`](hackney_http.md): HTTP parser in pure Erlang. This parser is able
+to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetected if it's a request or a response that's needed.
 
-- {@link hackney_headers} Module to manipulate HTTP headers.
-- {@link hackney_cookie}: Module to manipulate cookies.
-- {@link hackney_multipart}: Module to encode/decode multipart.
-- {@link hackney_url}: Module to parse and create URIs.
-- {@link hackney_date}: Module to parse HTTP dates.
+- [`hackney_headers`](hackney_headers.md) Module to manipulate HTTP headers.
+- [`hackney_cookie`](hackney_cookie.md): Module to manipulate cookies.
+- [`hackney_multipart`](hackney_multipart.md): Module to encode/decode multipart.
+- [`hackney_url`](hackney_url.md): Module to parse and create URIs.
+- [`hackney_date`](hackney_date.md): Module to parse HTTP dates.
 
 Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
 to get the last changelog.
-
 
 ## Installation
 
@@ -84,14 +66,15 @@ files and documentation.
 To run tests run 'make test'.
 To generate doc, run 'make doc'.
 
-
 Or add it to your rebar config
 
-<pre lang="erlang">
+```erlang
+
 {deps, [
     ....
     {hackney, ".*", {git, "git://github.com/benoitc/hackney.git", {branch, "master"}}}
-]}.</pre>
+]}.
+```
 
 ## Basic usage
 
@@ -106,68 +89,77 @@ The hackney application will start the default socket pool for you.
 
 To start in the console run:
 
-<pre lang="erlang-repl">
+```erlang-repl
+
 $ erl -pa ebin -pa deps/*/ebin
 1>> hackney:start().
-ok</pre>
+ok
+```
 
 It will start hackney and all of the application it depends on:
 
-<pre lang="erlang">
+```erlang
+
 application:start(crypto),
 application:start(public_key),
 application:start(ssl),
-application:start(hackney).</pre>
+application:start(hackney).
+```
 
 Or add hackney to the applications property of your .app in a release
-
 
 ### Simple request
 
 Do a simple request that will return a client state:
 
-<pre lang="erlang">
+```erlang
+
 Method = get,
-URL = &lt;&lt;"https://friendpaste.com">>,
+URL = <<"https://friendpaste.com">>,
 Headers = [],
-Payload = &lt;&lt;>>,
+Payload = <<>>,
 Options = [],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL,
                                                         Headers, Payload,
-                                                        Options).</pre>
+                                                        Options).
+```
 
-The request method returns the tuple `{ok, StatusCode, Headers, ClientRef}'
-or `{error, Reason}'. A `ClientRef' is simply a reference to the current
+The request method returns the tuple `{ok, StatusCode, Headers, ClientRef}`
+or `{error, Reason}`. A `ClientRef` is simply a reference to the current
 request that you can reuse.
-
 
 If you prefer the REST syntax, you can also do:
 
-<pre lang="erlang">hackney:Method(URL, Headers, Payload, Options)</pre>
+```erlang
+hackney:Method(URL, Headers, Payload, Options)
+```
 
-where `Method', can be any HTTP method in lowercase.
-
+where `Method`, can be any HTTP method in lowercase.
 
 ### Read the body
 
-<pre lang="erlang">{ok, Body} = hackney:body(Client).</pre>
+```erlang
+{ok, Body} = hackney:body(Client).
+```
 
-`hackney:body/1' fetch the body. To fetch it by chunk you can use the
-`hackney:stream_body/1' function:
+`hackney:body/1` fetch the body. To fetch it by chunk you can use the
+`hackney:stream_body/1` function:
 
-<pre lang="erlang">
+```erlang
+
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 	case stream_body(Ref) of
 		{ok, Data} ->
-			read_body(MaxLength, Ref, &lt;&lt; Acc/binary, Data/binary >>);
+			read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
 		done ->
 			{ok, Acc};
 		{error, Reason} ->
 			{error, Reason}
-	end.</pre>
+	end.
+```
 
 > Note: you can also fetch a multipart response using the functions
-> `hackney:stream_multipart/1` and  `hackney:skip_multipart/1'.
+> `hackney:stream_multipart/1` and  `hackney:skip_multipart/1`.
 
 ### Reuse a connection
 
@@ -180,57 +172,60 @@ couple of requests.
 
 #### To create a connection:
 
-<pre lang="erlang">
+```erlang
+
 Transport = hackney_tcp_transport,
-Host = &lt;&lt; "https://friendpaste.com" >>,
+Host = << "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
-{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)</pre>
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
+```
 
 > To create a connection that will use an HTTP proxy use
-> `hackney_http_proxy:connect_proxy/5' instead.
+> `hackney_http_proxy:connect_proxy/5` instead.
 
 #### Make a request
 
-Once you created a connection use the `hackney:send_request/2' function
+Once you created a connection use the `hackney:send_request/2` function
 to make a request:
 
-<pre lang="erlang">
-ReqBody = &lt;&lt; "{	\"snippet\": \"some snippet\" }" >>,
-ReqHeaders = [{&lt;&lt;"Content-Type">>, &lt;&lt;"application/json">>}],
-NextPath = &lt;&lt;"/">>,
+```erlang
+
+ReqBody = << "{	\"snippet\": \"some snippet\" }" >>,
+ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
+NextPath = <<"/">>,
 NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 {ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
-{ok, Body1} = hackney:body(ConnRef),</pre>
+{ok, Body1} = hackney:body(ConnRef),
+```
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
 > If your connection supports keepalive the connection will be simply :
 
-
 ### Send a body
 
 hackney helps you send different payloads by passing different terms as
 the request body:
 
-- `{form, PropList}' : To send a form
-- `{multipart, Parts}' : to send you body using the multipart API. Parts
+- `{form, PropList}` : To send a form
+- `{multipart, Parts}` : to send you body using the multipart API. Parts
   follow this format:
-  - `eof': end the multipart request
-  - `{file, Path}': to stream a file
-  - `{file, Path, ExtraHeaders}': to stream a file
-  - `{Name, Content}': to send a full part
-  - `{Name, Content, ExtraHeaders}': to send a full part
-  - `{mp_mixed, Name, MixedBoundary}': To notify we start a part with a
+  - `eof`: end the multipart request
+  - `{file, Path}`: to stream a file
+  - `{file, Path, ExtraHeaders}`: to stream a file
+  - `{Name, Content}`: to send a full part
+  - `{Name, Content, ExtraHeaders}`: to send a full part
+  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a
     a mixed multipart content
-  - `{mp_mixed_eof, MixedBoundary}': To notify we end a part with a a
+  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a a
     mixed multipart content
-- `{file, File}' : To send a file
+- `{file, File}` : To send a file
 - Bin: To send a binary or an iolist
 
-> Note: to send a chunked request, just add the `Transfer-Encoding: chunked'
+> Note: to send a chunked request, just add the `Transfer-Encoding: chunked`
 > header to your headers. Binary and Iolist bodies will be then sent using
 > the chunked encoding.
 
@@ -239,43 +234,43 @@ the request body:
 While the default is to directly send the request and fetch the status
 and headers, if the body is set as the atom `stream` the request and
 send_request function will return {ok, Client}. Then you can use the
-function `hackney:send_body/2' to stream the request body and
-`hackney:start_response/1' to initialize the response.
+function `hackney:send_body/2` to stream the request body and
+`hackney:start_response/1` to initialize the response.
 
-> Note: The function `hackney:start_response/1' will only accept
+> Note: The function `hackney:start_response/1` will only accept
 > a Client that is waiting for a response (with a response state
-> equal to the atom `waiting').
-
+> equal to the atom `waiting`).
 
 Ex:
 
-<pre lang="erlang">
-ReqBody = &lt;&lt; "{
+```erlang
+
+ReqBody = << "{
       \"id\": \"some_paste_id2\",
       \"rev\": \"some_revision_id\",
       \"changeset\": \"changeset in unidiff format\"
 }" >>,
-ReqHeaders = [{&lt;&lt;"Content-Type">>, &lt;&lt;"application/json">>}],
-Path = &lt;&lt;"https://friendpaste.com/">>,
+ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
+Path = <<"https://friendpaste.com/">>,
 Method = post,
 {ok, ClientRef} = hackney:request(Method, Path, ReqHeaders, stream, []),
 ok  = hackney:send_body(ClientRef, ReqBody),
 {ok, _Status, _Headers, ClientRef} = hackney:start_response(ClientRef),
-{ok, Body} = hackney:body(ClientRef),</pre>
+{ok, Body} = hackney:body(ClientRef),
+```
 
 > Note: to send a **multipart** body  in a streaming fashion use the
-> `hackney:sen_multipart_body/2' function.
+> `hackney:sen_multipart_body/2` function.
 
 ### Get a response asynchronously
 
 Since the 0.6 version, hackney is able to fetch the response
-asynchronously using the `async' option:
+asynchronously using the `async` option:
 
-<pre lang="erlang">
-Url = &lt;&lt;"https://friendpaste.com/_all_languages">>,
+```erlang
+
+Url = <<"https://friendpaste.com/_all_languages">>,
 Opts = [async],
-
-
 LoopFun = fun(Loop, Ref) ->
         receive
             {hackney_response, Ref, {status, StatusInt, Reason}} ->
@@ -297,26 +292,27 @@ LoopFun = fun(Loop, Ref) ->
         end
     end.
 
-{ok, ClientRef} = hackney:get(Url, [], &lt;&lt;>>, Opts),
-LoopFun(LoopFun, ClientRef).</pre>
+{ok, ClientRef} = hackney:get(Url, [], <<>>, Opts),
+LoopFun(LoopFun, ClientRef).
+```
 
-> **Note 1**: When `{async, once}' is used the socket will receive only once.
-> To receive the other messages use the function `hackney:stream_next/1'.
+> **Note 1**: When `{async, once}` is used the socket will receive only once.
+> To receive the other messages use the function `hackney:stream_next/1`.
 
 > **Note 2**:  Asynchronous responses automatically checkout the socket at the end.
 
 > **Note 3**:  At any time you can go back and receive your response
-> synchronously using the function `hackney:stop_async/1' See the
+> synchronously using the function `hackney:stop_async/1` See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
-> **Note 4**:  When the option `{following_redirect, true}' is passed to
+> **Note 4**:  When the option `{following_redirect, true}` is passed to
 > the request, you will receive the folllowing messages on valid
 > redirection:
-> - `{redirect, To, Headers}'
-> - `{see_other, To, Headers}' for status 303 and POST requests.
+> - `{redirect, To, Headers}`
+> - `{see_other, To, Headers}` for status 303 and POST requests.
 
 > **Note 5**: You can send the messages to another process by using the
-> option `{stream_to, Pid}' .
+> option `{stream_to, Pid}` .
 
 ### Use the default pool
 
@@ -324,39 +320,44 @@ To reuse a connection globally in your application you can also use a
 socket pool. On startup, hackney launches a pool named default. To use it
 do the following:
 
-<pre lang="erlang">
+```erlang
+
 Method = get,
-URL = &lt;&lt;"https://friendpaste.com">>,
+URL = <<"https://friendpaste.com">>,
 Headers = [],
-Payload = &lt;&lt;>>,
+Payload = <<>>,
 Options = [{pool, default}],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL, Headers,
-                                                        Payload, Options).</pre>
+                                                        Payload, Options).
+```
 
-By adding the tuple `{pool, default}' to the options, hackney will use
+By adding the tuple `{pool, default}` to the options, hackney will use
 the connections stored in that pool.
 
 You can also use different pools in your application which allows
 you to maintain a group of connections.
 
-<pre lang="erlang">
+```erlang
+
 PoolName = mypool,
 Options = [{timeout, 150000}, {max_connections, 100}],
-ok = hackney_pool:start_pool(PoolName, Options),</pre>
+ok = hackney_pool:start_pool(PoolName, Options),
+```
 
-`timeout' is the time we keep the connection alive in the pool,
-`max_connections' is the number of connections maintained in the pool. Each
+`timeout` is the time we keep the connection alive in the pool,
+`max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
 
-
 To close a pool do:
 
-<pre lang="erlang">hackney_pool:stop_pool(PoolName).</pre>
+```erlang
+hackney_pool:stop_pool(PoolName).
+```
 
 > Note: Sometimes you want to always use the default pool in your app
 > without having to set the client option each time. You can now do this
-> by setting the hackney application environment key `use_default_pool'
+> by setting the hackney application environment key `use_default_pool`
 > to true.
 
 ### Use a custom pool handler.
@@ -369,54 +370,53 @@ behaviour.
 
 See for example the
 [hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
-Pool dispatcher based on dispcount].
-
-> Note: for now you can't force the pool handler / client.
-
+Pool dispatcher based on dispcount].> Note: for now you can`t force the pool handler / client.
 
 ### Automatically follow a redirection
 
-If the option `{follow_redirect, true}' is given to the request, the
+If the option `{follow_redirect, true}` is given to the request, the
 client will be able to automatically follow the redirection and
 retrieve the body. The maximum number of connections can be set using the
-`{max_redirect, Max}' option. Default is 5.
+`{max_redirect, Max}` option. Default is 5.
 
-The client will follow redirects on 301, 302 &amp; 307 if the method is
+The client will follow redirects on 301, 302 & 307 if the method is
 get or head. If another method is used the tuple
-`{ok, maybe_redirect, Status, Headers, Client}' will be returned. It will
+`{ok, maybe_redirect, Status, Headers, Client}` will be returned. It will
 only follow 303 redirects (see other) if the method is a POST.
 
-Last Location is stored in the `location' property of the client state.
+Last Location is stored in the `location` property of the client state.
 
 ex:
 
-<pre lang="erlang">
+```erlang
+
 Method = get,
 URL = "http://friendpaste.com/",
-ReqHeaders = [{&lt;&lt;"accept-encoding">>, &lt;&lt;"identity">>}],
-ReqBody = &lt;&lt;>>,
+ReqHeaders = [{<<"accept-encoding">>, <<"identity">>}],
+ReqBody = <<>>,
 Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
                                      ReqBody, Options),
-{ok, Body1} = hackney:body(Ref).</pre>
+{ok, Body1} = hackney:body(Ref).
+```
 
 ### Proxy a connection
 
 #### HTTP Proxy
 
-To use an HTTP tunnel add the option `{proxy, ProxyUrl}' where
-`ProxyUrl' can be a simple url or an `{Host, Port}' tuple. If you need
-to authenticate set the option `{proxy_auth, {User, Password}}'.
+To use an HTTP tunnel add the option `{proxy, ProxyUrl}` where
+`ProxyUrl` can be a simple url or an `{Host, Port}` tuple. If you need
+to authenticate set the option `{proxy_auth, {User, Password}}`.
 
 #### SOCKS5 proxy
 
 Hackney supports the connection via a socks5 proxy. To set a socks5
 proxy, use the following settings:
 
-- `{proxy, {socks5, ProxyHost, ProxyPort}}': to set the host and port of
+- `{proxy, {socks5, ProxyHost, ProxyPort}}`: to set the host and port of
   the proxy to connect.
-- `{socks5_user, Username}': to set the user used to connect to the proxy
-- `{socks5_pass, Password}': to set the password used to connect to the proxy
+- `{socks5_user, Username}`: to set the user used to connect to the proxy
+- `{socks5_pass, Password}`: to set the password used to connect to the proxy
 
 SSL and TCP connections can be forwarded via a socks5 proxy. hackney is
 automatically upgrading to an SSL connection if needed.
@@ -425,16 +425,15 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics' entry to hackney’s
+You can enable metrics collection by adding a `mod_metrics` entry to hackney’s
 app config. Metrics are disabled by default. The module specified must have an
 API matching that of the hackney metrics module.
 
 To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
-folsom}', or if you want to use
-[exometer](https://github.com/feuerlabs/exometer), specify  `{mod_metrics,
-exometers}' and ensure that folsom or exometer is in your code path and has
+folsom}`, or if you want to use
+[exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
+exometers}` and ensure that folsom or exometer is in your code path and has
 been started.
-
 
 #### Generic Hackney metrics
 
@@ -473,23 +472,26 @@ issue](http://github.com/benoitc/hackney/issues).
 ### Notes for developers
 
 If you want to contribute patches or improve the docs, you will need to
-build hackney using the `rebar_dev.config'  file. It can also be built
+build hackney using the `rebar_dev.config`  file. It can also be built
 using the **Makefile**:
 
-<pre lang="sh">
-$ make dev ; # compile &amp; get deps
-$ make devclean ; # clean all files</pre>
+```sh
 
+$ make dev ; # compile & get deps
+$ make devclean ; # clean all files
+```
 
 For successfully running the hackney test suite locally it is necessary to
 install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
 
 An example installation using virtualenv::
 
-<pre lang="sh">
+```sh
+
 $ mkvirtualenv hackney
 $ pip install gunicorn httpbin
-</pre>
+
+```
 
 Running the tests:
 
@@ -497,7 +499,39 @@ Running the tests:
 $ gunicorn --daemon --pid httpbin.pid httpbin:app
 $ make test
 $ kill `cat httpbin.pid`
-'''
+```
 
 
-@end
+## Modules ##
+
+
+<table width="100%" border="0" summary="list of modules">
+<tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
+<tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
+<tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
+<tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
+<tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
+<tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
+<tr><td><a href="hackney_dummy_metrics.md" class="module">hackney_dummy_metrics</a></td></tr>
+<tr><td><a href="hackney_exometer_metrics.md" class="module">hackney_exometer_metrics</a></td></tr>
+<tr><td><a href="hackney_folsom_metrics.md" class="module">hackney_folsom_metrics</a></td></tr>
+<tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
+<tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="hackney_idna.md" class="module">hackney_idna</a></td></tr>
+<tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
+<tr><td><a href="hackney_mimetypes.md" class="module">hackney_mimetypes</a></td></tr>
+<tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
+<tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
+<tr><td><a href="hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
+<tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
+<tr><td><a href="hackney_response.md" class="module">hackney_response</a></td></tr>
+<tr><td><a href="hackney_socks5.md" class="module">hackney_socks5</a></td></tr>
+<tr><td><a href="hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
+<tr><td><a href="hackney_stream.md" class="module">hackney_stream</a></td></tr>
+<tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
+<tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
+<tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
+

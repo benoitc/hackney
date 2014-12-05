@@ -1,5 +1,10 @@
 # NEWS
 
+1.0.3 - 2014/12/5
+-----------------
+
+- fix SSL validation under R15 and R14 Erlang versions.
+
 1.0.2 - 2014/12/02
 ------------------
 
