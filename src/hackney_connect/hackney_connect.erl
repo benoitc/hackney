@@ -249,7 +249,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
                     SslOpts = [{cacertfile, CACertFile },
                                {verify, verify_peer}, {depth, 99}],
 
-                    ConnectOpts1 + SslOpts;
+                    ConnectOpts1 ++ SslOpts;
                 _ ->
                     ConnectOpts1
             end;
