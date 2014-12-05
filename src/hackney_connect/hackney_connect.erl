@@ -17,6 +17,15 @@
 
 -include("hackney.hrl").
 
+-ifdef(broken_ssl).
+-define(VALIDATE_SSL, false).
+-else.
+-ifdef(no_ssl_name_validation).
+-define(VALIDATE_SSL, normal).
+-else.
+-define(VALIDATE_SSL, host).
+-endif.
+-endif.
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, []).
@@ -217,11 +226,14 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
 
     ConnectOpts = case {Transport, proplists:get_value(ssl_options, Opts)} of
         {hackney_ssl_transport, undefined} ->
-            case proplists:get_value(insecure, Opts) of
-                true ->
+            Insecure =  proplists:get_value(insecure, Opts),
+            ShouldValidate = should_validate_ssl(),
+
+            case {Insecure, ShouldValidate} of
+                {true, _} ->
                     ConnectOpts1 ++ [{verify, verify_none},
                              {reuse_sessions, true}];
-                _ ->
+                {_, host} ->
                     CACertFile = filename:join(hackney_util:privdir(),
                                                "ca-bundle.crt"),
                     SslOpts = [{verify_fun, {fun ssl_verify_hostname:verify_fun/3,
@@ -230,7 +242,16 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
                                {server_name_indication, Host},
                                {verify, verify_peer}, {depth, 99}],
 
-                    ConnectOpts1 ++ SslOpts
+                    ConnectOpts1 ++ SslOpts;
+                {_, normal} ->
+                    CACertFile = filename:join(hackney_util:privdir(),
+                                               "ca-bundle.crt"),
+                    SslOpts = [{cacertfile, CACertFile },
+                               {verify, verify_peer}, {depth, 99}],
+
+                    ConnectOpts1 ++ SslOpts;
+                _ ->
+                    ConnectOpts1
             end;
         {hackney_ssl_transport, SslOpts} ->
             ConnectOpts1 ++ SslOpts;
@@ -270,3 +291,7 @@ check_mod_metrics(#client{mod_metrics=Mod}=State)
     State;
 check_mod_metrics(State) ->
     State#client{mod_metrics=hackney_util:mod_metrics()}.
+
+
+should_validate_ssl() ->
+    ?VALIDATE_SSL.

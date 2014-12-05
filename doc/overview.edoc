@@ -38,15 +38,11 @@ Main features:
 - multipart support (streamed or not)
 - chunked encoding support
 - Can send files using the sendfile API
-- Chunked encoding support
 - Optional socket pool
 - REST syntax: `hackney:Method(URL)' (where a method can be get, post, put, delete, ...)
 
-Hackney uses [hackney_lib](http://github.com/benoitc/hackney_lib) to
-handle any web protocols. If you want to manipulate headers, cookies,
-multipart or any other thing related to web protocols this is the place
-to go.
-
+**Supported versions** of Erlang are R16B03-1, 17.3.4 and above. It is
+reported to work with R14B04 and R15B03-1.
 
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
