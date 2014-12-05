@@ -4,6 +4,7 @@
 -----------------
 
 - fix SSL validation under R15 and R14 Erlang versions.
+- Apply SSL certificate validation to SOCKS5 and HTTP proxies.
 
 1.0.2 - 2014/12/02
 ------------------
