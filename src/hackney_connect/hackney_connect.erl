@@ -15,6 +15,8 @@
          close/1,
          is_pool/1]).
 
+-export([ssl_opts/2]).
+
 -include("hackney.hrl").
 
 -ifdef(no_ssl_name_validation).
@@ -221,38 +223,12 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
             ConnectOpts0
     end,
 
-    ConnectOpts = case {Transport, proplists:get_value(ssl_options, Opts)} of
-        {hackney_ssl_transport, undefined} ->
-            Insecure =  proplists:get_value(insecure, Opts),
-            ShouldValidate = should_validate_ssl(),
-
-            case {Insecure, ShouldValidate} of
-                {true, _} ->
-                    ConnectOpts1 ++ [{verify, verify_none},
-                             {reuse_sessions, true}];
-                {_, host} ->
-                    CACertFile = filename:join(hackney_util:privdir(),
-                                               "ca-bundle.crt"),
-                    SslOpts = [{verify_fun, {fun ssl_verify_hostname:verify_fun/3,
-                                             [{check_hostname, Host}]}},
-                               {cacertfile, CACertFile },
-                               {server_name_indication, Host},
-                               {verify, verify_peer}, {depth, 99}],
-
-                    ConnectOpts1 ++ SslOpts;
-                {_, normal} ->
-                    CACertFile = filename:join(hackney_util:privdir(),
-                                               "ca-bundle.crt"),
-                    SslOpts = [{cacertfile, CACertFile },
-                               {verify, verify_peer}, {depth, 99}],
-
-                    ConnectOpts1 ++ SslOpts
-            end;
-        {hackney_ssl_transport, SslOpts} ->
-            ConnectOpts1 ++ SslOpts;
-        {_, _} ->
-            ConnectOpts1
-    end,
+    ConnectOpts = case Transport of
+                      hackney_ssl_transport ->
+                          ConnectOpts1 ++ ssl_opts(Host, Opts);
+                      _ ->
+                          ConnectOpts1
+                  end,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
@@ -287,6 +263,34 @@ check_mod_metrics(#client{mod_metrics=Mod}=State)
 check_mod_metrics(State) ->
     State#client{mod_metrics=hackney_util:mod_metrics()}.
 
+
+ssl_opts(Host, Options) ->
+    case proplists:get_value(ssl_options, Options) of
+        undefined ->
+            Insecure =  proplists:get_value(insecure, Options),
+            ShouldValidate = should_validate_ssl(),
+
+            case {Insecure, ShouldValidate} of
+                {true, _} ->
+                    [{verify, verify_none},
+                     {reuse_sessions, true}];
+                {_, host} ->
+                    CACertFile = filename:join(hackney_util:privdir(),
+                                               "ca-bundle.crt"),
+                    [{verify_fun, {fun ssl_verify_hostname:verify_fun/3,
+                                   [{check_hostname, Host}]}},
+                     {cacertfile, CACertFile },
+                     {server_name_indication, Host},
+                     {verify, verify_peer}, {depth, 99}];
+                {_, normal} ->
+                    CACertFile = filename:join(hackney_util:privdir(),
+                                               "ca-bundle.crt"),
+                    [{cacertfile, CACertFile },
+                     {verify, verify_peer}, {depth, 99}]
+            end;
+        SSLOpts ->
+            SSLOpts
+    end.
 
 should_validate_ssl() ->
     ?VALIDATE_SSL.

@@ -58,20 +58,9 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                 ok ->
                     case Transport of
                         hackney_ssl_transport ->
-                            SslOpts0 = proplists:get_value(ssl_options, Opts),
-                            Insecure = proplists:get_value(insecure, Opts),
-
-                            SslOpts = case {SslOpts0, Insecure} of
-                                {undefined, true} ->
-                                    [{verify, verify_none},
-                                     {reuse_sessions, true}];
-                                {undefined, _} ->
-                                    [];
-                                _ ->
-                                    SslOpts0
-                            end,
+                            SSlOpts = hackney_connect:ssl_opts(Host, Opts),
                             %% upgrade the tcp connection
-                            case ssl:connect(Socket, SslOpts) of
+                            case ssl:connect(Socket, SSlOpts) of
                                 {ok, SslSocket} ->
                                     {ok, {Transport, SslSocket}};
                                 Error ->
