@@ -118,7 +118,6 @@ close_request(#client{}=Client) ->
             state=Status,
             request_ref=Ref} = Client,
 
-
     %% remove the request
     erase(Ref),
     ets:delete(?MODULE, Ref),
@@ -259,13 +258,14 @@ handle_error(#client{request_ref=Ref, dynamic=true}) ->
 
 handle_error(#client{request_ref=Ref, transport=Transport,
                     socket=Socket}=Client) ->
+
     case get_state(Ref) of
         req_not_found -> ok;
         _ ->
             catch Transport:controlling_process(Socket, self()),
             catch Transport:close(Socket),
             NClient = Client#client{socket=nil, state=closed},
-            put(Ref, NClient),
+            update_state(NClient),
             ok
     end.
 
@@ -304,7 +304,7 @@ init(_) ->
 
 handle_call({new_request, Pid, Ref, Client}, _From, #mstate{pids=Pids}=State) ->
     %% get pool name
-    Pool = proplists:get_value(pool, Client#client.options),
+    Pool = proplists:get_value(pool, Client#client.options, default),
     %% set requInfo
     StartTime = os:timestamp(),
     ReqInfo = #request_info{pool=Pool,
@@ -414,12 +414,12 @@ handle_call({cancel_request, Ref}, _From, State) ->
             Pids2 = dict:erase(Owner, State#mstate.pids),
             %% notify the pool that the request have been canceled
             PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
-
             %% update metrics
             finish_request(Info, State),
 
             {reply, ok, State#mstate{pids=Pids2}};
-        [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}] when is_pid(Stream) ->
+        [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}]
+          when is_pid(Stream) ->
             unlink(Owner),
             unlink(Stream),
             Pids2 = dict:erase(Stream, dict:erase(Owner, State#mstate.pids)),

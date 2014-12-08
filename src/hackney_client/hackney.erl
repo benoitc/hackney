@@ -364,10 +364,10 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
                     Reply = maybe_redirect(Resp, Req, 0),
                     reply_response(Reply, Client);
                 _ ->
-                    {error, invalide_state}
+                    reply_response({error, invalide_state}, Client)
             end;
         Error ->
-            Error
+            reply_response(Error, Client0)
     end.
 
 %% @doc send the request body until eob. It's issued after sending a request using

@@ -118,8 +118,7 @@ stop_pool(Name) ->
 notify(Pool, Msg) ->
     case find_pool(Pool) of
         undefined -> ok;
-        Pid ->
-            Pid ! Msg
+        Pid -> Pid ! Msg
     end.
 
 
@@ -386,10 +385,10 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
 
 
 store_socket({_Host, _Port, Transport} = Dest, Socket,
-                 #state{timeout=Timeout, connections=Conns,
-                        sockets=Sockets}=State) ->
+             #state{timeout=Timeout, connections=Conns,
+                    sockets=Sockets}=State) ->
     Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
-    ok = Transport:setopts(Socket, [{active, once}]),
+    Transport:setopts(Socket, [{active, once}]),
     ConnSockets = case dict:find(Dest, Conns) of
         {ok, OldSockets} ->
             [Socket | OldSockets];
@@ -449,9 +448,9 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
 deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
     Mod = State#state.mod_metrics,
 
+
     case queue_out(Dest, State#state.queues) of
         empty ->
-
             store_socket(Dest, Socket, State);
         {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
             NbWaiters = State#state.nb_waiters - 1,
@@ -472,8 +471,9 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
                 _Error -> % Something wrong with the socket; just remove it
                     catch Transport:close(Socket),
                     gen_server:reply(FromWaiter, {error, no_socket, self()}),
-                    State#state{queues = Queues2,
-                                nb_waiters = NbWaiters}
+                    monitor_client(Dest, Ref,
+                                   State#state{queues = Queues2,
+                                               nb_waiters = NbWaiters})
             end
     end.
 
