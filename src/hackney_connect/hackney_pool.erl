@@ -508,6 +508,6 @@ delete_metrics(Mod, PoolName) ->
 update_usage(#state{name=PoolName, mod_metrics=Mod, sockets=Sockets,
                     clients=Clients}) ->
     Mod:update_histogram([hackney_pool, PoolName,in_use_count],
-                         dict:size(Clients)),
+                         dict:size(Clients) - 1),
     Mod:update_histogram([hackney_pool, PoolName, free_count],
-                         dict:size(Sockets)).
+                         dict:size(Sockets) - 1).
