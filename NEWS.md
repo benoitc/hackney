@@ -1,5 +1,11 @@
 # NEWS
 
+1.0.4 - 2014/12/8
+-----------------
+
+- fix client leaks on error
+- fix monitor counters
+
 1.0.3 - 2014/12/5
 -----------------
 
