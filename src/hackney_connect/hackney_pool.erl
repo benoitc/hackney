@@ -463,8 +463,13 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
                     monitor_client(Dest, Ref,
                                    State#state{queues = Queues2,
                                                nb_waiters=NbWaiters});
-                {error, badarg} -> % Pid died, reuse for someone else
+                {error, badarg} ->
+                    %% something happened here normally the PID died,
+                    %% but make sure we still have the control of the process
+                    Transport:controlling_process(Socket, self()),
+                    %% get the socket events again
                     Transport:setopts(Socket, [{active, once}]),
+
                     deliver_socket(Socket, Dest,
                                    State#state{queues = Queues2,
                                                nb_waiters = NbWaiters});
