@@ -84,13 +84,9 @@ cancel_request(Ref) when is_reference(Ref) ->
                     erase(Ref),
 
                     %% stop to monitor the request
-                    case gen_server:call(?MODULE, {cancel_request, Ref}) of
-                        ok ->
-                            %% return the latest state
-                            {ok, {Transport, Socket, Buffer, RespState}};
-                        Error ->
-                            Error
-                    end;
+                    ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
+                    %% return the latest state
+                    {ok, {Transport, Socket, Buffer, RespState}};
                 Error ->
                     Error
             end;
@@ -103,13 +99,9 @@ cancel_request(Ref) when is_reference(Ref) ->
 
 
             %% stop to monitor the request
-            case gen_server:call(?MODULE, {cancel_request, Ref}) of
-                ok ->
-                    %% return the latest state
-                    {ok, {Transport, Socket, Buffer, RespState}};
-                Error ->
-                    Error
-            end
+            ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
+            %% return the latest state
+            {ok, {Transport, Socket, Buffer, RespState}}
     end.
 
 close_request(#client{}=Client) ->
@@ -123,7 +115,7 @@ close_request(#client{}=Client) ->
     ets:delete(?MODULE, Ref),
 
     %% stop to monitor the request
-    Reply = gen_server:call(?MODULE, {cancel_request, Ref}),
+    ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
 
     case Status of
         done -> ok;
@@ -132,8 +124,7 @@ close_request(#client{}=Client) ->
             catch Transport:close(Socket),
             ok;
         _ -> ok
-    end,
-    Reply;
+    end;
 close_request(Ref) ->
     case get_state(Ref) of
         req_not_found ->
@@ -401,12 +392,13 @@ handle_call({controlling_process, Ref, Pid}, _From, State) ->
                                dict:erase(Owner, State#mstate.pids)),
             ets:insert(?REFS, {Ref, {Pid, Stream, Info}}),
             {reply, ok, State#mstate{pids=Pids2}}
-    end;
+    end.
 
-handle_call({cancel_request, Ref}, _From, State) ->
+handle_cast({cancel_request, Ref}, State) ->
     PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
     case ets:lookup(?REFS, Ref) of
-        [] -> {reply, badarg, State};
+        [] ->
+            {noreply, State};
         [{Ref, {Owner, nil, #request_info{pool=Pool}=Info}}] ->
             %% no stream just cancel the request and unlink the owner.
             unlink(Owner),
@@ -416,8 +408,7 @@ handle_call({cancel_request, Ref}, _From, State) ->
             PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
             %% update metrics
             finish_request(Info, State),
-
-            {reply, ok, State#mstate{pids=Pids2}};
+            {noreply, State#mstate{pids=Pids2}};
         [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}]
           when is_pid(Stream) ->
             unlink(Owner),
@@ -426,18 +417,12 @@ handle_call({cancel_request, Ref}, _From, State) ->
             ets:delete(?REFS, Ref),
             %% notify the pool that the request have been canceled
             PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
-
             %% update metrics
             finish_request(Info, State),
-
             %% terminate the async response
-            case terminate_async_response(Stream) of
-                ok ->
-                    {reply, ok, State#mstate{pids=Pids2}};
-                Error ->
-                    {reply, Error, State#mstate{pids=Pids2}}
-            end
-    end.
+            terminate_async_response(Stream),
+            {noreply, State#mstate{pids=Pids2}}
+    end;
 
 handle_cast(_Msg, Children) ->
     {noreply, Children}.
