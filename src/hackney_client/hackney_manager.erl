@@ -97,7 +97,6 @@ cancel_request(Ref) when is_reference(Ref) ->
             %% remove the request
             erase(Ref),
 
-
             %% stop to monitor the request
             ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
             %% return the latest state
