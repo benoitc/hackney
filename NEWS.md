@@ -4,7 +4,7 @@
 ------------------
 
 - improvement: Do not wait to cancel a request
-- fix: do not control the request premptively
+- improvement: do not control the request premptively
 
 1.0.4 - 2014/12/8
 -----------------
