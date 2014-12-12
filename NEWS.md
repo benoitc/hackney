@@ -1,5 +1,11 @@
 # NEWS
 
+1.0.5 - 2014/12/12
+------------------
+
+- improvement: Do not wait to cancel a request
+- fix: do not control the request premptively
+
 1.0.4 - 2014/12/8
 -----------------
 
