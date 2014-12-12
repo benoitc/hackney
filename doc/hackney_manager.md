@@ -77,7 +77,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 ### handle_cast/2 ###
 
-`handle_cast(Msg, Children) -> any()`
+`handle_cast(Msg, State) -> any()`
 
 
 <a name="handle_error-1"></a>
