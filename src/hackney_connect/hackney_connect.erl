@@ -216,12 +216,18 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
     %% handle ipv6
-    ConnectOpts1 = case hackney_util:is_ipv6(Host) of
-        true ->
-            [inet6 | ConnectOpts0];
-        false ->
-            ConnectOpts0
-    end,
+    ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
+                       lists:member(inet6, ConnectOpts0) of
+                       true ->
+                           ConnectOpts0;
+                       false ->
+                           case hackney_util:is_ipv6(Host) of
+                               true ->
+                                   [inet6 | ConnectOpts0];
+                               false ->
+                                   ConnectOpts0
+                           end
+                   end,
 
     ConnectOpts = case Transport of
                       hackney_ssl_transport ->
