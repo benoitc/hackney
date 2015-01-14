@@ -166,7 +166,8 @@ stream_body_recv(Buffer, Client=#client{version=Version,
     case recv(Client) of
         {ok, Data} ->
             stream_body(Data, Client);
-        {error, closed} when Version =:= {1, 0}, CLen =:= nil ->
+        {error, closed} when (Version =:= {1, 0} orelse Version =:= {1, 1})
+                             andalso CLen =:= nil ->
             {ok, Buffer, Client#client{socket=nil,
                                        state = closed,
                                        response_state = done,
