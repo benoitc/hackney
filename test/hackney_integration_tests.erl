@@ -8,6 +8,7 @@ http_requests_test_() ->
      fun stop/1,
      fun(SetupData) ->
          {inparallel, [get_request(SetupData),
+                       head_request(SetupData),
                        basic_auth_request_failed(SetupData),
                        basic_auth_request(SetupData),
                        set_cookie_request(SetupData),
@@ -26,6 +27,11 @@ stop(_) -> ok.
 get_request(_) ->
     URL = <<"http://localhost:8000/get">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+    ?_assertEqual(200, StatusCode).
+
+head_request(_) ->
+    URL = <<"http://localhost:8000/get">>,
+    {ok, StatusCode, _} = hackney:request(head, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
 
 basic_auth_request(_) ->
