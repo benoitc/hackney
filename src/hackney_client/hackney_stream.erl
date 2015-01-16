@@ -296,10 +296,16 @@ process({more, NParser}, Client) ->
 process({more, NParser, Buffer}, Client) ->
     NClient = update_client(NParser, Client),
     {more, NClient, Buffer};
-process({response, Version, Status, Reason, NParser}, Client) ->
-    NClient = update_client(NParser, Client#client{version=Version,
+process({response, Version, Status, Reason, Parser}, Client0) ->
+    Client1 = update_client(Parser, Client0#client{version=Version,
                                                    response_state=on_header}),
-    {ok, Status, Reason, NClient};
+    Client2 = case Status of
+        S when S =:= 204 orelse S =:= 304 ->
+            Client1#client{clen = 0};
+        _Otherwise ->
+            Client1
+    end,
+    {ok, Status, Reason, Client2};
 process({header, {Key, Value}=KV, NParser},
         #client{partial_headers=Headers}=Client) ->
     %% store useful headers

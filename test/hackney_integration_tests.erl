@@ -9,6 +9,8 @@ http_requests_test_() ->
      fun(SetupData) ->
          {inparallel, [get_request(SetupData),
                        head_request(SetupData),
+                       no_content_response(SetupData),
+                       not_modified_response(SetupData),
                        basic_auth_request_failed(SetupData),
                        basic_auth_request(SetupData),
                        set_cookie_request(SetupData),
@@ -17,7 +19,8 @@ http_requests_test_() ->
                        absolute_redirect_request_follow(SetupData),
                        relative_redirect_request_no_follow(SetupData),
                        relative_redirect_request_follow(SetupData),
-                       async_request(SetupData)]}
+                       async_request(SetupData),
+                       async_no_content_request(SetupData)]}
      end}.
 
 start() -> hackney:start().
@@ -33,6 +36,16 @@ head_request(_) ->
     URL = <<"http://localhost:8000/get">>,
     {ok, StatusCode, _} = hackney:request(head, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
+
+no_content_response(_) ->
+    URL = <<"http://localhost:8000/status/204">>,
+    {ok, StatusCode, _} = hackney:request(get, URL, [], <<>>, []),
+    ?_assertEqual(204, StatusCode).
+
+not_modified_response(_) ->
+    URL = <<"http://localhost:8000/status/304">>,
+    {ok, StatusCode, _} = hackney:request(get, URL, [], <<>>, []),
+    ?_assertEqual(304, StatusCode).
 
 basic_auth_request(_) ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
@@ -91,23 +104,36 @@ relative_redirect_request_follow(_) ->
 
 async_request(_) ->
     URL = <<"http://localhost:8000/get">>,
-    Opts = [async],
-    LoopFun = fun(Loop, Ref, Dict) ->
-                  receive
-                      {hackney_response, Ref, {status, StatusInt, _Reason}} ->
-                          Dict2 = orddict:store(status, StatusInt, Dict),
-                          Loop(Loop, Ref, Dict2);
-                      {hackney_response, Ref, {headers, Headers}} ->
-                          Dict2 = orddict:store(headers, Headers, Dict),
-                          Loop(Loop, Ref, Dict2);
-                      {hackney_response, Ref, done} -> Dict;
-                      {hackney_response, Ref, Bin} ->
-                          Dict2 = orddict:append(body, Bin, Dict),
-                          Loop(Loop, Ref, Dict2)
-                  end
-              end,
-    {ok, ClientRef} = hackney:get(URL, [], <<>>, Opts),
-    Dict = LoopFun(LoopFun, ClientRef, orddict:new()),
+    Options = [async],
+    {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
+    Dict = receive_response(ClientRef, orddict:new()),
     Keys = orddict:fetch_keys(Dict),
-    Status = orddict:fetch(status, Dict),
-    [?_assertEqual([body, headers, status], Keys), ?_assertEqual(200, Status)].
+    StatusCode = orddict:fetch(status, Dict),
+    [?_assertEqual(200, StatusCode),
+     ?_assertEqual([body, headers, status], Keys)].
+
+async_no_content_request(_) ->
+    URL = <<"http://localhost:8000/status/204">>,
+    Options = [async],
+    {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
+    Dict = receive_response(ClientRef, orddict:new()),
+    Keys = orddict:fetch_keys(Dict),
+    StatusCode = orddict:fetch(status, Dict),
+    [?_assertEqual(204, StatusCode),
+     ?_assertEqual([headers, status], Keys)].
+
+%% Helpers
+
+receive_response(Ref, Dict0) ->
+    receive
+        {hackney_response, Ref, {status, Status, _Reason}} ->
+            Dict1 = orddict:store(status, Status, Dict0),
+            receive_response(Ref, Dict1);
+        {hackney_response, Ref, {headers, Headers}} ->
+            Dict1 = orddict:store(headers, Headers, Dict0),
+            receive_response(Ref, Dict1);
+        {hackney_response, Ref, done} -> Dict0;
+        {hackney_response, Ref, Bin} ->
+            Dict1 = orddict:append(body, Bin, Dict0),
+            receive_response(Ref, Dict1)
+    end.

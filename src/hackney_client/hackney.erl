@@ -86,7 +86,7 @@ connect(Transport, Host, Port, Options) ->
 
 %% @doc Assign a new controlling process <em>Pid</em> to <em>Client</em>.
 -spec controlling_process(client_ref(), pid())
-	-> ok | {error, closed | not_owner | atom()}.
+    -> ok | {error, closed | not_owner | atom()}.
 controlling_process(Ref, Pid) ->
     hackney_manager:controlling_process(Ref, Pid).
 
@@ -271,7 +271,8 @@ request(Method, URL, Headers, Body) ->
 %%  Return:
 %%  <ul>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
-%%  request if the response succeded.</li>
+%%  request if the response succeded, or in case of 204 (No Content),
+%%  and 304 (Not Modified) responses.</li>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
 %%  the response succeded. The request reference is used later to
 %%  retrieve the body.</li>
@@ -484,7 +485,7 @@ body(Ref) ->
 %% @doc Return the full body sent with the response as long as the body
 %% length doesn't go over MaxLength.
 -spec body(client_ref(), non_neg_integer() | infinity)
-	-> {ok, binary()} | {error, atom()}.
+    -> {ok, binary()} | {error, atom()}.
 body(Ref, MaxLength) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:body(MaxLength, State),
@@ -880,6 +881,11 @@ mp_reply({ok, NState}, _State) ->
     ok.
 
 %% response reply
+reply_response({ok, Status, Headers, #client{}=NState}, _State)
+        when Status =:= 204 orelse Status =:= 304 ->
+    {skip, NState2} = hackney_response:skip_body(NState#client{clen = 0}),
+    maybe_update_req(NState2),
+    {ok, Status, Headers};
 reply_response({ok, Status, Headers, #client{method= <<"HEAD">>}=NState},
                _State) ->
     {skip, NState2} = hackney_response:skip_body(NState),
