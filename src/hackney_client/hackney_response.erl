@@ -327,7 +327,7 @@ maybe_close(#client{socket=nil}) ->
 maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
     case Connection of
         <<"close">> -> true;
-        <<"keepalive">> -> false;
+        <<"keep-alive">> -> false;
         _ when Min =< 0 orelse Maj < 1 -> true;
         _ -> false
     end.
