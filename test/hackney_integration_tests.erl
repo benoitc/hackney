@@ -39,12 +39,12 @@ head_request(_) ->
 
 no_content_response(_) ->
     URL = <<"http://localhost:8000/status/204">>,
-    {ok, StatusCode, _} = hackney:request(get, URL, [], <<>>, []),
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(204, StatusCode).
 
 not_modified_response(_) ->
     URL = <<"http://localhost:8000/status/304">>,
-    {ok, StatusCode, _} = hackney:request(get, URL, [], <<>>, []),
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(304, StatusCode).
 
 basic_auth_request(_) ->
