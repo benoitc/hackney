@@ -3,7 +3,7 @@
 %%% This file is part of hackney_lib released under the Apache 2 license.
 %%% See the NOTICE for more information.
 %%%
-%%% Copyright (c) 2012-2014 Benoît Chesneau <benoitc@e-engura.org>
+%%% Copyright (c) 2012-2015 Benoît Chesneau <benoitc@e-engura.org>
 %%% Copyright (c) 2011, Magnus Klaar <magnus.klaar@gmail.com>
 %%%
 

@@ -4,7 +4,7 @@
 %%% See the NOTICE for more information.
 %%%
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
-%%% Copyright (c) 2013-2014 Benoit Chesneau
+%%% Copyright (c) 2013-2015 Benoit Chesneau
 %%%
 %%% @doc HTTP parser in pure Erlang
 %%% This parser is able to parse HTTP responses and requests in a

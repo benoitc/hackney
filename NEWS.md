@@ -1,5 +1,14 @@
 # NEWS
 
+1.0.6 - 2015/01/21
+------------------
+
+- improvement: handle {error, closed} for HTTP 1.1 when no content-length is given.
+- improvement: handle 204 and 304 status
+- fix keep-alive handling
+- remove expm package
+- build under R18
+
 1.0.5 - 2014/12/12
 ------------------
 

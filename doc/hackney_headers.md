@@ -17,6 +17,30 @@ module to manipulate HTTP headers.
 
 
 
+### <a name="type-compat_dict">compat_dict()</a> ###
+
+
+
+<pre><code>
+compat_dict() = <a href="dict.md#type-dict">dict:dict()</a>
+</code></pre>
+
+
+
+
+
+### <a name="type-compat_dict">compat_dict()</a> ###
+
+
+
+<pre><code>
+compat_dict() = <a href="dict.md#type-dict">dict:dict()</a>
+</code></pre>
+
+
+
+
+
 ### <a name="type-disposition">disposition()</a> ###
 
 
@@ -135,7 +159,7 @@ Create a binary header
 
 
 <pre><code>
-new() -&gt; dict()
+new() -&gt; <a href="#type-compat_dict">compat_dict()</a>
 </code></pre>
 <br />
 
@@ -146,7 +170,7 @@ initialise an header dict
 
 
 <pre><code>
-new(D::{dict, dict()} | list()) -&gt; dict()
+new(D::{dict, <a href="#type-compat_dict">compat_dict()</a>} | list()) -&gt; <a href="#type-compat_dict">compat_dict()</a>
 </code></pre>
 <br />
 
@@ -157,7 +181,7 @@ new(D::{dict, dict()} | list()) -&gt; dict()
 
 
 <pre><code>
-parse(Name::binary(), Headers::list() | dict()) -&gt; any() | undefined | {error, badarg}
+parse(Name::binary(), Headers::list() | <a href="#type-compat_dict">compat_dict()</a>) -&gt; any() | undefined | {error, badarg}
 </code></pre>
 <br />
 

@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2014 Benoît Chesneau.
+Copyright (c) 2012-2015 Benoît Chesneau.
 
-__Version:__ 1.0.5
+__Version:__ 1.0.6
 
 # hackney
 
@@ -532,6 +532,7 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="hackney_stream.md" class="module">hackney_stream</a></td></tr>
 <tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
 <tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
+<tr><td><a href="hackney_trace.md" class="module">hackney_trace</a></td></tr>
 <tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
 

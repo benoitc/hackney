@@ -8,4 +8,4 @@
           hackney_mimetypes,hackney_multipart,hackney_pool,
           hackney_pool_handler,hackney_request,hackney_response,
           hackney_socks5,hackney_ssl_transport,hackney_stream,hackney_sup,
-          hackney_tcp_transport,hackney_url,hackney_util]}.
+          hackney_tcp_transport,hackney_trace,hackney_url,hackney_util]}.

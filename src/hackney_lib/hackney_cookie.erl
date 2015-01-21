@@ -6,7 +6,7 @@
 %%% Copyright 2007 Mochi Media, Inc.
 %%% Copyright 2011 Thomas Burdick <thomas.burdick@gmail.com>
 %%% Copyright 2013, Loïc Hoguin <essen@ninenines.eu>
-%%% Copyright 2013-2014, Benoit Chesneau
+%%% Copyright 2013-2015, Benoit Chesneau
 %%%
 -module(hackney_cookie).
 

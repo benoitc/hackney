@@ -3,8 +3,6 @@
 %%% This file is part of hackney released under the Apache 2 license.
 %%% See the NOTICE for more information.
 %%%
-%%% Copyright (c) 2012-2014 Benoît Chesneau <benoitc@e-engura.org>
-%%%
 -module(hackney_pool_handler).
 
 -include("hackney.hrl").
