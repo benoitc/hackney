@@ -20,6 +20,7 @@ http_requests_test_() ->
                        relative_redirect_request_no_follow(),
                        relative_redirect_request_follow(),
                        async_request(),
+                       async_head_request(),
                        async_no_content_request()]}
      end}.
 
@@ -110,23 +111,33 @@ async_request() ->
     URL = <<"http://localhost:8000/get">>,
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
-    Dict = receive_response(ClientRef, orddict:new()),
-    Keys = orddict:fetch_keys(Dict),
-    StatusCode = orddict:fetch(status, Dict),
+    {StatusCode, Keys} = receive_response(ClientRef),
     [?_assertEqual(200, StatusCode),
      ?_assertEqual([body, headers, status], Keys)].
+
+async_head_request() ->
+    URL = <<"http://localhost:8000/get">>,
+    Options = [async],
+    {ok, ClientRef} = hackney:head(URL, [], <<>>, Options),
+    {StatusCode, Keys} = receive_response(ClientRef),
+    [?_assertEqual(200, StatusCode),
+     ?_assertEqual([headers, status], Keys)].
 
 async_no_content_request() ->
     URL = <<"http://localhost:8000/status/204">>,
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
-    Dict = receive_response(ClientRef, orddict:new()),
-    Keys = orddict:fetch_keys(Dict),
-    StatusCode = orddict:fetch(status, Dict),
+    {StatusCode, Keys} = receive_response(ClientRef),
     [?_assertEqual(204, StatusCode),
      ?_assertEqual([headers, status], Keys)].
 
 %% Helpers
+
+receive_response(Ref) ->
+    Dict = receive_response(Ref, orddict:new()),
+    Keys = orddict:fetch_keys(Dict),
+    StatusCode = orddict:fetch(status, Dict),
+    {StatusCode, Keys}.
 
 receive_response(Ref, Dict0) ->
     receive
