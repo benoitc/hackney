@@ -108,7 +108,7 @@ wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
         <<"connection">> ->
             Client#client{connection=hackney_bstr:to_lower(Value)};
         <<"content-type">> ->
-            Client#client{ctype=hackney_bstr:to_lower(Value)};
+            Client#client{ctype=Value};
         <<"location">> ->
             Client#client{location=Value};
         _ ->
