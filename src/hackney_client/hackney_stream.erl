@@ -248,7 +248,8 @@ async_recv(Parent, Owner, Ref,
             stream_loop(Parent, Owner, Ref, Client#client{buffer=Data});
         {Closed, Sock} ->
             case Client#client.response_state of
-                on_body when Version =:= {1, 0}, CLen =:= nil ->
+                on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
+                             andalso CLen =:= nil ->
                     Owner ! {hackney_response, Ref, Buffer};
                 on_body when TE =:= <<"identity">> ->
                     Owner ! {hackney_response, Ref, Buffer};
