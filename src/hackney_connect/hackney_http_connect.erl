@@ -151,7 +151,7 @@ do_handshake(Socket, Host, Port, Options) ->
         _ ->
             Credentials = base64:encode(<<ProxyUser/binary, ":",
                                           ProxyPass/binary>>),
-            Headers0 ++ [<< "Proxy-Authorization: ", Credentials/binary >>]
+            Headers0 ++ [<< "Proxy-Authorization: Basic ", Credentials/binary >>]
     end,
     Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
 
