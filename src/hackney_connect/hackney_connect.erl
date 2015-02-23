@@ -285,12 +285,14 @@ ssl_opts(Host, Options) ->
                                    [{check_hostname, Host}]}},
                      {cacertfile, CACertFile },
                      {server_name_indication, Host},
-                     {verify, verify_peer}, {depth, 99}];
+                     {verify, verify_peer}, {depth, 99},
+                     {reuse_sessions, true}];
                 {_, normal} ->
                     CACertFile = filename:join(hackney_util:privdir(),
                                                "ca-bundle.crt"),
                     [{cacertfile, CACertFile },
-                     {verify, verify_peer}, {depth, 99}]
+                     {verify, verify_peer}, {depth, 99},
+                     {reuse_sessions, true}]
             end;
         SSLOpts ->
             SSLOpts
