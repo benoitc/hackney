@@ -5,25 +5,32 @@
 -module(test).
 
 
+display_request_info(Ref) ->
+    Info = hackney:request_info(Ref),
+    io:format("socket is ~p~n", [Info]).
 
 main(_) ->
     hackney:start(),
+    application:set_env(hackney, use_default_pool, false),
 
     io:format("step 1~n", []),
     {ok, Ref} = hackney:connect(<<"https://friendpaste.com">>),
+    display_request_info(Ref),
     {ok, _, _Headers, Ref} = hackney:send_request(Ref, {get, <<"/">>, [],
-                                                 <<>>}),
+                                                  <<>>}),
 
     {ok, Body} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body]),
 
     io:format("step 2~n", []),
+    display_request_info(Ref),
     {ok, _, _, Ref} = hackney:send_request(Ref, {get,
                                                  <<"/_all_languages">>,
                                                  [],
                                                  <<>>}),
     {ok, Body1} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body1]),
+    display_request_info(Ref),
 
     io:format("step 3~n", []),
     ReqBody = << "{\"snippet\": \"test.ebin\" }" >>,
@@ -34,6 +41,8 @@ main(_) ->
     {ok, Body2} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body2]),
 
+    display_request_info(Ref),
+
     io:format("step 4~n", []),
     ReqBody1 = {file, "./examples/test.json"},
     {ok, _, _, Ref} = hackney:send_request(Ref, {post, <<"/">>,
@@ -42,6 +51,10 @@ main(_) ->
     {ok, Body3} = hackney:body(Ref),
     io:format("body: ~p~n~n", [Body3]),
 
+    display_request_info(Ref),
+
     hackney:close(Ref),
     IsClosed = hackney_manager:get_state(Ref) =:= req_not_found,
-    io:format("has been closed: ~p~n", [IsClosed]).
+    io:format("has been closed: ~p~n", [IsClosed]),
+
+    display_request_info(Ref).

@@ -131,9 +131,11 @@ unparse_url(#hackney_url{}=Url) ->
     end,
 
     Path1 = case Path of
-        <<>> -> <<"/">>;
-        _ -> Path
-    end,
+                nil -> <<>>;
+                undefined -> <<>>;
+                <<>> -> <<"/">>;
+                _ -> Path
+            end,
 
     << Scheme1/binary, Netloc1/binary, Path1/binary, Qs1/binary, Fragment1/binary >>.
 

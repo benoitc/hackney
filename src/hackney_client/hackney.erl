@@ -89,7 +89,8 @@ controlling_process(Ref, Pid) ->
     hackney_manager:controlling_process(Ref, Pid).
 
 %% @doc Extract raw informations from the client context
-%% This feature can be useful when you want to create a simple proxy, rerouting on the headers and the status line and continue to forward the connection for example.
+%% This feature can be useful when you want to create a simple proxy, rerouting
+%% on the headers and the status line and continue to forward the connection for example.
 %%
 %% return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}'
 %% <ul>
@@ -134,13 +135,15 @@ close(Ref) ->
 request_info(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 #client{transport=Transport,
+                        socket=Socket,
                         method=Method} = State,
-                Location = hackney_request:location(State),
 
+                Location = hackney_request:location(State),
 
                 [{method, Method},
                  {location, Location},
-                 {transport, Transport}]
+                 {transport, Transport},
+                 {socket, Socket}]
         end).
 
 %% @doc return the requested location
