@@ -32,7 +32,6 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
     #client{options=Options} = Client0,
 
     DefaultHeaders0 =  [{<<"User-Agent">>, default_ua()}],
-
     %% basic authorization handling
     DefaultHeaders = case proplists:get_value(basic_auth, Options) of
         undefined ->
@@ -53,27 +52,30 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                                           Headers0),
 
     {HeadersDict, ReqType0} = req_type(HeadersDict0, Body0),
+
+    HeadersDict1 = maybe_add_host(HeadersDict, Client0#client.netloc),
+
     Expect = expectation(HeadersDict),
 
     %% build headers with the body.
-    {HeaderDict1, ReqType, Body, Client1} = case Body0 of
+    {HeaderDict2, ReqType, Body, Client1} = case Body0 of
         stream ->
-            {HeadersDict, ReqType0, stream, Client0};
+            {HeadersDict1, ReqType0, stream, Client0};
         stream_multipart ->
-            handle_multipart_body(HeadersDict, ReqType0, Client0);
+            handle_multipart_body(HeadersDict1, ReqType0, Client0);
         {stream_multipart, Size} ->
-            handle_multipart_body(HeadersDict, ReqType0, Size, Client0);
+            handle_multipart_body(HeadersDict1, ReqType0, Size, Client0);
         {stream_multipart, Size, Boundary} ->
-            handle_multipart_body(HeadersDict, ReqType0, Size,
+            handle_multipart_body(HeadersDict1, ReqType0, Size,
                                   Boundary, Client0);
         <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-            handle_body(HeadersDict, ReqType0, Body0, Client0);
+            handle_body(HeadersDict1, ReqType0, Body0, Client0);
         <<>> ->
-            {HeadersDict, ReqType0, Body0, Client0};
+            {HeadersDict1, ReqType0, Body0, Client0};
         [] ->
-            {HeadersDict, ReqType0, Body0, Client0};
+            {HeadersDict1, ReqType0, Body0, Client0};
         _ ->
-            handle_body(HeadersDict, ReqType0, Body0, Client0)
+            handle_body(HeadersDict1, ReqType0, Body0, Client0)
     end,
 
     Client = case ReqType of
@@ -87,7 +89,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
     HeadersData = iolist_to_binary([
                 << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
-                hackney_headers:to_binary(HeaderDict1)]),
+                hackney_headers:to_binary(HeaderDict2)]),
 
     PerformAll = proplists:get_value(perform_all, Options, true),
 
@@ -607,6 +609,13 @@ default_ua() ->
     end,
     << "hackney/", Version/binary >>.
 
+maybe_add_host(HeadersDict, Netloc) ->
+    case hackney_headers:get_value(<<"Host">>, HeadersDict) of
+        undefined ->
+            hackney_headers:store(<<"Host">>, Netloc, HeadersDict);
+        _ ->
+            HeadersDict
+    end.
 
 is_default_port(#client{transport=hackney_tcp_transport, port=80}) ->
     true;
