@@ -176,7 +176,7 @@ len_mp_stream(Parts, Boundary) ->
                     Len = byte_size(Bin),
                     {MpHeader, Len} = mp_data_header({Name, Len}, Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
-                ({Name, Len}, AccSize) ->
+                ({Name, Len}, AccSize) when is_integer(Len) ->
                     {MpHeader, Len} = mp_data_header({Name, Len}, Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
                 ({Name, Bin, ExtraHeaders}, AccSize) when is_binary(Bin) ->
@@ -184,7 +184,7 @@ len_mp_stream(Parts, Boundary) ->
                     {MpHeader, Len} = mp_data_header({Name, Len, ExtraHeaders},
                                                      Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
-                ({Name, Len, ExtraHeaders}, AccSize) ->
+                ({Name, Len, ExtraHeaders}, AccSize) when is_integer(Len) ->
                     {MpHeader, Len} = mp_data_header({Name, Len, ExtraHeaders},
                                                      Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
