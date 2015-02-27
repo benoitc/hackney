@@ -179,7 +179,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
             Mod:update_meter([hackney_pool, PoolName, take_rate], 1),
-
+            Mod:increment_counter([hackney_pool, Host, reuse_connection]),
             Client1 = Client#client{socket=Skt,
                                     socket_ref=Ref,
                                     pool_handler=PoolHandler,
@@ -238,6 +238,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
         {ok, Skt} ->
             ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
             Mod:update_histogram([hackney, Host, connect_time], ConnectTime),
+            Mod:increment_counter([hackney_pool, Host, new_connection]),
             Client1 = Client#client{socket=Skt,
                                     state = connected},
             hackney_manager:update_state(Client1),
