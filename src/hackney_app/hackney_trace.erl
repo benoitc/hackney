@@ -1,3 +1,6 @@
+%%%% -*- erlang -*-
+%%%% This file is part of hackney released under the Apache 2 license.
+%%%% See the NOTICE for more information.
 -module(hackney_trace).
 
 -export([enable/2, disable/0,
