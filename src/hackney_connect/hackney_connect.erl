@@ -183,10 +183,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
-            ?report_debug("reuse a connection", [{pool, PoolName},
-                                                 {transport, Transport},
-                                                 {host, Host},
-                                                 {port, Port}]),
+            ?report_debug("reuse a connection", [{pool, PoolName}]),
             Mod:update_meter([hackney_pool, PoolName, take_rate], 1),
             Mod:increment_counter([hackney_pool, Host, reuse_connection]),
             Client1 = Client#client{socket=Skt,
@@ -197,10 +194,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, no_socket, Ref} ->
-            ?report_debug("no socket in the pool", [{pool, PoolName},
-                                                    {transport, Transport},
-                                                    {host, Host},
-                                                    {port, Port}]),
+            ?report_debug("no socket in the pool", [{pool, PoolName}]),
 
             Mod:increment_counter([hackney_pool, PoolName, no_socket]),
             do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
@@ -250,9 +244,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
-            ?report_debug("new connection", [{transport, Transport},
-                                             {host, Host},
-                                             {port, Port}]),
+            ?report_debug("new connection", []),
             ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
             Mod:update_histogram([hackney, Host, connect_time], ConnectTime),
             Mod:increment_counter([hackney_pool, Host, new_connection]),
@@ -261,17 +253,12 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, timeout} ->
-            ?report_debug("connect timeout", [{transport, Transport},
-                                              {host, Host},
-                                              {port, Port}]),
+            ?report_debug("connect timeout", []),
             Mod:increment_counter([hackney, Host, connect_timeout]),
             hackney_manager:cancel_request(Client),
             {error, connect_timeout};
         Error ->
-            ?report_debug("connect error", [{transport, Transport},
-                                            {host, Host},
-                                            {port, Port},
-                                            {error, Error}]),
+            ?report_debug("connect error", []),
             Mod:increment_counter([hackney, Host, connect_error]),
             hackney_manager:cancel_request(Client),
             Error
