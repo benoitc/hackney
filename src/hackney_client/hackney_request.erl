@@ -10,6 +10,7 @@
 
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
+-include_lib("src/hackney_app/hackney_internal.hrl").
 
 -export([perform/2,
          location/1,
@@ -92,6 +93,11 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                 hackney_headers:to_binary(HeaderDict2)]),
 
     PerformAll = proplists:get_value(perform_all, Options, true),
+
+    ?report_verbose("perform request", [{header_data, HeadersData},
+                                        {perform_all, PerformAll},
+                                        {expect, Expect}]),
+
 
     case can_perform_all(Body, Expect, PerformAll) of
         true ->

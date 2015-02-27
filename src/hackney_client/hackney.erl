@@ -37,6 +37,7 @@
 
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
+-include_lib("src/hackney_app/hackney_internal.hrl").
 
 
 -type url() :: #hackney_url{}.
@@ -293,6 +294,12 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
     %% normalize the url encoding
     URL = hackney_url:normalize(URL0),
 
+    ?report_trace("request", [{method, Method},
+                              {url, URL},
+                              {headers, Headers},
+                              {body, Body},
+                              {options, Options0}]),
+
     #hackney_url{transport=Transport,
                  host = Host,
                  port = Port,
@@ -351,12 +358,17 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
                                                             Path,
                                                             Headers,
                                                             Body}),
+                    ?report_trace("got response", [{response, Resp},
+                                                   {client, Client}]),
                     Reply = maybe_redirect(Resp, Req, 0),
                     reply_response(Reply, Client);
                 _ ->
+                    ?report_trace("invalid state", [{client, Client}]),
                     reply_response({error, invalide_state}, Client)
             end;
         Error ->
+            ?report_trace("response error", [{error, Error},
+                                             {client, Client0}]),
             reply_response(Error, Client0)
     end.
 
@@ -587,6 +599,7 @@ maybe_proxy(Transport, Host, Port, Options)
         when is_list(Host), is_integer(Port), is_list(Options) ->
     case proplists:get_value(proxy, Options) of
         Url when is_binary(Url) orelse is_list(Url) ->
+            ?report_debug("HTTP proxy request", [{url, Url}]),
             Url1 = hackney_url:parse_url(Url),
             #hackney_url{transport = PTransport,
                          host = ProxyHost,
@@ -606,6 +619,8 @@ maybe_proxy(Transport, Host, Port, Options)
                     end
             end;
         {ProxyHost, ProxyPort} ->
+            ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost},
+                                                 {proxy_port, ProxyPort}]),
             case Transport of
                 hackney_ssl_transport ->
                     ProxyAuth = proplists:get_value(proxy_auth, Options),
@@ -619,10 +634,16 @@ maybe_proxy(Transport, Host, Port, Options)
                     end
             end;
         {connect, ProxyHost, ProxyPort} ->
+            ?report_debug("HTTP tunnel request", [{proxy_host, ProxyHost},
+                                                  {proxy_port, ProxyPort}]),
+
             ProxyAuth = proplists:get_value(proxy_auth, Options),
             do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
                        Port, Options);
         {socks5, ProxyHost, ProxyPort} ->
+            ?report_debug("SOCKS proxy request", [{proxy_host, ProxyHost},
+                                                  {proxy_port, ProxyPort}]),
+
             %% create connection options
             ProxyUser = proplists:get_value(socks5_user, Options),
             ProxyPass = proplists:get_value(socks5_pass, Options),
@@ -652,6 +673,7 @@ maybe_proxy(Transport, Host, Port, Options)
             hackney_connect:connect(hackney_socks5, Host, Port,
                                     Options1, true);
         _ ->
+            ?report_debug("request without proxy", []),
             hackney_connect:connect(Transport, Host, Port, Options, true)
     end.
 
@@ -722,6 +744,10 @@ maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
     {Method, _Path, Headers, Body} = Req,
     case lists:member(S, [301, 302, 307]) of
         true  ->
+            ?report_debug("redirect request", [{location, Location},
+                                               {req, Req},
+                                               {resp, Resp},
+                                               {tries, Tries}]),
             %% redirect the location if possible. If the method is
             %% different from  get or head it will return
             %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
@@ -743,10 +769,18 @@ maybe_redirect1(Location, {ok, S, H, Client}=Resp, Req, Tries) ->
             %% invalid redirection
             case {Location, Method} of
                 {_, post} ->
+                    ?report_debug("redirect request", [{location, Location},
+                                                       {req, Req},
+                                                       {resp, Resp},
+                                                       {tries, Tries}]),
+
                     NewReq = {get, Location, [], <<>>},
                     maybe_redirect(redirect(Client, NewReq), Req, Tries+1);
                 {_, _} ->
-
+                    ?report_debug("invalid redirecttion", [{location, Location},
+                                                           {req, Req},
+                                                           {resp, Resp},
+                                                           {tries, Tries}]),
                     {error, {invalid_redirection, Resp}}
             end;
         _ ->

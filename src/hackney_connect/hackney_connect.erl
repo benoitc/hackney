@@ -16,6 +16,7 @@
 -export([ssl_opts/2]).
 
 -include("hackney.hrl").
+-include_lib("src/hackney_app/hackney_internal.hrl").
 
 -ifdef(no_ssl_name_validation).
 -define(VALIDATE_SSL, normal).
@@ -33,6 +34,10 @@ connect(Transport, Host, Port, Options) ->
 connect(Transport, Host, Port, Options, Dynamic) when is_binary(Host) ->
     connect(Transport, binary_to_list(Host), Port, Options, Dynamic);
 connect(Transport, Host, Port, Options, Dynamic) ->
+    ?report_debug("connect", [{transport, Transport},
+                              {host, Host},
+                              {port, Port},
+                              {dynamic, Dynamic}]),
     case create_connection(Transport, hackney_idna:to_ascii(Host), Port,
                            Options, Dynamic) of
         {ok, #client{request_ref=Ref}} ->
@@ -178,6 +183,10 @@ socket_from_pool(Host, Port, Transport, Client0) ->
 
     case PoolHandler:checkout(Host, Port, Transport, Client) of
         {ok, Ref, Skt} ->
+            ?report_debug("reuse a connection", [{pool, PoolName},
+                                                 {transport, Transport},
+                                                 {host, Host},
+                                                 {port, Port}]),
             Mod:update_meter([hackney_pool, PoolName, take_rate], 1),
             Mod:increment_counter([hackney_pool, Host, reuse_connection]),
             Client1 = Client#client{socket=Skt,
@@ -188,6 +197,11 @@ socket_from_pool(Host, Port, Transport, Client0) ->
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, no_socket, Ref} ->
+            ?report_debug("no socket in the pool", [{pool, PoolName},
+                                                    {transport, Transport},
+                                                    {host, Host},
+                                                    {port, Port}]),
+
             Mod:increment_counter([hackney_pool, PoolName, no_socket]),
             do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
                        pool);
@@ -236,6 +250,9 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
+            ?report_debug("new connection", [{transport, Transport},
+                                             {host, Host},
+                                             {port, Port}]),
             ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
             Mod:update_histogram([hackney, Host, connect_time], ConnectTime),
             Mod:increment_counter([hackney_pool, Host, new_connection]),
@@ -244,10 +261,17 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, timeout} ->
+            ?report_debug("connect timeout", [{transport, Transport},
+                                              {host, Host},
+                                              {port, Port}]),
             Mod:increment_counter([hackney, Host, connect_timeout]),
             hackney_manager:cancel_request(Client),
             {error, connect_timeout};
         Error ->
+            ?report_debug("connect error", [{transport, Transport},
+                                            {host, Host},
+                                            {port, Port},
+                                            {error, Error}]),
             Mod:increment_counter([hackney, Host, connect_error]),
             hackney_manager:cancel_request(Client),
             Error
