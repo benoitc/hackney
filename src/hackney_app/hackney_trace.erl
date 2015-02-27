@@ -8,13 +8,24 @@
          report_event/4]).
 
 -type trace_level() :: max | min | integer().
+-type filename() :: string().
+-type trace_type() :: io | filename() | port() | {fun(), any()}.
 
--export_type([trace_level/0]).
+
+-export_type([trace_level/0,
+              filename/0,
+              trace_type/0]).
 
 
 %% @doc start tracing
-%% Level are min, max or integer
--spec enable(trace_level(), any()) -> ok.
+%% start tracing at level Level and send the result either to the file File,
+%% the port Port or to a  trace handler.
+%%
+%% Note: that it starts a tracer server.
+%% When Destination is the atom io (or the tuple {io, Verbosity}),
+%% %% all (printable) inets trace events (trace_ts events which has
+%% %% Severity withing Limit) will be written to stdout using io:format.
+-spec enable(trace_level(), trace_type()) -> ok.
 enable(Level, File) when is_list(File) ->
     case file:open(File, [write]) of
         {ok, Fd} ->
