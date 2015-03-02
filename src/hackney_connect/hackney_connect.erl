@@ -16,7 +16,7 @@
 -export([ssl_opts/2]).
 
 -include("hackney.hrl").
--include_lib("src/hackney_app/hackney_internal.hrl").
+-include_lib("../hackney_app/hackney_internal.hrl").
 
 -ifdef(no_ssl_name_validation).
 -define(VALIDATE_SSL, normal).
