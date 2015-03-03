@@ -79,11 +79,18 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
 
 %% @doc release a socket in the pool
 checkin({_Name, Ref, Dest, Owner, Transport}, Socket) ->
-    case Transport:controlling_process(Socket, Owner) of
-        ok ->
-            gen_server:call(Owner, {checkin, Ref, Dest, Socket, Transport},
-                            infinity);
-        _Error ->
+    Transport:setopts(Socket, [{active, false}]),
+    case sync_socket(Transport, Socket) of
+        true ->
+            case Transport:controlling_process(Socket, Owner) of
+                ok ->
+                    gen_server:call(Owner, {checkin, Ref, Dest, Socket, Transport},
+                                    infinity);
+                _Error ->
+                    catch Transport:close(Socket),
+                    ok
+            end;
+        false ->
             catch Transport:close(Socket),
             ok
     end.
@@ -260,7 +267,7 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
                     {reply, {error, no_socket, self()}, State3}
             end
     end;
-handle_call({checkin, Ref, Dest, Socket, _Transport}, From, State) ->
+handle_call({checkin, Ref, Dest, Socket, Transport}, From, State) ->
     gen_server:reply(From, ok),
     Clients2 = case dict:find(Ref, State#state.clients) of
                    {ok, Dest} ->
@@ -268,7 +275,14 @@ handle_call({checkin, Ref, Dest, Socket, _Transport}, From, State) ->
                    error ->
                         State#state.clients
                end,
-    State2 = deliver_socket(Socket, Dest, State#state{clients=Clients2}),
+    State2 = case Transport:peername(Socket) of
+                 {ok, {_Adress, _Port}} ->
+                     %% socket is not closed, try to deliver it or store it
+                     deliver_socket(Socket, Dest, State#state{clients=Clients2});
+                 _Error ->
+                     %% socket is probably closed just return
+                     State#state{clients=Clients2}
+             end,
     update_usage(State2),
     {noreply, State2};
 
@@ -466,7 +480,6 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
             NbWaiters = State#state.nb_waiters - 1,
             Mod:update_histogram([hackney_pool, State#state.name, queue_count],
                                  NbWaiters),
-            Transport:setopts(Socket, [{active, false}]),
             case Transport:controlling_process(Socket, PidWaiter) of
                 ok ->
                     gen_server:reply(FromWaiter, {ok, Socket, self()}),

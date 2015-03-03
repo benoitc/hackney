@@ -157,7 +157,6 @@ is_pool(#client{options=Opts}) ->
             true
     end.
 
-
 reconnect(Host, Port, Transport, State) ->
     %% if we use a pool then checkout the connection from the pool, else
     %% connect the socket to the remote
