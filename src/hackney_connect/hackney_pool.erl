@@ -497,7 +497,7 @@ sync_socket(Transport, Socket) ->
     receive
         {Msg, Socket, _} -> false;
         {MsgClosed, Socket} -> false;
-        {MsgError, Socket} -> false
+        {MsgError, Socket, _} -> false
     after 0 ->
               true
     end.
