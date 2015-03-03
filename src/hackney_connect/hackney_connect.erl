@@ -194,7 +194,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, no_socket, Ref} ->
-            ?report_debug("no socket in the pool", [{pool, PoolName}]),
+            ?report_trace("no socket in the pool", [{pool, PoolName}]),
 
             Mod:increment_counter([hackney_pool, PoolName, no_socket]),
             do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
@@ -244,7 +244,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
 
     case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
         {ok, Skt} ->
-            ?report_debug("new connection", []),
+            ?report_trace("new connection", []),
             ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
             Mod:update_histogram([hackney, Host, connect_time], ConnectTime),
             Mod:increment_counter([hackney_pool, Host, new_connection]),
@@ -253,12 +253,12 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Mod,
             hackney_manager:update_state(Client1),
             {ok, Client1};
         {error, timeout} ->
-            ?report_debug("connect timeout", []),
+            ?report_trace("connect timeout", []),
             Mod:increment_counter([hackney, Host, connect_timeout]),
             hackney_manager:cancel_request(Client),
             {error, connect_timeout};
         Error ->
-            ?report_debug("connect error", []),
+            ?report_trace("connect error", []),
             Mod:increment_counter([hackney, Host, connect_error]),
             hackney_manager:cancel_request(Client),
             Error

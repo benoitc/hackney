@@ -37,6 +37,7 @@
          code_change/3, terminate/2]).
 
 -include("hackney.hrl").
+-include_lib("../hackney_app/hackney_internal.hrl").
 
 -record(state, {
         name,
@@ -367,6 +368,7 @@ find_connection({_Host, _Port, Transport}=Dest, Pid,
                             find_connection(Dest, Pid, remove_socket(S, State))
                     end;
                 false ->
+                    ?report_trace("checkout: socket unsynced~n", []),
                     find_connection(Dest, Pid, remove_socket(S, State))
             end;
         _Else ->
