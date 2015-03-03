@@ -290,17 +290,17 @@ handle_cast(_Msg, State) ->
 
 handle_info({timeout, Socket}, State) ->
     {noreply, remove_socket(Socket, State)};
+handle_info({tcp, Socket, _}, State) ->
+    {noreply, remove_socket(Socket, State)};
 handle_info({tcp_closed, Socket}, State) ->
+    {noreply, remove_socket(Socket, State)};
+handle_info({ssl, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({ssl_closed, Socket}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({tcp_error, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({ssl_error, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({tcp, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({ssl, Socket, _}, State) ->
     {noreply, remove_socket(Socket, State)};
 handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
     Mod = State#state.mod_metrics,
@@ -346,22 +346,27 @@ find_connection({_Host, _Port, Transport}=Dest, Pid,
     case dict:find(Dest, Conns) of
         {ok, [S | Rest]} ->
             Transport:setopts(S, [{active, false}]),
-            case Transport:controlling_process(S, Pid) of
-                ok ->
-                    {_, Timer} = dict:fetch(S, Sockets),
-                    cancel_timer(S, Timer),
-                    NewConns = update_connections(Rest, Dest, Conns),
-                    NewSockets = dict:erase(S, Sockets),
-                    NewState = State#state{connections=NewConns,
-                                           sockets=NewSockets},
-                    {{ok, S, self()}, NewState};
-                {error, badarg} ->
-                    %% something happened here normally the PID died,
-                    %% but make sure we still have the control of the process
-                    Transport:controlling_process(S, self()),
-                    Transport:setopts(S, [{active, once}]),
-                    {no_socket, State};
-                _Else ->
+            case sync_socket(Transport, S) of
+                true ->
+                    case Transport:controlling_process(S, Pid) of
+                        ok ->
+                            {_, Timer} = dict:fetch(S, Sockets),
+                            cancel_timer(S, Timer),
+                            NewConns = update_connections(Rest, Dest, Conns),
+                            NewSockets = dict:erase(S, Sockets),
+                            NewState = State#state{connections=NewConns,
+                                                   sockets=NewSockets},
+                            {{ok, S, self()}, NewState};
+                        {error, badarg} ->
+                            %% something happened here normally the PID died,
+                            %% but make sure we still have the control of the process
+                            Transport:controlling_process(S, self()),
+                            Transport:setopts(S, [{active, once}]),
+                            {no_socket, State};
+                        _Else ->
+                            find_connection(Dest, Pid, remove_socket(S, State))
+                    end;
+                false ->
                     find_connection(Dest, Pid, remove_socket(S, State))
             end;
         _Else ->
@@ -390,7 +395,9 @@ store_socket({_Host, _Port, Transport} = Dest, Socket,
              #state{timeout=Timeout, connections=Conns,
                     sockets=Sockets}=State) ->
     Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
-    Transport:setopts(Socket, [{active, once}]),
+    %% make sure to close the socket if anything is received while we are in
+    %% the pool.
+    Transport:setopts(Socket, [{active, once}, {packet, 0}]),
     ConnSockets = case dict:find(Dest, Conns) of
         {ok, OldSockets} ->
             [Socket | OldSockets];
@@ -450,7 +457,6 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
 deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
     Mod = State#state.mod_metrics,
 
-
     case queue_out(Dest, State#state.queues) of
         empty ->
             store_socket(Dest, Socket, State);
@@ -482,6 +488,18 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
                                    State#state{queues = Queues2,
                                                nb_waiters = NbWaiters})
             end
+    end.
+
+%% check that no events from the sockets is received after setting it to
+%% passive.
+sync_socket(Transport, Socket) ->
+    {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
+    receive
+        {Msg, Socket, _} -> false;
+        {MsgClosed, Socket} -> false;
+        {MsgError, Socket} -> false
+    after 0 ->
+              true
     end.
 
 %------------------------------------------------------------------------------
