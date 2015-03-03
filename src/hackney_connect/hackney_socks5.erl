@@ -120,7 +120,7 @@ close({Transport, Socket}) ->
 
 %% @doc Immediately close a socket in one or two directions.
 %% @see gen_tcp:shutdown/2
--spec shudown(socks5_socket(), read | write | read_write) -> ok.
+-spec shutdown(socks5_socket(), read | write | read_write) -> ok.
 shutdown({Transport, Socket}, How) ->
     Transport:shutdown(Socket, How).
 
