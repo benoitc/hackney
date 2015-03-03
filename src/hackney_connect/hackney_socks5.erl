@@ -16,6 +16,7 @@
          controlling_process/2,
          peername/1,
          close/1,
+         shutdown/2,
          sockname/1]).
 
 -define(TIMEOUT, infinity).
@@ -116,6 +117,12 @@ peername({Transport, Socket}) ->
 -spec close(socks5_socket()) -> ok.
 close({Transport, Socket}) ->
 	Transport:close(Socket).
+
+%% @doc Immediately close a socket in one or two directions.
+%% @see gen_tcp:shutdown/2
+-spec shudown(socks5_socket(), read | write | read_write) -> ok.
+shutdown({Transport, Socket}, How) ->
+    Transport:shutdown(Socket, How).
 
 %% @doc Get the local address and port of a socket
 %% @see inet:sockname/1

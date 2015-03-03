@@ -14,6 +14,7 @@
          controlling_process/2,
          peername/1,
          close/1,
+         shutdown/2,
          sockname/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
@@ -80,6 +81,12 @@ peername(Socket) ->
 -spec close(ssl:sslsocket()) -> ok.
 close(Socket) ->
 	ssl:close(Socket).
+
+%% @doc Immediately close a socket in one or two directions.
+%% @see ssl:shutdown/2
+-spec shutdown(ssl:socket(), read | write | read_write) -> ok.
+shutdown(Socket, How) ->
+    ssl:shutdown(Socket, How).
 
 %% @doc Get the local address and port of a socket
 %% @see ssl:sockname/1
