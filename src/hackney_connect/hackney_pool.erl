@@ -486,22 +486,12 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
                     monitor_client(Dest, Ref,
                                    State#state{queues = Queues2,
                                                nb_waiters=NbWaiters});
-                {error, badarg} ->
-                    %% something happened here normally the PID died,
-                    %% but make sure we still have the control of the process
-                    Transport:controlling_process(Socket, self()),
-                    %% get the socket events again
-                    Transport:setopts(Socket, [{active, once}]),
-
-                    deliver_socket(Socket, Dest,
-                                   State#state{queues = Queues2,
-                                               nb_waiters = NbWaiters});
-                _Error -> % Something wrong with the socket; just remove it
+                _Error ->
+                    % Something wrong, just remove the socket
                     catch Transport:close(Socket),
-                    gen_server:reply(FromWaiter, {error, no_socket, self()}),
-                    monitor_client(Dest, Ref,
-                                   State#state{queues = Queues2,
-                                               nb_waiters = NbWaiters})
+                    %% put the waiter back in the queue at the beginning
+                    NewQueues = queue:in_r({FromWaiter, Ref}, Queues2),
+                    State#state{queues = NewQueues, nb_waiters = NbWaiters + 1}
             end
     end.
 
