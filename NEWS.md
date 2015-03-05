@@ -1,5 +1,25 @@
 # NEWS
 
+1.1.0 - 2015/03/04
+------------------
+
+- fix: honor max_redirect.
+- fix: socket checkout in the pool: close the socket if something happen while
+  passing the control to the client
+- fix: put back the waiter in the queue of the pool if no socket can be
+  delivered
+- fix: make sure we don't release a closed typo
+- add: shutdown method to transports
+- add: hackney_trace module to trace a request
+- add: reuse/new connection metrics
+- fix: guard binary in `hackney_multipart:len_mp_stream/2`
+- improvement: pass the socket to `hackney:request_info/1`
+- dependency: update ssl_verify_hostname
+- fix: make sure to pass the Host header to the request
+- fix: HTTP basic authentication
+- fix content-type case
+- improvement: tests
+
 1.0.6 - 2015/01/21
 ------------------
 
