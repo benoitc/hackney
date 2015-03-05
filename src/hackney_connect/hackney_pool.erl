@@ -374,10 +374,12 @@ find_connection({_Host, _Port, Transport}=Dest, Pid,
                             {{ok, S, self()}, NewState};
                         {error, badarg} ->
                             %% something happened here normally the PID died,
-                            %% but make sure we still have the control of the process
-                            Transport:controlling_process(S, self()),
-                            Transport:setopts(S, [{active, once}]),
-                            {no_socket, State};
+                            %% but make sure we still have the control of the
+                            %% process
+                            catch Transport:controlling_process(S, self()),
+                            %% and then close it
+                            find_connection(Dest, Pid,
+                                            remove_socket(S,  State));
                         _Else ->
                             find_connection(Dest, Pid, remove_socket(S, State))
                     end;
