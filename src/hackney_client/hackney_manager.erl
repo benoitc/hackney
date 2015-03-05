@@ -50,10 +50,10 @@
 
 new_request(#client{request_ref=Ref}=Client) when is_reference(Ref) ->
     {ok, StartTime} = take_control(Ref, Client),
-     {Ref, Client#client{start_time=StartTime}};
+     {Ref, Client#client{start_time=StartTime, retries=0}};
 new_request(Client) ->
     {Ref, StartTime} = init_request(Client),
-    {Ref, Client#client{start_time=StartTime, request_ref=Ref}}.
+    {Ref, Client#client{start_time=StartTime, request_ref=Ref, retries=0}}.
 
 
 init_request(InitialState) ->

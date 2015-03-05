@@ -15,6 +15,7 @@
         follow_redirect = false,
         max_redirect = 5,
         force_redirect = false,
+        retries = 0,
         redirect = nil,
         location=nil,
         parser=nil,
