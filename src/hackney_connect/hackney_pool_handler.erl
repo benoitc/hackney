@@ -30,7 +30,7 @@ behaviour_info(_) ->
 -callback checkout(Host::host(), Port::integer(),Transport::atom(),
                    Client::client()) ->
     {ok, {Info::any(), CheckingReference::any(), Owner::pid(),
-          Transport::atom()}, Socket::inets:socket()}
+          Transport::atom()}, Socket::inet:socket()}
     | {error, Reason :: any()}.
 
 -callback checkin({Info::any(), CheckingReference::any(), Owner::pid(),
