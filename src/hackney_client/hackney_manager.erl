@@ -48,12 +48,13 @@
                  mod_metrics}).
 
 
-new_request(#client{request_ref=Ref}=Client) when is_reference(Ref) ->
+new_request(#client{request_ref=Ref}=Client)
+  when is_reference(Ref) ->
     {ok, StartTime} = take_control(Ref, Client),
-     {Ref, Client#client{start_time=StartTime, retries=0}};
+     {Ref, Client#client{start_time=StartTime}};
 new_request(Client) ->
     {Ref, StartTime} = init_request(Client),
-    {Ref, Client#client{start_time=StartTime, request_ref=Ref, retries=0}}.
+    {Ref, Client#client{start_time=StartTime, request_ref=Ref}}.
 
 
 init_request(InitialState) ->

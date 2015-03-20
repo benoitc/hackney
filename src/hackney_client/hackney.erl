@@ -713,9 +713,8 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
 maybe_redirect({ok, _}=Resp, _Req) ->
     Resp;
 maybe_redirect({ok, S, H, #client{follow_redirect=true,
-                                  max_redirect=Max,
                                   retries=Tries}=Client}=Resp, Req)
-        when Tries < Max ->
+        when Tries > 0 ->
     %% check if the given location is an absolute url,
     %% else return an error.
     case redirect_location(H) of
@@ -729,8 +728,7 @@ maybe_redirect({ok, S, H, #client{follow_redirect=true,
                     maybe_redirect1(URL, Resp, Req)
             end
     end;
-maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp,
-               _Req) ->
+maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp, _Req) ->
     case lists:member(S, [301, 302, 303, 307]) of
         true ->
             {error, {max_redirect_overflow, Resp}};
@@ -756,11 +754,11 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
             case {Location, lists:member(Method, [get, head])} of
                 {_, true} ->
                     NewReq = {Method, Location, Headers, Body},
-                    maybe_redirect(redirect(Client#client{retries=Tries+1}, NewReq),
+                    maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
                                    Req);
                 {_, _} when Client#client.force_redirect =:= true ->
                         NewReq = {Method, Location, Headers, Body},
-                        maybe_redirect(redirect(Client#client{retries=Tries+1}, NewReq),
+                        maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
                                        Req);
                 {_, _} ->
                     {ok, {maybe_redirect, S, H, Client}}
@@ -776,7 +774,7 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
                                                        {tries, Tries}]),
 
                     NewReq = {get, Location, [], <<>>},
-                    maybe_redirect(redirect(Client#client{retries=Tries+1}, NewReq),
+                    maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
                                    Req);
                 {_, _} ->
                     ?report_debug("invalid redirecttion", [{location, Location},
@@ -845,6 +843,7 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             NewClient = RedirectClient#client{redirect=Redirect,
                                               follow_redirect=FollowRedirect,
                                               max_redirect=MaxRedirect,
+                                              retries=Tries,
                                               options=Opts0},
             {ok, S, H, NewClient};
         {ok, S, H, RedirectClient} ->

@@ -81,6 +81,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
                            recv_timeout=Timeout,
                            follow_redirect=FollowRedirect,
                            max_redirect=MaxRedirect,
+                           retries=MaxRedirect,
                            force_redirect=ForceRedirect,
                            async=Async,
                            stream_to=StreamTo,
