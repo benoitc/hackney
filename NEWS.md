@@ -1,5 +1,12 @@
 # NEWS
 
+1.1.1 - 2015/03/20
+------------------
+
+- fix: fix max redirection (#170)
+- fix: don't encode path parameters and unreserved chars. (#176)
+
+
 1.1.0 - 2015/03/04
 ------------------
 
