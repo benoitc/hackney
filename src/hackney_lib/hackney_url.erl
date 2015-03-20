@@ -368,7 +368,9 @@ partial_pathencode(<<C, Rest/binary>> = Bin, Acc) ->
     if	C >= $0, C =< $9 -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C >= $A, C =< $Z -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C >= $a, C =< $z -> partial_pathencode(Rest, <<Acc/binary, C>>);
-        C =:= $.; C =:= $-; C =:= $~; C =:= $_ ->
+        C =:= $;; C =:= $=; C =:= $,; C =:= $: ->
+            partial_pathencode(Rest, <<Acc/binary, C>>);
+        C =:= $.; C =:= $-; C =:= $+; C =:= $~; C =:= $_ ->
             partial_pathencode(Rest, <<Acc/binary, C>>);
         C =:= $  ->
 		    partial_pathencode(Rest, <<Acc/binary, $+>>);
