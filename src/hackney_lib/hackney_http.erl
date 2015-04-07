@@ -247,7 +247,7 @@ parse_uri_path(<< C, Rest/bits >>, St, Method, Acc) ->
         _ -> parse_uri_path(Rest, St, Method, << Acc/binary, C >>)
     end.
 
-parse_version(<< "HTTP/", High, ".", Low, Rest/binary >>, St, Method, URI)
+parse_version(<< "HTTP/", High, ".", Low, $\r , $\n, Rest/binary >>, St, Method, URI)
         when High >= $0, High =< $9, Low >= $0, Low =< $9 ->
     Version = { High -$0, Low - $0},
 
