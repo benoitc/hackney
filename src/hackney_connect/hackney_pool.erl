@@ -534,7 +534,7 @@ delete_metrics(Mod, PoolName) ->
     Mod:delete([hackney_pool, PoolName, no_socket]),
     Mod:delete([hackney_pool, PoolName, in_use_count]),
     Mod:delete([hackney_pool, PoolName, free_count]),
-    Mod:delete(histogram, [hackney_pool, PoolName, queue_counter]).
+    Mod:delete([hackney_pool, PoolName, queue_counter]).
 
 
 update_usage(#state{name=PoolName, mod_metrics=Mod, sockets=Sockets,
