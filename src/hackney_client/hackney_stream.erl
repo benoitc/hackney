@@ -250,9 +250,11 @@ async_recv(Parent, Owner, Ref,
             case Client#client.response_state of
                 on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
                              andalso CLen =:= nil ->
-                    Owner ! {hackney_response, Ref, Buffer};
+                    Owner ! {hackney_response, Ref, Buffer},
+                    Owner ! {hackney_response, Ref, done};
                 on_body when TE =:= <<"identity">> ->
-                    Owner ! {hackney_response, Ref, Buffer};
+                    Owner ! {hackney_response, Ref, Buffer},
+                    Owner ! {hackney_response, Ref, done};
                 on_body ->
                     Owner ! {hackney_response, Ref, {error, {closed, Buffer}}};
                 _ ->
