@@ -206,6 +206,8 @@ parse_response_version(<< "HTTP/", High, ".", Low, $\s, Rest/binary >>, St)
 parse_response_version(_, _) ->
      {error, bad_request}.
 
+parse_status(<<>>, St, Version, Acc) ->
+    parse_reason(<<>>, St, Version, Acc);
 parse_status(<< C, Rest/bits >>, St, Version, Acc) ->
     case C of
         $\r ->  {error, bad_request};
