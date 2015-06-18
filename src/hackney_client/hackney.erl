@@ -764,8 +764,8 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
                     {ok, {maybe_redirect, S, H, Client}}
             end;
         false when S =:= 303 ->
-            %% see other. If methos is not POST we consider it as an
-            %% invalid redirection
+            %% see other. If method is not POST it is
+            %% considered an invalid redirection.
             case {Location, Method} of
                 {_, post} ->
                     ?report_debug("redirect request", [{location, Location},
