@@ -123,8 +123,6 @@ parse_cookie_name(<< C, Rest/binary >>, Acc, Name) ->
 
 parse_cookie_value(<<>>, Acc, Name, Value) ->
     lists:reverse([{Name, parse_cookie_trim(Value)}|Acc]);
-parse_cookie_value(<< $,, Rest/binary >>, Acc, Name, Value) ->
-    parse_cookie(Rest, [{Name, parse_cookie_trim(Value)}|Acc]);
 parse_cookie_value(<< $;, Rest/binary >>, Acc, Name, Value) ->
     parse_cookie(Rest, [{Name, parse_cookie_trim(Value)}|Acc]);
 parse_cookie_value(<< $\t, _/binary >>, _, _, _) ->

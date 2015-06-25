@@ -21,6 +21,14 @@ parse_cookie_test_() ->
             %% Space in value.
             {<<"foo=Thu Jul 11 2013 15:38:43 GMT+0400 (MSK)">>,
              [{<<"foo">>, <<"Thu Jul 11 2013 15:38:43 GMT+0400 (MSK)">>}]},
+            %% Comma in params
+            {<<"foo=some:value;Path=/;Expires=Fri, 09-Jun-2017 09:32:51 GMT;Secure;HttpOnly;Priority=HIGH">>,
+             [{<<"foo">>, <<"some:value">>},
+              {<<"Path">>, <<"/">>},
+              {<<"Expires">>, <<"Fri, 09-Jun-2017 09:32:51 GMT">>},
+              {<<"Secure">>, true},
+              {<<"HttpOnly">>, true},
+              {<<"Priority">>, <<"HIGH">>}]},
             %% Potential edge cases (initially from Mochiweb).
             {<<"foo=\\x">>, [{<<"foo">>, <<"\\x">>}]},
             {<<"=">>, {error, badarg}},
@@ -30,11 +38,9 @@ parse_cookie_test_() ->
             {<<"foo=\\\";;bar=good ">>,
              [{<<"foo">>, <<"\\\"">>}, {<<"bar">>, <<"good">>}]},
             {<<"foo=\"\\\";bar">>, [{<<"foo">>, <<"\"\\\"">>}, {<<"bar">>, true}]},
-            {<<>>, []},
-            {<<"foo=bar , baz=wibble ">>,
-             [{<<"foo">>, <<"bar">>}, {<<"baz">>, <<"wibble">>}]}
+            {<<>>, []}
             ],
-    [{V, fun() -> R = hackney_cookie:parse_cookie(V) end} || {V, R} <- Tests].
+    [{V, ?_assertEqual(R, hackney_cookie:parse_cookie(V))} || {V, R} <- Tests].
 
 setcookie_test_() ->
     %% {Name, Value, Opts, Result}
