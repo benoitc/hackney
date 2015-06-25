@@ -212,6 +212,8 @@ request(Method, URL, Headers, Body) ->
 %%      <li>`ssl_options()': See the ssl options from the ssl
 %%      module.</li>
 %%
+%%      <li>`with_body': when this option is passed the body is returned
+%%      directly. The response is `{ok, Status, Headers, Body}'</li>
 %%      <li>`async': receive the response asynchronously
 %%      The function return {ok, StreamRef}.
 %%      When {async, once} is used the response will be received only once. To
@@ -932,12 +934,22 @@ reply_response({ok, Status, Headers, #client{method= <<"HEAD">>}=NState},
     {ok, Status, Headers};
 reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
                _State) when Status =:= 204 orelse Status =:= 304 ->
-    hackney_manager:update_state(NState#client{clen = 0}),
-    {ok, Status, Headers, Ref};
+    case NState#client.with_body of
+        false ->
+            hackney_manager:update_state(NState#client{clen = 0}),
+            {ok, Status, Headers, Ref};
+        true ->
+            reply_with_body(Status, Headers, NState#client{clen = 0})
+    end;
 reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
                _State) ->
-    hackney_manager:update_state(NState),
-    {ok, Status, Headers, Ref};
+    case NState#client.with_body of
+        false ->
+            hackney_manager:update_state(NState),
+            {ok, Status, Headers, Ref};
+        true ->
+            reply_with_body(Status, Headers, NState)
+    end;
 reply_response({ok, #client{request_ref=Ref}=NState}, _State) ->
     hackney_manager:update_state(NState),
     {ok, Ref};
@@ -946,6 +958,16 @@ reply_response({ok, Ref}, _State) when is_reference(Ref) ->
 reply_response(Error, State) ->
     hackney_manager:handle_error(State),
     Error.
+
+
+reply_with_body(Status, Headers, State) ->
+    Reply = hackney_response:body(State),
+    case reply(Reply, State) of
+        {ok, Body} ->
+            {ok, Status, Headers, Body};
+        Error ->
+            Error
+    end.
 
 
 maybe_update_req(#client{dynamic=true, response_state=done}=State) ->
@@ -972,6 +994,10 @@ parse_options([dynamic | Rest], State) ->
     parse_options(Rest, State#client{dynamic=true});
 parse_options([{dynamic, Dynamic} | Rest], State) ->
     parse_options(Rest, State#client{dynamic=Dynamic});
+parse_options([{with_body, WithBody} | Rest], State) ->
+    parse_options(Rest, State#client{with_body=WithBody});
+parse_options([with_body | Rest], State) ->
+    parse_options(Rest, State#client{with_body=true});
 parse_options([_ | Rest], State) ->
     parse_options(Rest, State).
 

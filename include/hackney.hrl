@@ -25,6 +25,7 @@
         req_type = normal,
         expect = false,
         async = false,
+        with_body = false,
         stream_to,
         send_fun=nil,
         body_state=waiting,
