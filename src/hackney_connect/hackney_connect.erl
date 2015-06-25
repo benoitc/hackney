@@ -293,19 +293,16 @@ ssl_opts(Host, Options) ->
                      {verify_fun, {fun ssl_verify_hostname:verify_fun/3,
                                    [{check_hostname, Host}]}},
                      {verify, verify_peer},
-                     {fail_if_no_peer_cert, true},
                      {depth, 2}];
                 {_, normal} ->
                     CACertFile = filename:join(hackney_util:privdir(),
                                                "ca-bundle.crt"),
                     [{cacertfile, CACertFile },
-                     {verify, verify_peer}, {depth, 99}]
+                     {verify, verify_peer}, {depth, 2}]
             end;
         SSLOpts ->
             SSLOpts
     end.
-
-
 
 
 should_validate_ssl() ->

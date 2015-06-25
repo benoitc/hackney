@@ -57,7 +57,7 @@ my %urls = (
     'http://hg.mozilla.org/releases/mozilla-release/raw-file/default/security/nss/lib/ckfw/builtins/certdata.txt',
 );
 
-$opt_d = 'release';
+$opt_d = 'nss';
 
 # If the OpenSSL commandline is not in search path you can configure it here!
 my $openssl = 'openssl';
