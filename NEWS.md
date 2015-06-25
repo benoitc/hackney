@@ -1,5 +1,24 @@
 # NEWS
 
+1.2.0 - 2015/06/25
+------------------
+
+- new: add `with_body` option to return the body directly (#184) 
+- fix: rely on ssl version to validate certificates securely using hostname
+  verification
+- fix: fix redirection when transport change (#177)
+- new: build is now using rebar3
+- new: updated root certificates
+- fix: ignore comma in set-cookie attributes (#193)
+- fix: status line parsing when reason phrase is missing entirely (#190)
+- fix: make sure sure the response is done during async streaming (#186)
+- fix metrics (#186)
+- bump lateqst version of `ssl_verify_hostname` (#175)
+- fix: parse server headers
+- fix: really honor max redirection (#170)
+- fix: handle path parameters in URL (#176)
+- 
+
 1.1.1 - 2015/03/20
 ------------------
 
