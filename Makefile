@@ -7,7 +7,7 @@ all: build
 dev: devbuild
 
 doc: dev
-	$(REBAR) as dev doc
+	$(REBAR) as dev edoc
 
 clean:
 	$(REBAR) clean
@@ -23,11 +23,8 @@ test:
 devclean:
 	$(REBAR) as dev clean
 
-devbuild: devdeps
+devbuild:
 	$(REBAR) as dev compile
-
-devdeps:
-	$(REBAR) as dev get-deps
 
 dialyzer:
 	$(REBAR) dialyzer

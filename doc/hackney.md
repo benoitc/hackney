@@ -324,6 +324,9 @@ see the gen_tcp options.
 module.
 
 
+* `with_body`: when this option is passed the body is returned
+directly. The response is `{ok, Status, Headers, Body}`
+
 * `async`: receive the response asynchronously
 The function return {ok, StreamRef}.
 When {async, once} is used the response will be received only once. To
