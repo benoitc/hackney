@@ -1,49 +1,36 @@
-REBAR?=rebar
+REBAR?=./rebar3
 DIALYZER?=dialyzer
 PLT=.hackney.plt
-
-ERLANG_APPS=asn1 compiler crypto edoc erts inets kernel mnesia public_key ssl stdlib syntax_tools tools xmerl
-DEPS=$(notdir $(wildcard deps/*))
-DIALYZER_DEPS=$(foreach dep,$(DEPS),deps/$(dep)/ebin)
 
 all: build
 
 dev: devbuild
 
 doc: dev
-	$(REBAR) -C rebar_dev.config doc
+	$(REBAR) as dev doc
 
 clean:
 	$(REBAR) clean
 
-distclean: clean
-	@rm -rf deps
-
-build: deps
+build:
 	$(REBAR) compile
 
-deps:
-	$(REBAR) get-deps
-
 test:
-	$(REBAR) skip_deps=true eunit
+	$(REBAR) eunit
 
 # development
 #
 devclean:
-	$(REBAR) -C rebar_dev.config clean
+	$(REBAR) as dev clean
 
 devbuild: devdeps
-	$(REBAR) -C rebar_dev.config compile
+	$(REBAR) as dev compile
 
 devdeps:
-	$(REBAR) -C rebar_dev.config get-deps
+	$(REBAR) as dev get-deps
 
-dialyzer: $(PLT) devbuild
-	$(DIALYZER) --plts $(PLT) -r ebin
-
-$(PLT):
-	$(DIALYZER) --build_plt $(DIALYZER_DEPS) --apps $(ERLANG_APPS) --output_plt $(PLT)
+dialyzer:
+	$(REBAR) dialyzer
 
 # CA generation
 #

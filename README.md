@@ -1,5 +1,3 @@
-
-
 # hackney - HTTP client library in Erlang #
 
 Copyright (c) 2012-2015 Benoît Chesneau.
@@ -66,13 +64,13 @@ files and documentation.
 To run tests run 'make test'.
 To generate doc, run 'make doc'.
 
-Or add it to your rebar config
+Or add it to your rebar3 config
 
 ```erlang
 
 {deps, [
     ....
-    {hackney, ".*", {git, "git://github.com/benoitc/hackney.git", {branch, "master"}}}
+    hackney
 ]}.
 ```
 
@@ -148,14 +146,14 @@ where `Method`, can be any HTTP method in lowercase.
 ```erlang
 
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Ref) of
-		{ok, Data} ->
-			read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
-		done ->
-			{ok, Acc};
-		{error, Reason} ->
-			{error, Reason}
-	end.
+    case stream_body(Ref) of
+        {ok, Data} ->
+            read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
+        done ->
+            {ok, Acc};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 ```
 
 > Note: you can also fetch a multipart response using the functions
@@ -472,12 +470,12 @@ issue](http://github.com/benoitc/hackney/issues).
 ### Notes for developers
 
 If you want to contribute patches or improve the docs, you will need to
-build hackney using the `rebar_dev.config`  file. It can also be built
+build hackney using the `dev` profile. It can also be built
 using the **Makefile**:
 
 ```sh
 
-$ make dev ; # compile & get deps
+$ make dev ; # compile
 $ make devclean ; # clean all files
 ```
 
@@ -535,4 +533,3 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
-
