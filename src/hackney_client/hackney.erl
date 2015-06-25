@@ -796,11 +796,7 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     #hackney_url{transport=RedirectTransport,
                  host=RedirectHost,
                  port=RedirectPort}=RedirectUrl,
-    NewHeaders = lists:keystore(<<"Host">>, 1, Headers,
-                                {<<"Host">>, RedirectHost}),
-    RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
-                                   Client#client.options, false),
-    %% make a request without any redirection
+
     #client{transport=Transport,
             host=Host,
             port=Port,
@@ -810,17 +806,26 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             retries=Tries,
             redirect=Redirect} = Client,
 
+
+    NewHeaders = lists:keystore(<<"Host">>, 1, Headers,
+                                {<<"Host">>, RedirectHost}),
+    RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
+                                   Client#client.options, false),
+    %% make a request without any redirection
+
     Opts = lists:keystore(follow_redirect, 1, Opts0,
                           {follow_redirect, false}),
 
+    Client1 = hackney_connect:check_or_close(Client),
+
     %% update the state with the redirect info
-    Client1 = Client#client{transport=RedirectTransport,
+    Client2 = Client1#client{transport=RedirectTransport,
                             host=RedirectHost,
                             port=RedirectPort,
                             options=Opts},
 
     %% send a request to the new location
-    case send_request(Client1, RedirectRequest) of
+    case send_request(Client2, RedirectRequest) of
         {ok,  S, H, RedirectRef} when is_reference(RedirectRef) ->
             RedirectState = hackney_manager:get_state(RedirectRef),
             RedirectState1 = case Redirect of

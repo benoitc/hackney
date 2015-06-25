@@ -10,6 +10,7 @@
          maybe_connect/1,
          reconnect/4,
          set_sockopts/2,
+         check_or_close/1,
          close/1,
          is_pool/1]).
 
@@ -108,21 +109,23 @@ maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
 maybe_connect(#client{redirect=nil}=Client) ->
     {ok, check_mod_metrics(Client)};
 maybe_connect(#client{redirect=Redirect}=Client) ->
-    #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
-    %% the connection was redirected. If we are using a pool, checkin
-    %% the socket and create the newone, else close the current socket
-    %% and create a new one.
+    %% reinit the options and reconnect the client
+    {Transport, Host, Port, Options} = Redirect,
+    reconnect(Host, Port, Transport, Client#client{options=Options,
+                                                    redirect=nil}).
+
+check_or_close(#client{socket=nil}=Client) ->
+    Client;
+check_or_close(Client) ->
     case is_pool(Client) of
         false ->
             close(Client);
         true ->
-            Handler:checkin(Ref, Socket)
-    end,
-    %% reinit the options and reconnect the client
-    {Transport, Host, Port, Options} = Redirect,
-    Client1 = Client#client{options=Options,
-                            redirect=nil},
-    reconnect(Host, Port, Transport, Client1).
+            #client{socket=Socket, socket_ref=Ref, pool_handler=Handler}=Client,
+            _ = Handler:checkin(Ref, Socket),
+            Client#client{socket=nil, state=closed}
+    end.
+
 
 
 %% @doc add set sockets options in the client
