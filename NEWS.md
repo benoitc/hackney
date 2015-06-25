@@ -13,7 +13,7 @@
 - fix: status line parsing when reason phrase is missing entirely (#190)
 - fix: make sure sure the response is done during async streaming (#186)
 - fix metrics (#186)
-- bump lateqst version of `ssl_verify_hostname` (#175)
+- new: bump latest version of `ssl_verify_hostname` (#175)
 - fix: parse server headers
 - fix: really honor max redirection (#170)
 - fix: handle path parameters in URL (#176)
