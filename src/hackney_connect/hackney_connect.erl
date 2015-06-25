@@ -18,11 +18,7 @@
 -include("hackney.hrl").
 -include_lib("../hackney_app/hackney_internal.hrl").
 
--ifdef(no_ssl_name_validation).
--define(VALIDATE_SSL, normal).
--else.
--define(VALIDATE_SSL, host).
--endif.
+-define(SSL_SECURE_VERSION,  {5, 3, 6}).
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, []).
@@ -284,20 +280,20 @@ ssl_opts(Host, Options) ->
     case proplists:get_value(ssl_options, Options) of
         undefined ->
             Insecure =  proplists:get_value(insecure, Options),
-            ShouldValidate = should_validate_ssl(),
+            UseSecureSsl = use_secure_ssl(),
 
-            case {Insecure, ShouldValidate} of
+            case {Insecure, UseSecureSsl} of
                 {true, _} ->
                     [{verify, verify_none},
                      {reuse_sessions, true}];
-                {_, host} ->[
-                     {cacertfile, CACertFile},
+                {_, true} ->
+                    [{cacertfile, CACertFile},
                      {server_name_indication, Host},
                      {verify_fun, {fun ssl_verify_hostname:verify_fun/3,
                                    [{check_hostname, Host}]}},
                      {verify, verify_peer},
                      {depth, 2}];
-                {_, normal} ->
+                {_, _} ->
                     CACertFile = filename:join(hackney_util:privdir(),
                                                "ca-bundle.crt"),
                     [{cacertfile, CACertFile },
@@ -307,6 +303,21 @@ ssl_opts(Host, Options) ->
             SSLOpts
     end.
 
+ssl_version() ->
+    case application:get_env(hackney, ssl_version) of
+        {ok, Version} -> Version;
+        undefined ->
+            {ok, Vsn} = application:get_key(ssl, vsn),
+            Parsed = [list_to_integer(V) || V <- string:tokens(Vsn, ".")],
+            Version = case Parsed of
+                          [Major] -> [Major, 0, 0];
+                          [Major, Minor] -> [Major, Minor];
+                          [Major, Minor, Patch] -> [Major, Minor, Patch];
+                          [Major, Minor, Patch | _] -> [Major, Minor, Patch]
+                      end,
+            application:set_env(hackney, ssl_version, Version),
+            Version
+    end.
 
-should_validate_ssl() ->
-    ?VALIDATE_SSL.
+use_secure_ssl() ->
+    ssl_version() >= ?SSL_SECURE_VERSION.
