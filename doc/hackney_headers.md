@@ -17,36 +17,24 @@ module to manipulate HTTP headers.
 
 
 
-### <a name="type-compat_dict">compat_dict()</a> ###
-
-
-
-<pre><code>
-compat_dict() = <a href="dict.md#type-dict">dict:dict()</a>
-</code></pre>
-
-
-
-
-
-### <a name="type-compat_dict">compat_dict()</a> ###
-
-
-
-<pre><code>
-compat_dict() = <a href="dict.md#type-dict">dict:dict()</a>
-</code></pre>
-
-
-
-
-
 ### <a name="type-disposition">disposition()</a> ###
 
 
 
 <pre><code>
 disposition() = {binary(), [{binary(), binary()}]}
+</code></pre>
+
+
+
+
+
+### <a name="type-headers">headers()</a> ###
+
+
+
+<pre><code>
+headers() = any()
 </code></pre>
 
 
@@ -159,7 +147,7 @@ Create a binary header
 
 
 <pre><code>
-new() -&gt; <a href="#type-compat_dict">compat_dict()</a>
+new() -&gt; <a href="#type-headers">headers()</a>
 </code></pre>
 <br />
 
@@ -170,7 +158,7 @@ initialise an header dict
 
 
 <pre><code>
-new(D::{dict, <a href="#type-compat_dict">compat_dict()</a>} | list()) -&gt; <a href="#type-compat_dict">compat_dict()</a>
+new(D::list()) -&gt; <a href="#type-headers">headers()</a>
 </code></pre>
 <br />
 
@@ -181,7 +169,7 @@ new(D::{dict, <a href="#type-compat_dict">compat_dict()</a>} | list()) -&gt; <a 
 
 
 <pre><code>
-parse(Name::binary(), Headers::list() | <a href="#type-compat_dict">compat_dict()</a>) -&gt; any() | undefined | {error, badarg}
+parse(Name::binary(), Headers::list() | <a href="#type-headers">headers()</a>) -&gt; any() | undefined | {error, badarg}
 </code></pre>
 <br />
 
