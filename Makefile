@@ -47,7 +47,7 @@ $(PLT):
 
 # CA generation
 #
-CA_BUNDLE_BIN=./mk-ca-bundle.pl
+CA_BUNDLE_BIN=./support/mk-ca-bundle.pl
 CA_BUNDLE=ca-bundle.crt
 
 mkcert:
