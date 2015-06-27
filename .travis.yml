@@ -14,3 +14,5 @@ before_install:
   - sudo pip install -q httpbin
   - sudo pip install -q gunicorn
 before_script: gunicorn httpbin:app&
+install: ./rebar3 update
+script: make test
