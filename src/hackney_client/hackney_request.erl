@@ -341,7 +341,7 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                                            <<"application/octet-stream">>),
             {S, CT, iolist_to_binary(Body1)};
         _ when is_binary(Body0) ->
-            S = erlang:size(Body0),
+            S = erlang:byte_size(Body0),
             CT = hackney_headers:get_value(<<"content-type">>, Headers,
                                            <<"application/octet-stream">>),
             {S, CT, Body0}
