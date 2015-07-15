@@ -664,7 +664,7 @@ maybe_proxy(Transport, Host, Port, Options)
                 undefined ->
                     [{insecure, Insecure}] ++ ConnectOpts1;
                 SslOpts ->
-                    [{ssl_opttions, SslOpts},
+                    [{ssl_options, SslOpts},
                      {insecure, Insecure}] ++ ConnectOpts1
             end,
 
@@ -699,7 +699,7 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
         undefined ->
             [{insecure, Insecure}] ++ ConnectOpts1;
         SslOpts ->
-            [{ssl_opttions, SslOpts},
+            [{ssl_options, SslOpts},
              {insecure, Insecure}] ++ ConnectOpts1
     end,
 
