@@ -95,7 +95,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
         {Ref, resume} ->
             stream_loop(Parent, Owner, Ref, Client);
         {Ref, pause} ->
-            erlang:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
+            proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
                                                        Client]);
         {Ref, stop_async, From} ->
             hackney_manager:store_state(Client#client{async=false}),
@@ -134,7 +134,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
     after 5000 ->
 
-        erlang:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
+        proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
                                                    Client])
 
     end.
@@ -234,8 +234,7 @@ async_recv(Parent, Owner, Ref,
         {Ref, pause} ->
             %% make sure that the proces won't be awoken by a tcp msg
             Transport:setopts(Sock, [{active, false}]),
-            %% hibernate
-            erlang:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
+            proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
                                                    Client, Buffer]);
         {Ref, close} ->
             Transport:close(Sock);
