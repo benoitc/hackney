@@ -10,6 +10,7 @@
          maybe_connect/1,
          reconnect/4,
          set_sockopts/2,
+         ssl_opts/2,
          check_or_close/1,
          close/1,
          is_pool/1]).
