@@ -214,6 +214,8 @@ request(Method, URL, Headers, Body) ->
 %%
 %%      <li>`with_body': when this option is passed the body is returned
 %%      directly. The response is `{ok, Status, Headers, Body}'</li>
+%%      <li>`max_body': sets maximum allowed size of the body if
+%%      with_body is true</li>
 %%      <li>`async': receive the response asynchronously
 %%      The function return {ok, StreamRef}.
 %%      When {async, once} is used the response will be received only once. To
@@ -961,7 +963,10 @@ reply_response(Error, State) ->
 
 
 reply_with_body(Status, Headers, State) ->
-    Reply = hackney_response:body(State),
+    Reply = case State#client.max_body of
+                undefined -> hackney_response:body(State);
+                MaxBody   -> hackney_response:body(MaxBody, State)
+            end,
     case reply(Reply, State) of
         {ok, Body} ->
             {ok, Status, Headers, Body};
@@ -998,6 +1003,8 @@ parse_options([{with_body, WithBody} | Rest], State) ->
     parse_options(Rest, State#client{with_body=WithBody});
 parse_options([with_body | Rest], State) ->
     parse_options(Rest, State#client{with_body=true});
+parse_options([{max_body, MaxBody} | Rest], State) ->
+    parse_options(Rest, State#client{max_body=MaxBody});
 parse_options([_ | Rest], State) ->
     parse_options(Rest, State).
 

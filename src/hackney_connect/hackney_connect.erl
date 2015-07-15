@@ -63,6 +63,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
     Async =  proplists:get_value(async, Options, false),
     StreamTo = proplists:get_value(stream_to, Options, false),
     WithBody = proplists:get_value(with_body, Options, false),
+    MaxBody = proplists:get_value(max_body, Options),
 
     %% get mod metrics
     Mod = hackney_util:mod_metrics(),
@@ -82,6 +83,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
                            force_redirect=ForceRedirect,
                            async=Async,
                            with_body=WithBody,
+                           max_body=MaxBody,
                            stream_to=StreamTo,
                            buffer = <<>>},
     %% if we use a pool then checkout the connection from the pool, else
