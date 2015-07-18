@@ -8,6 +8,7 @@ http_requests_test_() ->
      fun stop/1,
      fun(ok) ->
          {inparallel, [get_request(),
+                       request_with_body(),
                        head_request(),
                        no_content_response(),
                        not_modified_response(),
@@ -32,6 +33,12 @@ get_request() ->
     URL = <<"http://localhost:8000/get">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
+
+request_with_body() ->
+    URL = <<"http://localhost:8000/robots.txt">>,
+    ExpectedBody = <<"User-agent: *\nDisallow: /deny\n">>,
+    {ok, 200, _, Body} = hackney:request(get, URL, [], <<>>, [{with_body, true}]),
+    ?_assertEqual(ExpectedBody, Body).
 
 head_request() ->
     URL = <<"http://localhost:8000/get">>,
