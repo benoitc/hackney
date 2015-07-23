@@ -18,8 +18,7 @@
 
 -include("hackney.hrl").
 -include_lib("../hackney_app/hackney_internal.hrl").
-
--define(SSL_SECURE_VERSION,  {5, 3, 6}).
+-include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
 connect(Transport, Host, Port) ->
     connect(Transport, Host, Port, []).
@@ -63,6 +62,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
     Async =  proplists:get_value(async, Options, false),
     StreamTo = proplists:get_value(stream_to, Options, false),
     WithBody = proplists:get_value(with_body, Options, false),
+    MaxBody = proplists:get_value(max_body, Options),
 
     %% get mod metrics
     Mod = hackney_util:mod_metrics(),
@@ -82,6 +82,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
                            force_redirect=ForceRedirect,
                            async=Async,
                            with_body=WithBody,
+                           max_body=MaxBody,
                            stream_to=StreamTo,
                            buffer = <<>>},
     %% if we use a pool then checkout the connection from the pool, else
@@ -279,48 +280,87 @@ check_mod_metrics(State) ->
     State#client{mod_metrics=hackney_util:mod_metrics()}.
 
 ssl_opts(Host, Options) ->
-    CACertFile = filename:join(hackney_util:privdir(),  "ca-bundle.crt"),
     case proplists:get_value(ssl_options, Options) of
         undefined ->
             Insecure =  proplists:get_value(insecure, Options),
-            UseSecureSsl = use_secure_ssl(),
+            UseSecureSsl = check_ssl_version(),
+            CACerts = cacerts(),
 
             case {Insecure, UseSecureSsl} of
                 {true, _} ->
                     [{verify, verify_none},
                      {reuse_sessions, true}];
                 {_, true} ->
-                    [{cacertfile, CACertFile},
-                     {server_name_indication, Host},
-                     {verify_fun, {fun ssl_verify_hostname:verify_fun/3,
-                                   [{check_hostname, Host}]}},
-                     {verify, verify_peer},
-                     {depth, 2}];
+                    VerifyFun = {fun ssl_verify_hostname:verify_fun/3,
+                                 [{check_hostname, Host}]},
+                    [{verify, verify_peer},
+                     {depth, 99},
+                     {cacerts, CACerts},
+                     {partial_chain, fun partial_chain/1},
+                     {verify_fun, VerifyFun}];
                 {_, _} ->
-                    CACertFile = filename:join(hackney_util:privdir(),
-                                               "ca-bundle.crt"),
-                    [{cacertfile, CACertFile },
+                    [{cacerts, CACerts},
                      {verify, verify_peer}, {depth, 2}]
             end;
         SSLOpts ->
             SSLOpts
     end.
 
-ssl_version() ->
-    case application:get_env(hackney, ssl_version) of
-        {ok, Version} -> Version;
-        undefined ->
-            {ok, Vsn} = application:get_key(ssl, vsn),
-            Parsed = [list_to_integer(V) || V <- string:tokens(Vsn, ".")],
-            Version = case Parsed of
-                          [Major] -> [Major, 0, 0];
-                          [Major, Minor] -> [Major, Minor];
-                          [Major, Minor, Patch] -> [Major, Minor, Patch];
-                          [Major, Minor, Patch | _] -> [Major, Minor, Patch]
-                      end,
-            application:set_env(hackney, ssl_version, Version),
-            Version
+%% code from rebar3 undert BSD license
+partial_chain(Certs) ->
+    Certs1 = [{Cert, public_key:pkix_decode_cert(Cert, otp)} || Cert <- Certs],
+    CACerts = cacerts(),
+    CACerts1 = [public_key:pkix_decode_cert(Cert, otp) || Cert <- CACerts],
+
+
+    case find(fun({_, Cert}) ->
+                      check_cert(CACerts1, Cert)
+              end, Certs1) of
+        {ok, Trusted} ->
+            {trusted_ca, element(1, Trusted)};
+        _ ->
+            unknown_ca
     end.
 
-use_secure_ssl() ->
-    ssl_version() >= ?SSL_SECURE_VERSION.
+extract_public_key_info(Cert) ->
+    ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
+
+cacerts() ->
+    Pems = public_key:pem_decode(hackney_cacerts:cacerts()),
+    [Der || {'Certificate', Der, _} <- Pems].
+
+check_cert(CACerts, Cert) ->
+    lists:any(fun(CACert) ->
+                      extract_public_key_info(CACert) == extract_public_key_info(Cert)
+              end, CACerts).
+
+check_ssl_version() ->
+    case application:get_key(ssl, vsn) of
+        {ok, Vsn} ->
+            parse_vsn(Vsn) >= {5, 3, 6};
+        _ ->
+            false
+    end.
+
+parse_vsn(Vsn) ->
+    version_pad(string:tokens(Vsn, ".")).
+
+version_pad([Major]) ->
+    {list_to_integer(Major), 0, 0};
+version_pad([Major, Minor]) ->
+    {list_to_integer(Major), list_to_integer(Minor), 0};
+version_pad([Major, Minor, Patch]) ->
+    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
+version_pad([Major, Minor, Patch | _]) ->
+    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
+
+-spec find(fun(), list()) -> {ok, term()} | error.
+find(Fun, [Head|Tail]) when is_function(Fun) ->
+    case Fun(Head) of
+        true ->
+            {ok, Head};
+        false ->
+            find(Fun, Tail)
+    end;
+find(_Fun, []) ->
+    error.
