@@ -26,6 +26,7 @@
         expect = false,
         async = false,
         with_body = false,
+        max_body,
         stream_to,
         send_fun=nil,
         body_state=waiting,
