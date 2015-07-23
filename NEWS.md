@@ -1,9 +1,14 @@
 # NEWS
 
+1.3.0 - 2015/07/23
+------------------
+- new add `max_body` setting
+- fix: handle partial chains during handshake in HTTPS (#196)
+
 1.2.0 - 2015/06/25
 ------------------
 
-- new: add `with_body` option to return the body directly (#184) 
+- new: add `with_body` option to return the body directly (#184)
 - fix: rely on ssl version to validate certificates securely using hostname
   verification
 - fix: fix redirection when transport change (#177)
@@ -17,7 +22,7 @@
 - fix: parse server headers
 - fix: really honor max redirection (#170)
 - fix: handle path parameters in URL (#176)
-- 
+-
 
 1.1.1 - 2015/03/20
 ------------------
