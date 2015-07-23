@@ -1,0 +1,8 @@
+-module(hackney_cacerts).
+
+-export([cacerts/0]).
+
+cacerts() ->
+    <<"
+%% GENERATED
+">>.

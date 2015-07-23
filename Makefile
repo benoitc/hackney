@@ -33,9 +33,18 @@ dialyzer:
 #
 CA_BUNDLE_BIN=./support/mk-ca-bundle.pl
 CA_BUNDLE=ca-bundle.crt
+CA_SRC=src/hackney_connect/hackney_cacerts.erl.src
+CA_OUT=src/hackney_connect/hackney_cacerts.erl
 
 mkcert:
-	$(CA_BUNDLE_BIN) -p ALL:ALL -l -u
+	$(CA_BUNDLE_BIN)
+	@cat $(CA_SRC) \
+		| head -n `grep -n "%% GENERATED" $(CA_SRC) | cut -d : -f 1` \
+		> $(CA_OUT)
+	@cat $(CA_BUNDLE) >> $(CA_OUT)
+	@cat $(CA_SRC) \
+		| tail -n +`grep -n "%% GENERATED" $(CA_SRC) | cut -d : -f 1`  \
+		>> $(CA_OUT)
 	mv $(CA_BUNDLE) priv/
 
 

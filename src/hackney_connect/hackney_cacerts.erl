@@ -1,3 +1,10 @@
+-module(hackney_cacerts).
+
+-export([cacerts/0]).
+
+cacerts() ->
+    <<"
+%% GENERATED
 ##
 ## Bundle of CA Root Certificates
 ##
@@ -3986,3 +3993,5 @@ PDCBBpEi6lmt2hkuIsKNuYyH4Ga8cyNfIWRjgEj1oDwYPZTISEEdQLpe/v5WOaHIz16eGWRGENoX
 kbcFgKyLmZJ956LYBws2J+dIeWCKw9cTXPhyQN9Ky8+ZAAoACxGV2lZFA4gKn2fQ1XmxqI1AbQ3C
 ekD6819kR5LLU7m7Wc5P/dAVUwHY3+vZ5nbv0CO7O6l5s9UCKc2Jo5YPSjXnTkLAdc0Hz+Ys63su
 -----END CERTIFICATE-----
+%% GENERATED
+">>.
