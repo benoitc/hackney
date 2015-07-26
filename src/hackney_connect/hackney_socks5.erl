@@ -159,6 +159,8 @@ do_handshake(Socket, Host, Port, Options) ->
 do_authentication(Socket, User, Pass) ->
     ok = gen_tcp:send(Socket, << 5, 1, 2 >>),
     case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
+        {ok, <<5, 0>>} ->
+        	ok;
         {ok, <<5, 2>>} ->
             UserLength = byte_size(User),
             PassLength = byte_size(Pass),
