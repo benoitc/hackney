@@ -243,7 +243,7 @@ request(Method, URL, Headers, Body) ->
 %%          <li>`{connect_timeout, infinity | integer()}': timeout used when
 %%          estabilishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>`{recv_timeout, infinity | integer()}': timeout used when
-%%          receiving a connection. Default is infinity</li>
+%%          receiving a connection. Default is 5000</li>
 %%      </ul>
 %%
 %%      <blocquote>Note: if the response is async, only

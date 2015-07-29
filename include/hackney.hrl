@@ -1,3 +1,5 @@
+-define(RECV_TIMEOUT, 5000).
+
 -record(client, {
         start_time,
         mod_metrics = nil,
@@ -11,7 +13,7 @@
         request_ref = nil,
         dynamic = true,
         pool_handler = hackney_pool,
-        recv_timeout = infinity,
+        recv_timeout = ?RECV_TIMEOUT,
         follow_redirect = false,
         max_redirect = 5,
         force_redirect = false,

@@ -55,7 +55,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
                      iolist_to_binary([Host, ":", integer_to_list(Port)])
              end,
     %% default timeout
-    Timeout = proplists:get_value(recv_timeout, Options, infinity),
+    Timeout = proplists:get_value(recv_timeout, Options, ?RECV_TIMEOUT),
     FollowRedirect = proplists:get_value(follow_redirect, Options, false),
     MaxRedirect = proplists:get_value(max_redirect, Options, 5),
     ForceRedirect = proplists:get_value(force_redirect, Options, false),
