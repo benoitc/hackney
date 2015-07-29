@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -21,21 +20,18 @@
 
 ### alpha/2 ###
 
-
 <pre><code>
 alpha(Data::binary(), Fun::function()) -&gt; any()
 </code></pre>
 <br />
 
-
 Parse a list of case-insensitive alpha characters.
 
-
 Changes all characters to lowercase.
+
 <a name="char_to_lower-1"></a>
 
 ### char_to_lower/1 ###
-
 
 <pre><code>
 char_to_lower(Ch::char()) -&gt; char()
@@ -43,10 +39,10 @@ char_to_lower(Ch::char()) -&gt; char()
 <br />
 
 Convert [A-Z] characters to lowercase.
+
 <a name="char_to_upper-1"></a>
 
 ### char_to_upper/1 ###
-
 
 <pre><code>
 char_to_upper(Ch::char()) -&gt; char()
@@ -54,10 +50,10 @@ char_to_upper(Ch::char()) -&gt; char()
 <br />
 
 Convert [a-z] characters to uppercase.
+
 <a name="digits-1"></a>
 
 ### digits/1 ###
-
 
 <pre><code>
 digits(Data::binary()) -&gt; non_neg_integer() | {error, badarg}
@@ -65,27 +61,24 @@ digits(Data::binary()) -&gt; non_neg_integer() | {error, badarg}
 <br />
 
 Parse a list of digits as a non negative integer.
+
 <a name="digits-2"></a>
 
 ### digits/2 ###
-
 
 <pre><code>
 digits(Data::binary(), Fun::function()) -&gt; any()
 </code></pre>
 <br />
 
-
 <a name="digits-3"></a>
 
 ### digits/3 ###
-
 
 <pre><code>
 digits(Data::binary(), Fun::function(), Acc::non_neg_integer()) -&gt; any()
 </code></pre>
 <br />
-
 
 <a name="join-2"></a>
 
@@ -93,11 +86,9 @@ digits(Data::binary(), Fun::function(), Acc::non_neg_integer()) -&gt; any()
 
 `join(L, Separator) -> any()`
 
-
 <a name="list-2"></a>
 
 ### list/2 ###
-
 
 <pre><code>
 list(Data::binary(), Fun::function()) -&gt; list() | {error, badarg}
@@ -105,10 +96,10 @@ list(Data::binary(), Fun::function()) -&gt; list() | {error, badarg}
 <br />
 
 Parse a list of the given type.
+
 <a name="nonempty_list-2"></a>
 
 ### nonempty_list/2 ###
-
 
 <pre><code>
 nonempty_list(Data::binary(), Fun::function()) -&gt; [any(), ...] | {error, badarg}
@@ -116,10 +107,10 @@ nonempty_list(Data::binary(), Fun::function()) -&gt; [any(), ...] | {error, bada
 <br />
 
 Parse a non-empty list of the given type.
+
 <a name="parameterized_tokens-1"></a>
 
 ### parameterized_tokens/1 ###
-
 
 <pre><code>
 parameterized_tokens(Data::binary()) -&gt; any()
@@ -127,10 +118,10 @@ parameterized_tokens(Data::binary()) -&gt; any()
 <br />
 
 Parse a non empty list of tokens followed with optional parameters.
+
 <a name="params-2"></a>
 
 ### params/2 ###
-
 
 <pre><code>
 params(Data::binary(), Fun::function()) -&gt; any()
@@ -138,16 +129,15 @@ params(Data::binary(), Fun::function()) -&gt; any()
 <br />
 
 Parse a list of parameters (a=b;c=d).
+
 <a name="quoted_string-2"></a>
 
 ### quoted_string/2 ###
-
 
 <pre><code>
 quoted_string(X1::binary(), Fun::function()) -&gt; any()
 </code></pre>
 <br />
-
 
 <a name="to_binary-1"></a>
 
@@ -155,18 +145,15 @@ quoted_string(X1::binary(), Fun::function()) -&gt; any()
 
 `to_binary(V) -> any()`
 
-
 <a name="to_hex-1"></a>
 
 ### to_hex/1 ###
 
 `to_hex(Bin) -> any()`
 
-
 <a name="to_lower-1"></a>
 
 ### to_lower/1 ###
-
 
 <pre><code>
 to_lower(L::binary()) -&gt; binary()
@@ -174,17 +161,16 @@ to_lower(L::binary()) -&gt; binary()
 <br />
 
 Convert a binary string to lowercase.
+
 <a name="to_upper-1"></a>
 
 ### to_upper/1 ###
 
 `to_upper(L) -> any()`
 
-
 <a name="token-2"></a>
 
 ### token/2 ###
-
 
 <pre><code>
 token(Data::binary(), Fun::function()) -&gt; any()
@@ -192,36 +178,32 @@ token(Data::binary(), Fun::function()) -&gt; any()
 <br />
 
 Parse a token.
+
 <a name="token_ci-2"></a>
 
 ### token_ci/2 ###
-
 
 <pre><code>
 token_ci(Data::binary(), Fun::function()) -&gt; any()
 </code></pre>
 <br />
 
-
 Parse a case-insensitive token.
 
-
 Changes all characters to lowercase.
+
 <a name="trim-1"></a>
 
 ### trim/1 ###
-
 
 <pre><code>
 trim(Data::binary()) -&gt; binary()
 </code></pre>
 <br />
 
-
 <a name="whitespace-2"></a>
 
 ### whitespace/2 ###
-
 
 <pre><code>
 whitespace(Data::binary(), Fun::function()) -&gt; any()
@@ -229,10 +211,10 @@ whitespace(Data::binary(), Fun::function()) -&gt; any()
 <br />
 
 Skip whitespace.
+
 <a name="word-2"></a>
 
 ### word/2 ###
-
 
 <pre><code>
 word(Data::binary(), Fun::function()) -&gt; any()
@@ -240,3 +222,4 @@ word(Data::binary(), Fun::function()) -&gt; any()
 <br />
 
 Parse either a token or a quoted string.
+

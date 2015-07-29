@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -24,3 +23,4 @@
 `to_ascii(Domain) -> any()`
 
 encode a IDNA domain to ascii
+

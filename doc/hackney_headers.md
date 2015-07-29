@@ -6,9 +6,7 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 module to manipulate HTTP headers.
-
 
 <a name="types"></a>
 
@@ -20,7 +18,6 @@ module to manipulate HTTP headers.
 ### <a name="type-disposition">disposition()</a> ###
 
 
-
 <pre><code>
 disposition() = {binary(), [{binary(), binary()}]}
 </code></pre>
@@ -28,15 +25,12 @@ disposition() = {binary(), [{binary(), binary()}]}
 
 
 
-
 ### <a name="type-headers">headers()</a> ###
-
 
 
 <pre><code>
 headers() = any()
 </code></pre>
-
 
 <a name="index"></a>
 
@@ -55,28 +49,26 @@ wire.</td></tr><tr><td valign="top"><a href="#to_list-1">to_list/1</a></td><td><
 
 ### content_disposition/1 ###
 
-
 <pre><code>
 content_disposition(Data::binary()) -&gt; <a href="#type-disposition">disposition()</a>
 </code></pre>
 <br />
 
 Parse a content disposition.
+
 <a name="content_type-1"></a>
 
 ### content_type/1 ###
-
 
 <pre><code>
 content_type(Data::binary()) -&gt; any()
 </code></pre>
 <br />
 
-
 Parse a content type.
 
-
 We lowercase the charset header as we know it's case insensitive.
+
 <a name="delete-2"></a>
 
 ### delete/2 ###
@@ -84,6 +76,7 @@ We lowercase the charset header as we know it's case insensitive.
 `delete(Key, Headers) -> any()`
 
 Delete the header corresponding to key if it is present.
+
 <a name="fold-3"></a>
 
 ### fold/3 ###
@@ -91,6 +84,7 @@ Delete the header corresponding to key if it is present.
 `fold(Fun, Acc0, Headers) -> any()`
 
 fold the list of headers
+
 <a name="get_value-2"></a>
 
 ### get_value/2 ###
@@ -98,12 +92,12 @@ fold the list of headers
 `get_value(Key, Headers) -> any()`
 
 get the value of the header
+
 <a name="get_value-3"></a>
 
 ### get_value/3 ###
 
 `get_value(Key, Headers, Default) -> any()`
-
 
 <a name="header_value-2"></a>
 
@@ -112,6 +106,7 @@ get the value of the header
 `header_value(Value, Params) -> any()`
 
 join value and params in a binary
+
 <a name="insert-3"></a>
 
 ### insert/3 ###
@@ -120,6 +115,7 @@ join value and params in a binary
 
 Insert the pair into the headers, merging with any pre-existing key.
 A merge is done with Value = V0 ++ ", " ++ V1.
+
 <a name="insert-4"></a>
 
 ### insert/4 ###
@@ -127,6 +123,7 @@ A merge is done with Value = V0 ++ ", " ++ V1.
 `insert(Key, Value, Params, Headers) -> any()`
 
 same as `insert/3` but allows to add params to the header value.
+
 <a name="make_header-2"></a>
 
 ### make_header/2 ###
@@ -134,17 +131,16 @@ same as `insert/3` but allows to add params to the header value.
 `make_header(Name, Value) -> any()`
 
 Create a binary header
+
 <a name="make_header-3"></a>
 
 ### make_header/3 ###
 
 `make_header(Name, Value, Params) -> any()`
 
-
 <a name="new-0"></a>
 
 ### new/0 ###
-
 
 <pre><code>
 new() -&gt; <a href="#type-headers">headers()</a>
@@ -152,35 +148,32 @@ new() -&gt; <a href="#type-headers">headers()</a>
 <br />
 
 initialise an header dict
+
 <a name="new-1"></a>
 
 ### new/1 ###
-
 
 <pre><code>
 new(D::list()) -&gt; <a href="#type-headers">headers()</a>
 </code></pre>
 <br />
 
-
 <a name="parse-2"></a>
 
 ### parse/2 ###
-
 
 <pre><code>
 parse(Name::binary(), Headers::list() | <a href="#type-headers">headers()</a>) -&gt; any() | undefined | {error, badarg}
 </code></pre>
 <br />
 
-
 Semantically parse headers.
-
 
 When the value isn't found, a proper default value for the type
 returned is used as a return value.
 
 __See also:__ [parse/3](#parse-3).
+
 <a name="store-3"></a>
 
 ### store/3 ###
@@ -188,6 +181,7 @@ __See also:__ [parse/3](#parse-3).
 `store(Key, Value, Headers) -> any()`
 
 store the pair into the headers, replacing any pre-existing key.
+
 <a name="to_binary-1"></a>
 
 ### to_binary/1 ###
@@ -196,12 +190,12 @@ store the pair into the headers, replacing any pre-existing key.
 
 return all the headers as a binary that can be sent over the
 wire.
+
 <a name="to_list-1"></a>
 
 ### to_list/1 ###
 
 `to_list(Headers) -> any()`
-
 
 <a name="update-2"></a>
 
@@ -210,3 +204,4 @@ wire.
 `update(Headers, KVs) -> any()`
 
 extend the headers with a new list of `{Key, Value}` pair.
+

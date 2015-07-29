@@ -5,7 +5,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 module handling the request.
 
 <a name="index"></a>
@@ -26,7 +25,6 @@ module handling the request.
 
 `default_ua() -> any()`
 
-
 <a name="encode_form-1"></a>
 
 ### encode_form/1 ###
@@ -34,12 +32,12 @@ module handling the request.
 `encode_form(KVs) -> any()`
 
 encode a list of properties in a form.
+
 <a name="end_stream_body-1"></a>
 
 ### end_stream_body/1 ###
 
 `end_stream_body(Client) -> any()`
-
 
 <a name="is_default_port-1"></a>
 
@@ -47,24 +45,20 @@ encode a list of properties in a form.
 
 `is_default_port(Client) -> any()`
 
-
 <a name="location-1"></a>
 
 ### location/1 ###
 
 `location(Client) -> any()`
 
-
 <a name="make_multipart_stream-2"></a>
 
 ### make_multipart_stream/2 ###
-
 
 <pre><code>
 make_multipart_stream(Parts::list(), Boundary::binary()) -&gt; {function(), list()}
 </code></pre>
 <br />
-
 
 <a name="perform-2"></a>
 
@@ -72,13 +66,11 @@ make_multipart_stream(Parts::list(), Boundary::binary()) -&gt; {function(), list
 
 `perform(Client0, X2) -> any()`
 
-
 <a name="send-2"></a>
 
 ### send/2 ###
 
 `send(Client, Data) -> any()`
-
 
 <a name="send_chunk-2"></a>
 
@@ -86,20 +78,17 @@ make_multipart_stream(Parts::list(), Boundary::binary()) -&gt; {function(), list
 
 `send_chunk(Client, Data) -> any()`
 
-
 <a name="sendfile-3"></a>
 
 ### sendfile/3 ###
 
 `sendfile(FileName, Opts, Client) -> any()`
 
-
 <a name="stream_body-2"></a>
 
 ### stream_body/2 ###
 
 `stream_body(Msg, Client) -> any()`
-
 
 <a name="stream_multipart-2"></a>
 
@@ -108,3 +97,4 @@ make_multipart_stream(Parts::list(), Boundary::binary()) -&gt; {function(), list
 `stream_multipart(File, Client) -> any()`
 
 stream multipart
+

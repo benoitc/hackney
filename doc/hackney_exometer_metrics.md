@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -21,23 +20,19 @@
 
 ### decrement_counter/1 ###
 
-
 <pre><code>
 decrement_counter(Name::any()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
-
 <a name="decrement_counter-2"></a>
 
 ### decrement_counter/2 ###
-
 
 <pre><code>
 decrement_counter(Name::any(), Value::pos_integer()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
-
 
 <a name="delete-1"></a>
 
@@ -45,70 +40,57 @@ decrement_counter(Name::any(), Value::pos_integer()) -&gt; ok | {error, term()}
 
 `delete(Name) -> any()`
 
-
 <a name="increment_counter-1"></a>
 
 ### increment_counter/1 ###
-
 
 <pre><code>
 increment_counter(Name::any()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
-
 <a name="increment_counter-2"></a>
 
 ### increment_counter/2 ###
-
 
 <pre><code>
 increment_counter(Name::any(), Value::pos_integer()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
-
 <a name="new-2"></a>
 
 ### new/2 ###
-
 
 <pre><code>
 new(X1::atom(), Name::any()) -&gt; ok | {error, metric_exists | unsupported_type}
 </code></pre>
 <br />
 
-
 <a name="update_gauge-2"></a>
 
 ### update_gauge/2 ###
-
 
 <pre><code>
 update_gauge(Name::any(), Value::number()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
-
 <a name="update_histogram-2"></a>
 
 ### update_histogram/2 ###
-
 
 <pre><code>
 update_histogram(Name::any(), Fun::number()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
-
 <a name="update_meter-2"></a>
 
 ### update_meter/2 ###
-
 
 <pre><code>
 update_meter(Name::any(), Value::number()) -&gt; ok | {error, term()}
 </code></pre>
 <br />
-
 

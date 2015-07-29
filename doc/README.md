@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2015 Benoît Chesneau.
 
-__Version:__ 1.2.0
+__Version:__ 1.3.1
 
 # hackney
 
@@ -355,10 +355,10 @@ To close a pool do:
 hackney_pool:stop_pool(PoolName).
 ```
 
-> Note: Sometimes you want to always use the default pool in your app
+> Note: Sometimes you want to disable the default pool in your app
 > without having to set the client option each time. You can now do this
 > by setting the hackney application environment key `use_default_pool`
-> to true.
+> to false.
 
 ### Use a custom pool handler.
 
@@ -425,7 +425,7 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics` entry to hackney’s
+You can enable metrics collection by adding a `mod_metrics` entry to hackney's
 app config. Metrics are disabled by default. The module specified must have an
 API matching that of the hackney metrics module.
 
@@ -500,39 +500,3 @@ $ gunicorn --daemon --pid httpbin.pid httpbin:app
 $ make test
 $ kill `cat httpbin.pid`
 ```
-
-
-## Modules ##
-
-
-<table width="100%" border="0" summary="list of modules">
-<tr><td><a href="hackney.md" class="module">hackney</a></td></tr>
-<tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
-<tr><td><a href="hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
-<tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
-<tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
-<tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
-<tr><td><a href="hackney_deps.md" class="module">hackney_deps</a></td></tr>
-<tr><td><a href="hackney_dummy_metrics.md" class="module">hackney_dummy_metrics</a></td></tr>
-<tr><td><a href="hackney_exometer_metrics.md" class="module">hackney_exometer_metrics</a></td></tr>
-<tr><td><a href="hackney_folsom_metrics.md" class="module">hackney_folsom_metrics</a></td></tr>
-<tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
-<tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
-<tr><td><a href="hackney_idna.md" class="module">hackney_idna</a></td></tr>
-<tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
-<tr><td><a href="hackney_mimetypes.md" class="module">hackney_mimetypes</a></td></tr>
-<tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
-<tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
-<tr><td><a href="hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
-<tr><td><a href="hackney_request.md" class="module">hackney_request</a></td></tr>
-<tr><td><a href="hackney_response.md" class="module">hackney_response</a></td></tr>
-<tr><td><a href="hackney_socks5.md" class="module">hackney_socks5</a></td></tr>
-<tr><td><a href="hackney_ssl_transport.md" class="module">hackney_ssl_transport</a></td></tr>
-<tr><td><a href="hackney_stream.md" class="module">hackney_stream</a></td></tr>
-<tr><td><a href="hackney_sup.md" class="module">hackney_sup</a></td></tr>
-<tr><td><a href="hackney_tcp_transport.md" class="module">hackney_tcp_transport</a></td></tr>
-<tr><td><a href="hackney_trace.md" class="module">hackney_trace</a></td></tr>
-<tr><td><a href="hackney_url.md" class="module">hackney_url</a></td></tr>
-<tr><td><a href="hackney_util.md" class="module">hackney_util</a></td></tr></table>
-

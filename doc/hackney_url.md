@@ -6,9 +6,7 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 module to manage urls.
-
 
 <a name="types"></a>
 
@@ -20,11 +18,9 @@ module to manage urls.
 ### <a name="type-qs_vals">qs_vals()</a> ###
 
 
-
 <pre><code>
 qs_vals() = [{binary(), binary() | true}]
 </code></pre>
-
 
 <a name="index"></a>
 
@@ -45,19 +41,18 @@ properties to give to the url.</td></tr><tr><td valign="top"><a href="#normalize
 
 `fix_path(Path) -> any()`
 
-
 <a name="make_url-3"></a>
 
 ### make_url/3 ###
-
 
 <pre><code>
 make_url(Url::binary(), Path::binary() | [binary()], Query::binary() | <a href="#type-qs_vals">qs_vals()</a>) -&gt; binary()
 </code></pre>
 <br />
 
- construct an url from a base url, a path and a list of
+construct an url from a base url, a path and a list of
 properties to give to the url.
+
 <a name="normalize-1"></a>
 
 ### normalize/1 ###
@@ -65,21 +60,19 @@ properties to give to the url.
 `normalize(Url) -> any()`
 
 Normalizes the encoding of a Url
+
 <a name="parse_qs-1"></a>
 
 ### parse_qs/1 ###
-
 
 <pre><code>
 parse_qs(Bin::binary()) -&gt; <a href="#type-qs_vals">qs_vals()</a>
 </code></pre>
 <br />
 
-
 <a name="parse_url-1"></a>
 
 ### parse_url/1 ###
-
 
 <pre><code>
 parse_url(URL::binary() | list()) -&gt; <a href="#type-hackney_url">hackney_url()</a>
@@ -87,10 +80,10 @@ parse_url(URL::binary() | list()) -&gt; <a href="#type-hackney_url">hackney_url(
 <br />
 
 Parse an url and return a #hackney_url record.
+
 <a name="pathencode-1"></a>
 
 ### pathencode/1 ###
-
 
 <pre><code>
 pathencode(Bin::binary()) -&gt; binary()
@@ -100,10 +93,10 @@ pathencode(Bin::binary()) -&gt; binary()
 Equivalent to [`pathencode(Bin, [])`](#pathencode-2).
 
 encode a URL path
+
 <a name="qs-1"></a>
 
 ### qs/1 ###
-
 
 <pre><code>
 qs(KVs::<a href="#type-qs_vals">qs_vals()</a>) -&gt; binary()
@@ -111,12 +104,12 @@ qs(KVs::<a href="#type-qs_vals">qs_vals()</a>) -&gt; binary()
 <br />
 
 encode query properties to binary
+
 <a name="transport_scheme-1"></a>
 
 ### transport_scheme/1 ###
 
 `transport_scheme(X1) -> any()`
-
 
 <a name="unparse_url-1"></a>
 
@@ -124,11 +117,9 @@ encode query properties to binary
 
 `unparse_url(Hackney_url) -> any()`
 
-
 <a name="urldecode-1"></a>
 
 ### urldecode/1 ###
-
 
 <pre><code>
 urldecode(Bin::binary()) -&gt; binary()
@@ -138,10 +129,10 @@ urldecode(Bin::binary()) -&gt; binary()
 Equivalent to [`urldecode(Bin, crash)`](#urldecode-2).
 
 Decode a URL encoded binary.
+
 <a name="urldecode-2"></a>
 
 ### urldecode/2 ###
-
 
 <pre><code>
 urldecode(Bin::binary(), OnError::crash | skip) -&gt; binary()
@@ -152,10 +143,10 @@ Decode a URL encoded binary.
 The second argument specifies how to handle percent characters that are not
 followed by two valid hex characters. Use `skip` to ignore such errors,
 if `crash` is used the function will fail with the reason `badarg`.
+
 <a name="urlencode-1"></a>
 
 ### urlencode/1 ###
-
 
 <pre><code>
 urlencode(Bin::binary() | string()) -&gt; binary()
@@ -163,10 +154,10 @@ urlencode(Bin::binary() | string()) -&gt; binary()
 <br />
 
 URL encode a string binary.
+
 <a name="urlencode-2"></a>
 
 ### urlencode/2 ###
-
 
 <pre><code>
 urlencode(Bin::binary() | string(), Opts::[noplus | upper]) -&gt; binary()
@@ -178,3 +169,4 @@ The `noplus` option disables the default behaviour of quoting space
 characters, `\s`, as `+`. The `upper` option overrides the default behaviour
 of writing hex numbers using lowecase letters to using uppercase letters
 instead.
+

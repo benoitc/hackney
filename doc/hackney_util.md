@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -21,7 +20,6 @@
 
 ### filter_options/3 ###
 
-
 <pre><code>
 filter_options(Tail::[{atom(), any()} | {raw, any(), any(), any()}], AllowedKeys::[atom()], Acc) -&gt; Acc
 </code></pre>
@@ -29,12 +27,12 @@ filter_options(Tail::[{atom(), any()} | {raw, any(), any(), any()}], AllowedKeys
 <ul class="definitions"><li><code>Acc = [any()]</code></li></ul>
 
 filter a proplists and only keep allowed keys
+
 <a name="is_ipv6-1"></a>
 
 ### is_ipv6/1 ###
 
 `is_ipv6(Host) -> any()`
-
 
 <a name="maybe_apply_defaults-2"></a>
 
@@ -42,13 +40,11 @@ filter a proplists and only keep allowed keys
 
 `maybe_apply_defaults(Rest, Options) -> any()`
 
-
 <a name="mod_metrics-0"></a>
 
 ### mod_metrics/0 ###
 
 `mod_metrics() -> any()`
-
 
 <a name="privdir-0"></a>
 
@@ -56,11 +52,9 @@ filter a proplists and only keep allowed keys
 
 `privdir() -> any()`
 
-
 <a name="require-1"></a>
 
 ### require/1 ###
-
 
 <pre><code>
 require(Rest::[module()]) -&gt; ok
@@ -68,10 +62,10 @@ require(Rest::[module()]) -&gt; ok
 <br />
 
 Start the given applications if they were not already started.
+
 <a name="set_option_default-3"></a>
 
 ### set_option_default/3 ###
-
 
 <pre><code>
 set_option_default(Opts, Key::atom(), Value::any()) -&gt; Opts
@@ -80,10 +74,10 @@ set_option_default(Opts, Key::atom(), Value::any()) -&gt; Opts
 <ul class="definitions"><li><code>Opts = [{atom(), any()}]</code></li></ul>
 
 set the default options in a proplists if not defined
+
 <a name="to_atom-1"></a>
 
 ### to_atom/1 ###
 
 `to_atom(V) -> any()`
-
 

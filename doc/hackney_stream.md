@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -23,13 +22,11 @@
 
 `async_recv(Parent, Owner, Ref, Client, Buffer) -> any()`
 
-
 <a name="init-4"></a>
 
 ### init/4 ###
 
 `init(Parent, Owner, Ref, Client) -> any()`
-
 
 <a name="maybe_continue-4"></a>
 
@@ -37,13 +34,11 @@
 
 `maybe_continue(Parent, Owner, Ref, Client) -> any()`
 
-
 <a name="start_link-3"></a>
 
 ### start_link/3 ###
 
 `start_link(Owner, Ref, Client) -> any()`
-
 
 <a name="system_code_change-4"></a>
 
@@ -51,22 +46,18 @@
 
 `system_code_change(Misc, X2, X3, X4) -> any()`
 
-
 <a name="system_continue-3"></a>
 
 ### system_continue/3 ###
 
 `system_continue(X1, X2, X3) -> any()`
 
-
 <a name="system_terminate-4"></a>
 
 ### system_terminate/4 ###
-
 
 <pre><code>
 system_terminate(Reason::any(), X2::term(), X3::term(), X4::term()) -&gt; no_return()
 </code></pre>
 <br />
-
 

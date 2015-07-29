@@ -4,7 +4,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 <a name="index"></a>
 
 ## Function Index ##
@@ -24,17 +23,16 @@ code path.</td></tr></table>
 
 ### deps_on_path/0 ###
 
-
 <pre><code>
 deps_on_path() -&gt; [ProjNameAndVers]
 </code></pre>
 <br />
 
 List of project dependencies on the path.
+
 <a name="ensure-0"></a>
 
 ### ensure/0 ###
-
 
 <pre><code>
 ensure() -&gt; ok
@@ -44,10 +42,10 @@ ensure() -&gt; ok
 Ensure that the ebin and include paths for dependencies of
 this application are on the code path. Equivalent to
 ensure(?Module).
+
 <a name="ensure-1"></a>
 
 ### ensure/1 ###
-
 
 <pre><code>
 ensure(Module) -&gt; ok
@@ -56,10 +54,10 @@ ensure(Module) -&gt; ok
 
 Ensure that all ebin and include paths for dependencies
 of the application for Module are on the code path.
+
 <a name="get_base_dir-0"></a>
 
 ### get_base_dir/0 ###
-
 
 <pre><code>
 get_base_dir() -&gt; string()
@@ -68,10 +66,10 @@ get_base_dir() -&gt; string()
 
 Return the application directory for this application. Equivalent to
 get_base_dir(?MODULE).
+
 <a name="get_base_dir-1"></a>
 
 ### get_base_dir/1 ###
-
 
 <pre><code>
 get_base_dir(Module) -&gt; string()
@@ -80,10 +78,10 @@ get_base_dir(Module) -&gt; string()
 
 Return the application directory for Module. It assumes Module is in
 a standard OTP layout application in the ebin or src directory.
+
 <a name="local_path-1"></a>
 
 ### local_path/1 ###
-
 
 <pre><code>
 local_path(Components) -&gt; string()
@@ -92,10 +90,10 @@ local_path(Components) -&gt; string()
 
 Return an application-relative directory for this application.
 Equivalent to local_path(Components, ?MODULE).
+
 <a name="local_path-2"></a>
 
 ### local_path/2 ###
-
 
 <pre><code>
 local_path(Components::[string()], Module) -&gt; string()
@@ -103,10 +101,10 @@ local_path(Components::[string()], Module) -&gt; string()
 <br />
 
 Return an application-relative directory from Module's application.
+
 <a name="new_siblings-1"></a>
 
 ### new_siblings/1 ###
-
 
 <pre><code>
 new_siblings(Module) -&gt; [Dir]
@@ -115,3 +113,4 @@ new_siblings(Module) -&gt; [Dir]
 
 Find new siblings paths relative to Module that aren't already on the
 code path.
+

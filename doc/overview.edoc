@@ -1,3 +1,4 @@
+
 %%==============================================================================
 %% Copyright 2013-2015 Benoît Chesneau
 %%
@@ -425,7 +426,7 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics' entry to hackney’s
+You can enable metrics collection by adding a `mod_metrics' entry to hackney's
 app config. Metrics are disabled by default. The module specified must have an
 API matching that of the hackney metrics module.
 

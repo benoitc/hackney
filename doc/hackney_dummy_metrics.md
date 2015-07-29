@@ -5,7 +5,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 dummy metric module.
 
 <a name="index"></a>
@@ -26,13 +25,11 @@ dummy metric module.
 
 `decrement_counter(X1) -> any()`
 
-
 <a name="decrement_counter-2"></a>
 
 ### decrement_counter/2 ###
 
 `decrement_counter(X1, X2) -> any()`
-
 
 <a name="delete-1"></a>
 
@@ -40,13 +37,11 @@ dummy metric module.
 
 `delete(X1) -> any()`
 
-
 <a name="increment_counter-1"></a>
 
 ### increment_counter/1 ###
 
 `increment_counter(X1) -> any()`
-
 
 <a name="increment_counter-2"></a>
 
@@ -54,13 +49,11 @@ dummy metric module.
 
 `increment_counter(X1, X2) -> any()`
 
-
 <a name="new-2"></a>
 
 ### new/2 ###
 
 `new(X1, X2) -> any()`
-
 
 <a name="update_gauge-2"></a>
 
@@ -68,18 +61,15 @@ dummy metric module.
 
 `update_gauge(X1, X2) -> any()`
 
-
 <a name="update_histogram-2"></a>
 
 ### update_histogram/2 ###
 
 `update_histogram(X1, Fun) -> any()`
 
-
 <a name="update_meter-2"></a>
 
 ### update_meter/2 ###
 
 `update_meter(X1, X2) -> any()`
-
 

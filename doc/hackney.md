@@ -5,8 +5,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
-
 <a name="types"></a>
 
 ## Data Types ##
@@ -25,7 +23,6 @@ __abstract datatype__: `client()`
 ### <a name="type-client_ref">client_ref()</a> ###
 
 
-
 <pre><code>
 client_ref() = term()
 </code></pre>
@@ -33,15 +30,12 @@ client_ref() = term()
 
 
 
-
 ### <a name="type-url">url()</a> ###
-
 
 
 <pre><code>
 url() = #hackney_url{}
 </code></pre>
-
 
 <a name="index"></a>
 
@@ -88,17 +82,16 @@ options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a><
 
 ### body/1 ###
 
-
 <pre><code>
 body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary()} | {error, atom()}
 </code></pre>
 <br />
 
 Return the full body sent with the response.
+
 <a name="body-2"></a>
 
 ### body/2 ###
-
 
 <pre><code>
 body(Ref::<a href="#type-client_ref">client_ref()</a>, MaxLength::non_neg_integer() | infinity) -&gt; {ok, binary()} | {error, atom()}
@@ -107,21 +100,19 @@ body(Ref::<a href="#type-client_ref">client_ref()</a>, MaxLength::non_neg_intege
 
 Return the full body sent with the response as long as the body
 length doesn't go over MaxLength.
+
 <a name="cancel_request-1"></a>
 
 ### cancel_request/1 ###
-
 
 <pre><code>
 cancel_request(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, {atom(), <a href="inet.md#type-socket">inet:socket()</a>, binary(), <a href="hackney_response.md#type-response_state">hackney_response:response_state()</a>}} | {error, term()}
 </code></pre>
 <br />
 
-
 Extract raw informations from the client context
 This feature can be useful when you want to create a simple proxy, rerouting
 on the headers and the status line and continue to forward the connection for example.
-
 
 return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}`
 
@@ -141,19 +132,18 @@ return: `{ResponseState, Transport, Socket, Buffer} | {error, Reason}`
 `close(Ref) -> any()`
 
 close the client
+
 <a name="connect-1"></a>
 
 ### connect/1 ###
 
 `connect(URL) -> any()`
 
-
 <a name="connect-2"></a>
 
 ### connect/2 ###
 
 `connect(Hackney_url, Options) -> any()`
-
 
 <a name="connect-3"></a>
 
@@ -162,17 +152,16 @@ close the client
 `connect(Transport, Host, Port) -> any()`
 
 connect a socket and create a client state.
+
 <a name="connect-4"></a>
 
 ### connect/4 ###
 
 `connect(Transport, Host, Port, Options) -> any()`
 
-
 <a name="controlling_process-2"></a>
 
 ### controlling_process/2 ###
-
 
 <pre><code>
 controlling_process(Ref::<a href="#type-client_ref">client_ref()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
@@ -180,16 +169,15 @@ controlling_process(Ref::<a href="#type-client_ref">client_ref()</a>, Pid::pid()
 <br />
 
 Assign a new controlling process _Pid_ to _Client_.
+
 <a name="cookies-1"></a>
 
 ### cookies/1 ###
-
 
 <pre><code>
 cookies(Headers::list()) -&gt; list()
 </code></pre>
 <br />
-
 
 <a name="finish_send_body-1"></a>
 
@@ -197,11 +185,9 @@ cookies(Headers::list()) -&gt; list()
 
 `finish_send_body(Ref) -> any()`
 
-
 <a name="location-1"></a>
 
 ### location/1 ###
-
 
 <pre><code>
 location(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; binary()
@@ -209,10 +195,10 @@ location(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; binary()
 <br />
 
 return the requested location
+
 <a name="pause_stream-1"></a>
 
 ### pause_stream/1 ###
-
 
 <pre><code>
 pause_stream(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, req_not_found}
@@ -221,17 +207,16 @@ pause_stream(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error
 
 pause a response stream, the stream process will hibernate and
 be woken later by the resume function
+
 <a name="redirect_location-1"></a>
 
 ### redirect_location/1 ###
 
 `redirect_location(Headers) -> any()`
 
-
 <a name="request-1"></a>
 
 ### request/1 ###
-
 
 <pre><code>
 request(URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
@@ -239,10 +224,10 @@ request(URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-cli
 <br />
 
 make a request
+
 <a name="request-2"></a>
 
 ### request/2 ###
-
 
 <pre><code>
 request(Method::term(), URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
@@ -250,10 +235,10 @@ request(Method::term(), URL::binary() | list()) -&gt; {ok, integer(), list(), <a
 <br />
 
 make a request
+
 <a name="request-3"></a>
 
 ### request/3 ###
-
 
 <pre><code>
 request(Method::term(), URL::binary() | list(), Headers::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
@@ -261,10 +246,10 @@ request(Method::term(), URL::binary() | list(), Headers::list()) -&gt; {ok, inte
 <br />
 
 make a request
+
 <a name="request-4"></a>
 
 ### request/4 ###
-
 
 <pre><code>
 request(Method::term(), URL::binary() | list(), Headers::list(), Body::term()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
@@ -272,19 +257,17 @@ request(Method::term(), URL::binary() | list(), Headers::list(), Body::term()) -
 <br />
 
 make a request
+
 <a name="request-5"></a>
 
 ### request/5 ###
-
 
 <pre><code>
 request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
 </code></pre>
 <br />
 
-
 make a request
-
 
 Args:
 
@@ -319,13 +302,14 @@ Args:
 `[binary, {active, false}, {packet, raw}])` . Vor valid options
 see the gen_tcp options.
 
-
 * `ssl_options()`: See the ssl options from the ssl
 module.
 
-
 * `with_body`: when this option is passed the body is returned
 directly. The response is `{ok, Status, Headers, Body}`
+
+* `max_body`: sets maximum allowed size of the body if
+with_body is true
 
 * `async`: receive the response asynchronously
 The function return {ok, StreamRef}.
@@ -333,14 +317,11 @@ When {async, once} is used the response will be received only once. To
 receive the other messages use the function
 `hackney:stream_next/1`
 
-
 * `{stream_to, pid()}`: If async is true or once, the response
 messages will be sent to this PID.
 
-
 * `{cookie, list() | binary()}` : to set a cookie or a
 list of cookies.
-
 
 * _Others options are_:
 
@@ -362,10 +343,7 @@ transfers without checking the certificate
 estabilishing a connection, in milliseconds. Default is 8000
 
 * `{recv_timeout, infinity | integer()}`: timeout used when
-receiving a connection. Default is infinity
-
-
-
+receiving a connection. Default is 5000
 
 
 <blocquote>Note: if the response is async, only
@@ -378,12 +356,7 @@ If a valid redirection happen you receive the messages:
 
 </blocquote>
 
-
-
-
-
 * `proxy_options()`:  options to connect by a proxy:
-
 
 * binary(): url to use for the proxy. Used for basic HTTP
 proxy
@@ -400,15 +373,9 @@ to connect to an HTTP tunnel.
 
 
 
-
-
-
-
 <bloquote>Note: instead of doing `hackney:request(Method, ...)` you can
 also do `hackney:Method(...)` if you prefer to use the REST
 syntax.</bloquote>
-
-
 
 Return:
 
@@ -435,17 +402,16 @@ Assume close to signal end`.
 
 ### request_info/1 ###
 
-
 <pre><code>
 request_info(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; list()
 </code></pre>
 <br />
 
 get request info
+
 <a name="resume_stream-1"></a>
 
 ### resume_stream/1 ###
-
 
 <pre><code>
 resume_stream(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, req_not_found}
@@ -454,10 +420,10 @@ resume_stream(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {erro
 
 resume a paused response stream, the stream process will be
 awoken
+
 <a name="send_body-2"></a>
 
 ### send_body/2 ###
-
 
 <pre><code>
 send_body(Ref::<a href="#type-client_ref">client_ref()</a>, Body::term()) -&gt; ok | {error, term()}
@@ -466,10 +432,10 @@ send_body(Ref::<a href="#type-client_ref">client_ref()</a>, Body::term()) -&gt; 
 
 send the request body until eob. It's issued after sending a request using
 the `request` and `send_request` functions.
+
 <a name="send_multipart_body-2"></a>
 
 ### send_multipart_body/2 ###
-
 
 <pre><code>
 send_multipart_body(Ref::<a href="#type-client_ref">client_ref()</a>, Body::term()) -&gt; ok | {error, term()}
@@ -512,9 +478,9 @@ multipart content
 multipart content
 
 
-
 Note: You can calculate the full length of a multipart stream using
 the function `hackney_multipart:len_mp_stream/2` .
+
 <a name="send_request-2"></a>
 
 ### send_request/2 ###
@@ -522,6 +488,7 @@ the function `hackney_multipart:len_mp_stream/2` .
 `send_request(Ref, Req) -> any()`
 
 send a request using the current client state
+
 <a name="send_request-3"></a>
 
 ### send_request/3 ###
@@ -530,10 +497,10 @@ send a request using the current client state
 
 send a request using the current client state and pass new
 options to it.
+
 <a name="setopts-2"></a>
 
 ### setopts/2 ###
-
 
 <pre><code>
 setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt; ok
@@ -553,10 +520,10 @@ followed when the response is received synchronously
 followed even on POST.
 - `{max_redirect, integer()}` the maximum number of redirections that
 will be followed
+
 <a name="skip_body-1"></a>
 
 ### skip_body/1 ###
-
 
 <pre><code>
 skip_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, atom()}
@@ -564,10 +531,10 @@ skip_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, a
 <br />
 
 skip the full body. (read all the body if needed).
+
 <a name="skip_multipart-1"></a>
 
 ### skip_multipart/1 ###
-
 
 <pre><code>
 skip_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, term()}
@@ -575,6 +542,7 @@ skip_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {err
 <br />
 
 Stream the response body.
+
 <a name="start-0"></a>
 
 ### start/0 ###
@@ -582,17 +550,16 @@ Stream the response body.
 `start() -> any()`
 
 Start the hackney process. Useful when testing using the shell.
+
 <a name="start-1"></a>
 
 ### start/1 ###
 
 `start(PoolHandler) -> any()`
 
-
 <a name="start_response-1"></a>
 
 ### start_response/1 ###
-
 
 <pre><code>
 start_response(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
@@ -602,6 +569,7 @@ start_response(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, inte
 start a response.
 Useful if you stream the body by yourself. It will fetch the status
 and headers of the response. and return
+
 <a name="stop-0"></a>
 
 ### stop/0 ###
@@ -609,10 +577,10 @@ and headers of the response. and return
 `stop() -> any()`
 
 Stop the hackney process. Useful when testing using the shell.
+
 <a name="stop_async-1"></a>
 
 ### stop_async/1 ###
-
 
 <pre><code>
 stop_async(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, req_not_found} | {error, term()}
@@ -620,10 +588,10 @@ stop_async(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, 
 <br />
 
 stop to receive asynchronously.
+
 <a name="stream_body-1"></a>
 
 ### stream_body/1 ###
-
 
 <pre><code>
 stream_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary()} | done | {error, term()}
@@ -631,19 +599,17 @@ stream_body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary(
 <br />
 
 Stream the response body.
+
 <a name="stream_multipart-1"></a>
 
 ### stream_multipart/1 ###
-
 
 <pre><code>
 stream_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {headers, list()} | {body, binary()} | eof | end_of_part | {error, term()}
 </code></pre>
 <br />
 
-
 Stream the response body.
-
 
 Return:
 
@@ -664,7 +630,6 @@ Return:
 
 ### stream_next/1 ###
 
-
 <pre><code>
 stream_next(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, req_not_found}
 </code></pre>
@@ -672,3 +637,4 @@ stream_next(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error,
 
 continue to the next stream message. Only use it when
 `{async, once}` is set in the client options.
+

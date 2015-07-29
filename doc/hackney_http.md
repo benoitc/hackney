@@ -6,7 +6,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 HTTP parser in pure Erlang
 This parser is able to parse HTTP responses and requests in a
 streaming fashion.
@@ -18,8 +17,6 @@ streaming fashion.
 If not set it will be autodetect the type of
 binary parsed, if it's a request or a response.
 
-
-
 Internally it is keeping a buffer for intermediary steps but don't
 keep any state in memory.
 
@@ -27,13 +24,10 @@ The first time you initialise a parser using `hackney_http:parser/0`
 or `hackney_http:parser/1` you will receive an opaque record You can
 then process it using the function `hackney_http:execute/2`.
 
-
-
 Each steps will return the status, some data and the new parser that
 you can process later with `hackney_http:execute/2` when
 `{more, ...}`  is returnned or `hackney_http:execute/1` in other
 cases:
-
 
 - `{response, http_version(), status(), http_reason(), parser()}`:
 when the first line of a response is parsed
@@ -70,7 +64,6 @@ given correpond to the non parsed part of the internal buffer.
 ### <a name="type-body_result">body_result()</a> ###
 
 
-
 <pre><code>
 body_result() = {more, <a href="#type-parser">parser()</a>, binary()} | {ok, binary(), <a href="#type-parser">parser()</a>} | {done, binary()}
 </code></pre>
@@ -78,9 +71,7 @@ body_result() = {more, <a href="#type-parser">parser()</a>, binary()} | {ok, bin
 
 
 
-
 ### <a name="type-http_method">http_method()</a> ###
-
 
 
 <pre><code>
@@ -90,9 +81,7 @@ http_method() = binary()
 
 
 
-
 ### <a name="type-http_reason">http_reason()</a> ###
-
 
 
 <pre><code>
@@ -102,15 +91,12 @@ http_reason() = binary()
 
 
 
-
 ### <a name="type-http_version">http_version()</a> ###
-
 
 
 <pre><code>
 http_version() = {integer(), integer()}
 </code></pre>
-
 
 
 
@@ -126,7 +112,6 @@ __abstract datatype__: `parser()`
 ### <a name="type-parser_option">parser_option()</a> ###
 
 
-
 <pre><code>
 parser_option() = request | response | auto | {max_empty_lines, integer()} | {max_line_length, integer()}
 </code></pre>
@@ -134,9 +119,7 @@ parser_option() = request | response | auto | {max_empty_lines, integer()} | {ma
 
 
 
-
 ### <a name="type-parser_options">parser_options()</a> ###
-
 
 
 <pre><code>
@@ -146,9 +129,7 @@ parser_options() = [<a href="#type-parser_option">parser_option()</a>]
 
 
 
-
 ### <a name="type-parser_result">parser_result()</a> ###
-
 
 
 <pre><code>
@@ -158,9 +139,7 @@ parser_result() = {response, <a href="#type-http_version">http_version()</a>, <a
 
 
 
-
 ### <a name="type-status">status()</a> ###
-
 
 
 <pre><code>
@@ -170,15 +149,12 @@ status() = integer()
 
 
 
-
 ### <a name="type-uri">uri()</a> ###
-
 
 
 <pre><code>
 uri() = binary()
 </code></pre>
-
 
 <a name="index"></a>
 
@@ -196,17 +172,16 @@ uri() = binary()
 
 ### execute/1 ###
 
-
 <pre><code>
 execute(Hparser::#hparser{}) -&gt; <a href="#type-parser_result">parser_result()</a>
 </code></pre>
 <br />
 
 Execute the parser with the current buffer.
+
 <a name="execute-2"></a>
 
 ### execute/2 ###
-
 
 <pre><code>
 execute(Hparser::#hparser{}, Bin::binary()) -&gt; <a href="#type-parser_result">parser_result()</a>
@@ -214,10 +189,10 @@ execute(Hparser::#hparser{}, Bin::binary()) -&gt; <a href="#type-parser_result">
 <br />
 
 Execute the parser with the new buffer
+
 <a name="get-2"></a>
 
 ### get/2 ###
-
 
 <pre><code>
 get(Parser::<a href="#type-parser">parser()</a>, Props::atom() | [atom()]) -&gt; any()
@@ -234,17 +209,16 @@ Properties are:
 - `content_type`: content type header if any
 - `location`: location header if any
 - `connection`: connection header if any.
+
 <a name="parse_response_version-2"></a>
 
 ### parse_response_version/2 ###
 
 `parse_response_version(X1, St) -> any()`
 
-
 <a name="parser-0"></a>
 
 ### parser/0 ###
-
 
 <pre><code>
 parser() -&gt; <a href="#type-parser">parser()</a>
@@ -253,20 +227,18 @@ parser() -&gt; <a href="#type-parser">parser()</a>
 
 Create a new HTTP parser. The parser will autodetect if the parded
 binary is a response or a request.
+
 <a name="parser-1"></a>
 
 ### parser/1 ###
-
 
 <pre><code>
 parser(Options::<a href="#type-parser_options">parser_options()</a>) -&gt; <a href="#type-parser">parser()</a>
 </code></pre>
 <br />
 
-
 create a new HTTP parser with options. By default the type of
 parsed binary will be detected.
-
 
 Available options:
 

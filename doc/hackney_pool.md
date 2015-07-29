@@ -5,9 +5,10 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
 pool of sockets connections.
+
 __Behaviours:__ [`gen_server`](gen_server.md).
+
 <a name="index"></a>
 
 ## Function Index ##
@@ -28,6 +29,7 @@ supervisor.</td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3
 `checkin(X1, Socket) -> any()`
 
 release a socket in the pool
+
 <a name="checkout-4"></a>
 
 ### checkout/4 ###
@@ -35,6 +37,7 @@ release a socket in the pool
 `checkout(Host0, Port, Transport, Client) -> any()`
 
 fetch a socket from the pool
+
 <a name="child_spec-2"></a>
 
 ### child_spec/2 ###
@@ -43,12 +46,12 @@ fetch a socket from the pool
 
 return a child spec suitable for embeding your pool in the
 supervisor
+
 <a name="code_change-3"></a>
 
 ### code_change/3 ###
 
 `code_change(OldVsn, State, Extra) -> any()`
-
 
 <a name="count-1"></a>
 
@@ -57,6 +60,7 @@ supervisor
 `count(Name) -> any()`
 
 get the number of connections in the pool
+
 <a name="count-2"></a>
 
 ### count/2 ###
@@ -64,12 +68,12 @@ get the number of connections in the pool
 `count(Name, X2) -> any()`
 
 get the number of connections in the pool for `{Host0, Port, Transport}`
+
 <a name="find_pool-1"></a>
 
 ### find_pool/1 ###
 
 `find_pool(Name) -> any()`
-
 
 <a name="handle_call-3"></a>
 
@@ -77,13 +81,11 @@ get the number of connections in the pool for `{Host0, Port, Transport}`
 
 `handle_call(X1, From, State) -> any()`
 
-
 <a name="handle_cast-2"></a>
 
 ### handle_cast/2 ###
 
 `handle_cast(Msg, State) -> any()`
-
 
 <a name="handle_info-2"></a>
 
@@ -91,13 +93,11 @@ get the number of connections in the pool for `{Host0, Port, Transport}`
 
 `handle_info(X1, State) -> any()`
 
-
 <a name="init-1"></a>
 
 ### init/1 ###
 
 `init(X1) -> any()`
-
 
 <a name="max_connections-1"></a>
 
@@ -106,12 +106,12 @@ get the number of connections in the pool for `{Host0, Port, Transport}`
 `max_connections(Name) -> any()`
 
 get max pool size
+
 <a name="notify-2"></a>
 
 ### notify/2 ###
 
 `notify(Pool, Msg) -> any()`
-
 
 <a name="set_max_connections-2"></a>
 
@@ -120,6 +120,7 @@ get max pool size
 `set_max_connections(Name, NewSize) -> any()`
 
 change the pool size
+
 <a name="set_timeout-2"></a>
 
 ### set_timeout/2 ###
@@ -134,13 +135,11 @@ change the connection timeout
 
 `start() -> any()`
 
-
 <a name="start_link-2"></a>
 
 ### start_link/2 ###
 
 `start_link(Name, Options0) -> any()`
-
 
 <a name="start_pool-2"></a>
 
@@ -149,6 +148,7 @@ change the connection timeout
 `start_pool(Name, Options) -> any()`
 
 start a pool
+
 <a name="stop_pool-1"></a>
 
 ### stop_pool/1 ###
@@ -156,12 +156,12 @@ start a pool
 `stop_pool(Name) -> any()`
 
 stop a pool
+
 <a name="terminate-2"></a>
 
 ### terminate/2 ###
 
 `terminate(Reason, State) -> any()`
-
 
 <a name="timeout-1"></a>
 
@@ -170,3 +170,4 @@ stop a pool
 `timeout(Name) -> any()`
 
 get timeout
+

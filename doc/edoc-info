@@ -1,6 +1,5 @@
 %% encoding: UTF-8
 {application,hackney}.
-{packages,[]}.
 {modules,[hackney,hackney_app,hackney_bstr,hackney_connect,hackney_cookie,
           hackney_date,hackney_deps,hackney_dummy_metrics,
           hackney_exometer_metrics,hackney_folsom_metrics,hackney_headers,

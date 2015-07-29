@@ -5,8 +5,6 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-
-
 <a name="types"></a>
 
 ## Data Types ##
@@ -17,7 +15,6 @@
 ### <a name="type-cookie_option">cookie_option()</a> ###
 
 
-
 <pre><code>
 cookie_option() = {max_age, non_neg_integer()} | {domain, binary()} | {path, binary()} | {secure, boolean()} | {http_only, boolean()}
 </code></pre>
@@ -25,15 +22,12 @@ cookie_option() = {max_age, non_neg_integer()} | {domain, binary()} | {path, bin
 
 
 
-
 ### <a name="type-cookie_opts">cookie_opts()</a> ###
-
 
 
 <pre><code>
 cookie_opts() = [<a href="#type-cookie_option">cookie_option()</a>]
 </code></pre>
-
 
 <a name="index"></a>
 
@@ -51,17 +45,16 @@ cookie_opts() = [<a href="#type-cookie_option">cookie_option()</a>]
 
 ### parse_cookie/1 ###
 
-
 <pre><code>
 parse_cookie(Cookie::binary()) -&gt; [{binary(), binary()}] | {error, badarg}
 </code></pre>
 <br />
 
 Parse a cookie header string and return a list of key/values.
+
 <a name="setcookie-3"></a>
 
 ### setcookie/3 ###
-
 
 <pre><code>
 setcookie(Name::iodata(), Value::iodata(), Opts::<a href="#type-cookie_opts">cookie_opts()</a>) -&gt; binary()
@@ -69,3 +62,4 @@ setcookie(Name::iodata(), Value::iodata(), Opts::<a href="#type-cookie_opts">coo
 <br />
 
 Convert a cookie name, value and options to its iodata form.
+

@@ -5,6 +5,7 @@
 * [Function Details](#functions)
 
 __Behaviours:__ [`application`](application.md).
+
 <a name="index"></a>
 
 ## Function Index ##
@@ -23,7 +24,6 @@ __Behaviours:__ [`application`](application.md).
 
 `ensure_deps_started() -> any()`
 
-
 <a name="get_app_env-1"></a>
 
 ### get_app_env/1 ###
@@ -31,6 +31,7 @@ __Behaviours:__ [`application`](application.md).
 `get_app_env(Key) -> any()`
 
 return a config value
+
 <a name="get_app_env-2"></a>
 
 ### get_app_env/2 ###
@@ -38,17 +39,16 @@ return a config value
 `get_app_env(Key, Default) -> any()`
 
 return a config value
+
 <a name="start-2"></a>
 
 ### start/2 ###
 
 `start(StartType, StartArgs) -> any()`
 
-
 <a name="stop-1"></a>
 
 ### stop/1 ###
 
 `stop(State) -> any()`
-
 

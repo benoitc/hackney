@@ -5,6 +5,7 @@
 * [Function Details](#functions)
 
 __This module defines the `hackney_pool_handler` behaviour.__<br /> Required callback functions: `start/0`, `checkout/4`, `checkin/2`.
+
 <a name="index"></a>
 
 ## Function Index ##
@@ -21,10 +22,8 @@ __This module defines the `hackney_pool_handler` behaviour.__<br /> Required cal
 
 ### behaviour_info/1 ###
 
-
 <pre><code>
 behaviour_info(X1::atom()) -&gt; [{atom(), arity()}] | undefined
 </code></pre>
 <br />
-
 

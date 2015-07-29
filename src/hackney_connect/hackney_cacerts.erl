@@ -1,4 +1,4 @@
-% @hidden
+%% @hidden
 
 -module(hackney_cacerts).
 
