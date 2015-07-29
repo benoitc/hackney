@@ -1,5 +1,11 @@
 # NEWS
 
+1.3.1 - 2015/07/28
+------------------
+
+- fix: set default `recv_timeout` to 5s. (#219)
+- fix: socks5 fix auth: handle not required case (#218)
+
 1.3.0 - 2015/07/23
 ------------------
 - new add `max_body` setting
