@@ -1,3 +1,5 @@
+% @hidden
+
 -module(hackney_cacerts).
 
 -export([cacerts/0]).
