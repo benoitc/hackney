@@ -355,10 +355,10 @@ To close a pool do:
 hackney_pool:stop_pool(PoolName).
 ```
 
-> Note: Sometimes you want to always use the default pool in your app
+> Note: Sometimes you want to disable the default pool in your app
 > without having to set the client option each time. You can now do this
 > by setting the hackney application environment key `use_default_pool`
-> to true.
+> to false.
 
 ### Use a custom pool handler.
 
