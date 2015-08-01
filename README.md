@@ -260,7 +260,7 @@ ok  = hackney:send_body(ClientRef, ReqBody),
 ```
 
 > Note: to send a **multipart** body  in a streaming fashion use the
-> `hackney:sen_multipart_body/2` function.
+> `hackney:send_multipart_body/2` function.
 
 ### Get a response asynchronously
 
