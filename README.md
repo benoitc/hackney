@@ -449,7 +449,7 @@ been started.
 |----------------------------|---------|----------------------------|
 |hackney.HOST.nb_requests    |counter  | Number of running requests |
 |hackney.HOST.request_time   |histogram| Request time               |
-|hackney.HOST.connect_time   |counter  | Connect time               |
+|hackney.HOST.connect_time   |histogram| Connect time               |
 |hackney.HOST.response_time  |histogram| Response time              |
 |hackney.HOST.connect_timeout|counter  | Number of connect timeout  |
 |hackney.HOST.connect_error  |counter  | Number of timeout errors   |
