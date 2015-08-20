@@ -279,8 +279,10 @@ handle_call({checkin, Ref, Dest, Socket, Transport}, From, State) ->
                  {ok, {_Adress, _Port}} ->
                      %% socket is not closed, try to deliver it or store it
                      deliver_socket(Socket, Dest, State#state{clients=Clients2});
-                 _Error ->
-                     %% socket is probably closed just return
+                 Error ->
+                     %% socket may be half-closed, close it and return
+                     catch Transport:close(Socket),
+                     ?report_trace("checkin: socket is not ok~n", [{socket, Socket}, {peername, Error}]),
                      State#state{clients=Clients2}
              end,
     update_usage(State2),
