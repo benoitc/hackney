@@ -848,14 +848,14 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
                                          options=Opts0}
             end,
             {ok, S, H, RedirectState1};
-        {ok,  S, H, RedirectClient} when Redirect /= nil ->
+        {ok,  S, H, #client{}=RedirectClient} when Redirect /= nil ->
             NewClient = RedirectClient#client{redirect=Redirect,
                                               follow_redirect=FollowRedirect,
                                               max_redirect=MaxRedirect,
                                               retries=Tries,
                                               options=Opts0},
             {ok, S, H, NewClient};
-        {ok, S, H, RedirectClient} ->
+        {ok, S, H, #client{}=RedirectClient} ->
             NewRedirect = {Transport, Host, Port, Opts0},
             NewClient = RedirectClient#client{redirect=NewRedirect,
                                               follow_redirect=FollowRedirect,
@@ -863,8 +863,8 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
                                               retries=Tries,
                                               options=Opts0},
             {ok, S, H, NewClient};
-        Error ->
-            Error
+        Response ->
+            Response
     end.
 
 redirect_location(Headers) ->
