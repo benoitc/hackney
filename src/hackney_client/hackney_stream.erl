@@ -241,7 +241,7 @@ async_recv(Parent, Owner, Ref,
             proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
                                                      Client, Buffer]);
         {Ref, close} ->
-            Transport:close(Sock);
+            Transport:close(TSock);
         {Ref, stop_async, From} ->
             hackney_manager:store_state(Client#client{async=false}),
             Transport:setopts(TSock, [{active, false}]),
