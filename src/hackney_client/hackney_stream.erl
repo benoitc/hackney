@@ -222,11 +222,12 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
 
 async_recv(Parent, Owner, Ref,
            #client{transport=Transport,
-                   socket=Sock,
+                   socket=TSock,
                    recv_timeout=Timeout}=Client, Buffer) ->
 
-    {OK, Closed, Error} = Transport:messages(Sock),
-    Transport:setopts(Sock, [{active, once}]),
+    {OK, Closed, Error} = Transport:messages(TSock),
+    Sock = raw_sock(TSock),
+    Transport:setopts(TSock, [{active, once}]),
     %% some useful info
     #client{version=Version, clen=CLen, te=TE} = Client,
     receive
@@ -236,15 +237,15 @@ async_recv(Parent, Owner, Ref,
             async_recv(Parent, Owner, Ref, Client, Buffer);
         {Ref, pause} ->
             %% make sure that the proces won't be awoken by a tcp msg
-            Transport:setopts(Sock, [{active, false}]),
+            Transport:setopts(TSock, [{active, false}]),
             proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
-                                                   Client, Buffer]);
+                                                     Client, Buffer]);
         {Ref, close} ->
             Transport:close(Sock);
         {Ref, stop_async, From} ->
             hackney_manager:store_state(Client#client{async=false}),
-            Transport:setopts(Sock, [{active, false}]),
-            Transport:controlling_process(Sock, From),
+            Transport:setopts(TSock, [{active, false}]),
+            Transport:controlling_process(TSock, From),
             From ! {Ref, ok};
         {OK, Sock, Data} ->
             stream_loop(Parent, Owner, Ref, Client#client{buffer=Data});
@@ -265,16 +266,17 @@ async_recv(Parent, Owner, Ref,
             Transport:close(Sock);
         {Error, Sock, Reason} ->
             Owner ! {hackney_response, Ref, {error, Reason}},
-            Transport:close(Sock);
+            Transport:close(TSock);
         {system, From, Request} ->
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
                                   {async_recv, Parent, Owner, Ref, Client});
         Else ->
-            ?report_trace("stream: unexpected message", [{message, Else}]),
+            ?report_trace("stream: unexpected message", [{message, Else},
+                                                         {sock, TSock}]),
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
     after Timeout ->
             Owner ! {hackney_response, Ref, {error, {closed, timeout}}},
-        Transport:close(Sock)
+            Transport:close(TSock)
     end.
 
 system_continue(_, _, {maybe_continue, Parent, Owner, Ref, Client}) ->
@@ -378,3 +380,11 @@ finish_response(Rest, Client0) ->
         false ->
             Client
     end.
+
+
+raw_sock({hackney_ssl_transport, RawSock}) ->
+    RawSock;
+raw_sock({hackney_tcp_transport, RawSock}) ->
+    RawSock;
+raw_sock(RawSock) ->
+    RawSock.
