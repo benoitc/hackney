@@ -16,6 +16,7 @@
          system_code_change/4]).
 
 -include("hackney.hrl").
+-include_lib("../hackney_app/hackney_internal.hrl").
 
 start_link(Owner, Ref, Client) ->
     proc_lib:start_link(?MODULE, init, [self(), Owner, Ref, Client]).
@@ -108,6 +109,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
                                   {stream_loop, Parent, Owner, Ref, Client});
         Else ->
+            ?report_trace("stream: unexpected message", [{message, Else}]),
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
 
     after 0 ->
@@ -131,6 +133,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
                                   {maybe_continue, Parent, Owner, Ref,
                                    Client});
         Else ->
+            ?report_trace("stream: unexpected message", [{message, Else}]),
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
     after 5000 ->
 
@@ -267,6 +270,7 @@ async_recv(Parent, Owner, Ref,
             sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
                                   {async_recv, Parent, Owner, Ref, Client});
         Else ->
+            ?report_trace("stream: unexpected message", [{message, Else}]),
             error_logger:error_msg("Unexpected message: ~w~n", [Else])
     after Timeout ->
             Owner ! {hackney_response, Ref, {error, {closed, timeout}}},
