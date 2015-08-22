@@ -370,9 +370,7 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
                                                dict:erase(Owner, Pids1))
                             end,
 
-                    {reply, {ok, Ref}, State#mstate{pids=Pids2}};
-                Error ->
-                    {reply, Error, State}
+                    {reply, {ok, Ref}, State#mstate{pids=Pids2}}
             after 5000 ->
                       {reply, {error, timeout}, State}
             end
