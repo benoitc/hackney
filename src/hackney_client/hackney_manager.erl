@@ -343,7 +343,7 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
         [] -> {reply, {ok, Ref}, State};
         [{Ref, {_Owner, nil, _Info}}] ->
             %% there is no async request to handle, just return
-            {ok, Ref};
+            {reply, {ok, Ref}, State};
         [{Ref, {Owner, Stream, Info}}] ->
             %% tell to the stream to stop
             Stream ! {Ref, stop_async, self()},
