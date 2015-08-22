@@ -343,7 +343,7 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
         [] -> {reply, {ok, Ref}, State};
         [{Ref, {_Owner, nil, _Info}}] ->
             %% there is no async request to handle, just return
-            {ok, Ref};
+            {reply, {ok, Ref}, State};
         [{Ref, {Owner, Stream, Info}}] ->
             %% tell to the stream to stop
             Stream ! {Ref, stop_async, self()},
@@ -370,9 +370,7 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
                                                dict:erase(Owner, Pids1))
                             end,
 
-                    {reply, {ok, Ref}, State#mstate{pids=Pids2}};
-                Error ->
-                    {reply, Error, State}
+                    {reply, {ok, Ref}, State#mstate{pids=Pids2}}
             after 5000 ->
                       {reply, {error, timeout}, State}
             end
