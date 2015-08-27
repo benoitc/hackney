@@ -1,5 +1,14 @@
 # NEWS
 
+1.3.2 - 2015/08/27
+------------------
+
+- fix `connect_time metric` (#227)
+- fix redirection when `with_body`  is enabled (#228)
+- close half-closed socket to avoid leak (#231)
+- fix undexpected message in `hackney_stream` (#223)
+- fix receive/error in hackney_manager (#232)
+
 1.3.1 - 2015/07/28
 ------------------
 
@@ -8,6 +17,7 @@
 
 1.3.0 - 2015/07/23
 ------------------
+
 - new add `max_body` setting
 - fix: handle partial chains during handshake in HTTPS (#196)
 
