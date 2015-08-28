@@ -810,9 +810,11 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
             retries=Tries,
             redirect=Redirect} = Client,
 
-
-    NewHeaders = lists:keystore(<<"Host">>, 1, Headers,
-                                {<<"Host">>, RedirectHost}),
+    NewHeaders = case RedirectHost of
+                     Host -> Headers;
+                     _    -> lists:keystore(<<"Host">>, 1, Headers,
+                                            {<<"Host">>, RedirectHost})
+                 end,
     RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
                                    Client#client.options, false),
     %% make a request without any redirection
@@ -874,18 +876,23 @@ absolute_url(<<"http://", _Rest/binary >>= URL, _Client) ->
     URL;
 absolute_url(<<"https://", _Rest/binary >>= URL, _Client) ->
     URL;
-absolute_url(RelativeUrl0, #client{transport=T, host=Host, port=Port,
-                                   netloc=Netloc}) ->
+absolute_url(RelativeUrl, #client{transport=T, host=Host, port=Port,
+                                   netloc=Netloc, path=Path}) ->
     Scheme = hackney_url:transport_scheme(T),
-    RelativeUrl = case RelativeUrl0 of
-                      <<"/", _Rest/binary>> -> RelativeUrl0;
-                      _                     -> <<"/", RelativeUrl0/binary>>
-                  end,
+    NewPath = case RelativeUrl of
+                  <<"/", _Rest/binary>> ->
+                      RelativeUrl;
+                  _ ->
+                      case binary:part(Path, {size(Path), -1}) of
+                          <<"/">> -> <<Path/binary, RelativeUrl/binary>>;
+                          _       -> <<Path/binary, "/", RelativeUrl/binary>>
+                      end
+              end,
     Parsed = hackney_url:normalize(#hackney_url{scheme=Scheme,
                                                 host=Host,
                                                 port=Port,
                                                 netloc=Netloc,
-                                                path=RelativeUrl}),
+                                                path=NewPath}),
     hackney_url:unparse_url(Parsed).
 
 
