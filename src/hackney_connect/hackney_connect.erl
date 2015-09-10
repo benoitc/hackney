@@ -291,9 +291,7 @@ ssl_opts(Host, Options) ->
                     [{verify, verify_none},
                      {reuse_sessions, true}];
                 {_, true} ->
-
-                    VerifyFun = {fun ssl_verify_hostname:verify_fun/3,
-                                 [{check_hostname, Host}]},
+                    VerifyFun = {fun verify/3, {[], Host}},
                     [{verify, verify_peer},
                      {depth, 99},
                      {cacerts, CACerts},
@@ -305,6 +303,26 @@ ssl_opts(Host, Options) ->
             end;
         SSLOpts ->
             SSLOpts
+    end.
+
+verify(Cert, Event, {Certs, Host}=St) ->
+    case Event of
+        {bad_cert, _Reason} -> {valid, {[Cert | Certs], Host}};
+        {extension, _} -> {unknown, St};
+        valid -> {valid, {[Cert | Certs], Host}};
+        valid_peer -> maybe_reorder(Cert, Certs, Host)
+    end.
+
+maybe_reorder(Cert, [], Host) ->
+    ssl_verify_hostname:verify_cert_hostname(Cert, Host);
+maybe_reorder(Cert, [NewCert | Rest], Host) ->
+    case ssl_verify_hostname:verify_cert_hostname(Cert, Host) of
+        {valid, Host} -> {valid, Host};
+        {fail, _}=Fail ->
+            case public_key:pkix_is_self_signed(Cert) of
+                true -> maybe_reorder(NewCert, Rest, Host);
+                false -> Fail
+            end
     end.
 
 %% code from rebar3 undert BSD license
