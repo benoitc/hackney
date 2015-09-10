@@ -29,25 +29,6 @@ devbuild:
 dialyzer:
 	$(REBAR) dialyzer
 
-# CA generation
-#
-CA_BUNDLE_BIN=./support/mk-ca-bundle.pl
-CA_BUNDLE=ca-bundle.crt
-CA_SRC=src/hackney_connect/hackney_cacerts.erl.src
-CA_OUT=src/hackney_connect/hackney_cacerts.erl
-
-mkcert:
-	$(CA_BUNDLE_BIN)
-	@cat $(CA_SRC) \
-		| head -n `grep -n "%% GENERATED" $(CA_SRC) | cut -d : -f 1` \
-		> $(CA_OUT)
-	@cat $(CA_BUNDLE) >> $(CA_OUT)
-	@cat $(CA_SRC) \
-		| tail -n +`grep -n "%% GENERATED" $(CA_SRC) | cut -d : -f 1`  \
-		>> $(CA_OUT)
-	mv $(CA_BUNDLE) priv/
-
-
 # Mimetypes module generator.
 
 GEN_URL = http://svn.apache.org/repos/asf/httpd/httpd/trunk/docs/conf/mime.types

@@ -284,13 +284,14 @@ ssl_opts(Host, Options) ->
         undefined ->
             Insecure =  proplists:get_value(insecure, Options),
             UseSecureSsl = check_ssl_version(),
-            CACerts = cacerts(),
+            CACerts = certifi:cacerts(),
 
             case {Insecure, UseSecureSsl} of
                 {true, _} ->
                     [{verify, verify_none},
                      {reuse_sessions, true}];
                 {_, true} ->
+
                     VerifyFun = {fun ssl_verify_hostname:verify_fun/3,
                                  [{check_hostname, Host}]},
                     [{verify, verify_peer},
@@ -308,8 +309,9 @@ ssl_opts(Host, Options) ->
 
 %% code from rebar3 undert BSD license
 partial_chain(Certs) ->
-    Certs1 = [{Cert, public_key:pkix_decode_cert(Cert, otp)} || Cert <- Certs],
-    CACerts = cacerts(),
+    Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
+                            Cert <- Certs]),
+    CACerts = certifi:cacerts(),
     CACerts1 = [public_key:pkix_decode_cert(Cert, otp) || Cert <- CACerts],
 
 
@@ -324,10 +326,6 @@ partial_chain(Certs) ->
 
 extract_public_key_info(Cert) ->
     ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
-
-cacerts() ->
-    Pems = public_key:pem_decode(hackney_cacerts:cacerts()),
-    [Der || {'Certificate', Der, _} <- Pems].
 
 check_cert(CACerts, Cert) ->
     lists:any(fun(CACert) ->
