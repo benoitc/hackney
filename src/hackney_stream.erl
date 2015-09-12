@@ -16,7 +16,7 @@
          system_code_change/4]).
 
 -include("hackney.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("hackney_internal.hrl").
 
 start_link(Owner, Ref, Client) ->
     proc_lib:start_link(?MODULE, init, [self(), Owner, Ref, Client]).

@@ -17,7 +17,7 @@
 
 
 -include("hackney.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("../hackney_internal.hrl").
 -include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
 connect(Transport, Host, Port) ->
