@@ -230,7 +230,7 @@ mp_file_header({file, Path, ExtraHeaders}, Boundary) ->
                     {<<"filename">>, <<"\"", FName/binary, "\"">>}]},
     mp_file_header({file, Path, Disposition, ExtraHeaders}, Boundary);
 mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
-    CType = hackney_mimetypes:filename(Path),
+    CType = mimerl:filename(Path),
     Len = filelib:file_size(Path),
     ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
     Headers = mp_filter_header([{<<"content-type">>, CType},
@@ -255,7 +255,7 @@ mp_data_header({Name, Len, ExtraHeaders}, Boundary) ->
                                       <<"\"", Name/binary, "\"">>}]},
     mp_data_header({Name, Len, Disposition, ExtraHeaders}, Boundary);
 mp_data_header({Name, Len, {Disposition, Params}, ExtraHeaders}, Boundary) ->
-    CType = hackney_mimetypes:filename(Name),
+    CType = mimerl:filename(Name),
     ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
     Headers = mp_filter_header([{<<"content-type">>, CType},
                                 {<<"content-length">>, Len}],

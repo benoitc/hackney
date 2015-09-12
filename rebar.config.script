@@ -9,6 +9,10 @@ Rebar2Deps = [
                {git, "https://github.com/benoitc/erlang-idna",
                 {tag, "1.0.2"}}},
 
+              {mimerl, ".*",
+                {git, "https://github.com/benoitc/mimerl",
+                 {tag, "1.0.0"}}},
+
               {certifi, ".*",
                {git, "https://github.com/certifi/erlang-certifi",
                 {tag, "0.1.0"}}},

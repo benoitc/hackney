@@ -13,6 +13,7 @@
                  public_key,
                  ssl,
                  idna,
+                 mimerl,
                  certifi]},
  {included_applications, [ssl_verify_hostname]},
  {mod, { hackney_app, []}},
