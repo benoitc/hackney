@@ -382,9 +382,9 @@ finish_response(Rest, Client0) ->
     end.
 
 
-raw_sock({hackney_ssl_transport, RawSock}) ->
+raw_sock({hackney_ssl, RawSock}) ->
     RawSock;
-raw_sock({hackney_tcp_transport, RawSock}) ->
+raw_sock({hackney_tcp, RawSock}) ->
     RawSock;
 raw_sock(RawSock) ->
     RawSock.
