@@ -1,6 +1,6 @@
 
 
-# Module hackney_ssl_transport #
+# Module hackney_ssl #
 * [Function Index](#index)
 * [Function Details](#functions)
 

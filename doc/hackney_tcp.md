@@ -1,6 +1,6 @@
 
 
-# Module hackney_tcp_transport #
+# Module hackney_tcp #
 * [Function Index](#index)
 * [Function Details](#functions)
 

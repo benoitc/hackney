@@ -609,9 +609,9 @@ maybe_proxy(Transport, Host, Port, Options)
                          port = ProxyPort} = hackney_url:normalize(Url1),
             ProxyAuth = proplists:get_value(proxy_auth, Options),
             case {Transport, PTransport} of
-                {hackney_ssl_transport, hackney_ssl_transport} ->
+                {hackney_ssl, hackney_ssl} ->
                     {error, invalid_proxy_transport};
-                {hackney_ssl_transport, _} ->
+                {hackney_ssl, _} ->
                     do_connect(ProxyHost, ProxyPort, ProxyAuth,
                                Transport, Host, Port, Options);
                 _ ->
@@ -625,7 +625,7 @@ maybe_proxy(Transport, Host, Port, Options)
             ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost},
                                                  {proxy_port, ProxyPort}]),
             case Transport of
-                hackney_ssl_transport ->
+                hackney_ssl ->
                     ProxyAuth = proplists:get_value(proxy_auth, Options),
                     do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
                         Port, Options);

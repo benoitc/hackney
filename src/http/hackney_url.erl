@@ -37,13 +37,13 @@ parse_url(URL) when is_list(URL) ->
             parse_url(unicode:characters_to_binary(list_to_binary(URL)))
     end;
 parse_url(<<"http://", Rest/binary>>) ->
-    parse_url(Rest, #hackney_url{transport=hackney_tcp_transport,
+    parse_url(Rest, #hackney_url{transport=hackney_tcp,
                                          scheme=http});
 parse_url(<<"https://", Rest/binary>>) ->
-    parse_url(Rest, #hackney_url{transport=hackney_ssl_transport,
+    parse_url(Rest, #hackney_url{transport=hackney_ssl,
                                  scheme=https});
 parse_url(URL) ->
-    parse_url(URL, #hackney_url{transport=hackney_tcp_transport,
+    parse_url(URL, #hackney_url{transport=hackney_tcp,
                                         scheme=http}).
 parse_url(URL, S) ->
     {Addr, RawPath} =
@@ -99,9 +99,9 @@ normalize(#hackney_url{}=Url) ->
     Path1 = pathencode(Path),
     Url#hackney_url{host=Host, netloc=Netloc, path=Path1}.
 
-transport_scheme(hackney_tcp_transport) ->
+transport_scheme(hackney_tcp) ->
     http;
-transport_scheme(hackney_ssl_transport) ->
+transport_scheme(hackney_ssl) ->
     https.
 
 unparse_url(#hackney_url{}=Url) ->
@@ -167,9 +167,9 @@ parse_addr(Addr, S) ->
 
 parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
     case binary:split(Rest, <<"]">>) of
-        [Host, <<>>] when Transport =:= hackney_tcp_transport ->
+        [Host, <<>>] when Transport =:= hackney_tcp ->
             S#hackney_url{host=binary_to_list(Host), port=80};
-        [Host, <<>>] when Transport =:= hackney_ssl_transport ->
+        [Host, <<>>] when Transport =:= hackney_ssl ->
             S#hackney_url{host=binary_to_list(Host), port=443};
         [Host, <<":", Port/binary>>] ->
             S#hackney_url{host=binary_to_list(Host),
@@ -180,10 +180,10 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
 
 parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
     case binary:split(Netloc, <<":">>) of
-        [Host] when Transport =:= hackney_tcp_transport ->
+        [Host] when Transport =:= hackney_tcp ->
             S#hackney_url{host=unicode:characters_to_list((Host)),
                           port=80};
-        [Host] when Transport =:= hackney_ssl_transport ->
+        [Host] when Transport =:= hackney_ssl ->
             S#hackney_url{host=unicode:characters_to_list(Host),
                           port=443};
         [Host, Port] ->
