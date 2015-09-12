@@ -20,8 +20,6 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    hackney_deps:ensure(),
-    ensure_deps_started(),
     hackney_sup:start_link().
 
 stop(_State) ->
