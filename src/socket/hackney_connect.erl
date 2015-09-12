@@ -17,7 +17,7 @@
 
 
 -include("hackney.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("../hackney_internal.hrl").
 -include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
 connect(Transport, Host, Port) ->
@@ -33,7 +33,7 @@ connect(Transport, Host, Port, Options, Dynamic) ->
                               {host, Host},
                               {port, Port},
                               {dynamic, Dynamic}]),
-    case create_connection(Transport, hackney_idna:to_ascii(Host), Port,
+    case create_connection(Transport, idna:utf8_to_ascii(Host), Port,
                            Options, Dynamic) of
         {ok, #client{request_ref=Ref}} ->
             {ok, Ref};

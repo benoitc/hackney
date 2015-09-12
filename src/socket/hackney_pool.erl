@@ -37,7 +37,7 @@
          code_change/3, terminate/2]).
 
 -include("hackney.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("../hackney_internal.hrl").
 
 -record(state, {
         name,

@@ -10,7 +10,7 @@
 
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("../hackney_internal.hrl").
 
 -export([perform/2,
          location/1,
@@ -252,7 +252,7 @@ stream_multipart({part, Name, ExtraHeaders},
                  #client{mp_boundary=Boundary}=Client)
         when is_list(ExtraHeaders) ->
     %% part without content-length
-    CType = hackney_mimetypes:filename(Name),
+    CType = mimerl:filename(Name),
     Headers = [{<<"Content-Disposition">>,
                 {<<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
                },
@@ -319,7 +319,7 @@ handle_body(Headers, ReqType0, Body0, Client) ->
             S= filelib:file_size(FileName),
             FileName1 = hackney_bstr:to_binary(FileName),
 	        CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                                          hackney_mimetypes:filename(FileName1)),
+                                          mimerl:filename(FileName1)),
             {S, CT, Body0};
         Func when is_function(Func) ->
             CT = hackney_headers:get_value(<<"content-type">>, Headers,

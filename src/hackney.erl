@@ -37,7 +37,7 @@
 
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
--include_lib("../hackney_app/hackney_internal.hrl").
+-include_lib("hackney_internal.hrl").
 
 
 -type url() :: #hackney_url{}.
@@ -51,7 +51,6 @@
 
 %% @doc Start the hackney process. Useful when testing using the shell.
 start() ->
-    hackney_deps:ensure(),
     application:load(hackney),
     hackney_app:ensure_deps_started(),
     application:start(hackney).
