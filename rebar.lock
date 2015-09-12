@@ -1,12 +1,3 @@
-[{<<"certifi">>,
-  {git,"https://github.com/certifi/erlang-certifi",
-       {ref,"98c733c7892253fe551070824a200fa9712a23b2"}},
-  0},
- {<<"idna">>,
-  {git,"https://github.com/benoitc/erlang-idna",
-       {ref,"c80afc2c3120010fd22287a3b2ef2bbbde57ff40"}},
-  0},
- {<<"ssl_verify_hostname">>,
-  {git,"https://github.com/deadtrickster/ssl_verify_hostname.erl",
-       {ref,"1105981e2c3afb40dcda46163aa54c3f931a1e0b"}},
-  0}].
+[{<<"certifi">>,{pkg,<<"certifi">>,<<"0.1.1">>},0},
+ {<<"idna">>,{pkg,<<"idna">>,<<"1.0.2">>},0},
+ {<<"ssl_verify_hostname">>,{pkg,<<"ssl_verify_hostname">>,<<"1.0.5">>},0}].

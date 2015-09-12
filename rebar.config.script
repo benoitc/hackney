@@ -1,0 +1,25 @@
+{ok, VSN} = application:get_key(rebar, vsn),
+[VSN1 | _] = string:tokens(VSN, "-"),
+[Maj, Min, Patch] = string:tokens(VSN1, "."),
+IsRebar3 = (list_to_integer(Maj) >= 3),
+
+
+Rebar2Deps = [
+              {idna, ".*",
+               {git, "https://github.com/benoitc/erlang-idna",
+                {tag, "1.0.2"}}},
+
+              {certifi, ".*",
+               {git, "https://github.com/certifi/erlang-certifi",
+                {tag, "0.1.0"}}},
+
+              {ssl_verify_hostname, ".*",
+               {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
+                {tag, "1.0.5"}}}
+             ],
+
+case IsRebar3 of
+    true -> CONFIG;
+    false ->
+        lists:keyreplace(deps, 1, CONFIG, {deps, Rebar2Deps})
+end.
