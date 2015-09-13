@@ -91,7 +91,7 @@ To start in the console run:
 
 ```erlang-repl
 
-$ erl -pa ebin -pa deps/*/ebin
+$ ./rebar3 shell
 1>> hackney:start().
 ok
 ```
