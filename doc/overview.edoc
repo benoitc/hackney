@@ -108,7 +108,7 @@ The hackney application will start the default socket pool for you.
 To start in the console run:
 
 <pre lang="erlang-repl">
-$ erl -pa ebin -pa deps/*/ebin
+$ ./rebar3 shell
 1>> hackney:start().
 ok</pre>
 
