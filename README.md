@@ -92,6 +92,14 @@ To start in the console run:
 ```erlang-repl
 
 $ ./rebar3 shell
+
+```
+
+It is suggested that you install rebar3 user-wide as described [here](http://blog.erlware.org/rebar3-features-part-1-local-install-and-upgrade/).
+This fixes zsh (and maybe other shells) escript-related bugs. Also this should speed things up.
+
+```erlang-repl
+
 1>> hackney:start().
 ok
 ```
