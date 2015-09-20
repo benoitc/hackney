@@ -41,16 +41,16 @@ information on what still needs to be done.
 
 #### Useful modules are:
 
-- [`hackney`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney.md): main module. It contains all HTTP client functions.
-- [`hackney_http`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
+- [`hackney`](http://github.com/benoitc/hackney/blob/master/doc/hackney.md): main module. It contains all HTTP client functions.
+- [`hackney_http`](http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
 to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetected if it's a request or a response that's needed.
 
-- [`hackney_headers`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_headers.md) Module to manipulate HTTP headers.
-- [`hackney_cookie`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_cookie.md): Module to manipulate cookies.
-- [`hackney_multipart`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_multipart.md): Module to encode/decode multipart.
-- [`hackney_url`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_url.md): Module to parse and create URIs.
-- [`hackney_date`](http://github.com/benoitc/hackney/blob/refactor/doc/hackney_date.md): Module to parse HTTP dates.
+- [`hackney_headers`](http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md) Module to manipulate HTTP headers.
+- [`hackney_cookie`](http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md): Module to manipulate cookies.
+- [`hackney_multipart`](http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md): Module to encode/decode multipart.
+- [`hackney_url`](http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md): Module to parse and create URIs.
+- [`hackney_date`](http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md): Module to parse HTTP dates.
 
 Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
 to get the last changelog.
@@ -91,7 +91,15 @@ To start in the console run:
 
 ```erlang-repl
 
-$ erl -pa ebin -pa deps/*/ebin
+$ ./rebar3 shell
+
+```
+
+It is suggested that you install rebar3 user-wide as described [here](http://blog.erlware.org/rebar3-features-part-1-local-install-and-upgrade/).
+This fixes zsh (and maybe other shells) escript-related bugs. Also this should speed things up.
+
+```erlang-repl
+
 1>> hackney:start().
 ok
 ```
