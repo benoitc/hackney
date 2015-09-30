@@ -226,7 +226,7 @@ mp_file_header({file, Path}, Boundary) ->
 mp_file_header({file, Path, ExtraHeaders}, Boundary) ->
     FName = hackney_bstr:to_binary(filename:basename(Path)),
     Disposition = {<<"form-data">>,
-                   [{<<"name">>, <<"file">>},
+                   [{<<"name">>, <<"\"file\"">>},
                     {<<"filename">>, <<"\"", FName/binary, "\"">>}]},
     mp_file_header({file, Path, Disposition, ExtraHeaders}, Boundary);
 mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
