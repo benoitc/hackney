@@ -304,19 +304,20 @@ end_stream_body(Rest, Client0) ->
 -spec read_body(non_neg_integer() | infinity, #client{}, binary())
 	-> {ok, binary(), #client{}} | {error, any()}.
 read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Client) of
-		{ok, Data, Client2} ->
-			read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
-		{done, Client2} ->
-      {ok, Acc, Client2};
-    {error, {closed, Bin}} when is_binary(Bin) ->
-      {error, {closed, << Acc/binary, Bin/binary >>}};
-		{error, Reason} ->
-			{error, Reason}
-	end;
+    case stream_body(Client) of
+        {ok, Data, Client2} ->
+            read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
+        {done, Client2} ->
+            {ok, Acc, Client2};
+        {error, {closed, Bin}} when is_binary(Bin) ->
+            {error, {closed, << Acc/binary, Bin/binary >>}};
+        {error, Reason} ->
+            {error, Reason}
+    end;
 
 read_body(_MaxLength, Client, Acc) ->
-	{ok, Acc, Client}.
+    Client2 = end_stream_body(<<>>, Client),
+    {ok, Acc, Client2}.
 
 
 maybe_close(#client{socket=nil}) ->
