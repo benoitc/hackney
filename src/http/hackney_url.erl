@@ -375,12 +375,12 @@ partial_pathencode(<<C, Rest/binary>> = Bin, Acc) ->
     if	C >= $0, C =< $9 -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C >= $A, C =< $Z -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C >= $a, C =< $z -> partial_pathencode(Rest, <<Acc/binary, C>>);
-        C =:= $;; C =:= $=; C =:= $,; C =:= $: ->
+        C =:= $;; C =:= $=; C =:= $,; C =:= $:; C =:= $? ->
             partial_pathencode(Rest, <<Acc/binary, C>>);
         C =:= $.; C =:= $-; C =:= $+; C =:= $~; C =:= $_ ->
             partial_pathencode(Rest, <<Acc/binary, C>>);
         C =:= $  ->
-		    partial_pathencode(Rest, <<Acc/binary, $+>>);
+            partial_pathencode(Rest, <<Acc/binary, $+>>);
         C =:= $% ->
             %% special case, when a % is passed to the path, check if
             %% it's a valid escape sequence. If the sequence is valid we
