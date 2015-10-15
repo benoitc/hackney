@@ -163,24 +163,24 @@ stream_body_recv(Buffer, Client=#client{version=Version,
     case recv(Client) of
         {ok, Data} ->
             stream_body(Data, Client);
-        {error, closed} when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                             andalso CLen =:= nil ->
-            {ok, Buffer, Client#client{socket=nil,
-                                       state = closed,
-                                       response_state = done,
-                                       body_state=done,
-                                       buffer = <<>>,
-                                       parser=nil}};
-        {error, closed} when Client#client.te =:= <<"identity">> ->
-            {ok, Buffer, Client#client{socket=nil,
-                                       state = closed,
-                                       response_state = done,
-                                       body_state=done,
-                                       buffer = <<>>}};
-        {error, closed} ->
-            {error, {closed, Buffer}};
         {error, Reason} ->
-            {error, Reason}
+            Client2 = close(Client),
+            case Reason of
+                closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
+                            andalso CLen =:= nil ->
+                    {ok, Buffer, Client2#client{response_state=done,
+                                                body_state=done,
+                                                buffer = <<>>,
+                                                parser=nil}};
+                closed when Client#client.te =:= <<"identity">> ->
+                    {ok, Buffer, Client2#client{response_state=done,
+                                                body_state=done,
+                                                buffer = <<>>}};
+                closed ->
+                    {error, {closed, Buffer}};
+                _ ->
+                    {error, Reason}
+            end
     end.
 
 %% @doc stream a multipart response
