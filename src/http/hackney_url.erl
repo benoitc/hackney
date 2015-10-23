@@ -272,7 +272,7 @@ urlencode(<<C, Rest/binary>>, Acc, P=Plus, U=Upper) ->
 	if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, U);
 		C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
 		C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C =:= $.; C =:= $-; C =:= $~; C =:= $_ ->
+		C =:= $.; C =:= $-; C =:= $~; C =:= $$; C =:= $_ ->
 		urlencode(Rest, <<Acc/binary, C>>, P, U);
 		C =:= $ , Plus ->
 		urlencode(Rest, <<Acc/binary, $+>>, P, U);
@@ -376,11 +376,11 @@ partial_pathencode(<<C, Rest/binary>> = Bin, Acc) ->
         C >= $A, C =< $Z -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C >= $a, C =< $z -> partial_pathencode(Rest, <<Acc/binary, C>>);
         C =:= $;; C =:= $=; C =:= $,; C =:= $: ->
-            partial_pathencode(Rest, <<Acc/binary, C>>);
-        C =:= $.; C =:= $-; C =:= $+; C =:= $~; C =:= $_ ->
-            partial_pathencode(Rest, <<Acc/binary, C>>);
+          partial_pathencode(Rest, <<Acc/binary, C>>);
+        C =:= $.; C =:= $-; C =:= $+; C =:= $~; C =:= $$; C =:= $_ ->
+          partial_pathencode(Rest, <<Acc/binary, C>>);
         C =:= $  ->
-		    partial_pathencode(Rest, <<Acc/binary, $+>>);
+		      partial_pathencode(Rest, <<Acc/binary, $+>>);
         C =:= $% ->
             %% special case, when a % is passed to the path, check if
             %% it's a valid escape sequence. If the sequence is valid we
