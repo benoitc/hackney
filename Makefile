@@ -28,3 +28,5 @@ devbuild:
 
 dialyzer:
 	$(REBAR) dialyzer
+
+.PHONY: test
