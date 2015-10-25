@@ -1,0 +1,10 @@
+-record(hackney_socket, {transport,
+                         sock,
+                         host,
+                         port,
+                         group,
+                         pool,
+                         secure = false,
+                         type = tcp,
+                         connected = true,
+                         count = 0}).

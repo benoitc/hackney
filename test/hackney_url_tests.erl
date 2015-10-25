@@ -7,8 +7,7 @@ parse_and_unparse_url_test_() ->
     %% {Value, Result}.
     Tests = [
             {<<"http://www.example.com/path?key=value#Section%205">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -20,8 +19,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http://www.example.com/">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/">>,
                           path = <<"/">>,
@@ -33,8 +31,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http://[db8:0cec::99:123a]/">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"[db8:0cec::99:123a]">>,
                           raw_path = <<"/">>,
                           path = <<"/">>,
@@ -46,8 +43,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"https://[db8:0cec::99:123a]/">>,
-             #hackney_url{transport =hackney_ssl,
-                          scheme = https,
+             #hackney_url{scheme = https,
                           netloc = <<"[db8:0cec::99:123a]">>,
                           raw_path = <<"/">>,
                           path = <<"/">>,
@@ -59,8 +55,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"https://[db8:0cec::99:123a]:8080/">>,
-             #hackney_url{transport =hackney_ssl,
-                          scheme = https,
+             #hackney_url{scheme = https,
                           netloc = <<"[db8:0cec::99:123a]:8080">>,
                           raw_path = <<"/">>,
                           path = <<"/">>,
@@ -72,8 +67,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http://www.example.com/?key=value#Section%205">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/?key=value#Section%205">>,
                           path = <<"/">>,
@@ -85,8 +79,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http://www.example.com:8080/path?key=value#Section%205">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com:8080">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -98,8 +91,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"https://user:passwd@www.example.com/path?key=value#Section%205">>,
-             #hackney_url{transport =hackney_ssl,
-                          scheme = https,
+             #hackney_url{scheme = https,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -111,8 +103,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"passwd">>}
             },
             {<<"https://user@www.example.com/path?key=value#Section%205">>,
-             #hackney_url{transport =hackney_ssl,
-                          scheme = https,
+             #hackney_url{scheme = https,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -131,8 +122,7 @@ parse_url_test_() ->
     %% {Value, Result}.
     Tests = [
             {"http://www.example.com/path?key=value#Section%205", % list as argument
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -144,8 +134,7 @@ parse_url_test_() ->
                           password = <<"">>}
             },
             {<<"www.example.com/path?key=value#Section%205">>, % without http://
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/path?key=value#Section%205">>,
                           path = <<"/path">>,
@@ -157,8 +146,7 @@ parse_url_test_() ->
                           password = <<"">>}
             },
             {<<"www.example.com?key=value#Section%205">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/?key=value#Section%205">>,
                           path = <<"/">>,
@@ -170,8 +158,7 @@ parse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http://www.example.com">>,
-             #hackney_url{transport =hackney_tcp,
-                          scheme = http,
+             #hackney_url{scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"/">>,
                           path = <<"/">>,
@@ -185,13 +172,6 @@ parse_url_test_() ->
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
 
-transport_scheme_test_() ->
-    %% {Value, Result}.
-    Tests = [
-            {hackney_tcp, http},
-            {hackney_ssl, https}
-            ],
-    [{atom_to_list(V), fun() -> R = hackney_url:transport_scheme(V) end} || {V, R} <- Tests].
 
 url_encode_and_decode_test_() ->
     %% {Value, Result}.

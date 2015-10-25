@@ -6,7 +6,7 @@
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 %%%
 -module(hackney_tcp).
--export([messages/1,
+-export([messages/0,
          connect/3, connect/4,
          recv/2, recv/3,
          send/2,
@@ -18,7 +18,7 @@
          sockname/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
-messages(_) -> {tcp, tcp_closed, tcp_error}.
+messages() -> {tcp, tcp_closed, tcp_error}.
 
 connect(Host, Port, Opts) ->
 	connect(Host, Port, Opts, infinity).
@@ -28,7 +28,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 
     %% filter options
     AcceptedOpts =  [linger, nodelay, keepalive, send_timeout,
-                     send_timeout_close, raw, inet6, reuseaddr],
+                     send_timeout_close, raw, inet6, reuseaddr, ip],
     BaseOpts = [binary, {active, false}, {packet, raw}],
     Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 

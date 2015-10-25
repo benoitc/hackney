@@ -5,7 +5,9 @@
 %%%
 
 -module(hackney).
--export([start/0, start/1, stop/0]).
+-export([start/0, stop/0]).
+-export([start_pool/2, stop_pool/1, child_spec/2]).
+
 -export([connect/1, connect/2, connect/3, connect/4,
          close/1,
          request_info/1,
@@ -55,13 +57,28 @@ start() ->
     hackney_app:ensure_deps_started(),
     application:start(hackney).
 
-start(PoolHandler) ->
-    application:set_env(hackney, pool_handler, PoolHandler),
-    start().
-
 %% @doc Stop the hackney process. Useful when testing using the shell.
 stop() ->
     application:stop(hackney).
+
+
+start_pool(Name, Opts) ->
+    supervisor:start_child(hackney_sup, child_spec(Name, Opts)).
+
+
+stop_pool(Name) ->
+    case supervisor:terminate_child(hackney_sup, {hackney_pool_sup, Name}) of
+        ok ->
+            %% make sure we delete the child on old erlang version
+            _ = supervisor:delete_child(hackney_sup, {hackney_pool_sup, Name}),
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+child_spec(Name, Opts) ->
+    {{hackney_pool_sup, Name}, {hackney_pool_sup, start_link, [Name, Opts]},
+      permanent, infinity, supervisor, [hackney_pool_sup]}.
 
 
 connect(URL) ->
@@ -303,7 +320,7 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
                               {body, Body},
                               {options, Options0}]),
 
-    #hackney_url{transport=Transport,
+    #hackney_url{scheme=Scheme,
                  host = Host,
                  port = Port,
                  user = User,
@@ -317,7 +334,7 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
                            {basic_auth, {User, Password}})
     end,
 
-    case maybe_proxy(Transport, Host, Port, Options) of
+    case maybe_proxy(Scheme, Host, Port, Options) of
         {ok, Ref, AbsolutePath} ->
             Request = make_request(Method, URL, Headers, Body,
                                    Options, AbsolutePath),

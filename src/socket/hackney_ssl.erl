@@ -6,7 +6,7 @@
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 
 -module(hackney_ssl).
--export([messages/1,
+-export([messages/0,
          connect/3, connect/4,
          recv/3, recv/2,
          send/2,
@@ -18,7 +18,7 @@
          sockname/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
-messages(_) -> {ssl, ssl_closed, ssl_error}.
+messages() -> {ssl, ssl_closed, ssl_error}.
 
 connect(Host, Port, Opts) ->
 	connect(Host, Port, Opts, infinity).

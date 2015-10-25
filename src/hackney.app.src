@@ -4,8 +4,8 @@
 {application, hackney,
  [
  {description, "simple HTTP client"},
- {vsn, "1.3.2"},
- {registered, [hackney_pool]},
+ {vsn, "2.0.0"},
+ {registered, [hackney_sup, hackney_server]},
  {applications, [kernel,
                  stdlib,
                  crypto,

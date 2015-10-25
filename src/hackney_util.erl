@@ -13,7 +13,8 @@
 -export([privdir/0]).
 -export([mod_metrics/0]).
 -export([to_atom/1]).
-
+-export([get_env/1, get_env/2]).
+-export([get_opt/2, get_opt/3]).
 
 -include("hackney.hrl").
 
@@ -127,3 +128,21 @@ to_atom(V) when is_binary(V) ->
     to_atom(binary_to_list(V));
 to_atom(V) when is_atom(V) ->
     V.
+
+get_env(Key) ->
+    get_env(Key, undefined).
+
+get_env(Key, Default) ->
+    case application:get_env(hackney, Key) of
+        {ok, Value} -> Value;
+        _ -> Default
+    end.
+
+get_opt(Key, Opts) ->
+    get_opt(Key, Opts, undefined).
+
+get_opt(Key, Opts, Default) ->
+    case proplists:get_value(Key, Opts) of
+        undefined -> get_env(Key, Default);
+        Value -> Value
+    end.

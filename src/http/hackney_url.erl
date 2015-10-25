@@ -12,7 +12,6 @@
 -module(hackney_url).
 
 -export([parse_url/1,
-         transport_scheme/1,
          unparse_url/1,
          urldecode/1, urldecode/2,
          urlencode/1, urlencode/2,
@@ -21,7 +20,8 @@
          make_url/3,
          fix_path/1,
          pathencode/1,
-         normalize/1]).
+         normalize/1,
+         is_secure/1]).
 
 -include("hackney_lib.hrl").
 
@@ -37,14 +37,11 @@ parse_url(URL) when is_list(URL) ->
             parse_url(unicode:characters_to_binary(list_to_binary(URL)))
     end;
 parse_url(<<"http://", Rest/binary>>) ->
-    parse_url(Rest, #hackney_url{transport=hackney_tcp,
-                                         scheme=http});
+    parse_url(Rest, #hackney_url{scheme=http});
 parse_url(<<"https://", Rest/binary>>) ->
-    parse_url(Rest, #hackney_url{transport=hackney_ssl,
-                                 scheme=https});
+    parse_url(Rest, #hackney_url{scheme=https});
 parse_url(URL) ->
-    parse_url(URL, #hackney_url{transport=hackney_tcp,
-                                        scheme=http}).
+    parse_url(URL, #hackney_url{scheme=http}).
 parse_url(URL, S) ->
     {Addr, RawPath} =
         case binary:split(URL, <<"/">>) of
@@ -66,6 +63,9 @@ parse_url(URL, S) ->
                                            qs = Query,
                                            fragment = Fragment})
     end.
+
+is_secure(#hackney_url{scheme=https}) -> true;
+is_secure(_) -> false.
 
 %% @doc Normalizes the encoding of a Url
 normalize(Url) when is_list(Url) orelse is_binary(Url) ->
@@ -99,10 +99,6 @@ normalize(#hackney_url{}=Url) ->
     Path1 = pathencode(Path),
     Url#hackney_url{host=Host, netloc=Netloc, path=Path1}.
 
-transport_scheme(hackney_tcp) ->
-    http;
-transport_scheme(hackney_ssl) ->
-    https.
 
 unparse_url(#hackney_url{}=Url) ->
     #hackney_url{scheme = Scheme,
@@ -165,11 +161,11 @@ parse_addr(Addr, S) ->
 
     end.
 
-parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
+parse_netloc(<<"[", Rest/binary>>, #hackney_url{scheme=Scheme}=S) ->
     case binary:split(Rest, <<"]">>) of
-        [Host, <<>>] when Transport =:= hackney_tcp ->
+        [Host, <<>>] when Scheme =:= http ->
             S#hackney_url{host=binary_to_list(Host), port=80};
-        [Host, <<>>] when Transport =:= hackney_ssl ->
+        [Host, <<>>] when Scheme =:= https ->
             S#hackney_url{host=binary_to_list(Host), port=443};
         [Host, <<":", Port/binary>>] ->
             S#hackney_url{host=binary_to_list(Host),
@@ -178,12 +174,12 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
             parse_netloc(Rest, S)
     end;
 
-parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
+parse_netloc(Netloc, #hackney_url{scheme=Scheme}=S) ->
     case binary:split(Netloc, <<":">>) of
-        [Host] when Transport =:= hackney_tcp ->
+        [Host] when Scheme =:= http ->
             S#hackney_url{host=unicode:characters_to_list((Host)),
                           port=80};
-        [Host] when Transport =:= hackney_ssl ->
+        [Host] when Scheme =:= https ->
             S#hackney_url{host=unicode:characters_to_list(Host),
                           port=443};
         [Host, Port] ->

@@ -43,3 +43,19 @@
         method = nil,
         path,
         ctype = nil}).
+
+
+
+-define(DEFAULT_CACHE_SIZE, 1000).
+-define(TAB, hackney_server).
+-define(LOOKUP_CACHE, hackney_lookup).
+
+%% default pool info
+-define(DEFAULT_IDLE_TIMEOUT, 150000). %% default time until a connectino is forced to closed
+-define(DEFAULT_GROUP_LIMIT, 6). %% max number of connections kept for a group
+-define(DEFAULT_PROXY_LIMIT, 20). %% max number of connections cached / proxy
+-define(DEFAULT_MAX_CONNS, 200). %% maximum number of connections kept
+
+%% connectors options
+-define(DEFAULT_NB_CONNECTORS, 20).
+-define(DEFAULT_FALLBACK_TIME, 300).

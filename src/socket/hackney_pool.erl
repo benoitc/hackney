@@ -1,437 +1,286 @@
-%%% -*- erlang -*-
-%%%
-%%% This file is part of hackney released under the Apache 2 license.
-%%% See the NOTICE for more information.
-%%%
-%%% Copyright (c) 2009, Erlang Training and Consulting Ltd.
-%%% Copyright (c) 2012-2015, Benoît Chesneau <benoitc@e-engura.org>
-
-%% @doc pool of sockets connections
-%%
 -module(hackney_pool).
--behaviour(gen_server).
 
-%% PUBLIC API
--export([start/0,
-         checkout/4,
-         checkin/2]).
+%% public API
+-export([request/6,
+         release/1]).
 
--export([start_pool/2,
-         stop_pool/1,
-         find_pool/1,
-         notify/2]).
-
-
--export([count/1, count/2,
-         max_connections/1,
-         set_max_connections/2,
-         timeout/1,
-         set_timeout/2,
-         child_spec/2]).
-
+%% hackney internal api
+-export([register_connector/2]).
 -export([start_link/2]).
 
-%% gen_server callbacks
-
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         code_change/3, terminate/2]).
+%% pool internals
+-export([init/3]).
+-export([system_continue/3]).
+-export([system_terminate/4]).
+-export([system_code_change/4]).
 
 -include("hackney.hrl").
--include_lib("../hackney_internal.hrl").
+-include("hackney_socket.hrl").
 
 -record(state, {
-        name,
-        mod_metrics,
-        max_connections,
-        timeout,
-        clients = dict:new(),
-        queues = dict:new(),  % Dest => queue of Froms
-        connections = dict:new(),
-        sockets = dict:new(),
-        nb_waiters=0}).
+        name :: atom(),
+        parent :: pid(),
+        idle_timeout :: non_neg_integer(),
+        group_limit = 8,
+        proxy_limit = 20,
+        max_conns = 200,
+        refs,
+        sockets,
+        connectors=[],
+        next=0}).
+
+request(Pool, Group, Host, Port, Options, Timeout) when is_pid(Pool) ->
+    Expires = case Timeout of
+                  infinity -> infinity;
+                  Timeout -> now_in_ms() + (Timeout * 1000)
+              end,
+    Tag = erlang:monitor(process, Pool),
+    From = {self(), Tag},
+    Req = {Host, Port, Options, Timeout},
+    catch Pool ! {request, From, Group, Req, Expires},
+    receive
+        {Tag, {ok, HS}} ->
+            {ok, HS};
+        {'DOWN', Tag, _, _, Reason} ->
+            {error, Reason};
+        {Tag, Error} -> 
+            Error
+    after Timeout ->
+        {error, timeout}
+    end;
+request(Pool, Group, Host, Port, Options, Timeout) ->
+    request(hackney_server:get_pool(Pool), Group, Host, Port, Options, Timeout).
 
 
-start() ->
-    %% NB this is first called from hackney_sup:start_link
-    %%    BEFORE the hackney_pool ETS table exists
-    ok.
-
-%% @doc fetch a socket from the pool
-checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
-    Host = string:to_lower(Host0),
-    Pid = self(),
-    RequestRef = Client#client.request_ref,
-    Name = proplists:get_value(pool, Opts, default),
-    Pool = find_pool(Name, Opts),
-    case gen_server:call(Pool, {checkout, {Host, Port, Transport},
-                                           Pid, RequestRef}, infinity) of
-        {ok, Socket, Owner} ->
-            CheckinReference = {Host, Port, Transport},
-            {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
-        {error, no_socket, Owner} ->
-            CheckinReference = {Host, Port, Transport},
-            {error, no_socket, {Name, RequestRef, CheckinReference, Owner,
-                                Transport}};
-
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
-%% @doc release a socket in the pool
-checkin({_Name, Ref, Dest, Owner, Transport}, Socket) ->
-    Transport:setopts(Socket, [{active, false}]),
-    case sync_socket(Transport, Socket) of
-        true ->
-            case Transport:controlling_process(Socket, Owner) of
-                ok ->
-                    gen_server:call(Owner, {checkin, Ref, Dest, Socket, Transport},
-                                    infinity);
-                _Error ->
-                    catch Transport:close(Socket),
-                    ok
-            end;
+release(HS) ->
+    hackney_socket:setopts(HS, [{active, false}]),
+    case sync_socket(HS) of
+        true -> release1(HS);
         false ->
-            catch Transport:close(Socket),
-            ok
+            catch hackney_socket:close(HS),
+            {error, sync_error}
     end.
 
 
-%% @doc start a pool
-start_pool(Name, Options) ->
-    case find_pool(Name, Options) of
-        Pid when is_pid(Pid) ->
+release1(#hackney_socket{pool=Pool}=HS) ->
+    hackney_socket:controlling_process(HS, Pool),
+    Tag = erlang:monitor(process, Pool),
+    Pool ! {release, {self(), Tag}, HS},
+    %% we directly pass the socket control to a pending connection if any. if
+    %% the pool can't accept the socket we kill it.
+    receive
+        {Tag, ok} ->
             ok;
-        Error ->
+        {'DOWN', Tag, _, _, Reason} ->
+            hackney_socket:close(HS),
+            {error, Reason};
+        {Tag, Error} ->
+            hackney_socket:close(HS),
             Error
     end.
 
+register_connector(Pool, Pid) ->
+    Pool ! {register_connector, Pid},
+    receive Pool -> ok end.
 
-%% @doc stop a pool
-stop_pool(Name) ->
-    case find_pool(Name) of
-        undefined ->
-            ok;
-        _Pid ->
-            case supervisor:terminate_child(hackney_sup, Name) of
-                ok ->
-                    supervisor:delete_child(hackney_sup, Name),
-                    ets:delete(hackney_pool, Name),
-                    ok;
-                Error ->
-                    Error
-            end
+
+
+start_link(Ref, Opts) ->
+    proc_lib:start_link(?MODULE, init, [self(), Ref, Opts]).
+
+
+init(Parent, Ref, Opts) ->
+    true = hackney_server:register_pool(Ref, self()),
+
+    IdleTimeout = hackney_util:get_opt(idle_timeout, Opts, ?DEFAULT_IDLE_TIMEOUT),
+    GroupLimit = hackney_util:get_opt(group_limit, Opts, ?DEFAULT_GROUP_LIMIT),
+    ProxyLimit =  hackney_util:get_opt(group_limit, Opts, ?DEFAULT_PROXY_LIMIT),
+    MaxConns =  hackney_util:get_opt(max_connections, Opts, ?DEFAULT_MAX_CONNS),
+    %% init tables
+    Refs = ets:new(hackney_pool_refs, [bag]),
+    Sockets = ets:new(hackney_pool_sockets, [set]),
+
+    ok = proc_lib:init_ack(Parent, {ok, self()}),
+    loop(#state{name = Ref,
+                parent = Parent,
+                idle_timeout = IdleTimeout,
+                group_limit = GroupLimit,
+                proxy_limit = ProxyLimit,
+                max_conns = MaxConns,
+                refs = Refs,
+                sockets = Sockets}).
+
+
+loop(State=#state{parent=Parent}) ->
+    receive
+        {request, {Pid, Tag} = From, Group, CReq, Expires} ->
+            case reuse_connection(Group, State) of
+                {ok, HS} ->
+                    hackney_socket:controlling_process(HS, Pid),
+                    Pid ! {Tag, {ok, HS}},
+                    loop(State);
+                no_socket ->
+                    %% insert pending request
+                    ets:insert(State#state.refs, {{pending, Group}, {From, Expires}}),
+                    State2 = request_socket(Group, CReq, State),
+                    loop(State2)
+            end;
+        {preconnect, {Pid, Tag}, Group, CReq} ->
+            State2 = request_socket(Group, CReq, State),
+            Pid ! {Tag, ok},
+            loop(State2);
+        {release, {Pid, Tag}, HS} ->
+            Reply = release_socket(HS, State),
+            Pid ! {Tag, Reply},
+            loop(State);
+        {register_connector, Pid} ->
+            _ = erlang:monitor(process, Pid),
+            Pid ! self(),
+            loop(State#state{connectors=[Pid | State#state.connectors]});
+        {timeout, Sock} ->
+            delete_socket(Sock, State),
+            loop(State);
+        {tcp, Sock, _} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {tcp_closed, Sock} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {tcp_error, Sock, _} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {ssl, Sock, _} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {ssl_closed, Sock} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {ssl_error, Sock, _} -> 
+            delete_socket(Sock, State),
+            loop(State);
+        {'DOWN', _, process, Pid, Reason} ->
+            error_logger:error_msg(
+                    "hackney connector failure failure; "
+                    "~p crashed with reason: ~p~n", [Pid, Reason]),
+            Connectors2 = State#state.connectors -- [Pid],
+            loop(State#state{connectors=Connectors2});
+        {'EXIT', Parent, Reason} ->
+            exit(Reason);
+        {system, From, Request} ->
+            system:handle_system_msg(Request, From, Parent, ?MODULE, [],
+                                     State);
+        Msg ->
+            error_logger:error_msg(
+              "Hackney pool ~p received an unexped message ~p",
+              [State#state.name, Msg])
     end.
 
+system_continue(_, _, State) ->
+    loop(State).
 
-notify(Pool, Msg) ->
-    case find_pool(Pool) of
-        undefined -> ok;
-        Pid -> Pid ! Msg
-    end.
+system_terminate(Reason, _, _, _State) ->
+    exit(Reason).
 
-
-
-%%
-%%  util functions for this pool
-%%
-
-%% @doc return a child spec suitable for embeding your pool in the
-%% supervisor
-child_spec(Name, Options0) ->
-    Options = [{name, Name} | Options0],
-    {Name, {hackney_pool, start_link, [Name, Options]},
-      permanent, 10000, worker, [hackney_pool]}.
+system_code_change(Misc, _, _, _) ->
+    {ok, Misc}.
 
 
-%% @doc get the number of connections in the pool
-count(Name) ->
-    gen_server:call(find_pool(Name), count).
-
-%% @doc get the number of connections in the pool for `{Host0, Port, Transport}'
-count(Name, {Host0, Port, Transport}) ->
-    Host = string:to_lower(Host0),
-    gen_server:call(find_pool(Name), {count, {Host, Port, Transport}}).
-
-%% @doc get max pool size
-max_connections(Name) ->
-    gen_server:call(find_pool(Name), max_connections).
-
-%% @doc change the pool size
-set_max_connections(Name, NewSize) ->
-    gen_server:cast(find_pool(Name), {set_maxconn, NewSize}).
-
-%% @doc get timeout
-timeout(Name) ->
-    gen_server:call(find_pool(Name), timeout).
-
-%% @doc change the connection timeout
-%%
-set_timeout(Name, NewTimeout) ->
-    gen_server:cast(find_pool(Name), {set_timeout, NewTimeout}).
-
-%% @private
-%%
-%%
-do_start_pool(Name, Options) ->
-    Spec = child_spec(Name, Options),
-    case supervisor:start_child(hackney_sup, Spec) of
-        {ok, Pid} ->
-            Pid;
-         {error, {already_started, _}} ->
-            find_pool(Name, Options)
-    end.
+reuse_connection(Group, State) ->
+    Refs = ets:lookup(State#state.refs, {conns, Group}),
+    reuse_connection1(Refs, State).
 
 
-find_pool(Name) ->
-    case ets:lookup(?MODULE, Name) of
-        [] ->
-            undefined;
-        [{_, Pid}] ->
-            Pid
-    end.
+reuse_connection1([], _State) ->
+    no_socket;
+reuse_connection1([{Group, #hackney_socket{sock=S}=HS} | Rest], State) ->
+    [{_, _, HS, T}] = ets:lookup(State#state.sockets, S),
 
-find_pool(Name, Options) ->
-     case ets:lookup(?MODULE, Name) of
-        [] ->
-            do_start_pool(Name, Options);
-        [{_, Pid}] ->
-            Pid
-    end.
-
-
-start_link(Name, Options0) ->
-    Options = hackney_util:maybe_apply_defaults([max_connections, timeout],
-                                                Options0),
-    gen_server:start_link(?MODULE, [Name, Options], []).
-
-init([Name, Options]) ->
-    process_flag(priority, high),
-    case lists:member({seed,1}, ssl:module_info(exports)) of
+    ets:delete_object(State#state.refs, {Group, HS}),
+    ets:delete(State#state.sockets, S),
+    cancel_timer(T, S),
+    hackney_socket:setopts(HS, [{active, false}]),
+    case sync_socket(HS) of
         true ->
-            % Make sure that the ssl random number generator is seeded
-            % This was new in R13 (ssl-3.10.1 in R13B vs. ssl-3.10.0 in R12B-5)
-            apply(ssl, seed, [crypto:rand_bytes(255)]);
+            {ok, HS};
         false ->
+            reuse_connection1(Rest, State)
+    end.
+
+request_socket(Group, Req, State) ->
+    %% we simply balance connections tasks between connectors using an RR algorithm
+    {Connector, State2} = pick_connector(State),
+    Connector ! {connect, Group, Req},
+    State2.
+
+
+pick_connector(State=#state{connectors=Connectors}) ->
+    [Connector | Rest] = Connectors,
+    {Connector, State#state{connectors = Rest ++ [Connector]}}.
+
+
+release_socket(#hackney_socket{group=Group}=HS, State) ->
+    Pending = ets:lookup(State#state.refs, {pending, Group}),
+    case Pending of
+        [] -> cache_socket(HS, State);
+        _ -> dispatch_socket(Pending, HS, State)
+    end.
+
+
+cache_socket(HS=#hackney_socket{sock=Sock, group=Group}, State) ->
+    Conns = ets:lookup(State#state.refs, {conns, Group}),
+    TotalGroup = length(Conns),
+    TotalConns = ets:info(State#state.sockets, size),
+
+    Limit = case Group of
+            <<"proxy/">> -> State#state.proxy_limit;
+            _ -> State#state.group_limit
+    end,
+
+    case {TotalConns < State#state.max_conns, TotalGroup < Limit} of
+        {true, true} ->
+            T = erlang:send_after(State#state.idle_timeout, self(), {timeout, Sock}),
+            ets:insert(State#state.sockets, {Sock, Group, HS, T}),
+            ets:insert(State#state.refs, {{conns, Group}, HS}),
+            ok;
+        {_, _} ->
+            {error, max_conns}
+    end.
+
+
+dispatch_socket([{_Key, {{Pid, Tag}, Expires}}=Obj | Rest], HS, State) ->
+    Now = now_in_ms(),
+    %% delete the pending connection from the list
+    ets:delete_object(State#state.refs, Obj),
+    %% if the pending connection expired, we ignore it, else 
+    %% we try to give the socket to it.
+    if
+        Expires > Now ->
+            case (catch hackney_socket:controlling_process(HS, Pid)) of
+                ok ->
+                    catch Pid ! {Tag, {ok, HS}},
+                    ok;
+                _Else ->
+                    catch hackney_socket:close(HS),
+                    dispatch_socket(Rest, HS, State)
+            end;
+        true ->
+            dispatch_socket(Rest, HS, State)
+    end.
+
+
+delete_socket(Sock, State) ->
+    case ets:lookup(State#state.sockets, Sock) of
+        [] -> ok;
+        [{Sock, Group, HS, T}] ->
+            catch hackney_socket:close(HS),
+            cancel_timer(T, Sock),
+            ets:delete(State#state.sockets, Sock),
+            ets:delete_obj(State#state.refs, {{conns, Group}, HS}),
             ok
-    end,
-
-    MaxConn = case proplists:get_value(pool_size, Options) of
-        undefined ->
-            proplists:get_value(max_connections, Options);
-        Size ->
-            Size
-    end,
-    Timeout = proplists:get_value(timeout, Options),
-
-    %% register the module
-    ets:insert(?MODULE, {Name, self()}),
-
-    %% initialize metrics
-    Mod = init_metrics(Name),
-
-    {ok, #state{name=Name, mod_metrics=Mod, max_connections=MaxConn,
-                timeout=Timeout}}.
-
-handle_call(count, _From, #state{sockets=Sockets}=State) ->
-    {reply, dict:size(Sockets), State};
-handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
-    {reply, Timeout, State};
-handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
-    {reply, MaxConn, State};
-handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
-    #state{name=PoolName,
-           mod_metrics = Mod,
-           max_connections=MaxConn,
-           clients=Clients,
-           queues = Queues,
-           nb_waiters = NbWaiters} = State,
-
-    {Reply, State2} = find_connection(Dest, Pid, State),
-    case Reply of
-        {ok, _Socket, _Owner} ->
-            State3 = monitor_client(Dest, RequestRef, State2),
-            update_usage(State3),
-            {reply, Reply, State3};
-        no_socket ->
-            case dict:size(Clients) >= MaxConn of
-                true ->
-                    Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
-                    NbWaiters2 = NbWaiters + 1,
-                    Mod:update_histogram([hackney_pool, PoolName, queue_count],
-                                         NbWaiters2),
-                    {noreply, State2#state{queues = Queues2,
-                                           nb_waiters=NbWaiters2}};
-                false ->
-                    State3 = monitor_client(Dest, RequestRef, State2),
-                    update_usage(State3),
-                    {reply, {error, no_socket, self()}, State3}
-            end
-    end;
-handle_call({checkin, Ref, Dest, Socket, Transport}, From, State) ->
-    gen_server:reply(From, ok),
-    Clients2 = case dict:find(Ref, State#state.clients) of
-                   {ok, Dest} ->
-                       dict:erase(Ref, State#state.clients);
-                   error ->
-                        State#state.clients
-               end,
-    State2 = case Transport:peername(Socket) of
-                 {ok, {_Adress, _Port}} ->
-                     %% socket is not closed, try to deliver it or store it
-                     deliver_socket(Socket, Dest, State#state{clients=Clients2});
-                 Error ->
-                     %% socket may be half-closed, close it and return
-                     catch Transport:close(Socket),
-                     ?report_trace("checkin: socket is not ok~n", [{socket, Socket}, {peername, Error}]),
-                     State#state{clients=Clients2}
-             end,
-    update_usage(State2),
-    {noreply, State2};
-
-handle_call({count, Key}, _From, #state{connections=Conns}=State) ->
-    Size = case dict:find(Key, Conns) of
-        {ok, Sockets} ->
-            length(Sockets);
-        error ->
-            0
-    end,
-    {reply, Size, State}.
-
-handle_cast({set_maxconn, MaxConn}, State) ->
-    {noreply, State#state{max_connections=MaxConn}};
-handle_cast({set_timeout, NewTimeout}, State) ->
-    {noreply, State#state{timeout=NewTimeout}};
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info({timeout, Socket}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({tcp, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({tcp_closed, Socket}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({ssl, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({ssl_closed, Socket}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({tcp_error, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({ssl_error, Socket, _}, State) ->
-    {noreply, remove_socket(Socket, State)};
-handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
-    Mod = State#state.mod_metrics,
-    case dict:find(Ref, State#state.clients) of
-        {ok, Dest} ->
-            Clients2 = dict:erase(Ref, State#state.clients),
-            case queue_out(Dest, State#state.queues) of
-                empty ->
-                    {noreply, State#state{clients = Clients2}};
-                {ok, {From, Ref2}, Queues2} ->
-                    NbWaiters = State#state.nb_waiters - 1,
-                    Mod:update_histogram([hackney_pool, State#state.name,
-                                           queue_count], NbWaiters),
-                    gen_server:reply(From, {error, no_socket, self()}),
-                    State2 = State#state{queues = Queues2, clients = Clients2,
-                                        nb_waiters=NbWaiters},
-                    {noreply, monitor_client(Dest, Ref2, State2)}
-            end;
-        error ->
-            {noreply, State}
-    end;
-handle_info(_, State) ->
-    {noreply, State}.
-
-code_change(_OldVsn, State, _Extra) ->
-   {ok, State}.
-
-terminate(_Reason, #state{name=PoolName, mod_metrics=Mod, sockets=Sockets}) ->
-    %% close any sockets in the pool
-    lists:foreach(fun({Socket, {{_, _, Transport}, Timer}}) ->
-                cancel_timer(Socket, Timer),
-                Transport:close(Socket)
-        end, dict:to_list(Sockets)),
-
-    %% delete pool metrics
-    delete_metrics(Mod, PoolName),
-    ok.
-
-%% internals
-
-find_connection({_Host, _Port, Transport}=Dest, Pid,
-                #state{connections=Conns, sockets=Sockets}=State) ->
-    case dict:find(Dest, Conns) of
-        {ok, [S | Rest]} ->
-            Transport:setopts(S, [{active, false}]),
-            case sync_socket(Transport, S) of
-                true ->
-                    case Transport:controlling_process(S, Pid) of
-                        ok ->
-                            {_, Timer} = dict:fetch(S, Sockets),
-                            cancel_timer(S, Timer),
-                            NewConns = update_connections(Rest, Dest, Conns),
-                            NewSockets = dict:erase(S, Sockets),
-                            NewState = State#state{connections=NewConns,
-                                                   sockets=NewSockets},
-                            {{ok, S, self()}, NewState};
-                        {error, badarg} ->
-                            %% something happened here normally the PID died,
-                            %% but make sure we still have the control of the
-                            %% process
-                            catch Transport:controlling_process(S, self()),
-                            %% and then close it
-                            find_connection(Dest, Pid,
-                                            remove_socket(S,  State));
-                        _Else ->
-                            find_connection(Dest, Pid, remove_socket(S, State))
-                    end;
-                false ->
-                    ?report_trace("checkout: socket unsynced~n", []),
-                    find_connection(Dest, Pid, remove_socket(S, State))
-            end;
-        _Else ->
-            {no_socket, State}
-    end.
-
-remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
-    Mod = State#state.mod_metrics,
-
-    Mod:update_histogram([hackney, State#state.name, free_count],
-                         dict:size(Sockets)),
-    case dict:find(Socket, Sockets) of
-        {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
-            cancel_timer(Socket, Timer),
-            catch Transport:close(Socket),
-            ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
-            NewConns = update_connections(ConnSockets, Key, Conns),
-            NewSockets = dict:erase(Socket, Sockets),
-            State#state{connections=NewConns, sockets=NewSockets};
-        error ->
-            State
     end.
 
 
-store_socket({_Host, _Port, Transport} = Dest, Socket,
-             #state{timeout=Timeout, connections=Conns,
-                    sockets=Sockets}=State) ->
-    Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
-    %% make sure to close the socket if anything is received while we are in
-    %% the pool.
-    Transport:setopts(Socket, [{active, once}, {packet, 0}]),
-    ConnSockets = case dict:find(Dest, Conns) of
-        {ok, OldSockets} ->
-            [Socket | OldSockets];
-        error -> [Socket]
-    end,
-    State#state{connections = dict:store(Dest, ConnSockets, Conns),
-                sockets = dict:store(Socket, {Dest, Timer}, Sockets)}.
-
-update_connections([], Key, Connections) ->
-    dict:erase(Key, Connections);
-update_connections(Sockets, Key, Connections) ->
-    dict:store(Key, Sockets, Connections).
-
-cancel_timer(Socket, Timer) ->
+cancel_timer(Timer, Socket) ->
     case erlang:cancel_timer(Timer) of
         false ->
             receive
@@ -442,106 +291,16 @@ cancel_timer(Socket, Timer) ->
         _ -> ok
     end.
 
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
-    case dict:find(Dest, Queues) of
-        error ->
-            dict:store(Dest, queue:in({From, Ref}, queue:new()), Queues);
-        {ok, Q} ->
-            dict:store(Dest, queue:in({From, Ref}, Q), Queues)
-    end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
-    case dict:find(Dest, Queues) of
-        error ->
-            empty;
-        {ok, Q} ->
-            {{value, {From, Ref}}, Q2} = queue:out(Q),
-            Queues2 = case queue:is_empty(Q2) of
-                true ->
-                    dict:erase(Dest, Queues);
-                false ->
-                    dict:store(Dest, Q2, Queues)
-            end,
-            {ok, {From, Ref}, Queues2}
-    end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
-    Mod = State#state.mod_metrics,
-
-    case queue_out(Dest, State#state.queues) of
-        empty ->
-            store_socket(Dest, Socket, State);
-        {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
-            NbWaiters = State#state.nb_waiters - 1,
-            Mod:update_histogram([hackney_pool, State#state.name, queue_count],
-                                 NbWaiters),
-            case Transport:controlling_process(Socket, PidWaiter) of
-                ok ->
-                    gen_server:reply(FromWaiter, {ok, Socket, self()}),
-                    monitor_client(Dest, Ref,
-                                   State#state{queues = Queues2,
-                                               nb_waiters=NbWaiters});
-                _Error ->
-                    % Something wrong, just remove the socket
-                    catch Transport:close(Socket),
-                    %% put the waiter back in the queue at the beginning
-                    NewQueues = queue:in_r({FromWaiter, Ref}, Queues2),
-                    State#state{queues = NewQueues, nb_waiters = NbWaiters + 1}
-            end
-    end.
-
 %% check that no events from the sockets is received after setting it to
 %% passive.
-sync_socket(Transport, Socket) ->
-    {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
+sync_socket(#hackney_socket{transport=Transport, sock=Sock} ) ->
+    {Msg, MsgClosed, MsgError} = Transport:messages(),
     receive
-        {Msg, Socket, _} -> false;
-        {MsgClosed, Socket} -> false;
-        {MsgError, Socket, _} -> false
+        {Msg, Sock, _} -> false;
+        {MsgClosed, Sock} -> false;
+        {MsgError, Sock, _} -> false
     after 0 ->
               true
     end.
 
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-monitor_client(Dest, Ref, State) ->
-    Clients2 = dict:store(Ref, Dest, State#state.clients),
-    State#state{clients = Clients2}.
-
-
-init_metrics(PoolName) ->
-    %% get metrics module
-    Mod = hackney_util:mod_metrics(),
-
-    %% initialise metrics
-    Mod:new(histogram, [hackney_pool, PoolName, take_rate]),
-    Mod:new(counter, [hackney_pool, PoolName, no_socket]),
-    Mod:new(histogram, [hackney_pool, PoolName, in_use_count]),
-    Mod:new(histogram, [hackney_pool, PoolName, free_count]),
-    Mod:new(histogram, [hackney_pool, PoolName, queue_counter]),
-    Mod.
-
-delete_metrics(Mod, PoolName) ->
-    Mod:delete([hackney_pool, PoolName, take_rate]),
-    Mod:delete([hackney_pool, PoolName, no_socket]),
-    Mod:delete([hackney_pool, PoolName, in_use_count]),
-    Mod:delete([hackney_pool, PoolName, free_count]),
-    Mod:delete([hackney_pool, PoolName, queue_counter]).
-
-
-update_usage(#state{name=PoolName, mod_metrics=Mod, sockets=Sockets,
-                    clients=Clients}) ->
-    Mod:update_histogram([hackney_pool, PoolName,in_use_count],
-                         dict:size(Clients) - 1),
-    Mod:update_histogram([hackney_pool, PoolName, free_count],
-                         dict:size(Sockets) - 1).
+now_in_ms() -> timer:now_diff(os:timestamp(), {0, 0, 0}).
