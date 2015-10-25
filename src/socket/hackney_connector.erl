@@ -38,9 +38,11 @@ handle_connect(Ref, Req, LookupOrder, State) ->
     [F1, F2] = LookupOrder,
     Pid = spawn_connection(Ref, Req, F1, State#state.pool),
     TRef = erlang:send_after(State#state.fallback_time, self(), {Ref, fallback, F2}),
-    connect_loop(Ref, TRef, Req, Pid, nil, LookupOrder, State).
+    connect_loop(Ref, TRef, Req, Pid, nil, LookupOrder, State, 2).
 
-connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, LookupOrder, State) ->
+connect_loop(_, _, _, _, _, _, State, 0) ->
+    loop(State);
+connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, LookupOrder, State, Wait) ->
     receive
         {Ref, connected, P1} ->
             maybe_kill_job(Ref, TRef, P2),
@@ -53,14 +55,14 @@ connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, LookupOrder, State) 
             loop(State);
         {Ref, fallback, Familly} ->
             Pid = spawn_connection(Ref, Req, Familly, State#state.pool),
-            connect_loop(Ref, TRef, Req, P1, Pid, LookupOrder, State);
+            connect_loop(Ref, TRef, Req, P1, Pid, LookupOrder, State, Wait);
         {Ref, 'DOWN', P1, _Error} ->
-            connect_loop(Ref, TRef, Req, P1, P2, LookupOrder, State);
+            connect_loop(Ref, TRef, Req, P1, P2, LookupOrder, State, Wait -1);
         {Ref, 'DOWN', P2, Error} ->
             error_logger:error_msg(
                     "hackney connector: connection failure; "
                     "with reason: ~p~n", [Error]),
-            loop(State)
+            connect_loop(Ref, TRef, Req, P1, P2, LookupOrder, State, Wait -1)
     end.
 
 maybe_kill_job(Ref, TRef, Pid) ->
