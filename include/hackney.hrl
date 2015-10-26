@@ -58,4 +58,4 @@
 
 %% connectors options
 -define(DEFAULT_NB_CONNECTORS, 20).
--define(DEFAULT_FALLBACK_TIME, 300).
+-define(DEFAULT_FALLBACK_TIME, 250).
