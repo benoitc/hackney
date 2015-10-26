@@ -37,12 +37,12 @@ loop(State) ->
 handle_connect(Ref, Req, LookupOrder, State) ->
     [F1, F2] = LookupOrder,
     Pid = spawn_connection(Ref, Req, F1, State#state.pool),
-    TRef = erlang:send_after(State#state.fallback_time, self(), {Ref, fallback, F2}),
-    connect_loop(Ref, TRef, Req, Pid, nil, LookupOrder, State, 2).
+    TRef = erlang:send_after(State#state.fallback_time, self(), {Ref, fallback}),
+    connect_loop(Ref, TRef, Req, Pid, nil, F2, LookupOrder, State, 2).
 
-connect_loop(_, _, _, _, _, _, State, 0) ->
+connect_loop(_, _, _, _, _, _, _, State, 0) ->
     loop(State);
-connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, LookupOrder, State, Wait) ->
+connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, F2, LookupOrder, State, Wait) ->
     receive
         {Ref, connected, P1} ->
             maybe_kill_job(Ref, TRef, P2),
@@ -53,17 +53,19 @@ connect_loop(Ref, TRef, {_Group, H, _, _, _} = Req, P1, P2, LookupOrder, State, 
             %% lookup order is reversed, store it.
             lru:add(?LOOKUP_CACHE, H, lists:reverse(LookupOrder)),
             loop(State);
-        {Ref, fallback, Familly} ->
-            Pid = spawn_connection(Ref, Req, Familly, State#state.pool),
-            connect_loop(Ref, TRef, Req, P1, Pid, LookupOrder, State, Wait);
+        {Ref, fallback} ->
+            Pid = spawn_fallback(P2, Ref, Req, F2, State),
+            connect_loop(Ref, TRef, Req, P1, Pid, F2, LookupOrder, State, Wait);
         {Ref, 'DOWN', P1, _Error} ->
-            connect_loop(Ref, TRef, Req, P1, P2, LookupOrder, State, Wait -1);
+            Pid = spawn_fallback(P2, Ref, Req, F2, State),
+            connect_loop(Ref, TRef, Req, P1, Pid, F2, LookupOrder, State, Wait -1);
         {Ref, 'DOWN', P2, Error} ->
             error_logger:error_msg(
                     "hackney connector: connection failure; "
                     "with reason: ~p~n", [Error]),
-            connect_loop(Ref, TRef, Req, P1, P2, LookupOrder, State, Wait -1)
+            connect_loop(Ref, TRef, Req, P1, P2, F2, LookupOrder, State, Wait -1)
     end.
+
 
 maybe_kill_job(Ref, TRef, Pid) ->
     case is_pid(Pid) of
@@ -81,6 +83,11 @@ flush(Ref, Pid) ->
             ok
     after 0 -> ok
     end.
+
+spawn_fallback(nil, Ref, Req, Familly, State) ->
+    spawn_connection(Ref, Req, Familly, State#state.pool);
+spawn_fallback(Pid, _, _, _, _) ->
+    Pid.
 
 spawn_connection(Ref, {Group, Host, Port, Opts0, Timeout}, Familly, Pool) ->
     Opts = [Familly | Opts0],
