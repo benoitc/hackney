@@ -117,13 +117,15 @@ controlling_process(#hackney_socket{transport=T, sock=S}, Pid) ->
 
 
 info(#hackney_socket{transport=Transport, sock=Sock}=HS) ->
-	[{type=HS#hackney_socket.type,
-	  connected=HS#hackney_socket.connected,
-	  secure=HS#hackney_socket.secure,
-	  peername=Transport:peername(Sock),
-	  sockname=Transport:sockname(Sock),
-	  tranport=Transport,
-	  socket=Sock}].
+    {ok, Peername} = Transport:peername(Sock),
+    {ok, Sockname} = Transport:sockname(Sock),
+	[{type, HS#hackney_socket.type,
+	  connected, HS#hackney_socket.connected,
+	  secure, HS#hackney_socket.secure,
+	  peername, Peername,
+	  sockname, Sockname,
+	  tranport, Transport,
+	  socket, Sock}].
 
 
 %% private functions
