@@ -56,12 +56,10 @@ init([]) ->
 default_pool() ->
       IdleTimeout = hackney_util:get_env(idle_timeout, ?DEFAULT_IDLE_TIMEOUT),
       GroupLimit = hackney_util:get_env(group_limit, ?DEFAULT_GROUP_LIMIT),
-      ProxyLimit =  hackney_util:get_env(proxy_limit, ?DEFAULT_PROXY_LIMIT),
       MaxConns =  hackney_util:get_env(max_connections,  ?DEFAULT_MAX_CONNS),
 
       [{idle_timeout, IdleTimeout},
        {group_limit, GroupLimit},
-       {proxy_limit, ProxyLimit},
        {max_conns, MaxConns}].
 
 init_pools() ->

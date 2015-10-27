@@ -94,8 +94,8 @@ init(Parent, Ref, Opts) ->
 
     IdleTimeout = hackney_util:get_opt(idle_timeout, Opts, ?DEFAULT_IDLE_TIMEOUT),
     GroupLimit = hackney_util:get_opt(group_limit, Opts, ?DEFAULT_GROUP_LIMIT),
-    ProxyLimit =  hackney_util:get_opt(group_limit, Opts, ?DEFAULT_PROXY_LIMIT),
     MaxConns =  hackney_util:get_opt(max_connections, Opts, ?DEFAULT_MAX_CONNS),
+
     %% init tables
     Refs = ets:new(hackney_pool_refs, [bag]),
     Sockets = ets:new(hackney_pool_sockets, [set]),
@@ -231,12 +231,7 @@ cache_socket(HS=#hackney_socket{sock=Sock, group=Group}, State) ->
     TotalGroup = length(Conns),
     TotalConns = ets:info(State#state.sockets, size),
 
-    Limit = case Group of
-            <<"proxy/">> -> State#state.proxy_limit;
-            _ -> State#state.group_limit
-    end,
-
-    case {TotalConns < State#state.max_conns, TotalGroup < Limit} of
+    case {TotalConns < State#state.max_conns, TotalGroup < State#state.group_limit} of
         {true, true} ->
             T = erlang:send_after(State#state.idle_timeout, self(), {timeout, Sock}),
             ets:insert(State#state.sockets, {Sock, Group, HS, T}),
