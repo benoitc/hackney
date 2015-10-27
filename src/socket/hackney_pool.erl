@@ -22,7 +22,6 @@
         parent :: pid(),
         idle_timeout :: non_neg_integer(),
         group_limit = 8,
-        proxy_limit = 20,
         max_conns = 200,
         refs,
         sockets,
@@ -105,7 +104,6 @@ init(Parent, Ref, Opts) ->
                 parent = Parent,
                 idle_timeout = IdleTimeout,
                 group_limit = GroupLimit,
-                proxy_limit = ProxyLimit,
                 max_conns = MaxConns,
                 refs = Refs,
                 sockets = Sockets}).
