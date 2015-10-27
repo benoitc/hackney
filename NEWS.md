@@ -1,5 +1,14 @@
 # NEWS
 
+1.4.0 - 2015/10/27
+------------------
+
+- build using hex.pm & small refactoring
+- fix multipart (#245)
+- fix redirection (#237)
+- fix url parsing (#236)
+- close connection when max body length is reached (#248)
+
 1.3.2 - 2015/08/27
 ------------------
 
