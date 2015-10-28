@@ -1,4 +1,5 @@
 -module(hackney_socks_connection).
+
 -export([open/5, open/6]).
 -export([do_handshake/4]).
 
