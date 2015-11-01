@@ -24,7 +24,7 @@
         {maxr, 10},
         {maxt, 1}]},
 
- {contributors,
+ {maintainers,
   ["Benoit Chesneau",
    "Adam Rutkowski",
    "Ilya Khlopotov",
