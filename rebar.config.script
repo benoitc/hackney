@@ -6,7 +6,7 @@ IsRebar3 = case application:get_env(rebar, vsn) of
                undefined ->
                    %% is mix is used
                    lists:keymember(mix, 1, application:loaded_applications())
-            end,
+           end,
 
 
 Rebar2Deps = [
