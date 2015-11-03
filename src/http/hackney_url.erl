@@ -46,23 +46,16 @@ parse_url(URL) ->
     parse_url(URL, #hackney_url{transport=hackney_tcp_transport,
                                         scheme=http}).
 parse_url(URL, S) ->
-    {Addr, RawPath} =
-        case binary:split(URL, <<"/">>) of
-            [Addr1] ->
-                case binary:split(Addr1, <<"?">>) of
-                    [_]             -> {Addr1, <<"/">>};
-                    [Addr2, Query1] -> {Addr2, <<"/?", Query1/binary>>}
-                end;
-            [Addr1, Path1] -> {Addr1, <<"/", Path1/binary>>}
-        end,
-    case RawPath of
-        <<"/">> ->
+    case binary:split(URL, <<"/">>) of
+        [Addr] ->
+            Path = <<"/">>,
+            parse_addr(Addr, S#hackney_url{raw_path = Path,
+                                           path = Path });
+        [Addr, Path] ->
+            RawPath =  <<"/", Path/binary>>,
+            {Path1, Query, Fragment} = parse_path(RawPath),
             parse_addr(Addr, S#hackney_url{raw_path = RawPath,
-                                           path = RawPath });
-        _ ->
-            {Path, Query, Fragment} = parse_path(RawPath),
-            parse_addr(Addr, S#hackney_url{raw_path = RawPath,
-                                           path = Path,
+                                           path = Path1,
                                            qs = Query,
                                            fragment = Fragment})
     end.
