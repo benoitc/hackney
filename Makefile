@@ -19,4 +19,7 @@ test:
 dialyzer:
 	$(REBAR) dialyzer
 
+distclean:
+	@rm -rf _build
+
 .PHONY: doc test
