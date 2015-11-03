@@ -15,8 +15,8 @@ Rebar2Deps = [
                 {tag, "1.0.2"}}},
 
               {mimerl, ".*",
-                {git, "https://github.com/benoitc/mimerl",
-                 {tag, "1.0.0"}}},
+               {git, "https://github.com/benoitc/mimerl",
+                {tag, "1.0.0"}}},
 
               {certifi, ".*",
                {git, "https://github.com/certifi/erlang-certifi",
