@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2015 Benoît Chesneau.
 
-__Version:__ 1.4.0
+__Version:__ 1.4.1
 
 # hackney
 
@@ -485,8 +485,8 @@ using the **Makefile**:
 
 ```sh
 
-$ make dev ; # compile & get deps
-$ make devclean ; # clean all files
+$ make ; # compile and get deps
+$ make clean ; # clean all files
 ```
 
 For successfully running the hackney test suite locally it is necessary to

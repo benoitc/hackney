@@ -17,7 +17,7 @@
 
 
 @copyright 2012-2015 Benoît Chesneau.
-@version 1.4.0
+@version 1.4.1
 @title hackney - HTTP client library in Erlang
 
 @doc
@@ -484,8 +484,8 @@ build hackney using the `rebar_dev.config'  file. It can also be built
 using the **Makefile**:
 
 <pre lang="sh">
-$ make dev ; # compile &amp; get deps
-$ make devclean ; # clean all files</pre>
+$ make ; # compile and get deps
+$ make clean ; # clean all files</pre>
 
 
 For successfully running the hackney test suite locally it is necessary to

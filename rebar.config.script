@@ -1,7 +1,12 @@
-{ok, VSN} = application:get_key(rebar, vsn),
-[VSN1 | _] = string:tokens(VSN, "-"),
-[Maj, Min, Patch] = string:tokens(VSN1, "."),
-IsRebar3 = (list_to_integer(Maj) >= 3),
+IsRebar3 = case application:get_env(rebar, vsn) of
+               {ok, VSN} ->
+                   [VSN1 | _] = string:tokens(VSN, "-"),
+                   [Maj, Min, Patch] = string:tokens(VSN1, "."),
+                   (list_to_integer(Maj) >= 3);
+               undefined ->
+                   %% is mix is used
+                   lists:keymember(mix, 1, application:loaded_applications())
+            end,
 
 
 Rebar2Deps = [
