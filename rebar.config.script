@@ -8,7 +8,6 @@ IsRebar3 = case application:get_env(rebar, vsn) of
                    lists:keymember(mix, 1, application:loaded_applications())
            end,
 
-
 Rebar2Deps = [
               {idna, ".*",
                {git, "https://github.com/benoitc/erlang-idna",
@@ -28,7 +27,8 @@ Rebar2Deps = [
              ],
 
 case IsRebar3 of
-    true -> CONFIG;
+    true ->
+        CONFIG;
     false ->
         lists:keyreplace(deps, 1, CONFIG, {deps, Rebar2Deps})
 end.
