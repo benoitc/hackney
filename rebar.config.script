@@ -1,15 +1,13 @@
 IsRebar3 = case application:get_env(rebar, vsn) of
-               {ok, VSN} ->
+               {ok, VSN} ->
                    [VSN1 | _] = string:tokens(VSN, "-"),
                    [Maj, Min, Patch] = string:tokens(VSN1, "."),
                    (list_to_integer(Maj) >= 3);
                undefined ->
-                   %% is mix is used
                    lists:keymember(mix, 1, application:loaded_applications())
            end,
 
-Rebar2Deps = [
-              {idna, ".*",
+Rebar2Deps = [{idna, ".*",
                {git, "https://github.com/benoitc/erlang-idna",
                 {tag, "1.0.2"}}},
 
@@ -23,8 +21,7 @@ Rebar2Deps = [
 
               {ssl_verify_hostname, ".*",
                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
-                {tag, "1.0.5"}}}
-             ],
+                {tag, "1.0.5"}}}],
 
 case IsRebar3 of
     true ->
