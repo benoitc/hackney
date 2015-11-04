@@ -1,4 +1,4 @@
-IsRebar3 = case application:get_env(rebar, vsn) of
+IsRebar3 = case application:get_key(rebar, vsn) of
                {ok, VSN} ->
                    [VSN1 | _] = string:tokens(VSN, "-"),
                    [Maj, Min, Patch] = string:tokens(VSN1, "."),
