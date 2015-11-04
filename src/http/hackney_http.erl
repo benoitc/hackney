@@ -296,8 +296,7 @@ parse_header(#hparser{buffer=Buf}=St) ->
 parse_header(Line, St) ->
     [Key, Value] = case binary:split(Line, <<":">>, [trim]) of
         [K] -> [K, <<>>];
-        [K, << " ", V/binary >>] -> [K, V];
-        [K, V] -> [K, V]
+        [K, V] -> [K, parse_header_value(V)]
     end,
     St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
         <<"content-length">> ->
@@ -319,6 +318,13 @@ parse_header(Line, St) ->
            St
     end,
     {header, {Key, Value}, St1}.
+
+parse_header_value(<< $\s, Rest/binary >>) ->
+    parse_header_value(Rest);
+parse_header_value(<< $\t, Rest/binary >>) ->
+    parse_header_value(Rest);
+parse_header_value(H) ->
+    H.
 
 
 parse_trailers(St, Acc) ->
