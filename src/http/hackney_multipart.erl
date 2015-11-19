@@ -135,7 +135,7 @@ mp_header(Headers, Boundary) ->
 
 %% @doc return the boundary ennding a multipart
 mp_eof(Boundary) ->
-    <<"--",  Boundary/binary, "--">>.
+    <<"--",  Boundary/binary, "--\r\n">>.
 
 %% @doc create a part
 part(Content, Headers, Boundary) ->
