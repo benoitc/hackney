@@ -17,7 +17,7 @@ Rebar2Deps = [{idna, ".*",
 
               {certifi, ".*",
                {git, "https://github.com/certifi/erlang-certifi",
-                {tag, "0.1.0"}}},
+                {tag, "0.2.0"}}},
 
               {ssl_verify_hostname, ".*",
                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
