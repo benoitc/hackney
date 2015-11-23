@@ -25,7 +25,9 @@ http_requests_test_() ->
                        async_no_content_request()]}
      end}.
 
-start() -> hackney:start().
+start() ->
+    hackney:start(),
+    ok.
 
 stop(ok) -> ok.
 
