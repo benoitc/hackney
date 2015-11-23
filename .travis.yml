@@ -14,4 +14,4 @@ before_script:
 before_install:
   - sudo pip install -q httpbin
   - sudo pip install -q gunicorn
-script: "./rebar3 eunit"
+script: './rebar3 eunit --dir="test"'
