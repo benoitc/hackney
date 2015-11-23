@@ -21,8 +21,7 @@ Rebar2Deps0 = [{idna, ".*",
 
               {ssl_verify_hostname, ".*",
                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
-                {tag, "1.0.5"}}},
-              {cowboy, ".*", {git, "https://github.com/ninenines/cowboy.git", {tag, "1.0.4"}}}],
+                {tag, "1.0.5"}}}],
 
 
 Rebar2Deps = case os:getenv("TEST") of
