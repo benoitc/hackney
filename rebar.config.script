@@ -7,7 +7,7 @@ IsRebar3 = case application:get_key(rebar, vsn) of
                    lists:keymember(mix, 1, application:loaded_applications())
            end,
 
-Rebar2Deps = [{idna, ".*",
+Rebar2Deps0 = [{idna, ".*",
                {git, "https://github.com/benoitc/erlang-idna",
                 {tag, "1.0.2"}}},
 
@@ -23,6 +23,14 @@ Rebar2Deps = [{idna, ".*",
                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
                 {tag, "1.0.5"}}},
               {cowboy, ".*", {git, "https://github.com/ninenines/cowboy.git", {tag, "1.0.4"}}}],
+
+
+Rebar2Deps = case os:getenv("TEST") of
+                 "1" -> [{cowboy, ".*", {git, "https://github.com/ninenines/cowboy.git",
+                                         {tag, "1.0.4"}}} | Rebar2Deps0];
+                 false ->
+                     Rebar2Deps0
+             end,
 
 case IsRebar3 of
     true ->

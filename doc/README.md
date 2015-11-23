@@ -485,8 +485,9 @@ using the **Makefile**:
 
 ```sh
 
-$ make ; # compile and get deps
-$ make clean ; # clean all files
+$ rebar3 update
+$ rebar3 compile
+
 ```
 
 For successfully running the hackney test suite locally it is necessary to

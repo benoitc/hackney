@@ -484,8 +484,9 @@ build hackney using the `rebar_dev.config'  file. It can also be built
 using the **Makefile**:
 
 <pre lang="sh">
-$ make ; # compile and get deps
-$ make clean ; # clean all files</pre>
+$ rebar3 update
+$ rebar3 compile
+</pre>
 
 
 For successfully running the hackney test suite locally it is necessary to
