@@ -1,5 +1,11 @@
 # NEWS
 
+1.4.5 - 2015/11/23
+------------------
+
+- fix multipart/form parsing (#258)
+- TRAVIS-CI build with rebar3
+
 1.4.4 - 2015/11/04
 ------------------
 
