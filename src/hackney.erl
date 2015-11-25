@@ -291,6 +291,7 @@ request(Method, URL, Headers, Body) ->
 %%  </ul>
 -spec request(term(), url() | binary(), list(), term(), list())
     -> {ok, integer(), list(), client_ref()}
+    | {ok, integer(), list()}
     | {ok, client_ref()}
     | {error, term()}.
 request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
