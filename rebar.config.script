@@ -1,8 +1,11 @@
-{ok, VSN} = application:get_key(rebar, vsn),
-[VSN1 | _] = string:tokens(VSN, "-"),
-[Maj, Min, Patch] = string:tokens(VSN1, "."),
-IsRebar3 = (list_to_integer(Maj) >= 3),
-
+IsRebar3 = case application:get_key(rebar, vsn) of
+               {ok, VSN} ->
+                   [VSN1 | _] = string:tokens(VSN, "-"),
+                   [Maj, Min, Patch] = string:tokens(VSN1, "."),
+                   (list_to_integer(Maj) >= 3);
+               undefined ->
+                   false
+           end,
 
 Rebar2Deps = [
               {idna, ".*",
@@ -19,7 +22,16 @@ Rebar2Deps = [
 
               {ssl_verify_hostname, ".*",
                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
-                {tag, "1.0.5"}}}
+                {tag, "1.0.5"}}},
+
+              {lru, ".*",
+               {git, "https://github.com/barrel-db/erlang-lru.git",
+                {tag, "1.3.1"}}},
+
+              {metrics, ".*",
+               {git, "https://github.com/benoitc/metrics.git",
+                {tag, "0.1.0"}}}
+
              ],
 
 case IsRebar3 of

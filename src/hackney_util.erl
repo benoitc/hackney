@@ -103,9 +103,9 @@ privdir() ->
 
 mod_metrics() ->
     case application:get_env(hackney, mod_metrics) of
-        {ok, folsom} -> hackney_folsom_metrics;
-        {ok, exometer} -> hackney_exometer_metrics;
-        {ok, dummy} -> hackney_dummy_metrics;
+        {ok, folsom} -> metrics_folsom;
+        {ok, exometer} -> metrics_exometer;
+        {ok, dummy} -> metrics_dummy;
         {ok, Mod} ->
             _ = code:ensure_loaded(Mod),
             case erlang:function_exported(Mod, new, 2) of
@@ -114,7 +114,7 @@ mod_metrics() ->
                 true ->
                     Mod
             end;
-        _ -> hackney_dummy_metrics
+        _ -> metrics_dummy
     end.
 
 
