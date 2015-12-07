@@ -10,7 +10,10 @@ __Version:__ 1.4.7
 
 **hackney** is an HTTP client library for Erlang.
 
-Main features:
+[![Build Status](https://travis-ci.org/benoitc/hackney.png?branch=master)](https://travis-ci.org/barrel-db/hooks)
+[![Hex pm](http://img.shields.io/hexpm/v/hackney.svg?style=flat)](https://hex.pm/packages/hooks)
+
+## Main features:
 
 - no message passing (except for asynchronous responses): response is
   directly streamed to the current process and state is kept in a `#client{}` record.

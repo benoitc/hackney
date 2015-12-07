@@ -263,7 +263,7 @@ make a request
 ### request/5 ###
 
 <pre><code>
-request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
+request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
 </code></pre>
 <br />
 
