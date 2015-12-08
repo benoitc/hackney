@@ -155,7 +155,7 @@ location(Ref) ->
 
 
 %% @doc make a request
--spec request(binary()|list())
+-spec request(url()|binary()|list())
     -> {ok, integer(), list(), client_ref()}
     | {ok, integer(), list()}
     | {error, term()}.
@@ -163,7 +163,7 @@ request(URL) ->
     request(get, URL).
 
 %% @doc make a request
--spec request(term(), binary()|list())
+-spec request(term(), url()|binary()|list())
     -> {ok, integer(), list(), client_ref()}
     | {ok, integer(), list()}
     | {error, term()}.
@@ -171,7 +171,7 @@ request(Method, URL) ->
     request(Method, URL, [], <<>>, []).
 
 %% @doc make a request
--spec request(term(), binary()|list(), list())
+-spec request(term(), url()|binary()|list(), list())
     -> {ok, integer(), list(), client_ref()}
     | {ok, integer(), list()}
     | {error, term()}.
@@ -179,7 +179,7 @@ request(Method, URL, Headers) ->
     request(Method, URL, Headers, <<>>, []).
 
 %% @doc make a request
--spec request(term(), binary()|list(), list(), term())
+-spec request(term(), url()|binary()|list(), list(), term())
     -> {ok, integer(), list(), client_ref()}
     | {ok, integer(), list()}
     | {error, term()}.
@@ -289,7 +289,7 @@ request(Method, URL, Headers, Body) ->
 %%  Assume close to signal end</code>. </li>
 %%  <li><code>{error, term()}</code> other errors.</li>
 %%  </ul>
--spec request(term(), url() | binary(), list(), term(), list())
+-spec request(term(), url() | binary() | list(), list(), term(), list())
     -> {ok, integer(), list(), client_ref()}
     | {ok, integer(), list()}
     | {ok, client_ref()}
