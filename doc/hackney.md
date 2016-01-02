@@ -219,7 +219,7 @@ be woken later by the resume function
 ### request/1 ###
 
 <pre><code>
-request(URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
+request(URL::<a href="#type-url">url()</a> | binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -230,7 +230,7 @@ make a request
 ### request/2 ###
 
 <pre><code>
-request(Method::term(), URL::binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
+request(Method::term(), URL::<a href="#type-url">url()</a> | binary() | list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -241,7 +241,7 @@ make a request
 ### request/3 ###
 
 <pre><code>
-request(Method::term(), URL::binary() | list(), Headers::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
+request(Method::term(), URL::<a href="#type-url">url()</a> | binary() | list(), Headers::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -252,7 +252,7 @@ make a request
 ### request/4 ###
 
 <pre><code>
-request(Method::term(), URL::binary() | list(), Headers::list(), Body::term()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
+request(Method::term(), URL::<a href="#type-url">url()</a> | binary() | list(), Headers::list(), Body::term()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {error, term()}
 </code></pre>
 <br />
 
@@ -263,7 +263,7 @@ make a request
 ### request/5 ###
 
 <pre><code>
-request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
+request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary() | list(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
 </code></pre>
 <br />
 
