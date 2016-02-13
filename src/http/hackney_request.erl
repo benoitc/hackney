@@ -254,8 +254,7 @@ stream_multipart({part, Name, ExtraHeaders},
     %% part without content-length
     CType = mimerl:filename(Name),
     Headers = [{<<"Content-Disposition">>,
-                {<<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]}
-               },
+                <<"form-data">>, [{<<"name">>, <<"\"", Name/binary, "\"">>}]},
                {<<"Content-Type">>, CType}],
     MpHeader = hackney_multipart:mp_header(Headers, Boundary),
     stream_body(MpHeader, Client);
