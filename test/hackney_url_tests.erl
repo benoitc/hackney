@@ -259,7 +259,8 @@ pathencode_test_() ->
             {<<"/path1/path2%2fa">>, <<"/path1/path2%2fa">>},
             {<<"/path1/path2%2fa%2fb">>, <<"/path1/path2%2fa%2fb">>},
             {<<"/path1/path2%2test">>, <<"/path1/path2%252test">>},
-            {<<"/id/name:107/name2;p=1,3">>, <<"/id/name:107/name2;p=1,3">>}
+            {<<"/id/name:107/name2;p=1,3">>, <<"/id/name:107/name2;p=1,3">>},
+            {<<"/@foobar">>, <<"/@foobar">>}
             ],
     [{V, fun() -> R = hackney_url:pathencode(V) end} || {V, R} <- Tests].
 
