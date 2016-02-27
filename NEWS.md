@@ -1,5 +1,12 @@
 # NEWS
 
+1.4.10 - 2016/02/27
+------------------
+
+- bump to idna 1.1.0
+- fix: don't encode @ in urls
+- fix: header stream multipart
+
 1.4.7 - 2015/12/07
 ------------------
 
