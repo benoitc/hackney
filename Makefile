@@ -15,6 +15,9 @@ EDOC_OPTS = {doclet, edown_doclet}, \
 			{top_level_readme, {"./README.md", "http://github.com/benoitc/hackney"}}
 
 
+TEST_DEPS = cowboy
+dep_cowboy = hex 1.0.4
+
 all:: deps app rel
 
 doc: edoc
