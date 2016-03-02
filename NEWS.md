@@ -1,5 +1,13 @@
 # NEWS
 
+1.5.0 - 2016-03-02
+------------------
+
+- refactor: one flat source
+- replace hackney_metrics_* by [metrics](https://github.com/benoitc/erlang-metrics) library
+- fix: hackney_pool (#286)
+- security: bump to [erlang-certifi](https//github.com/certifi/erlang-certifi) 0.4.0
+
 1.4.10 - 2016/02/27
 ------------------
 
