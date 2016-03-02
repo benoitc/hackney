@@ -28,12 +28,12 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 
     %% filter options
     AcceptedOpts =  [cacertfile, cacerts, cert, certfile, ciphers,
-                     fail_if_no_peer_cert, hibernate_after, ip, key, keyfile,
+                     fail_if_no_peer_cert, hibernate_after, key, keyfile,
                      linger, next_protocols_advertised, nodelay, password, raw,
                      reuse_session, reuse_sessions, secure_renegotiate,
                      send_timeout, send_timeout_close, verify, partial_chain,
                      verify_fun, inet6, versions, server_name_indication,
-                     depth, reuseaddr],
+                     depth, reuseaddr, ip, ip_address],
     BaseOpts = [binary, {active, false}, {packet, raw}],
     Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
