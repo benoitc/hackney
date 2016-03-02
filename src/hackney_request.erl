@@ -10,7 +10,7 @@
 
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
--include_lib("../hackney_internal.hrl").
+-include_lib("hackney_internal.hrl").
 
 -export([perform/2,
          location/1,
