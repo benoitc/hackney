@@ -16,6 +16,7 @@
                  mimerl,
                  certifi]},
  {included_applications, [ssl_verify_hostname, metrics]},
+ {modules, []},
  {mod, { hackney_app, []}},
  {env, [{timeout, 150000},
         {max_connections, 50},
