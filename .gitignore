@@ -10,3 +10,5 @@ mime.types
 .rebar
 *.plt
 .rebar
+.erlang.mk
+hackney.d

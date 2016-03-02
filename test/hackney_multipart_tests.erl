@@ -9,10 +9,11 @@ dummy_test() ->
 multipart_test_() ->
     {setup, fun start/0, fun stop/1,
       [multipart_post()]}.
-      
+
 start() ->
     error_logger:tty(false),
     application:start(ranch),
+    application:start(crypto),
     application:start(cowlib),
     application:start(cowboy),
     hackney:start(),
