@@ -16,7 +16,7 @@
 
 ERLANG_MK_FILENAME := $(realpath $(lastword $(MAKEFILE_LIST)))
 
-ERLANG_MK_VERSION = 2.0.0-pre.2-81-gbb6b947
+ERLANG_MK_VERSION = 2.0.0-pre.2-87-gec4d6d6
 
 # Core configuration.
 
@@ -2170,6 +2170,14 @@ pkg_kafka_homepage = https://github.com/wooga/kafka-erlang
 pkg_kafka_fetch = git
 pkg_kafka_repo = https://github.com/wooga/kafka-erlang
 pkg_kafka_commit = master
+
+PACKAGES += kafka_protocol
+pkg_kafka_protocol_name = kafka_protocol
+pkg_kafka_protocol_description = Kafka protocol Erlang library
+pkg_kafka_protocol_homepage = https://github.com/klarna/kafka_protocol
+pkg_kafka_protocol_fetch = git
+pkg_kafka_protocol_repo = https://github.com/klarna/kafka_protocol.git
+pkg_kafka_protocol_commit = master
 
 PACKAGES += kai
 pkg_kai_name = kai
@@ -5115,8 +5123,12 @@ define compat_erlc_opts_to_list
 endef
 
 define compat_rebar_config
-{deps, [$(call comma_list,$(foreach d,$(DEPS),\
-	{$(call dep_name,$d),".*",{git,"$(call dep_repo,$d)","$(call dep_commit,$d)"}}))]}.
+{deps, [
+$(call comma_list,$(foreach d,$(DEPS),\
+	$(if $(filter hex,$(call dep_fetch,$d)),\
+		{$(call dep_name,$d)$(comma)"$(call dep_repo,$d)"},\
+		{$(call dep_name,$d)$(comma)".*"$(comma){git,"$(call dep_repo,$d)"$(comma)"$(call dep_commit,$d)"}})))
+]}.
 {erl_opts, $(call compat_erlc_opts_to_list,$(ERLC_OPTS))}.
 endef
 
@@ -5186,8 +5198,8 @@ help::
 		"  bootstrap          Generate a skeleton of an OTP application" \
 		"  bootstrap-lib      Generate a skeleton of an OTP library" \
 		"  bootstrap-rel      Generate the files needed to build a release" \
-		"  new-app n=NAME     Create a new local OTP application NAME" \
-		"  new-lib n=NAME     Create a new local OTP library NAME" \
+		"  new-app in=NAME    Create a new local OTP application NAME" \
+		"  new-lib in=NAME    Create a new local OTP library NAME" \
 		"  new t=TPL n=NAME   Generate a module NAME based on the template TPL" \
 		"  new t=T n=N in=APP Generate a module NAME based on the template TPL in APP" \
 		"  list-templates     List available templates"
