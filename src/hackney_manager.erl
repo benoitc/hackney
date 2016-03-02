@@ -45,7 +45,7 @@
 -define(REFS, hackney_manager_refs).
 
 -record(mstate, {pids=dict:new(),
-                 mod_metrics}).
+                 metrics}).
 
 
 new_request(#client{request_ref=Ref}=Client)
@@ -283,14 +283,14 @@ init(_) ->
     ets:new(?REFS, [named_table, set, protected]),
 
     %% initialize metrics
-    Mod = init_metrics(),
+    Metrics = init_metrics(),
 
     process_flag(trap_exit, true),
     %% return {ok, {Pids, Refs}}
     %% Pids are the managed pids
     %% Refs are the managed requests
     {ok, #mstate{pids=dict:new(),
-                 mod_metrics=Mod}}.
+                 metrics=Metrics}}.
 
 
 handle_call({new_request, Pid, Ref, Client}, _From, #mstate{pids=Pids}=State) ->
@@ -581,24 +581,24 @@ wait_async_response(Stream) ->
 
 init_metrics() ->
     %% get metrics module
-    Mod = hackney_util:mod_metrics(),
+    Engine = metrics:init(hackney_util:mod_metrics()),
 
     %% initialise metrics
-    Mod:new(counter, [hackney, nb_requests]),
-    Mod:new(counter, [hackney, total_requests]),
-    Mod:new(counter, [hackney, finished_requests]),
-    Mod.
+    metrics:new(Engine, counter, [hackney, nb_requests]),
+    metrics:new(Engine, counter, [hackney, total_requests]),
+    metrics:new(Engine, counter, [hackney, finished_requests]),
+    Engine.
 
-start_request(#request_info{host=Host}, #mstate{mod_metrics=Mod}) ->
-    Mod:increment_counter([hackney, Host, nb_requests]),
-    Mod:increment_counter([hackney, nb_requests]),
-    Mod:increment_counter([hackney, total_requests]).
+start_request(#request_info{host=Host}, #mstate{metrics=Engine}) ->
+    metrics:increment_counter(Engine, [hackney, Host, nb_requests]),
+    metrics:increment_counter(Engine, [hackney, nb_requests]),
+    metrics:increment_counter(Engine, [hackney, total_requests]).
 
 
 finish_request(#request_info{start_time=Begin, host=Host},
-               #mstate{mod_metrics=Mod}) ->
+               #mstate{metrics=Engine}) ->
     RequestTime = timer:now_diff(os:timestamp(), Begin)/1000,
-    Mod:update_histogram([hackney, Host, request_time], RequestTime),
-    Mod:decrement_counter([hackney, Host, nb_requests]),
-    Mod:decrement_counter([hackney, nb_requests]),
-    Mod:increment_counter([hackney, finished_requests]).
+    metrics:update_histogram(Engine, [hackney, Host, request_time], RequestTime),
+    metrics:decrement_counter(Engine, [hackney, Host, nb_requests]),
+    metrics:decrement_counter(Engine, [hackney, nb_requests]),
+    metrics:increment_counter(Engine, [hackney, finished_requests]).

@@ -118,11 +118,11 @@ wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
                  [KV | Headers]);
 
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
-    Mod = Client#client.mod_metrics,
     ResponseTime = timer:now_diff(os:timestamp(),
                                   Client#client.start_time)/1000,
-    Mod:update_histogram([hackney, Client#client.host, response_time],
-                         ResponseTime),
+    metrics:update_histogram(Client#client.mod_metrics,
+                             [hackney, Client#client.host, response_time],
+                             ResponseTime),
     {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 
 stream_body(Client=#client{response_state=done}) ->
