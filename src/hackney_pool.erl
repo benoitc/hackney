@@ -488,11 +488,11 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
                                    State#state{queues = Queues2,
                                                nb_waiters=NbWaiters});
                 _Error ->
-                    % Something wrong, just remove the socket
+                    % Something wrong, close the socket
                     catch Transport:close(Socket),
-                    %% put the waiter back in the queue at the beginning
-                    NewQueues = queue:in_r({FromWaiter, Ref}, Queues2),
-                    State#state{queues = NewQueues, nb_waiters = NbWaiters + 1}
+                    %% and let the waiter connect to a new one
+                    gen_server:reply(FromWaiter, {error, no_socket, self()}),
+                    State#state{queues = Queues2, nb_waiters = NbWaiters}
             end
     end.
 
