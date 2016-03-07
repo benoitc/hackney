@@ -104,7 +104,7 @@ mod_metrics() ->
     case application:get_env(hackney, mod_metrics) of
         {ok, folsom} -> metrics_folsom;
         {ok, exometer} -> metrics_exometers;
-        {ok, dummy} -> metrics_dumy;
+        {ok, dummy} -> metrics_dummy;
         {ok, Mod} -> Mod;
         _ -> metrics_dummy
     end.
