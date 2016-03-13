@@ -8,31 +8,31 @@ RemovePrefix = fun(VSN) ->
 IsRebar3 = case application:get_key(rebar, vsn) of
                {ok, VSN} ->
                    VSN1 = RemovePrefix(VSN),
-                   [Maj, Min, Patch | _] = string:tokens(VSN1, "."),
+                   [Maj, Min, Patch |_] = string:tokens(VSN1, "."),
                    (list_to_integer(Maj) >= 3);
                undefined ->
                    false
            end,
 
 Rebar2Deps0 = [{idna, ".*",
-               {git, "https://github.com/benoitc/erlang-idna",
-                {tag, "1.1.0"}}},
+                {git, "https://github.com/benoitc/erlang-idna",
+                 {tag, "1.1.0"}}},
 
-              {mimerl, ".*",
-               {git, "https://github.com/benoitc/mimerl",
-                {tag, "1.0.2"}}},
+               {mimerl, ".*",
+                {git, "https://github.com/benoitc/mimerl",
+                 {tag, "1.0.2"}}},
 
-              {certifi, ".*",
-               {git, "https://github.com/certifi/erlang-certifi",
-                {tag, "0.4.0"}}},
+               {certifi, ".*",
+                {git, "https://github.com/certifi/erlang-certifi",
+                 {tag, "0.4.0"}}},
 
-              {metrics, ".*",
-               {git, "https://github.com/benoitc/erlang-metrics",
-                {tag, "1.0.1"}}},
+               {metrics, ".*",
+                {git, "https://github.com/benoitc/erlang-metrics",
+                 {tag, "1.0.1"}}},
 
-              {ssl_verify_hostname, ".*",
-               {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
-                {tag, "1.0.6"}}}],
+               {ssl_verify_hostname, ".*",
+                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
+                 {tag, "1.0.6"}}}],
 
 
 Rebar2Deps = case os:getenv("TEST") of
