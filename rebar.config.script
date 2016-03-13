@@ -1,7 +1,7 @@
 RemovePrefix = fun(VSN) ->
                        case string:tokens(VSN, "-") of
-                           [VSN] -> VSN;
-                           [VSN1 | _] -> VSN1
+                           [VSN] -> VSN;
+                           [VSN1|_] -> VSN1
                        end
                end,
 
