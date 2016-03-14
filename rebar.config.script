@@ -1,7 +1,7 @@
 IsRebar3 = case application:get_key(rebar, vsn) of
                {ok, VSN} ->
-                   [VSN1 | _] = string:tokens(VSN, "-"),
-                   [Maj, Min, Patch | _] = string:tokens(VSN1, "."),
+                   [Maj, _Min, _Patch] = re:split(VSN, "\\.", [{return, list},
+                                                               {parts, 3}]),
                    (list_to_integer(Maj) >= 3);
                undefined ->
                    false
