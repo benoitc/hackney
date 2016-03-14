@@ -1,14 +1,7 @@
-RemovePrefix = fun(VSN) ->
-                       case string:tokens(VSN, "-") of
-                           [VSN] -> VSN;
-                           [VSN1|_] -> VSN1
-                       end
-               end,
-
 IsRebar3 = case application:get_key(rebar, vsn) of
                {ok, VSN} ->
-                   VSN1 = RemovePrefix(VSN),
-                   [Maj, Min, Patch |_] = string:tokens(VSN1, "."),
+                   [VSN1 | _] = string:tokens(VSN, "-"),
+                   [Maj, Min, Patch | _] = string:tokens(VSN1, "."),
                    (list_to_integer(Maj) >= 3);
                undefined ->
                    false
