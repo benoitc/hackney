@@ -1,6 +1,6 @@
 IsRebar3 = case application:get_key(rebar, vsn) of
                {ok, VSN} ->
-                   [VSN1 | _] = string:tokens(VSN, "-"),
+                   [VSN1 | _] = string:tokens(VSN, "+"),
                    [Maj, Min, Patch | _] = string:tokens(VSN1, "."),
                    (list_to_integer(Maj) >= 3);
                undefined ->
