@@ -257,8 +257,8 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
                 true ->
                     Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
                     NbWaiters2 = NbWaiters + 1,
-                    metrics:update_histogram([Engine, hackney_pool, PoolName, queue_count],
-                                         NbWaiters2),
+                    metrics:update_histogram(State#state.metrics, 
+                                        [Engine, hackney_pool, PoolName, queue_count], NbWaiters2),
                     {noreply, State2#state{queues = Queues2,
                                            nb_waiters=NbWaiters2}};
                 false ->
