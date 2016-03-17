@@ -9,7 +9,7 @@ IsRebar3 = case application:get_key(rebar, vsn) of
 
 Rebar2Deps0 = [{idna, ".*",
                {git, "https://github.com/benoitc/erlang-idna",
-                {tag, "1.2.0"}}},                
+                {tag, "1.2.0"}}},
 
                {mimerl, ".*",
                 {git, "https://github.com/benoitc/mimerl",
