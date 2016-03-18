@@ -4,7 +4,7 @@ use Mix.Project
     def project do
         [
             app: :hackney,
-            version: "1.5.4",
+            version: "1.5.5",
             description: "simple HTTP client for the Erlang VM",
             deps: deps,
             package: package,
