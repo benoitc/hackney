@@ -12,6 +12,12 @@ use Mix.Project
         ]
     end
 
+    def application do
+        [
+            mod: {:hackney_app, []}
+        ]
+    end
+
     def deps do
         [
             {:idna, "~> 1.2.0"},
