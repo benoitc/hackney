@@ -1,11 +1,4 @@
-IsRebar3 = case application:get_key(rebar, vsn) of
-               {ok, VSN} ->
-                   [Maj, _Min, _Patch] = re:split(VSN, "\\.", [{return, list},
-                                                               {parts, 3}]),
-                   (list_to_integer(Maj) >= 3);
-               undefined ->
-                   false
-           end,
+IsRebar3 = erlang:function_exported(rebar3, main, 1),
 
 Rebar2Deps0 = [{idna, ".*",
                {git, "https://github.com/benoitc/erlang-idna",
