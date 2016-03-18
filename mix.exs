@@ -26,6 +26,7 @@ use Mix.Project
         [
             files: [
                 "src",
+                "include",
                 "mix.exs",
                 "mix.lock",
                 "rebar.config",
