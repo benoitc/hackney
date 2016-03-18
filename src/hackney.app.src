@@ -4,7 +4,7 @@
 {application, hackney,
  [
  {description, "simple HTTP client"},
- {vsn, "1.5.3"},
+ {vsn, "1.5.4"},
  {registered, [hackney_pool]},
  {applications, [kernel,
                  stdlib,
@@ -26,28 +26,20 @@
 
  {maintainers,
   ["Benoit Chesneau",
-   "Adam Rutkowski",
-   "Ilya Khlopotov",
-   "Leo Lou",
-   "Tristan Sloughter",
-   "Erik Timan",
-   "Bip Thelin",
-   "Jose Valim",
-   "Damjan",
-   "Alexander Zhuravlev",
-   "Anthony Grimes",
-   "Bob Ippolito",
-   "Mahesh Paolini-Subramanya",
-   "Jesse Gumm",
-   "Daniel White",
-   "Chris Andrews",
-   "Alexey Aniskin",
-   "Yuki Ito",
-   "Yuriy Bogdanov",
-   "Ben Murphy",
-   "Richard Jones"
+   "Eduardo Gurgel"
   ]},
  {licenses, ["Apache 2.0"]},
- {links, [{"Github", "https://github.com/benoitc/hackney"}]}
+ {links, [{"Github", "https://github.com/benoitc/hackney"}]},
+ {files, [
+    "src",
+    "mix.exs",
+    "mix.lock",
+    "rebar.config",
+    "rebar.lock",
+    "README.md",
+    "NEWS.md",
+    "LICENSE",
+    "NOTICE",
+    "MAINTAINERS"]}
  ]
 }.

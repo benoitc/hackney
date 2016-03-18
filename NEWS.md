@@ -1,5 +1,11 @@
 # NEWS
 
+1.5.4 - 2016-03-18
+------------------
+
+- fix support of rebar 3 stable
+- add mix package
+
 1.5.0 - 2016-03-02
 ------------------
 
