@@ -41,6 +41,7 @@
     "NEWS.md",
     "LICENSE",
     "NOTICE",
-    "MAINTAINERS"]}
+    "MAINTAINERS"]},
+ {build_tools, [<<"rebar3">>, <<"mix">>]}
  ]
 }.
