@@ -2,4 +2,5 @@
   "idna": {:hex, :idna, "1.2.0"},
   "metrics": {:hex, :metrics, "1.0.1"},
   "mimerl": {:hex, :mimerl, "1.0.2"},
-  "ssl_verify_hostname": {:hex, :ssl_verify_hostname, "1.0.6"}}
+  "ssl_verify_fun": {:hex, :ssl_verify_fun, "1.1.0"}}
+  

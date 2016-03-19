@@ -16,9 +16,9 @@ Rebar2Deps0 = [{idna, ".*",
                 {git, "https://github.com/benoitc/erlang-metrics",
                  {tag, "1.0.1"}}},
 
-               {ssl_verify_hostname, ".*",
-                {git, "https://github.com/deadtrickster/ssl_verify_hostname.erl",
-                 {tag, "1.0.6"}}}],
+               {ssl_verify_fun, ".*",
+                {git, "https://github.com/deadtrickster/ssl_verify_fun.erl",
+                 {tag, "1.1.0"}}}],
 
 
 Rebar2Deps = case os:getenv("TEST") of

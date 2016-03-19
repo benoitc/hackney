@@ -28,7 +28,7 @@ use Mix.Project
                 ],
             included_applications:
                 [
-                    :ssl_verify_hostname,
+                    :ssl_verify_fun,
                     :metrics
                 ],
             env:
@@ -50,7 +50,7 @@ use Mix.Project
             {:mimerl, "~> 1.0.2"},
             {:certifi, "~> 0.4.0"},
             {:metrics, "~> 1.0.1"},
-            {:ssl_verify_hostname, "1.0.6"}
+            {:ssl_verify_fun, "1.1.0"}
         ]
     end
 
