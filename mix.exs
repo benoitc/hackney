@@ -24,10 +24,7 @@ use Mix.Project
                     :ssl,
                     :idna,
                     :mimerl,
-                    :certifi
-                ],
-            included_applications:
-                [
+                    :certifi,
                     :ssl_verify_fun,
                     :metrics
                 ],
