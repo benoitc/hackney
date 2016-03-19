@@ -14,6 +14,32 @@ use Mix.Project
 
     def application do
         [
+            applications:
+                [
+                    :kernel,
+                    :stdlib,
+                    :crypto,
+                    :asn1,
+                    :public_key,
+                    :ssl,
+                    :idna,
+                    :mimerl,
+                    :certifi
+                ],
+            included_applications:
+                [
+                    :ssl_verify_hostname,
+                    :metrics
+                ],
+            env:
+                [
+                    {:timeout, 150000},
+                    {:max_connections, 50},
+                    {:restart, :permanent},
+                    {:shutdown, 10000},
+                    {:maxr, 10},
+                    {:maxt, 1}
+                ],
             mod: {:hackney_app, []}
         ]
     end
