@@ -221,6 +221,9 @@ request(Method, URL, Headers, Body) ->
 %%      receive the other messages use the function
 %%      `hackney:stream_next/1'
 %%      </li>
+%%      <li>`{path_encode_fun, fun()}': function used to encode the path. if
+%%      not set it will use `hackney_url:path_encode/1' the function takes the
+%%      binary path as entry and return a new encoded path.</li>
 %%
 %%      <li>`{stream_to, pid()}': If async is true or once, the response
 %%      messages will be sent to this PID.</li>
@@ -295,8 +298,12 @@ request(Method, URL, Headers, Body) ->
     | {ok, client_ref()}
     | {error, term()}.
 request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
+    PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
+                                        fun hackney_url:encodepath/1),
+
+
     %% normalize the url encoding
-    URL = hackney_url:normalize(URL0),
+    URL = hackney_url:normalize(URL0, PathEncodeFun),
 
     ?report_trace("request", [{method, Method},
                               {url, URL},

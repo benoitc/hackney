@@ -317,6 +317,10 @@ When {async, once} is used the response will be received only once. To
 receive the other messages use the function
 `hackney:stream_next/1`
 
+* `{path_encode_fun, fun()}`: function used to encode the path. if
+not set it will use `hackney_url:path_encode/1` the function takes the
+binary path as entry and return a new encoded path.
+
 * `{stream_to, pid()}`: If async is true or once, the response
 messages will be sent to this PID.
 

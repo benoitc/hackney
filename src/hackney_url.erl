@@ -21,7 +21,7 @@
          make_url/3,
          fix_path/1,
          pathencode/1,
-         normalize/1]).
+         normalize/1, normalize/2]).
 
 -include("hackney_lib.hrl").
 
@@ -61,9 +61,21 @@ parse_url(URL, S) ->
     end.
 
 %% @doc Normalizes the encoding of a Url
-normalize(Url) when is_list(Url) orelse is_binary(Url) ->
-    normalize(parse_url(Url));
-normalize(#hackney_url{}=Url) ->
+%% use the hackney_url:pathencode/1 to encode an url
+-spec normalize(URL) -> NormalizedUrl when
+    URL :: binary() | list() | hackney_url(),
+    NormalizedUrl :: hackney_url().
+normalize(Url) ->
+    normalize(Url, fun hackney_url:pathencode/1).
+
+%% @doc Normalizes the encoding of a Url
+-spec normalize(URL, Fun) -> NormalizedUrl when
+    URL :: binary() | list() | hackney_url(),
+    Fun :: fun(),
+    NormalizedUrl :: hackney_url().
+normalize(Url, Fun) when is_list(Url) orelse is_binary(Url) ->
+    normalize(parse_url(Url), Fun);
+normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
     #hackney_url{scheme=Scheme,
                  host = Host0,
                  port = Port,
