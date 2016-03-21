@@ -277,7 +277,7 @@ urlencode(<<C, Rest/binary>>, Acc, P=Plus, U=Upper) ->
 	if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, U);
 		C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
 		C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-		C =:= $.; C =:= $-; C =:= $~; C =:= $_ , C =:= $*, C =:= $@ ->
+		C =:= $.; C =:= $-; C =:= $~; C =:= $_; C =:= $*; C =:= $@ ->
 		urlencode(Rest, <<Acc/binary, C>>, P, U);
         C =:= $(; C =:= $); C =:= $!, C =:= $$ ->
 		urlencode(Rest, <<Acc/binary, C>>, P, U);
