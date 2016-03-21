@@ -63,16 +63,16 @@ parse_url(URL, S) ->
 %% @doc Normalizes the encoding of a Url
 %% use the hackney_url:pathencode/1 to encode an url
 -spec normalize(URL) -> NormalizedUrl when
-    URL :: binary() | list() | hackney_url(),
-    NormalizedUrl :: hackney_url().
+      URL :: binary() | list() | hackney_url(),
+      NormalizedUrl :: hackney_url().
 normalize(Url) ->
     normalize(Url, fun hackney_url:pathencode/1).
 
 %% @doc Normalizes the encoding of a Url
 -spec normalize(URL, Fun) -> NormalizedUrl when
-    URL :: binary() | list() | hackney_url(),
-    Fun :: fun(),
-    NormalizedUrl :: hackney_url().
+      URL :: binary() | list() | hackney_url(),
+      Fun :: fun(),
+      NormalizedUrl :: hackney_url().
 normalize(Url, Fun) when is_list(Url) orelse is_binary(Url) ->
     normalize(parse_url(Url), Fun);
 normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
