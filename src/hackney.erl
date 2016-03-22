@@ -299,9 +299,9 @@ request(Method, URL, Headers, Body) ->
     | {error, term()}.
 request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
     PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
-                                        fun hackney_url:encodepath/1),
+                                        fun hackney_url:pathencode/1),
 
-                                            
+
     %% normalize the url encoding
     URL = hackney_url:normalize(URL0, PathEncodeFun),
 
