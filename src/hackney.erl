@@ -222,7 +222,7 @@ request(Method, URL, Headers, Body) ->
 %%      `hackney:stream_next/1'
 %%      </li>
 %%      <li>`{path_encode_fun, fun()}': function used to encode the path. if
-%%      not set it will use `hackney_url:path_encode/1' the function takes the
+%%      not set it will use `hackney_url:pathencode/1' the function takes the
 %%      binary path as entry and return a new encoded path.</li>
 %%
 %%      <li>`{stream_to, pid()}': If async is true or once, the response
