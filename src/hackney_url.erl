@@ -101,7 +101,7 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
             end,
             {Host2, Netloc1}
     end,
-    Path1 = pathencode(Path),
+    Path1 = Fun(Path),
     Url#hackney_url{host=Host, netloc=Netloc, path=Path1}.
 
 transport_scheme(hackney_tcp_transport) ->
