@@ -774,26 +774,24 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
                 {_, _} ->
                     {ok, {maybe_redirect, S, H, Client}}
             end;
-        false when S =:= 303 ->
+        false when S =:= 303 andalso (Method =:= post orelse
+                                      Client#client.force_redirect =:= true) ->
             %% see other. If method is not POST it is
             %% considered an invalid redirection.
-            case {Location, Method} of
-                {_, post} ->
-                    ?report_debug("redirect request", [{location, Location},
-                                                       {req, Req},
-                                                       {resp, Resp},
-                                                       {tries, Tries}]),
+            ?report_debug("redirect request", [{location, Location},
+                                               {req, Req},
+                                               {resp, Resp},
+                                               {tries, Tries}]),
 
-                    NewReq = {get, Location, [], <<>>},
-                    maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
-                                   Req);
-                {_, _} ->
-                    ?report_debug("invalid redirecttion", [{location, Location},
-                                                           {req, Req},
-                                                           {resp, Resp},
-                                                           {tries, Tries}]),
-                    {error, {invalid_redirection, Resp}}
-            end;
+            NewReq = {get, Location, [], <<>>},
+            maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
+                           Req);
+        false when S =:= 303 ->
+            ?report_debug("invalid redirecttion", [{location, Location},
+                                                   {req, Req},
+                                                   {resp, Resp},
+                                                   {tries, Tries}]),
+            {error, {invalid_redirection, Resp}};
         _ ->
             Resp
     end.
