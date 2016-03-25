@@ -4,6 +4,7 @@
 ------------------
 
 - add `path_encode_fun` option to request.
+- add: allow force non-POST 303 redirects
 - use `ssl_verif_fun` dependency to replace `ssl_verify_hostname`
 - fix: 	move included_applications to applications
 - fix: mix packaging
