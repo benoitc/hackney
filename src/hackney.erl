@@ -762,16 +762,16 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
             %% different from  get or head it will return
             %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
             %% the  user make his choice.
-            case {Location, lists:member(Method, [get, head])} of
-                {_, true} ->
+            case lists:member(Method, [get, head]) of
+                true ->
                     NewReq = {Method, Location, Headers, Body},
                     maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
                                    Req);
-                {_, _} when Client#client.force_redirect =:= true ->
+                false when Client#client.force_redirect =:= true ->
                         NewReq = {Method, Location, Headers, Body},
                         maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
                                        Req);
-                {_, _} ->
+                false ->
                     {ok, {maybe_redirect, S, H, Client}}
             end;
         false when S =:= 303 andalso (Method =:= post orelse
