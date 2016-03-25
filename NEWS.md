@@ -1,5 +1,13 @@
 # NEWS
 
+1.6.0 - 2016-03-25
+------------------
+
+- add `path_encode_fun` option to request.
+- use `ssl_verif_fun` dependency to replace `ssl_verify_hostname`
+- fix: 	move included_applications to applications
+- fix: mix packaging
+
 1.5.4 - 2016-03-18
 ------------------
 
