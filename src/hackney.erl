@@ -205,7 +205,7 @@ request(Method, URL, Headers, Body) ->
 %%  <li><strong>Options:</strong> `[{connect_options, connect_options(),
 %%  {ssl_options, ssl_options()}, Others]'</li>
 %%      <li>`connect_options()': The default connect_options are
-%%      `[binary, {active, false}, {packet, raw}])' . Vor valid options
+%%      `[binary, {active, false}, {packet, raw}])'. For valid options
 %%      see the gen_tcp options.</li>
 %%
 %%      <li>`ssl_options()': See the ssl options from the ssl
