@@ -367,9 +367,8 @@ fix_path(Path) ->
 %% @equiv pathencode(Bin, [])
 -spec pathencode(binary()) -> binary().
 pathencode(Bin) ->
-    Parts = re:split(hackney_bstr:to_binary(Bin), <<"/">>,
-                     [{return, binary}]),
-	do_partial_pathencode(Parts, []).
+    Parts = binary:split(hackney_bstr:to_binary(Bin), <<"/">>, [global]),
+    do_partial_pathencode(Parts, []).
 
 do_partial_pathencode([], Acc) ->
     hackney_bstr:join(lists:reverse(Acc), <<"/">>);
