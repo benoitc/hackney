@@ -83,7 +83,9 @@ wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
         {response, Version, Status, _Reason, NParser} ->
             wait_headers(Client#client{parser=NParser,
                                        buffer = <<>>,
-                                       version=Version}, Status)
+                                       version=Version}, Status);
+        Error ->
+            Error
     end.
 
 wait_headers(#client{parser=Parser}=Client, Status) ->
