@@ -6,8 +6,8 @@ use Mix.Project
             app: :hackney,
             version: "1.6.0",
             description: "simple HTTP client for the Erlang VM",
-            deps: deps,
-            package: package,
+            deps: deps(),
+            package: package(),
             language: :erlang
         ]
     end
