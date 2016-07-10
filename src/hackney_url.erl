@@ -76,8 +76,7 @@ normalize(#hackney_url{}=Url) ->
         {ok, {_, _, _, _, _, _, _, _}} ->
             {Host0, Netloc0};
         _ ->
-            Host1 = unicode:characters_to_list(
-                    urldecode(unicode:characters_to_binary(Host0))),
+            Host1 = urldecode(unicode:characters_to_binary(Host0)),
 
             %% encode domain if needed
             Host2 = idna:to_ascii(Host1),

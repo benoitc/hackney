@@ -265,6 +265,7 @@ pathencode_test_() ->
     [{V, fun() -> R = hackney_url:pathencode(V) end} || {V, R} <- Tests].
 
 normalize_test_() ->
+    {ok, _} = application:ensure_all_started(hackney),
     Tests = [
         {"http://www.%E3%81%BB%E3%82%93%E3%81%A8%E3%81%86%E3%81%AB%E3%81%AA" ++
          "%E3%81%8C%E3%81%84%E3%82%8F%E3%81%91%E3%81%AE%E3%82%8F%E3%81%8B%E3" ++
@@ -279,6 +280,7 @@ normalize_test_() ->
 
 
 normalize2_test_() ->
+    {ok, _} = application:ensure_all_started(hackney),
     Tests = [<<"http://www.詹姆斯.com/atomtests/iri/詹.html"/utf8>>,
              <<"http://www.xn--8ws00zhy3a.com/atomtests/iri/%e8%a9%b9.html">>],
     [{V, fun() -> R = hackney_url:unparse_url(hackney_url:normalize(V))

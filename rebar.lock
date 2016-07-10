@@ -1,5 +1,7 @@
 [{<<"certifi">>,{pkg,<<"certifi">>,<<"0.4.0">>},0},
- {<<"idna">>,{pkg,<<"idna">>,<<"1.1.0">>},0},
+ {<<"idna">>,{pkg,<<"idna">>,<<"3.0.0">>},0},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
- {<<"ssl_verify_hostname">>,{pkg,<<"ssl_verify_hostname">>,<<"1.0.6">>},0}].
+ {<<"p1_utils">>,{pkg,<<"p1_utils">>,<<"1.0.4">>},2},
+ {<<"ssl_verify_hostname">>,{pkg,<<"ssl_verify_hostname">>,<<"1.0.6">>},0},
+ {<<"stringprep">>,{pkg,<<"stringprep">>,<<"1.0.5">>},1}].
