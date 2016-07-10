@@ -12,7 +12,6 @@
 
 %% Application callbacks
 -export([start/2, stop/1,
-         ensure_deps_started/0,
          get_app_env/1, get_app_env/2]).
 
 %% ===================================================================
