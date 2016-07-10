@@ -25,22 +25,6 @@ start(_StartType, _StartArgs) ->
 stop(_State) ->
     ok.
 
-
-ensure_deps_started() ->
-    {ok, Deps} = application:get_key(hackney, applications),
-    true = lists:all(fun ensure_started/1, Deps).
-ensure_started(App) ->
-    case application:start(App) of
-        ok ->
-            true;
-        {error, {already_started, App}} ->
-            true;
-        Else ->
-            error_logger:error_msg("Couldn't start ~p: ~p", [App, Else]),
-            Else
-    end.
-
-
 %% @doc return a config value
 get_app_env(Key) ->
     get_app_env(Key, undefined).
