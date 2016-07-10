@@ -1,5 +1,13 @@
 # NEWS
 
+1.6.1 - 2016-07-10
+------------------
+- fix: close socket on error (#308)
+- improvement: handle errors in `hackney_response:wait_status` (#313)
+- improvement: make pathencode faster (#317)
+- fix: typo (#321)
+- fix: elixir 1.4 warnings (#325)
+
 1.6.0 - 2016-03-25
 ------------------
 

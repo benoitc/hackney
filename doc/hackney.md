@@ -299,7 +299,7 @@ Args:
 {ssl_options, ssl_options()}, Others]`
 
 * `connect_options()`: The default connect_options are
-`[binary, {active, false}, {packet, raw}])` . Vor valid options
+`[binary, {active, false}, {packet, raw}])`. For valid options
 see the gen_tcp options.
 
 * `ssl_options()`: See the ssl options from the ssl
