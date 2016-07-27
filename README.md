@@ -10,7 +10,7 @@ __Version:__ 1.6.1
 
 **hackney** is an HTTP client library for Erlang.
 
-[![Build Status](https://travis-ci.org/benoitc/hackney.png?branch=master)](https://travis-ci.org/benoitc/hackney)
+[![Build Status](https://secure.travis-ci.org/benoitc/hackney.svg?branch=master)](https://travis-ci.org/benoitc/hackney)
 [![Hex pm](http://img.shields.io/hexpm/v/hackney.svg?style=flat)](https://hex.pm/packages/hackney)
 
 ## Main features:
