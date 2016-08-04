@@ -658,12 +658,14 @@ maybe_proxy(Transport, Host, Port, Options)
             %% create connection options
             ProxyUser = proplists:get_value(socks5_user, Options),
             ProxyPass = proplists:get_value(socks5_pass, Options),
+            ProxyResolve = proplists:get_value(socks5_resolve, Options),
             ConnectOpts = proplists:get_value(connect_options, Options,
                                               []),
             ConnectOpts1 = [{socks5_host, ProxyHost},
                            {socks5_port, ProxyPort},
                            {socks5_user, ProxyUser},
                            {socks5_pass, ProxyPass},
+                           {socks5_resolve, ProxyResolve},
                            {socks5_transport, Transport} | ConnectOpts],
 
             %% ssl options?

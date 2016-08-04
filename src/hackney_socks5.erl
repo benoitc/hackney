@@ -141,7 +141,7 @@ do_handshake(Socket, Host, Port, Options) ->
             ok = gen_tcp:send(Socket, << 5, 1, 0 >>),
             case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
                 {ok, << 5, 0 >>} ->
-                    do_connection(Socket, Host, Port);
+                    do_connection(Socket, Host, Port, Options);
                 {ok, _Reply} ->
                     {error, unknown_reply};
                 Error ->
@@ -150,7 +150,7 @@ do_handshake(Socket, Host, Port, Options) ->
         _ ->
             case do_authentication(Socket, ProxyUser, ProxyPass) of
                 ok ->
-                    do_connection(Socket, Host, Port);
+                    do_connection(Socket, Host, Port, Options);
                 Error ->
                     Error
             end
@@ -179,39 +179,49 @@ do_authentication(Socket, User, Pass) ->
     end.
 
 
-do_connection(Socket, Host, Port) ->
-    Addr = case inet_parse:address(Host) of
-        {ok, {IP1, IP2, IP3, IP4}} ->
-            << 1, IP1, IP2, IP3, IP4, Port:16 >>;
-        {ok, {IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8}} ->
-            << 4, IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8, Port:16 >>;
-        _ ->
-            %% domain name
-            case inet:getaddr(Host, inet) of
-                {ok, {IP1, IP2, IP3, IP4}} ->
-                    << 1, IP1, IP2, IP3, IP4, Port:16 >>;
-                _Else ->
-                    case inet:getaddr(Host, inet6) of
-                         {ok, {IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8}} ->
-                            << 4, IP1, IP2, IP3, IP4, IP5, IP6, IP7,
-                              IP8, Port:16 >>;
-                        _ ->
-                            Host1 = list_to_binary(Host),
-                            HostLength = byte_size(Host1),
-                            << 3, HostLength, Host1/binary, Port:16 >>
-                    end
-            end
-    end,
-    ok = gen_tcp:send(Socket, << 5, 1, 0, Addr/binary >>),
-    case gen_tcp:recv(Socket, 10, ?TIMEOUT) of
-        {ok, << 5, 0, 0, BoundAddr/binary >>} ->
-            check_connection(BoundAddr);
-        {ok, _} ->
-            {error, badarg};
+do_connection(Socket, Host, Port, Options) ->
+    Resolve = proplists:get_value(socks5_resolve, Options, remote),
+    case addr(Host, Port, Resolve) of
+        Addr when is_binary(Addr) ->
+            ok = gen_tcp:send(Socket, << 5, 1, 0, Addr/binary >>),
+            case gen_tcp:recv(Socket, 10, ?TIMEOUT) of
+                {ok, << 5, 0, 0, BoundAddr/binary >>} ->
+                    check_connection(BoundAddr);
+                {ok, _} ->
+                    {error, badarg};
+                Error ->
+                    Error
+            end;
         Error ->
             Error
     end.
 
+addr(Host, Port, Resolve) ->
+    case inet_parse:address(Host) of
+        {ok, {IP1, IP2, IP3, IP4}} ->
+            << 1, IP1, IP2, IP3, IP4, Port:16 >>;
+        {ok, {IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8}} ->
+            << 4, IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8, Port:16 >>;
+        _ -> %% domain name
+            case Resolve of
+                local ->
+                    case inet:getaddr(Host, inet) of
+                        {ok, {IP1, IP2, IP3, IP4}} ->
+                            << 1, IP1, IP2, IP3, IP4, Port:16 >>;
+                        Error ->
+                            case inet:getaddr(Host, inet6) of
+                                {ok, {IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8}} ->
+                                    << 4, IP1, IP2, IP3, IP4, IP5, IP6, IP7, IP8, Port:16 >>;
+                                _ ->
+                                    Error
+                            end
+                    end;
+                _Remote ->
+                    Host1 = list_to_binary(Host),
+                    HostLength = byte_size(Host1),
+                    << 3, HostLength, Host1/binary, Port:16 >>
+            end
+    end.
 
 check_connection(<< 3, _DomainLen:8, _Domain/binary >>) ->
     ok;
