@@ -5,7 +5,7 @@
 %%%
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 %%%
--module(hackney_local_transport).
+-module(hackney_local_tcp).
 -export([messages/1,
          connect/3, connect/4,
          recv/2, recv/3,

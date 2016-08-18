@@ -43,7 +43,7 @@ parse_url(<<"https://", Rest/binary>>) ->
     parse_url(Rest, #hackney_url{transport=hackney_ssl,
                                  scheme=https});
 parse_url(<<"http+unix://", Rest/binary>>) ->
-    parse_url(Rest, #hackney_url{transport=hackney_local_transport,
+    parse_url(Rest, #hackney_url{transport=hackney_local_tcp,
                                  scheme=http_unix});
 parse_url(URL) ->
     parse_url(URL, #hackney_url{transport=hackney_tcp,
@@ -112,7 +112,7 @@ transport_scheme(hackney_tcp) ->
     http;
 transport_scheme(hackney_ssl) ->
     https;
-transport_scheme(hackney_local_transport) ->
+transport_scheme(hackney_local_tcp) ->
     http_unix.
 
 unparse_url(#hackney_url{}=Url) ->
@@ -198,7 +198,7 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
         [Host] when Transport =:= hackney_ssl ->
             S#hackney_url{host=unicode:characters_to_list(Host),
                           port=443};
-        [Host] when Transport =:= hackney_local_transport ->
+        [Host] when Transport =:= hackney_local_tcp ->
             S#hackney_url{host=unicode:characters_to_list(urldecode(Host)),
                           port=0};
         [Host, Port] ->

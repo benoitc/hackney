@@ -124,7 +124,7 @@ parse_and_unparse_url_test_() ->
                           password = <<"">>}
             },
             {<<"http+unix://user@%2Fvar%2Frun%2Ftest.sock/path?key=value#Section%205">>,
-             #hackney_url{transport =hackney_local_transport,
+             #hackney_url{transport =hackney_local_tcp,
                           scheme = http_unix,
                           netloc = <<"%2Fvar%2Frun%2Ftest.sock">>,
                           raw_path = <<"/path?key=value#Section%205">>,
