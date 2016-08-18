@@ -18,8 +18,10 @@ http_requests_test_() ->
                        send_cookies_request(),
                        absolute_redirect_request_no_follow(),
                        absolute_redirect_request_follow(),
+                       absolute_redirect_request_follow_with_proxy(),
                        relative_redirect_request_no_follow(),
                        relative_redirect_request_follow(),
+                       relative_redirect_request_follow_with_proxy(),
                        async_request(),
                        async_head_request(),
                        async_no_content_request()]}
@@ -100,6 +102,14 @@ absolute_redirect_request_follow() ->
     [?_assertEqual(200, StatusCode),
      ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
 
+absolute_redirect_request_follow_with_proxy() ->
+    URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
+    Options = [{follow_redirect, true}, {proxy, "http://localhost:8001"}],
+    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+    Location = hackney:location(Client),
+    [?_assertEqual(200, StatusCode),
+     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+
 relative_redirect_request_no_follow() ->
     URL = <<"http://localhost:8000/relative-redirect/1">>,
     Options = [{follow_redirect, false}],
@@ -111,6 +121,14 @@ relative_redirect_request_no_follow() ->
 relative_redirect_request_follow() ->
     URL = <<"http://localhost:8000/redirect-to?url=/get">>,
     Options = [{follow_redirect, true}],
+    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+    Location = hackney:location(Client),
+    [?_assertEqual(200, StatusCode),
+     ?_assertEqual(<<"/get">>, Location)].
+
+relative_redirect_request_follow_with_proxy() ->
+    URL = <<"http://localhost:8000/relative-redirect/1">>,
+    Options = [{follow_redirect, true}, {proxy, "http://localhost:8001"}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(200, StatusCode),

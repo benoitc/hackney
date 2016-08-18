@@ -494,22 +494,23 @@ $ rebar3 compile
 ```
 
 For successfully running the hackney test suite locally it is necessary to
-install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0).
+install [httpbin](https://pypi.python.org/pypi/httpbin/0.2.0) and [mitmproxy](https://pypi.python.org/pypi/mitmproxy).
 
 An example installation using virtualenv::
 
 ```sh
 
 $ mkvirtualenv hackney
-$ pip install gunicorn httpbin
+$ pip install gunicorn httpbin mitmproxy
 
 ```
 
 Running the tests:
 
 ```
+$ mitmdump  -p 8001
 $ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
+$ rebar3 eunit --dir="test"
 $ kill `cat httpbin.pid`
 ```
 
