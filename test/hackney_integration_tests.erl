@@ -142,9 +142,13 @@ async_no_content_request() ->
      ?_assertEqual([headers, status], Keys)].
 
 local_socket_request() ->
-    URL = <<"http+unix://httpbin.sock/get">>,
-    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(200, StatusCode).
+    case erlang:function_exported(local_tcp, connect, 3) of
+        false -> ok;
+        true ->
+            URL = <<"http+unix://httpbin.sock/get">>,
+            {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+            ?_assertEqual(200, StatusCode)
+    end.
 
 %% Helpers
 
