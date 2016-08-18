@@ -142,15 +142,24 @@ async_no_content_request() ->
      ?_assertEqual([headers, status], Keys)].
 
 local_socket_request() ->
-    case code:ensure_loaded(local_tcp) of
-        {error, _} -> ok;
-        _ ->
+    case has_unix_socket() of
+        false -> ok;
+        true ->
             URL = <<"http+unix://httpbin.sock/get">>,
             {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
             ?_assertEqual(200, StatusCode)
     end.
 
+
+
 %% Helpers
+
+has_unix_socket() ->
+    case code:ensure_loaded(local_tcp) of
+        {error, _} -> false;
+        _ -> erlang:function_exported(local_tcp, connect, 3)
+    end.
+
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),
