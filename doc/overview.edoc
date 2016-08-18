@@ -321,7 +321,7 @@ LoopFun(LoopFun, ClientRef).</pre>
 > synchronously using the function `hackney:stop_async/1' See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
-> **Note 4**:  When the option `{following_redirect, true}' is passed to
+> **Note 4**:  When the option `{follow_redirect, true}' is passed to
 > the request, you will receive the folllowing messages on valid
 > redirection:
 > - `{redirect, To, Headers}'
