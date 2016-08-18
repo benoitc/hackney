@@ -193,7 +193,7 @@ couple of requests.
 #### To create a connection:
 
 <pre lang="erlang">
-Transport = hackney_tcp_transport,
+Transport = hackney_tcp,
 Host = &lt;&lt; "https://friendpaste.com" >>,
 Port = 443,
 Options = [],

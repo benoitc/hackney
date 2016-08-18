@@ -25,7 +25,7 @@
 -export_type([http_socket/0]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
-messages({hackney_ssl_transport, _}) ->
+messages({hackney_ssl, _}) ->
     {ssl, ssl_closed, ssl_error};
 messages({_, _}) ->
     {tcp, tcp_closed, tcp_error}.
@@ -58,7 +58,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
                     %% if we are connecting to a remote https source, we
                     %% upgrade the connection socket to handle SSL.
                     case Transport of
-                        hackney_ssl_transport ->
+                        hackney_ssl ->
                             SSLOpts = hackney_connect:ssl_opts(Host, Opts),
                             %% upgrade the tcp connection
                             case ssl:connect(Socket, SSLOpts) of

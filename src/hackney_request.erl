@@ -622,9 +622,9 @@ maybe_add_host(HeadersDict, Netloc) ->
             HeadersDict
     end.
 
-is_default_port(#client{transport=hackney_tcp_transport, port=80}) ->
+is_default_port(#client{transport=hackney_tcp, port=80}) ->
     true;
-is_default_port(#client{transport=hackney_ssl_transport, port=443}) ->
+is_default_port(#client{transport=hackney_ssl, port=443}) ->
     true;
 is_default_port(_) ->
     false.

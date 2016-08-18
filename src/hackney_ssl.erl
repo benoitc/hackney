@@ -5,7 +5,7 @@
 %%%
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 
--module(hackney_ssl_transport).
+-module(hackney_ssl).
 -export([messages/1,
          connect/3, connect/4,
          recv/3, recv/2,
