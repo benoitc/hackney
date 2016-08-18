@@ -159,7 +159,7 @@ local_socket_request() ->
 %% Helpers
 
 has_unix_socket() ->
-    {ok, Vsn} = application:get_key(kernel, vsn),
+    {ok, Vsn} = application:get_key(kernel, vsn),
     ParsedVsn = version_pad(string:tokens(Vsn, ".")),
     ParsedVsn >= {5, 0, 0}.
 
