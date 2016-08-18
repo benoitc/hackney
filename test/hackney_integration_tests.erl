@@ -155,11 +155,18 @@ local_socket_request() ->
 %% Helpers
 
 has_unix_socket() ->
-    case code:ensure_loaded(local_tcp) of
-        {error, _} -> false;
-        _ -> erlang:function_exported(local_tcp, connect, 3)
-    end.
+  {ok, Vsn} = application:get_key(kernel, vsn),
+  ParsedVsn = version_pad(string:tokens(Vsn, ".")),
+  ParsedVsn >= {5, 0, 0}.
 
+version_pad([Major]) ->
+      {list_to_integer(Major), 0, 0};
+version_pad([Major, Minor]) ->
+      {list_to_integer(Major), list_to_integer(Minor), 0};
+version_pad([Major, Minor, Patch]) ->
+      {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
+version_pad([Major, Minor, Patch | _]) ->
+      {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),
