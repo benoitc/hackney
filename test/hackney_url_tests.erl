@@ -122,6 +122,19 @@ parse_and_unparse_url_test_() ->
                           port = 443,
                           user = <<"user">>,
                           password = <<"">>}
+            },
+            {<<"http+unix://user@%2Fvar%2Frun%2Ftest.sock/path?key=value#Section%205">>,
+             #hackney_url{transport =hackney_local_transport,
+                          scheme = http_unix,
+                          netloc = <<"%2Fvar%2Frun%2Ftest.sock">>,
+                          raw_path = <<"/path?key=value#Section%205">>,
+                          path = <<"/path">>,
+                          qs = <<"key=value">>,
+                          fragment = <<"Section%205">>,
+                          host = "/var/run/test.sock",
+                          port = 0,
+                          user = <<"user">>,
+                          password = <<"">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests] ++

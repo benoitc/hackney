@@ -42,6 +42,9 @@ parse_url(<<"http://", Rest/binary>>) ->
 parse_url(<<"https://", Rest/binary>>) ->
     parse_url(Rest, #hackney_url{transport=hackney_ssl_transport,
                                  scheme=https});
+parse_url(<<"http+unix://", Rest/binary>>) ->
+    parse_url(Rest, #hackney_url{transport=hackney_local_transport,
+                                 scheme=http_unix});
 parse_url(URL) ->
     parse_url(URL, #hackney_url{transport=hackney_tcp_transport,
                                         scheme=http}).
@@ -96,6 +99,7 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
             Netloc1 = case {Scheme, Port} of
                 {http, 80} -> list_to_binary(Host2);
                 {https, 443} -> list_to_binary(Host2);
+                {http_unix, _} -> list_to_binary(Host2);
                 _ ->
                     iolist_to_binary([Host2, ":", integer_to_list(Port)])
             end,
@@ -107,7 +111,9 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
 transport_scheme(hackney_tcp_transport) ->
     http;
 transport_scheme(hackney_ssl_transport) ->
-    https.
+    https;
+transport_scheme(hackney_local_transport) ->
+    http_unix.
 
 unparse_url(#hackney_url{}=Url) ->
     #hackney_url{scheme = Scheme,
@@ -120,7 +126,8 @@ unparse_url(#hackney_url{}=Url) ->
 
     Scheme1 = case Scheme of
         http -> <<"http://">>;
-        https -> <<"https://">>
+        https -> <<"https://">>;
+        http_unix -> <<"http+unix://">>
     end,
 
     Netloc1 = case User of
@@ -191,6 +198,9 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
         [Host] when Transport =:= hackney_ssl_transport ->
             S#hackney_url{host=unicode:characters_to_list(Host),
                           port=443};
+        [Host] when Transport =:= hackney_local_transport ->
+            S#hackney_url{host=unicode:characters_to_list(urldecode(Host)),
+                          port=0};
         [Host, Port] ->
             S#hackney_url{host=unicode:characters_to_list(Host),
                           port=list_to_integer(binary_to_list(Port))}

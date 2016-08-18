@@ -508,7 +508,7 @@ $ pip install gunicorn httpbin
 Running the tests:
 
 ```
-$ gunicorn --daemon --pid httpbin.pid httpbin:app
+$ gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock --daemon --pid httpbin.pid httpbin:appl
 $ make test
 $ kill `cat httpbin.pid`
 ```
@@ -541,4 +541,3 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
-

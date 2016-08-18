@@ -22,7 +22,8 @@ http_requests_test_() ->
                        relative_redirect_request_follow(),
                        async_request(),
                        async_head_request(),
-                       async_no_content_request()]}
+                       async_no_content_request(),
+                       local_socket_request()]}
      end}.
 
 start() ->
@@ -139,6 +140,11 @@ async_no_content_request() ->
     {StatusCode, Keys} = receive_response(ClientRef),
     [?_assertEqual(204, StatusCode),
      ?_assertEqual([headers, status], Keys)].
+
+local_socket_request() ->
+    URL = <<"http+unix://httpbin.sock/get">>,
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+    ?_assertEqual(200, StatusCode).
 
 %% Helpers
 
