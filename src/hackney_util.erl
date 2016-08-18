@@ -14,6 +14,8 @@
 -export([mod_metrics/0]).
 -export([to_atom/1]).
 
+%% random compatibility
+-export([uniform/1]).
 
 -include("hackney.hrl").
 
@@ -120,3 +122,13 @@ to_atom(V) when is_binary(V) ->
     to_atom(binary_to_list(V));
 to_atom(V) when is_atom(V) ->
     V.
+
+%% random compatibility
+
+uniform(N) ->
+  case have_rand() of
+    true  -> rand:uniform(N);
+    false -> (fun random:uniform/1)(N)
+  end.
+
+have_rand() -> (code:which(rand) /= non_existing).

@@ -268,7 +268,7 @@ mp_data_header({Name, Len, {Disposition, Params}, ExtraHeaders}, Boundary) ->
 unique(Size) -> unique(Size, <<>>).
 unique(0, Acc) -> Acc;
 unique(Size, Acc) ->
-  Random = $a + rand:uniform($z - $a),
+  Random = $a + hackney_util:uniform($z - $a),
   unique(Size - 1, <<Acc/binary, Random>>).
 
 decode_form1(eof, [[]|Acc]) ->
