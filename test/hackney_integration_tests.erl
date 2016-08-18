@@ -2,28 +2,37 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("hackney_lib.hrl").
 
+
+default_tests() ->
+  [get_request(),
+   request_with_body(),
+   head_request(),
+   no_content_response(),
+   not_modified_response(),
+   basic_auth_request_failed(),
+   basic_auth_request(),
+   set_cookie_request(),
+   send_cookies_request(),
+   absolute_redirect_request_no_follow(),
+   absolute_redirect_request_follow(),
+   relative_redirect_request_no_follow(),
+   relative_redirect_request_follow(),
+   async_request(),
+   async_head_request(),
+   async_no_content_request()].
+
+all_tests() ->
+    case has_unix_socket() of
+        true -> default_tests() ++ [local_socket_request()];
+        false -> default_tests()
+    end.
+
 http_requests_test_() ->
     {setup,
      fun start/0,
      fun stop/1,
      fun(ok) ->
-         {inparallel, [get_request(),
-                       request_with_body(),
-                       head_request(),
-                       no_content_response(),
-                       not_modified_response(),
-                       basic_auth_request_failed(),
-                       basic_auth_request(),
-                       set_cookie_request(),
-                       send_cookies_request(),
-                       absolute_redirect_request_no_follow(),
-                       absolute_redirect_request_follow(),
-                       relative_redirect_request_no_follow(),
-                       relative_redirect_request_follow(),
-                       async_request(),
-                       async_head_request(),
-                       async_no_content_request(),
-                       local_socket_request()]}
+         {inparallel, all_tests()}
      end}.
 
 start() ->
@@ -142,31 +151,26 @@ async_no_content_request() ->
      ?_assertEqual([headers, status], Keys)].
 
 local_socket_request() ->
-    case has_unix_socket() of
-        false -> ok;
-        true ->
-            URL = <<"http+unix://httpbin.sock/get">>,
-            {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-            ?_assertEqual(200, StatusCode)
-    end.
-
+    URL = <<"http+unix://httpbin.sock/get">>,
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+    ?_assertEqual(200, StatusCode).
 
 
 %% Helpers
 
 has_unix_socket() ->
-  {ok, Vsn} = application:get_key(kernel, vsn),
-  ParsedVsn = version_pad(string:tokens(Vsn, ".")),
-  ParsedVsn >= {5, 0, 0}.
+    {ok, Vsn} = application:get_key(kernel, vsn),
+    ParsedVsn = version_pad(string:tokens(Vsn, ".")),
+    ParsedVsn >= {5, 0, 0}.
 
 version_pad([Major]) ->
-      {list_to_integer(Major), 0, 0};
+    {list_to_integer(Major), 0, 0};
 version_pad([Major, Minor]) ->
-      {list_to_integer(Major), list_to_integer(Minor), 0};
+    {list_to_integer(Major), list_to_integer(Minor), 0};
 version_pad([Major, Minor, Patch]) ->
-      {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
+    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
 version_pad([Major, Minor, Patch | _]) ->
-      {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
+    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),
