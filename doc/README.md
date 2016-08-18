@@ -443,7 +443,7 @@ API matching that of the hackney metrics module.
 To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
 folsom}`, or if you want to use
 [exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
-exometers}` and ensure that folsom or exometer is in your code path and has
+exometer}` and ensure that folsom or exometer is in your code path and has
 been started.
 
 #### Generic Hackney metrics

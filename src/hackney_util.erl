@@ -103,7 +103,7 @@ privdir() ->
 mod_metrics() ->
     case application:get_env(hackney, mod_metrics) of
         {ok, folsom} -> metrics_folsom;
-        {ok, exometer} -> metrics_exometers;
+        {ok, exometer} -> metrics_exometer;
         {ok, dummy} -> metrics_dummy;
         {ok, Mod} -> Mod;
         _ -> metrics_dummy
