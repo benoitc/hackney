@@ -45,7 +45,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
 
     %% filter connection options
     AcceptedOpts =  [linger, nodelay, send_timeout,
-                     send_timeout_close, raw],
+                     send_timeout_close, raw, inet6],
     BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
                 {nodelay, true}],
     ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
@@ -148,7 +148,7 @@ do_handshake(Socket, Host, Port, Options) ->
             iolist_to_binary([Host, ":", integer_to_list(Port)])
     end,
     UA =  hackney_request:default_ua(),
-    Headers0 = [<<"Host", HostHdr/binary>>,
+    Headers0 = [<<"Host: ", HostHdr/binary>>,
                 <<"User-Agent: ", UA/binary >>],
 
     Headers = case ProxyUser of
