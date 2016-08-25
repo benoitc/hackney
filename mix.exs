@@ -45,7 +45,7 @@ use Mix.Project
         [
             {:idna, "~> 1.2.0"},
             {:mimerl, "~> 1.0.2"},
-            {:certifi, "~> 0.4.0"},
+            {:certifi, "~> 0.5.0"},
             {:metrics, "~> 1.0.1"},
             {:ssl_verify_fun, "1.1.0"}
         ]
