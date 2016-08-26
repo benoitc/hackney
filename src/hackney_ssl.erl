@@ -25,20 +25,12 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 	(Timeout =:= infinity orelse is_integer(Timeout)) ->
-
-    %% filter options
-    AcceptedOpts =  [cacertfile, cacerts, cert, certfile, ciphers,
-                     fail_if_no_peer_cert, hibernate_after, key, keyfile,
-                     linger, next_protocols_advertised, nodelay, password, raw,
-                     reuse_session, reuse_sessions, secure_renegotiate,
-                     send_timeout, send_timeout_close, verify, partial_chain,
-                     verify_fun, inet6, versions, server_name_indication,
-                     depth, reuseaddr, ip, ip_address, log_alert],
-    BaseOpts = [binary, {active, false}, {packet, raw}],
-    Opts1 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+    BaseOpts = [binary, {active, false}, {packet, raw},
+								{versions,['tlsv1.1',tlsv1,sslv3]}],
+		Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
 
     %% connect
-	ssl:connect(Host, Port, Opts1, Timeout).
+		ssl:connect(Host, Port, Opts1, Timeout).
 
 recv(Socket, Length) ->
     recv(Socket, Length, infinity).

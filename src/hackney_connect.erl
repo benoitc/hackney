@@ -15,6 +15,7 @@
          close/1,
          is_pool/1]).
 
+-export([partial_chain/1]).
 
 -include("hackney.hrl").
 -include_lib("hackney_internal.hrl").

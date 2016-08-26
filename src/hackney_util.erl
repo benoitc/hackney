@@ -17,6 +17,8 @@
 %% random compatibility
 -export([uniform/1]).
 
+-export([merge_opts/2]).
+
 -include("hackney.hrl").
 
 %% @doc filter a proplists and only keep allowed keys
@@ -39,6 +41,7 @@ filter_options([Opt|Tail], AllowedKeys, Acc) when is_atom(Opt) ->
 		true -> filter_options(Tail, AllowedKeys, [Opt|Acc]);
 		false -> filter_options(Tail, AllowedKeys, Acc)
 	end.
+
 
 %% @doc set the default options in a proplists if not defined
 -spec set_option_default(Opts, atom(), any())
@@ -132,3 +135,21 @@ uniform(N) ->
   end.
 
 have_rand() -> (code:which(rand) /= non_existing).
+
+
+merge_opts([], Options) -> Options;
+merge_opts([Opt = {K, _}| Rest], Options) ->
+	case lists:member(K, Options) of
+		true -> merge_opts(Rest, Options);
+		false -> merge_opts(Rest, [Opt | Options])
+	end;
+merge_opts([Opt={raw, _, _, _} | Rest], Options) ->
+	merge_opts(Rest, [Opt | Options]);
+merge_opts([K | Rest], Options) when is_atom(K) ->
+	case lists:member(K, Options) of
+		true -> merge_opts(Rest, Options);
+		false -> merge_opts(Rest, [K | Options])
+	end;
+merge_opts([_ | Rest], Options) ->
+	merge_opts(Rest, Options).
+
