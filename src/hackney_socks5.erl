@@ -44,7 +44,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 
     %% filter connection options
     AcceptedOpts =  [linger, nodelay, send_timeout,
-                     send_timeout_close, raw],
+                     send_timeout_close, raw, inet6],
     BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
                 {nodelay, true}],
     ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
