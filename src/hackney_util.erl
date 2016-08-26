@@ -141,11 +141,11 @@ merge_opts([], Options) -> Options;
 merge_opts([Opt = {K, _}| Rest], Options) ->
 	case lists:member(K, Options) of
 		true -> merge_opts(Rest, Options);
-		false -> merge_opts(Rest, [Opt | Options])
+		false -> merge_opts(Rest, [Opt | Options])
 	end;
 merge_opts([Opt={raw, _, _, _} | Rest], Options) ->
-	merge_opts(Rest, [Opt | Options]);
-merge_opts([K | Rest], Options) when is_atom(K) ->
+	merge_opts(Rest, [Opt | Options]);
+merge_opts([K | Rest], Options) when is_atom(K) ->
 	case lists:member(K, Options) of
 		true -> merge_opts(Rest, Options);
 		false -> merge_opts(Rest, [K | Options])
