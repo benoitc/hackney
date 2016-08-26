@@ -18,7 +18,7 @@ Rebar2Deps0 = [{idna, ".*",
 
                {ssl_verify_fun, ".*",
                 {git, "https://github.com/deadtrickster/ssl_verify_fun.erl",
-                 {tag, "1.1.0"}}}],
+                 {tag, "1.1.1"}}}],
 
 
 Rebar2Deps = case os:getenv("TEST") of
