@@ -219,8 +219,7 @@ NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
-> If your connection supports keepalive the connection will be simply :
-
+> If your connection supports keepalive the connection will be kept open until you close it exclusively.
 
 ### Send a body
 
