@@ -289,8 +289,7 @@ ssl_opts(Host, Options) ->
 
             case {Insecure, UseSecureSsl} of
                 {true, _} ->
-                    [{verify, verify_none},
-                     {reuse_sessions, true}];
+                    [{verify, verify_none}];
                 {_, true} ->
 
                     VerifyFun = {fun ssl_verify_hostname:verify_fun/3,
