@@ -498,7 +498,7 @@ skip_multipart(Ref) ->
         end).
 
 %% @doc Return the full body sent with the response.
--spec body(client_ref()) -> {ok, binary()} | {error, atom()} | {error, {closed, binary()}}.
+-spec body(client_ref()) -> {ok, binary()} | {error, atom()} | {error, {closed, binary()}}.
 body(Ref) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:body(State),
@@ -508,7 +508,7 @@ body(Ref) ->
 %% @doc Return the full body sent with the response as long as the body
 %% length doesn't go over MaxLength.
 -spec body(client_ref(), non_neg_integer() | infinity)
-    -> {ok, binary()} | {error, atom()} | {error, {closed, binary()}}.
+    -> {ok, binary()} | {error, atom()} | {error, {closed, binary()}}.
 body(Ref, MaxLength) ->
     hackney_manager:get_state(Ref, fun(State) ->
                 Reply = hackney_response:body(MaxLength, State),
