@@ -17,6 +17,22 @@
          shutdown/2,
          sockname/1]).
 
+%% from https://wiki.mozilla.org/Security/Server_Side_TLS
+-define(DEFAULT_CIPHERS,
+    ["ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384",
+     "ECDHE-ECDSA-AES256-SHA384","ECDHE-RSA-AES256-SHA384", "ECDHE-ECDSA-DES-CBC3-SHA",
+     "ECDH-ECDSA-AES256-GCM-SHA384","ECDH-RSA-AES256-GCM-SHA384","ECDH-ECDSA-AES256-SHA384",
+     "ECDH-RSA-AES256-SHA384","DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
+     "AES256-GCM-SHA384","AES256-SHA256","ECDHE-ECDSA-AES128-GCM-SHA256",
+     "ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES128-SHA256","ECDHE-RSA-AES128-SHA256",
+     "ECDH-ECDSA-AES128-GCM-SHA256","ECDH-RSA-AES128-GCM-SHA256","ECDH-ECDSA-AES128-SHA256",
+     "ECDH-RSA-AES128-SHA256","DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
+     "AES128-GCM-SHA256","AES128-SHA256","ECDHE-ECDSA-AES256-SHA",
+     "ECDHE-RSA-AES256-SHA","DHE-DSS-AES256-SHA","ECDH-ECDSA-AES256-SHA",
+     "ECDH-RSA-AES256-SHA","AES256-SHA","ECDHE-ECDSA-AES128-SHA",
+     "ECDHE-RSA-AES128-SHA","DHE-DSS-AES128-SHA","ECDH-ECDSA-AES128-SHA",
+     "ECDH-RSA-AES128-SHA","AES128-SHA"]).
+
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
 
@@ -25,9 +41,13 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
 	(Timeout =:= infinity orelse is_integer(Timeout)) ->
-    BaseOpts = [binary, {active, false}, {packet, raw},
-								{versions,['tlsv1.1',tlsv1,sslv3]}],
-		Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
+  BaseOpts = [binary, {active, false}, {packet, raw},
+              {secure_renegotiate, true},
+              {reuse_sessions, true},
+              {honor_cipher_order, true},
+              {versions,['tlsv1.2', 'tlsv1.1', tlsv1, sslv3]},
+              {ciphers, ?DEFAULT_CIPHERS}],
+  Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
 
     %% connect
 		ssl:connect(Host, Port, Opts1, Timeout).
