@@ -41,7 +41,6 @@
 
 -record(state, {
         name,
-        metrics,
         max_connections,
         timeout,
         clients = dict:new(),
@@ -227,9 +226,9 @@ init([Name, Options]) ->
     ets:insert(?MODULE, {Name, self()}),
 
     %% initialize metrics
-    Engine = init_metrics(Name),
+    init_metrics(Name),
 
-    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
+    {ok, #state{name=Name, max_connections=MaxConn,
                 timeout=Timeout}}.
 
 handle_call(count, _From, #state{sockets=Sockets}=State) ->
@@ -240,7 +239,6 @@ handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
     {reply, MaxConn, State};
 handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
     #state{name=PoolName,
-           metrics = Engine,
            max_connections=MaxConn,
            clients=Clients,
            queues = Queues,
@@ -257,9 +255,8 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
                 true ->
                     Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
                     NbWaiters2 = NbWaiters + 1,
-                    metrics:update_histogram(Engine,
-                                             [hackney_pool, PoolName, queue_count],
-                                             NbWaiters2),
+                    metrics:update([hackney_pool, PoolName, queue_count],
+                                   NbWaiters2),
                     {noreply, State2#state{queues = Queues2,
                                            nb_waiters=NbWaiters2}};
                 false ->
@@ -329,8 +326,7 @@ handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
                     {noreply, State#state{clients = Clients2}};
                 {ok, {From, Ref2}, Queues2} ->
                     NbWaiters = State#state.nb_waiters - 1,
-                    metrics:update_histogram(State#state.metrics,
-                                             [hackney_pool, State#state.name, queue_count], NbWaiters),
+                    metrics:update([hackney_pool, State#state.name, queue_count], NbWaiters),
                     gen_server:reply(From, {error, no_socket, self()}),
                     State2 = State#state{queues = Queues2, clients = Clients2,
                                         nb_waiters=NbWaiters},
@@ -345,7 +341,7 @@ handle_info(_, State) ->
 code_change(_OldVsn, State, _Extra) ->
    {ok, State}.
 
-terminate(_Reason, #state{name=PoolName, metrics=Engine, sockets=Sockets}) ->
+terminate(_Reason, #state{name=PoolName, sockets=Sockets}) ->
     %% close any sockets in the pool
     lists:foreach(fun({Socket, {{_, _, Transport}, Timer}}) ->
                 cancel_timer(Socket, Timer),
@@ -353,7 +349,7 @@ terminate(_Reason, #state{name=PoolName, metrics=Engine, sockets=Sockets}) ->
         end, dict:to_list(Sockets)),
 
     %% delete pool metrics
-    delete_metrics(Engine, PoolName),
+    delete_metrics(PoolName),
     ok.
 
 %% internals
@@ -394,9 +390,8 @@ find_connection({_Host, _Port, Transport}=Dest, Pid,
     end.
 
 remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
-    metrics:update_histogram(State#state.metrics,
-                             [hackney, State#state.name, free_count],
-                             dict:size(Sockets)),
+    metrics:update([hackney, State#state.name, free_count],
+                   dict:size(Sockets)),
     case dict:find(Socket, Sockets) of
         {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
             cancel_timer(Socket, Timer),
@@ -479,9 +474,8 @@ deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
             store_socket(Dest, Socket, State);
         {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
             NbWaiters = State#state.nb_waiters - 1,
-            metrics:update_histogram(State#state.metrics,
-                                     [hackney_pool, State#state.name, queue_count],
-                                     NbWaiters),
+            metrics:update([hackney_pool, State#state.name, queue_count],
+                           NbWaiters),
             case Transport:controlling_process(Socket, PidWaiter) of
                 ok ->
                     gen_server:reply(FromWaiter, {ok, Socket, self()}),
@@ -518,28 +512,24 @@ monitor_client(Dest, Ref, State) ->
 
 
 init_metrics(PoolName) ->
-    %% get metrics module
-    Engine = metrics:init(hackney_util:mod_metrics()),
-
     %% initialise metrics
-    metrics:new(Engine, histogram, [hackney_pool, PoolName, take_rate]),
-    metrics:new(Engine, counter, [hackney_pool, PoolName, no_socket]),
-    metrics:new(Engine, histogram, [hackney_pool, PoolName, in_use_count]),
-    metrics:new(Engine, histogram, [hackney_pool, PoolName, free_count]),
-    metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_counter]),
-    Engine.
+    metrics:new(histogram, [hackney_pool, PoolName, take_rate]),
+    metrics:new(counter, [hackney_pool, PoolName, no_socket]),
+    metrics:new(histogram, [hackney_pool, PoolName, in_use_count]),
+    metrics:new(histogram, [hackney_pool, PoolName, free_count]),
+    metrics:new(histogram, [hackney_pool, PoolName, queue_counter]).
 
-delete_metrics(Engine, PoolName) ->
-    metrics:delete(Engine, [hackney_pool, PoolName, take_rate]),
-    metrics:delete(Engine, [hackney_pool, PoolName, no_socket]),
-    metrics:delete(Engine, [hackney_pool, PoolName, in_use_count]),
-    metrics:delete(Engine, [hackney_pool, PoolName, free_count]),
-    metrics:delete(Engine, [hackney_pool, PoolName, queue_counter]).
+delete_metrics(PoolName) ->
+    metrics:delete([hackney_pool, PoolName, take_rate]),
+    metrics:delete([hackney_pool, PoolName, no_socket]),
+    metrics:delete([hackney_pool, PoolName, in_use_count]),
+    metrics:delete([hackney_pool, PoolName, free_count]),
+    metrics:delete([hackney_pool, PoolName, queue_counter]).
 
 
-update_usage(#state{name=PoolName, metrics=Engine, sockets=Sockets,
+update_usage(#state{name=PoolName, sockets=Sockets,
                     clients=Clients}) ->
-    metrics:update_histogram(Engine, [hackney_pool, PoolName,in_use_count],
-                         dict:size(Clients) - 1),
-    metrics:update_histogram(Engine, [hackney_pool, PoolName, free_count],
-                         dict:size(Sockets) - 1).
+    metrics:update([hackney_pool, PoolName,in_use_count],
+                   dict:size(Clients) - 1),
+    metrics:update([hackney_pool, PoolName, free_count],
+                   dict:size(Sockets) - 1).

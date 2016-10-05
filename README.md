@@ -436,15 +436,24 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics` entry to hackney's
-app config. Metrics are disabled by default. The module specified must have an
-API matching that of the hackney metrics module.
+You can enable metrics collection by adding a `metrics` entry to the config.
 
-To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
-folsom}`, or if you want to use
+```erlang
+{metrics, [
+  {mod_metrics, metrics_folsom}
+]}
+```
+
+Metrics are disabled by default. The module specified must have an API 
+matching that of the hackney metrics module.
+
+To use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
+metrics_folsom}`, if you want to use
 [exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
-exometer}` and ensure that folsom or exometer is in your code path and has
-been started.
+metrics_exometer}`, or if you want to use 
+[grapherl](https://github.com/processone/grapherl), specify `{mod_metrics,
+metrics_grapherl}` and ensure that folsom, exometer or grapherl is in your
+code path and has been started.
 
 #### Generic Hackney metrics
 

@@ -1,5 +1,5 @@
 [{<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},0},
  {<<"idna">>,{pkg,<<"idna">>,<<"1.2.0">>},0},
- {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
+ {<<"metrics">>,{pkg,<<"metrics">>,<<"2.1.0">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.1">>},0}].
