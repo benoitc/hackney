@@ -2,7 +2,6 @@
 
 -record(client, {
         start_time,
-        mod_metrics = nil,
         transport,
         host,
         port,

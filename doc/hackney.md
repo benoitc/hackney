@@ -83,7 +83,7 @@ options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a><
 ### body/1 ###
 
 <pre><code>
-body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary()} | {error, atom()}
+body(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, binary()} | {error, atom()} | {error, {closed, binary()}}
 </code></pre>
 <br />
 
@@ -94,7 +94,7 @@ Return the full body sent with the response.
 ### body/2 ###
 
 <pre><code>
-body(Ref::<a href="#type-client_ref">client_ref()</a>, MaxLength::non_neg_integer() | infinity) -&gt; {ok, binary()} | {error, atom()}
+body(Ref::<a href="#type-client_ref">client_ref()</a>, MaxLength::non_neg_integer() | infinity) -&gt; {ok, binary()} | {error, atom()} | {error, {closed, binary()}}
 </code></pre>
 <br />
 

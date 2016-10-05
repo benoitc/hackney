@@ -229,7 +229,7 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}' : To send a form
-- `{multipart, Parts}' : to send you body using the multipart API. Parts
+- `{multipart, Parts}' : to send your body using the multipart API. Parts
   follow this format:
   - `eof': end the multipart request
   - `{file, Path}': to stream a file
@@ -438,16 +438,24 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics' entry to hackney's
-app config. Metrics are disabled by default. The module specified must have an
-API matching that of the hackney metrics module.
+You can enable metrics collection by adding a `metrics` entry to the config.
 
-To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
-folsom}', or if you want to use
-[exometer](https://github.com/feuerlabs/exometer), specify  `{mod_metrics,
-exometer}' and ensure that folsom or exometer is in your code path and has
-been started.
 
+<pre lang="erlang">
+{metrics, [
+  {mod_metrics, metrics_folsom}
+]}</pre>
+
+Metrics are disabled by default. The module specified must have an API 
+matching that of the hackney metrics module.
+
+To use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
+metrics_folsom}`, if you want to use
+[exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
+metrics_exometer}`, or if you want to use 
+[grapherl](https://github.com/processone/grapherl), specify `{mod_metrics,
+metrics_grapherl}` and ensure that folsom, exometer or grapherl is in your
+code path and has been started.
 
 #### Generic Hackney metrics
 
@@ -508,8 +516,8 @@ $ pip install gunicorn httpbin
 Running the tests:
 
 ```
-$ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
+$ gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock --daemon --pid httpbin.pid httpbin:app
+$ rebar3 as test eunit
 $ kill `cat httpbin.pid`
 '''
 

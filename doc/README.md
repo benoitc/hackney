@@ -172,6 +172,8 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 > Note: you can also fetch a multipart response using the functions
 > `hackney:stream_multipart/1` and  `hackney:skip_multipart/1`.
 
+> Note 2: using the `with_body` option will return the body directy instead of a reference.
+
 ### Reuse a connection
 
 By default all connections are created and closed dynamically by
@@ -214,7 +216,7 @@ NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
-> If your connection supports keepalive the connection will be simply :
+> If your connection supports keepalive the connection will be kept open until you close it exclusively.
 
 ### Send a body
 
@@ -222,7 +224,7 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}` : To send a form
-- `{multipart, Parts}` : to send you body using the multipart API. Parts
+- `{multipart, Parts}` : to send your body using the multipart API. Parts
   follow this format:
   - `eof`: end the multipart request
   - `{file, Path}`: to stream a file
@@ -316,7 +318,7 @@ LoopFun(LoopFun, ClientRef).
 > synchronously using the function `hackney:stop_async/1` See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
-> **Note 4**:  When the option `{following_redirect, true}` is passed to
+> **Note 4**:  When the option `{follow_redirect, true}` is passed to
 > the request, you will receive the folllowing messages on valid
 > redirection:
 > - `{redirect, To, Headers}`
@@ -436,15 +438,21 @@ automatically upgrading to an SSL connection if needed.
 
 Hackney offers the following metrics
 
-You can enable metrics collection by adding a `mod_metrics` entry to hackney's
-app config. Metrics are disabled by default. The module specified must have an
-API matching that of the hackney metrics module.
+You can enable metrics collection by adding a `metrics` entry to the config.<pre lang="erlang">
+{metrics, [
+  {mod_metrics, metrics_folsom}
+]}</pre>
 
-To  use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
-folsom}`, or if you want to use
+Metrics are disabled by default. The module specified must have an API 
+matching that of the hackney metrics module.
+
+To use [folsom](https://github.com/boundary/folsom), specify `{mod_metrics,
+metrics_folsom}`, if you want to use
 [exometer](https://github.com/feuerlabs/exometer), specify`{mod_metrics,
-exometer}` and ensure that folsom or exometer is in your code path and has
-been started.
+metrics_exometer}`, or if you want to use 
+[grapherl](https://github.com/processone/grapherl), specify `{mod_metrics,
+metrics_grapherl}` and ensure that folsom, exometer or grapherl is in your
+code path and has been started.
 
 #### Generic Hackney metrics
 
@@ -508,8 +516,8 @@ $ pip install gunicorn httpbin
 Running the tests:
 
 ```
-$ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
+$ gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock --daemon --pid httpbin.pid httpbin:app
+$ rebar3 as test eunit
 $ kill `cat httpbin.pid`
 ```
 
@@ -527,6 +535,7 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
 <tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
