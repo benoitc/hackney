@@ -319,12 +319,8 @@ parse_header(Line, St) ->
     end,
     {header, {Key, Value}, St1}.
 
-parse_header_value(<< $\s, Rest/binary >>) ->
-    parse_header_value(Rest);
-parse_header_value(<< $\t, Rest/binary >>) ->
-    parse_header_value(Rest);
 parse_header_value(H) ->
-    H.
+    hackney_bstr:trim(H).
 
 
 parse_trailers(St, Acc) ->
@@ -525,3 +521,16 @@ get_property(content_type, #hparser{ctype=CType}) ->
     CType;
 get_property(location, #hparser{location=Location}) ->
     Location.
+
+%%% Private Tests
+-ifdef(TEST).
+
+    -include_lib("eunit/include/eunit.hrl").
+
+    parse_response_header_with_trailing_whitespace_test() ->
+        Response = <<"Content-Length: 27515  ">>,
+        Parser1 = parser([response]),
+        {header, {<<"Content-Length">>, Length}, _} = parse_header(Response, Parser1),
+        ?assertEqual(<<"27515">>, Length).
+
+-endif.
