@@ -45,7 +45,7 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                                  <<"Basic ", Credentials/binary>>}]
     end,
 
-    %% add any cookies passed ot options
+    %% add any cookies passed to options
     Cookies = proplists:get_value(cookie, Options, []),
     DefaultHeaders1 = maybe_add_cookies(Cookies, DefaultHeaders),
 
