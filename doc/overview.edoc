@@ -229,7 +229,7 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}' : To send a form
-- `{multipart, Parts}' : to send you body using the multipart API. Parts
+- `{multipart, Parts}' : to send your body using the multipart API. Parts
   follow this format:
   - `eof': end the multipart request
   - `{file, Path}': to stream a file
