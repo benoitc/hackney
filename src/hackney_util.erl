@@ -139,7 +139,7 @@ have_rand() -> (code:which(rand) /= non_existing).
 
 merge_opts([], Options) -> Options;
 merge_opts([Opt = {K, _}| Rest], Options) ->
-	case lists:member(K, Options) of
+	case lists:keymember(K, 1, Options) of
 		true -> merge_opts(Rest, Options);
 		false -> merge_opts(Rest, [Opt | Options])
 	end;
