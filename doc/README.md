@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2016 Benoît Chesneau.
 
-__Version:__ 1.6.1
+__Version:__ 1.6.2
 
 # hackney
 
@@ -172,6 +172,8 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 > Note: you can also fetch a multipart response using the functions
 > `hackney:stream_multipart/1` and  `hackney:skip_multipart/1`.
 
+> Note 2: using the `with_body` option will return the body directy instead of a reference.
+
 ### Reuse a connection
 
 By default all connections are created and closed dynamically by
@@ -214,7 +216,7 @@ NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
 
-> If your connection supports keepalive the connection will be simply :
+> If your connection supports keepalive the connection will be kept open until you close it exclusively.
 
 ### Send a body
 
@@ -222,7 +224,7 @@ hackney helps you send different payloads by passing different terms as
 the request body:
 
 - `{form, PropList}` : To send a form
-- `{multipart, Parts}` : to send you body using the multipart API. Parts
+- `{multipart, Parts}` : to send your body using the multipart API. Parts
   follow this format:
   - `eof`: end the multipart request
   - `{file, Path}`: to stream a file
@@ -316,7 +318,7 @@ LoopFun(LoopFun, ClientRef).
 > synchronously using the function `hackney:stop_async/1` See the
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
-> **Note 4**:  When the option `{following_redirect, true}` is passed to
+> **Note 4**:  When the option `{follow_redirect, true}` is passed to
 > the request, you will receive the folllowing messages on valid
 > redirection:
 > - `{redirect, To, Headers}`
@@ -527,6 +529,7 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
 <tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
 <tr><td><a href="hackney_manager.md" class="module">hackney_manager</a></td></tr>
 <tr><td><a href="hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
 <tr><td><a href="hackney_pool.md" class="module">hackney_pool</a></td></tr>
