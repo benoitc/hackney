@@ -10,9 +10,9 @@ otp_release:
   - R16B01
   - R16B
 before_script:
-    - "./support/bootstrap_travis.sh"
+    - "./support/rebar3 update"
     - "gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&"
 before_install:
   - sudo pip install -q httpbin
   - sudo pip install -q gunicorn
-script: './rebar3 eunit --dir="test"'
+script: './support/rebar3 eunit --dir="test"'
