@@ -9,10 +9,10 @@ otp_release:
   - R16B02
   - R16B01
   - R16B
+env:
+  - TEST=1
 before_script:
-    - "./support/rebar3 update"
     - "gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&"
 before_install:
   - sudo pip install -q httpbin
   - sudo pip install -q gunicorn
-script: './support/rebar3 eunit --dir="test"'
