@@ -1,5 +1,17 @@
 # NEWS
 
+1.6.2 - 2016-10-22
+------------------
+
+- add: unix sockets support on Erlang > 19
+- fix: `hackney_multiprart` for Erlang < 17
+- add: new `socks5_resolver` function
+- fix: `hackney_util:merge_opts/2`
+- improvements: inet6 support in socks5 sockets
+- doc: miscenaleous docs fixes
+- security: beeing more strict in ssl support
+- security: bump to certifi 0.7
+
 1.6.1 - 2016-07-10
 ------------------
 - fix: close socket on error (#308)
