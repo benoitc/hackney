@@ -3,7 +3,7 @@
 -include("hackney_lib.hrl").
 
 
-default_tests() ->
+all_tests() ->
   [get_request(),
    request_with_body(),
    head_request(),
@@ -21,11 +21,11 @@ default_tests() ->
    async_head_request(),
    async_no_content_request()].
 
-all_tests() ->
-    case has_unix_socket() of
-        true -> default_tests() ++ [local_socket_request()];
-        false -> default_tests()
-    end.
+%%all_tests() ->
+%%    case has_unix_socket() of
+%%        true -> default_tests() ++ [local_socket_request()];
+%%        false -> default_tests()
+%%    end.
 
 http_requests_test_() ->
     {setup,
@@ -150,10 +150,10 @@ async_no_content_request() ->
     [?_assertEqual(204, StatusCode),
      ?_assertEqual([headers, status], Keys)].
 
-local_socket_request() ->
-    URL = <<"http+unix://httpbin.sock/get">>,
-    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(200, StatusCode).
+%%local_socket_request() ->
+%%    URL = <<"http+unix://httpbin.sock/get">>,
+%%    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+%%    ?_assertEqual(200, StatusCode).
 
 
 %% Helpers
