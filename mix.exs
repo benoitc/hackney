@@ -47,7 +47,7 @@ use Mix.Project
             {:mimerl, "~> 1.0.2"},
             {:certifi, "~> 0.7.0"},
             # {:metrics, "~> 2.1.0"},
-            {:metrics, git: "https://github.com/botsunit/erlang-metrics.git", branch: "add_delete"},
+            {:metrics, git: "https://github.com/botsunit/erlang-metrics.git", tag: "2.2.0"},
             {:ssl_verify_fun, "1.1.1"}
         ]
     end

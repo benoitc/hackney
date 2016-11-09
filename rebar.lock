@@ -2,7 +2,7 @@
  {<<"idna">>,{pkg,<<"idna">>,<<"1.2.0">>},0},
  {<<"metrics">>,
   {git,"https://github.com/botsunit/erlang-metrics.git",
-       {ref,"acb2181d9e1b18139237ee748ab3b3590dadc5eb"}},
+       {ref,"c9e6f9c894d152d29400a62fb9aeb41f1ec38e14"}},
   0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.1">>},0}].
