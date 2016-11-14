@@ -1,8 +1,5 @@
 [{<<"certifi">>,{pkg,<<"certifi">>,<<"0.7.0">>},0},
  {<<"idna">>,{pkg,<<"idna">>,<<"1.2.0">>},0},
- {<<"metrics">>,
-  {git,"https://github.com/botsunit/erlang-metrics.git",
-       {ref,"c9e6f9c894d152d29400a62fb9aeb41f1ec38e14"}},
-  0},
+ {<<"metrics">>,{pkg,<<"metrics">>,<<"2.2.0">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.1">>},0}].
