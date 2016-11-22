@@ -11,7 +11,6 @@
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
 -export([privdir/0]).
--export([mod_metrics/0]).
 -export([to_atom/1]).
 
 %% random compatibility
@@ -105,16 +104,6 @@ privdir() ->
     end.
 
 
-mod_metrics() ->
-    case application:get_env(hackney, mod_metrics) of
-        {ok, folsom} -> metrics_folsom;
-        {ok, exometer} -> metrics_exometer;
-        {ok, dummy} -> metrics_dummy;
-        {ok, Mod} -> Mod;
-        _ -> metrics_dummy
-    end.
-
-
 to_atom(V) when is_list(V) ->
     try
         list_to_existing_atom(V)
@@ -152,4 +141,3 @@ merge_opts([K | Rest], Options) when is_atom(K) ->
 	end;
 merge_opts([_ | Rest], Options) ->
 	merge_opts(Rest, Options).
-
