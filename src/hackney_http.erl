@@ -280,11 +280,11 @@ parse_header(#hparser{buffer=Buf}=St) ->
         [<<>>, Rest] ->
             {headers_complete, St#hparser{buffer=Rest,
                                           state=on_body}};
-        [<< " ", Line/binary >>, Rest] ->
-            NewBuf = iolist_to_binary([Line, Rest]),
+        [Line, << " ", Rest/binary >> ] ->
+            NewBuf = iolist_to_binary([Line, " ", Rest]),
             parse_header(St#hparser{buffer=NewBuf});
-        [<< "\t", Line/binary >>, Rest] ->
-            NewBuf = iolist_to_binary([Line, Rest]),
+        [Line, << "\t", Rest/binary >> ] ->
+            NewBuf = iolist_to_binary([Line, " ", Rest]),
             parse_header(St#hparser{buffer=NewBuf});
         [Line, Rest]->
             parse_header(Line, St#hparser{buffer=Rest});
