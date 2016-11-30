@@ -17,7 +17,7 @@
          urldecode/1, urldecode/2,
          urlencode/1, urlencode/2,
          parse_qs/1,
-         qs/1,
+         qs/1, qs/2,
          make_url/3,
          fix_path/1,
          pathencode/1,
@@ -330,13 +330,19 @@ parse_qs(Bin) ->
 qs(KVs) ->
    qs(KVs, []).
 
-qs([], Acc) ->
+%% @doc encode query properties to binary
+%% Opts are passed to urlencode.
+-spec qs(qs_vals(), [atom]) -> binary().
+qs(KVs, Opts) ->
+  qs(KVs, Opts, []).
+
+qs([], _Opts, Acc) ->
     hackney_bstr:join(lists:reverse(Acc), <<"&">>);
-qs([{K, V}|R], Acc) ->
-    K1 = urlencode(K),
-    V1 = urlencode(V),
+qs([{K, V}|R], Opts, Acc) ->
+    K1 = urlencode(K, Opts),
+    V1 = urlencode(V, Opts),
     Line = << K1/binary, "=", V1/binary >>,
-    qs(R, [Line | Acc]).
+    qs(R, Opts, [Line | Acc]).
 
 %% @doc  construct an url from a base url, a path and a list of
 %% properties to give to the url.
