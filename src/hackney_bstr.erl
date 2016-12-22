@@ -6,43 +6,43 @@
 -module(hackney_bstr).
 
 -export([to_binary/1,
-         to_lower/1, to_upper/1,
-         char_to_lower/1, char_to_upper/1,
-         join/2,
-         to_hex/1,
-         token_ci/2, token/2,
-         list/2,
-         nonempty_list/2,
-         params/2,
-         parameterized_tokens/1,
-         whitespace/2,
-         digits/1, digits/2, digits/3,
-         alpha/2,
-         word/2,
-         trim/1]).
+  to_lower/1, to_upper/1,
+  char_to_lower/1, char_to_upper/1,
+  join/2,
+  to_hex/1,
+  token_ci/2, token/2,
+  list/2,
+  nonempty_list/2,
+  params/2,
+  parameterized_tokens/1,
+  whitespace/2,
+  digits/1, digits/2, digits/3,
+  alpha/2,
+  word/2,
+  trim/1]).
 
 -export([quoted_string/2]).
 
 to_binary(V) when is_list(V) ->
-    list_to_binary(V);
+  list_to_binary(V);
 to_binary(V) when is_atom(V) ->
-    atom_to_binary(V, latin1);
+  atom_to_binary(V, latin1);
 to_binary(V) when is_integer(V) ->
-    list_to_binary(integer_to_list(V));
+  list_to_binary(integer_to_list(V));
 to_binary(V) when is_binary(V) ->
-    V.
+  V.
 
 %% @doc Convert a binary string to lowercase.
 -spec to_lower(binary()) -> binary().
 to_lower(L) when is_list(L) ->
-    to_lower(list_to_binary(L));
+  to_lower(list_to_binary(L));
 to_lower(L) ->
-	<< << (char_to_lower(C)) >> || << C >> <= L >>.
+  << << (char_to_lower(C)) >> || << C >> <= L >>.
 
 to_upper(L) when is_list(L) ->
-    to_upper(list_to_binary(L));
+  to_upper(list_to_binary(L));
 to_upper(U) ->
-    << << (char_to_upper(C)) >> || << C >> <= U >>.
+  << << (char_to_upper(C)) >> || << C >> <= U >>.
 
 
 %% @doc Convert [A-Z] characters to lowercase.
@@ -108,25 +108,25 @@ char_to_upper($z) -> $Z;
 char_to_upper(Ch) -> Ch.
 
 join([], _Separator) ->
-    <<>>;
+  <<>>;
 join([S], _separator) ->
-    S;
+  S;
 join(L, Separator) ->
-    iolist_to_binary(join(lists:reverse(L), Separator, [])).
+  iolist_to_binary(join(lists:reverse(L), Separator, [])).
 
 join([], _Separator, Acc) ->
-    Acc;
+  Acc;
 join([S | Rest], Separator, []) ->
-    join(Rest, Separator, [S]);
+  join(Rest, Separator, [S]);
 join([S | Rest], Separator, Acc) ->
-    join(Rest, Separator, [S, Separator | Acc]).
+  join(Rest, Separator, [S, Separator | Acc]).
 
 to_hex([]) ->
-    [];
+  [];
 to_hex(Bin) when is_binary(Bin) ->
-    to_hex(binary_to_list(Bin));
+  to_hex(binary_to_list(Bin));
 to_hex([H|T]) ->
-    [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
+  [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
 
 to_digit(N) when N < 10 -> $0 + N;
 to_digit(N)             -> $a + N-10.
@@ -138,46 +138,46 @@ to_digit(N)             -> $a + N-10.
 %% Changes all characters to lowercase.
 -spec token_ci(binary(), fun()) -> any().
 token_ci(Data, Fun) ->
-	token(Data, Fun, ci, <<>>).
+  token(Data, Fun, ci, <<>>).
 
 %% @doc Parse a token.
 -spec token(binary(), fun()) -> any().
 token(Data, Fun) ->
-	token(Data, Fun, cs, <<>>).
+  token(Data, Fun, cs, <<>>).
 
 -spec token(binary(), fun(), ci | cs, binary()) -> any().
 token(<<>>, Fun, _Case, Acc) ->
-	Fun(<<>>, Acc);
+  Fun(<<>>, Acc);
 token(Data = << C, _Rest/binary >>, Fun, _Case, Acc)
-		when C =:= $(; C =:= $); C =:= $<; C =:= $>; C =:= $@;
-			 C =:= $,; C =:= $;; C =:= $:; C =:= $\\; C =:= $";
-			 C =:= $/; C =:= $[; C =:= $]; C =:= $?; C =:= $=;
-			 C =:= ${; C =:= $}; C =:= $\s; C =:= $\t;
-			 C < 32; C =:= 127 ->
-	Fun(Data, Acc);
+  when C =:= $(; C =:= $); C =:= $<; C =:= $>; C =:= $@;
+       C =:= $,; C =:= $;; C =:= $:; C =:= $\\; C =:= $";
+       C =:= $/; C =:= $[; C =:= $]; C =:= $?; C =:= $=;
+       C =:= ${; C =:= $}; C =:= $\s; C =:= $\t;
+       C < 32; C =:= 127 ->
+  Fun(Data, Acc);
 token(<< C, Rest/binary >>, Fun, Case = ci, Acc) ->
-	C2 = char_to_lower(C),
-	token(Rest, Fun, Case, << Acc/binary, C2 >>);
+  C2 = char_to_lower(C),
+  token(Rest, Fun, Case, << Acc/binary, C2 >>);
 token(<< C, Rest/binary >>, Fun, Case, Acc) ->
-	token(Rest, Fun, Case, << Acc/binary, C >>).
+  token(Rest, Fun, Case, << Acc/binary, C >>).
 
 
 %% @doc Parse a non-empty list of the given type.
 -spec nonempty_list(binary(), fun()) -> [any(), ...] | {error, badarg}.
 nonempty_list(Data, Fun) ->
-    case list(Data, Fun, []) of
-        {error, badarg} -> {error, badarg};
-        [] -> {error, badarg};
-        L -> lists:reverse(L)
-    end.
+  case list(Data, Fun, []) of
+    {error, badarg} -> {error, badarg};
+    [] -> {error, badarg};
+    L -> lists:reverse(L)
+  end.
 
 %% @doc Parse a list of the given type.
 -spec list(binary(), fun()) -> list() | {error, badarg}.
 list(Data, Fun) ->
-    case list(Data, Fun, []) of
-        {error, badarg} -> {error, badarg};
-        L -> lists:reverse(L)
-    end.
+  case list(Data, Fun, []) of
+    {error, badarg} -> {error, badarg};
+    L -> lists:reverse(L)
+  end.
 
 -spec list(binary(), fun(), [binary()]) -> [any()] | {error, badarg}.
 %% From the RFC:
@@ -187,132 +187,132 @@ list(Data, Fun) ->
 %% as only two elements. Therefore, where at least one element is required,
 %% at least one non-null element MUST be present.</blockquote>
 list(Data, Fun, Acc) ->
-    whitespace(Data,
-               fun (<<>>) -> Acc;
-            (<< $,, Rest/binary >>) -> list(Rest, Fun, Acc);
-            (Rest) -> Fun(Rest,
-                          fun (D, I) -> whitespace(D,
-                                                   fun (<<>>) -> [I|Acc];
-                                    (<< $,, R/binary >>) -> list(R, Fun,
-                                                                 [I|Acc]);
-                                    (_Any) -> {error, badarg}
-                                end)
-                    end)
-        end).
+  whitespace(Data,
+    fun (<<>>) -> Acc;
+        (<< $,, Rest/binary >>) -> list(Rest, Fun, Acc);
+        (Rest) -> Fun(Rest,
+          fun (D, I) -> whitespace(D,
+            fun (<<>>) -> [I|Acc];
+                (<< $,, R/binary >>) -> list(R, Fun,
+                  [I|Acc]);
+                (_Any) -> {error, badarg}
+            end)
+          end)
+    end).
 
 
 %% @doc Parse a list of parameters (a=b;c=d).
 -spec params(binary(), fun()) -> any().
 params(Data, Fun) ->
-    params(Data, Fun, []).
+  params(Data, Fun, []).
 
 -spec params(binary(), fun(), [{binary(), binary()}]) -> any().
 params(Data, Fun, Acc) ->
-    whitespace(Data,
-               fun (<< $;, Rest/binary >>) ->
-                param(Rest,
-                      fun (Rest2, Attr, Value) ->
-                            params(Rest2, Fun, [{Attr, Value}|Acc])
-                    end);
-            (Rest) ->
-                Fun(Rest, lists:reverse(Acc))
-        end).
+  whitespace(Data,
+    fun (<< $;, Rest/binary >>) ->
+      param(Rest,
+        fun (Rest2, Attr, Value) ->
+          params(Rest2, Fun, [{Attr, Value}|Acc])
+        end);
+        (Rest) ->
+          Fun(Rest, lists:reverse(Acc))
+    end).
 
 -spec param(binary(), fun()) -> any().
 param(Data, Fun) ->
-    whitespace(Data,
-               fun (Rest) ->
-                token_ci(Rest,
-                         fun (_Rest2, <<>>) -> {error, badarg};
-                        (<< $=, Rest2/binary >>, Attr) ->
-                            word(Rest2,
-                                 fun (Rest3, Value) ->
-                                        Fun(Rest3, Attr, Value)
-                                end);
-                        (_Rest2, _Attr) -> {error, badarg}
-                    end)
-        end).
+  whitespace(Data,
+    fun (Rest) ->
+      token_ci(Rest,
+        fun (_Rest2, <<>>) -> {error, badarg};
+            (<< $=, Rest2/binary >>, Attr) ->
+              word(Rest2,
+                fun (Rest3, Value) ->
+                  Fun(Rest3, Attr, Value)
+                end);
+            (_Rest2, _Attr) -> {error, badarg}
+        end)
+    end).
 
 %% @doc Parse a non empty list of tokens followed with optional parameters.
 -spec parameterized_tokens(binary()) -> any().
 parameterized_tokens(Data) ->
-    nonempty_list(Data,
-                  fun (D, Fun) ->
-                token(D,
-                      fun (_Rest, <<>>) -> {error, badarg};
-                        (Rest, Token) ->
-                            parameterized_tokens_params(Rest,
-                                                        fun (Rest2, Params) ->
-                                        Fun(Rest2, {Token, Params})
-                                end, [])
-                    end)
-        end).
+  nonempty_list(Data,
+    fun (D, Fun) ->
+      token(D,
+        fun (_Rest, <<>>) -> {error, badarg};
+            (Rest, Token) ->
+              parameterized_tokens_params(Rest,
+                fun (Rest2, Params) ->
+                  Fun(Rest2, {Token, Params})
+                end, [])
+        end)
+    end).
 
 -spec parameterized_tokens_params(binary(), fun(),
-                    [binary() | {binary(), binary()}]) -> any().
+  [binary() | {binary(), binary()}]) -> any().
 parameterized_tokens_params(Data, Fun, Acc) ->
-    whitespace(Data,
-               fun (<< $;, Rest/binary >>) ->
-                parameterized_tokens_param(Rest,
-                                           fun (Rest2, Param) ->
-                            parameterized_tokens_params(Rest2, Fun,
-                                                        [Param|Acc])
-                    end);
-            (Rest) ->
-                Fun(Rest, lists:reverse(Acc))
-        end).
+  whitespace(Data,
+    fun (<< $;, Rest/binary >>) ->
+      parameterized_tokens_param(Rest,
+        fun (Rest2, Param) ->
+          parameterized_tokens_params(Rest2, Fun,
+            [Param|Acc])
+        end);
+        (Rest) ->
+          Fun(Rest, lists:reverse(Acc))
+    end).
 
 -spec parameterized_tokens_param(binary(), fun()) -> any().
 parameterized_tokens_param(Data, Fun) ->
-    whitespace(Data,
-               fun (Rest) ->
-                token(Rest,
-                      fun (_Rest2, <<>>) ->
-                            {error, badarg};
-                        (<< $=, Rest2/binary >>, Attr) ->
-                            word(Rest2,
-                                 fun (Rest3, Value) ->
-                                        Fun(Rest3, {Attr, Value})
-                                end);
-                        (Rest2, Attr) ->
-                            Fun(Rest2, Attr)
-                    end)
-        end).
+  whitespace(Data,
+    fun (Rest) ->
+      token(Rest,
+        fun (_Rest2, <<>>) ->
+          {error, badarg};
+            (<< $=, Rest2/binary >>, Attr) ->
+              word(Rest2,
+                fun (Rest3, Value) ->
+                  Fun(Rest3, {Attr, Value})
+                end);
+            (Rest2, Attr) ->
+              Fun(Rest2, Attr)
+        end)
+    end).
 
 %% @doc Skip whitespace.
 -spec whitespace(binary(), fun()) -> any().
 whitespace(<< C, Rest/binary >>, Fun)
-                when C =:= $\s; C =:= $\t ->
-        whitespace(Rest, Fun);
+  when C =:= $\s; C =:= $\t ->
+  whitespace(Rest, Fun);
 whitespace(Data, Fun) ->
-        Fun(Data).
+  Fun(Data).
 
 %% @doc Parse a list of digits as a non negative integer.
 -spec digits(binary()) -> non_neg_integer() | {error, badarg}.
 digits(Data) ->
-        digits(Data,
-                fun (Rest, I) ->
-                        whitespace(Rest,
-                                fun (<<>>) ->
-                                                I;
-                                        (_Rest2) ->
-                                                {error, badarg}
-                                end)
-                end).
+  digits(Data,
+    fun (Rest, I) ->
+      whitespace(Rest,
+        fun (<<>>) ->
+          I;
+            (_Rest2) ->
+              {error, badarg}
+        end)
+    end).
 
 -spec digits(binary(), fun()) -> any().
 digits(<< C, Rest/binary >>, Fun)
-                when C >= $0, C =< $9 ->
-        digits(Rest, Fun, C - $0);
+  when C >= $0, C =< $9 ->
+  digits(Rest, Fun, C - $0);
 digits(_Data, _Fun) ->
-        {error, badarg}.
+  {error, badarg}.
 
 -spec digits(binary(), fun(), non_neg_integer()) -> any().
 digits(<< C, Rest/binary >>, Fun, Acc)
-                when C >= $0, C =< $9 ->
-        digits(Rest, Fun, Acc * 10 + (C - $0));
+  when C >= $0, C =< $9 ->
+  digits(Rest, Fun, Acc * 10 + (C - $0));
 digits(Data, Fun, Acc) ->
-        Fun(Data, Acc).
+  Fun(Data, Acc).
 
 
 %% @doc Parse a list of case-insensitive alpha characters.
@@ -320,43 +320,43 @@ digits(Data, Fun, Acc) ->
 %% Changes all characters to lowercase.
 -spec alpha(binary(), fun()) -> any().
 alpha(Data, Fun) ->
-        alpha(Data, Fun, <<>>).
+  alpha(Data, Fun, <<>>).
 
 -spec alpha(binary(), fun(), binary()) -> any().
 alpha(<<>>, Fun, Acc) ->
-        Fun(<<>>, Acc);
+  Fun(<<>>, Acc);
 alpha(<< C, Rest/binary >>, Fun, Acc)
-                when C >= $a andalso C =< $z;
-                         C >= $A andalso C =< $Z ->
-        C2 = char_to_lower(C),
-        alpha(Rest, Fun, << Acc/binary, C2 >>);
+  when C >= $a andalso C =< $z;
+       C >= $A andalso C =< $Z ->
+  C2 = char_to_lower(C),
+  alpha(Rest, Fun, << Acc/binary, C2 >>);
 alpha(Data, Fun, Acc) ->
-        Fun(Data, Acc).
+  Fun(Data, Acc).
 
 %% @doc Parse either a token or a quoted string.
 -spec word(binary(), fun()) -> any().
 word(Data = << $", _/binary >>, Fun) ->
-        quoted_string(Data, Fun);
+  quoted_string(Data, Fun);
 word(Data, Fun) ->
-        token(Data,
-                fun (_Rest, <<>>) -> {error, badarg};
-                        (Rest, Token) -> Fun(Rest, Token)
-                end).
+  token(Data,
+    fun (_Rest, <<>>) -> {error, badarg};
+        (Rest, Token) -> Fun(Rest, Token)
+    end).
 
 -spec trim(binary()) -> binary().
 trim(Data) ->
-    re:replace(Data, "^\\s+|\\s+$", "", [{return, binary}, global]).
+  re:replace(Data, "^\\s+|\\s+$", "", [{return, binary}, global]).
 
 -spec quoted_string(binary(), fun()) -> any().
 quoted_string(<< $", Rest/binary >>, Fun) ->
-        quoted_string(Rest, Fun, <<>>).
+  quoted_string(Rest, Fun, <<>>).
 
 -spec quoted_string(binary(), fun(), binary()) -> any().
 quoted_string(<<>>, _Fun, _Acc) ->
-        {error, badarg};
+  {error, badarg};
 quoted_string(<< $", Rest/binary >>, Fun, Acc) ->
-        Fun(Rest, Acc);
+  Fun(Rest, Acc);
 quoted_string(<< $\\, C, Rest/binary >>, Fun, Acc) ->
-        quoted_string(Rest, Fun, << Acc/binary, C >>);
+  quoted_string(Rest, Fun, << Acc/binary, C >>);
 quoted_string(<< C, Rest/binary >>, Fun, Acc) ->
-        quoted_string(Rest, Fun, << Acc/binary, C >>).
+  quoted_string(Rest, Fun, << Acc/binary, C >>).

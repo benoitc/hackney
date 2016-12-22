@@ -14,176 +14,176 @@
 -export_type([response_state/0]).
 
 -export([start_response/1,
-         stream_body/1,
-         stream_multipart/1,
-         skip_multipart/1,
-         body/1, body/2, skip_body/1,
-         maybe_close/1,
-         close/1,
-         expect_response/1]).
+  stream_body/1,
+  stream_multipart/1,
+  skip_multipart/1,
+  body/1, body/2, skip_body/1,
+  maybe_close/1,
+  close/1,
+  expect_response/1]).
 
 %% internal
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
-    case hackney_request:end_stream_body(Client) of
-        {ok, Client1} ->
-            start_response(Client1);
-        Error ->
-            Error
-    end;
+  case hackney_request:end_stream_body(Client) of
+    {ok, Client1} ->
+      start_response(Client1);
+    Error ->
+      Error
+  end;
 start_response(#client{response_state=stream} = Client) ->
-    case hackney_request:stream_multipart(eof, Client) of
-        {ok, Client1} ->
-            start_response(Client1);
-        Error ->
-            Error
-    end;
+  case hackney_request:stream_multipart(eof, Client) of
+    {ok, Client1} ->
+      start_response(Client1);
+    Error ->
+      Error
+  end;
 start_response(#client{request_ref=Ref, response_state=waiting,
-                       async=Async}=Client)
-        when Async =:= true orelse Async =:= once ->
-
-    hackney_manager:update_state(Client),
-    case hackney_manager:start_async_response(Ref) of
-        ok ->
-            {ok, Ref};
-        Error ->
-            Error
-    end;
+  async=Async}=Client)
+  when Async =:= true orelse Async =:= once ->
+  
+  hackney_manager:update_state(Client),
+  case hackney_manager:start_async_response(Ref) of
+    ok ->
+      {ok, Ref};
+    Error ->
+      Error
+  end;
 start_response(#client{response_state=waiting} = Client) ->
-    Parser = hackney_http:parser([response]),
-    wait_status(Client#client{parser=Parser});
+  Parser = hackney_http:parser([response]),
+  wait_status(Client#client{parser=Parser});
 start_response(_) ->
-    {error, invalide_state}.
+  {error, invalide_state}.
 
 %% @doc handle Expect header
 expect_response(Client) ->
-    case recv(Client#client{recv_timeout=1000}) of
-        {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" , Rest/binary >>} ->
-            {continue, Client#client{expect=false, buffer=Rest}};
-        {ok, Data} ->
-            {stop, Client#client{buffer=Data, expect=false,
-                                 response_state=waiting}};
-        {error, timeout} ->
-            {continue, Client#client{expect=false}};
-        Error ->
-            Error
-    end.
+  case recv(Client#client{recv_timeout=1000}) of
+    {ok, <<"HTTP/1.1 100 Continue\r\n\r\n" , Rest/binary >>} ->
+      {continue, Client#client{expect=false, buffer=Rest}};
+    {ok, Data} ->
+      {stop, Client#client{buffer=Data, expect=false,
+        response_state=waiting}};
+    {error, timeout} ->
+      {continue, Client#client{expect=false}};
+    Error ->
+      Error
+  end.
 
 
 wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
-    case hackney_http:execute(Parser, Buf) of
-        {more, NParser} ->
-            case recv(Client) of
-                {ok, Data} ->
-                    wait_status(Client#client{buffer=Data,
-                                              parser=NParser});
-                Error  ->
-                    Error
-            end;
-        {response, Version, Status, _Reason, NParser} ->
-            wait_headers(Client#client{parser=NParser,
-                                       buffer = <<>>,
-                                       version=Version}, Status);
-        Error ->
-            Error
-    end.
+  case hackney_http:execute(Parser, Buf) of
+    {more, NParser} ->
+      case recv(Client) of
+        {ok, Data} ->
+          wait_status(Client#client{buffer=Data,
+            parser=NParser});
+        Error  ->
+          Error
+      end;
+    {response, Version, Status, _Reason, NParser} ->
+      wait_headers(Client#client{parser=NParser,
+        buffer = <<>>,
+        version=Version}, Status);
+    Error ->
+      Error
+  end.
 
 wait_headers(#client{parser=Parser}=Client, Status) ->
-    wait_headers(hackney_http:execute(Parser), Client, Status, []).
+  wait_headers(hackney_http:execute(Parser), Client, Status, []).
 
 
 wait_headers({more, Parser}, Client, Status, Headers) ->
-      case recv(Client) of
-        {ok, Data} ->
-            wait_headers(hackney_http:execute(Parser, Data), Client, Status,
-                         Headers);
-        Error  ->
-            Error
-    end;
+  case recv(Client) of
+    {ok, Data} ->
+      wait_headers(hackney_http:execute(Parser, Data), Client, Status,
+        Headers);
+    Error  ->
+      Error
+  end;
 wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
-    Client1 = case hackney_bstr:to_lower(Key) of
-        <<"content-length">> ->
-            CLen = list_to_integer(binary_to_list(Value)),
-            Client#client{clen=CLen};
-        <<"transfer-encoding">> ->
-            Client#client{te=hackney_bstr:to_lower(Value)};
-        <<"connection">> ->
-            Client#client{connection=hackney_bstr:to_lower(Value)};
-        <<"content-type">> ->
-            Client#client{ctype=Value};
-        <<"location">> ->
-            Client#client{location=Value};
-        _ ->
-            Client
-    end,
-    wait_headers(hackney_http:execute(Parser), Client1, Status,
-                 [KV | Headers]);
+  Client1 = case hackney_bstr:to_lower(Key) of
+              <<"content-length">> ->
+                CLen = list_to_integer(binary_to_list(Value)),
+                Client#client{clen=CLen};
+              <<"transfer-encoding">> ->
+                Client#client{te=hackney_bstr:to_lower(Value)};
+              <<"connection">> ->
+                Client#client{connection=hackney_bstr:to_lower(Value)};
+              <<"content-type">> ->
+                Client#client{ctype=Value};
+              <<"location">> ->
+                Client#client{location=Value};
+              _ ->
+                Client
+            end,
+  wait_headers(hackney_http:execute(Parser), Client1, Status,
+    [KV | Headers]);
 
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
-    ResponseTime = timer:now_diff(os:timestamp(),
-                                  Client#client.start_time)/1000,
-    metrics:update_histogram(Client#client.mod_metrics,
-                             [hackney, Client#client.host, response_time],
-                             ResponseTime),
-    {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
+  ResponseTime = timer:now_diff(os:timestamp(),
+    Client#client.start_time)/1000,
+  metrics:update_histogram(Client#client.mod_metrics,
+    [hackney, Client#client.host, response_time],
+    ResponseTime),
+  {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
 
 stream_body(Client=#client{response_state=done}) ->
-    {done, Client};
+  {done, Client};
 stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
-    Buffer = hackney_http:get(Parser, buffer),
-    Client2 = end_stream_body(Buffer, Client),
-    {done, Client2};
+  Buffer = hackney_http:get(Parser, buffer),
+  Client2 = end_stream_body(Buffer, Client),
+  {done, Client2};
 stream_body(Client=#client{parser=Parser, clen=0, te=TE})
-        when TE /= <<"chunked">> ->
-    Buffer = hackney_http:get(Parser, buffer),
-    Client2 = end_stream_body(Buffer, Client),
-    {done, Client2};
+  when TE /= <<"chunked">> ->
+  Buffer = hackney_http:get(Parser, buffer),
+  Client2 = end_stream_body(Buffer, Client),
+  {done, Client2};
 stream_body(Client=#client{parser=Parser}) ->
-    stream_body1(hackney_http:execute(Parser), Client).
+  stream_body1(hackney_http:execute(Parser), Client).
 
 stream_body(Data, #client{parser=Parser}=Client) ->
-    stream_body1(hackney_http:execute(Parser, Data), Client).
+  stream_body1(hackney_http:execute(Parser, Data), Client).
 
 stream_body1({more, Parser, Buffer}, Client) ->
-    stream_body_recv(Buffer, Client#client{parser=Parser});
+  stream_body_recv(Buffer, Client#client{parser=Parser});
 stream_body1({ok, Data, Parser}, Client) ->
-    {ok, Data, Client#client{parser=Parser}};
+  {ok, Data, Client#client{parser=Parser}};
 stream_body1({done, Rest}, Client) ->
-    Client2 = end_stream_body(Rest, Client),
-    {done, Client2};
+  Client2 = end_stream_body(Rest, Client),
+  {done, Client2};
 stream_body1(done, Client) ->
-    Client2 = end_stream_body(<<>>, Client),
-    {done, Client2};
+  Client2 = end_stream_body(<<>>, Client),
+  {done, Client2};
 stream_body1(Error, _Client) ->
-    Error.
+  Error.
 
 
 -spec stream_body_recv(binary(), #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
+    -> {ok, binary(), #client{}} | {error, atom()}.
 stream_body_recv(Buffer, Client=#client{version=Version,
-                                        clen=CLen}) ->
-    case recv(Client) of
-        {ok, Data} ->
-            stream_body(Data, Client);
-        {error, Reason} ->
-            Client2 = close(Client),
-            case Reason of
-                closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                            andalso CLen =:= nil ->
-                    {ok, Buffer, Client2#client{response_state=done,
-                                                body_state=done,
-                                                buffer = <<>>,
-                                                parser=nil}};
-                closed when Client#client.te =:= <<"identity">> ->
-                    {ok, Buffer, Client2#client{response_state=done,
-                                                body_state=done,
-                                                buffer = <<>>}};
-                closed ->
-                    {error, {closed, Buffer}};
-                _ ->
-                    {error, Reason}
-            end
-    end.
+  clen=CLen}) ->
+  case recv(Client) of
+    {ok, Data} ->
+      stream_body(Data, Client);
+    {error, Reason} ->
+      Client2 = close(Client),
+      case Reason of
+        closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
+                      andalso CLen =:= nil ->
+          {ok, Buffer, Client2#client{response_state=done,
+            body_state=done,
+            buffer = <<>>,
+            parser=nil}};
+        closed when Client#client.te =:= <<"identity">> ->
+          {ok, Buffer, Client2#client{response_state=done,
+            body_state=done,
+            buffer = <<>>}};
+        closed ->
+          {error, {closed, Buffer}};
+        _ ->
+          {error, Reason}
+      end
+  end.
 
 %% @doc stream a multipart response
 %%
@@ -193,50 +193,50 @@ stream_body_recv(Buffer, Client=#client{version=Version,
 %% is no part to parse anymore, <em>{eof, Req}</em> is returned.
 -spec stream_multipart(#client{})
     -> {headers, list(), #client{}} | {body, binary(), #client{}}
-    | {eof|end_of_part|mp_mixed|mp_mixed_eof, #client{}}.
+  | {eof|end_of_part|mp_mixed|mp_mixed_eof, #client{}}.
 stream_multipart(Client=#client{body_state=waiting,
-                                ctype=CType,
-                                clen=Length}) ->
-    {<<"multipart">>, _, Params} = hackney_headers:content_type(CType),
-    {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
-    Parser = hackney_multipart:parser(Boundary),
-    multipart_data(Client#client{body_state=processing}, Length,
-                                 {more, Parser});
+  ctype=CType,
+  clen=Length}) ->
+  {<<"multipart">>, _, Params} = hackney_headers:content_type(CType),
+  {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
+  Parser = hackney_multipart:parser(Boundary),
+  multipart_data(Client#client{body_state=processing}, Length,
+    {more, Parser});
 stream_multipart(Client=#client{multipart={Length, Cont}}) ->
-    multipart_data(Client, Length, Cont());
+  multipart_data(Client, Length, Cont());
 stream_multipart(Client=#client{body_state=done}) ->
-    {eof, Client}.
+  {eof, Client}.
 
 multipart_data(Client, Length, {headers, Headers, Cont}) ->
-    {headers, Headers, Client#client{multipart={Length, Cont}}};
+  {headers, Headers, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {body, Data, Cont}) ->
-    {body, Data, Client#client{multipart={Length, Cont}}};
+  {body, Data, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {end_of_part, Cont}) ->
-    {end_of_part, Client#client{multipart={Length, Cont}}};
+  {end_of_part, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {mp_mixed, Cont}) ->
-    {mp_mixed, Client#client{multipart={Length, Cont}}};
+  {mp_mixed, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, {mp_mixed_eof, Cont}) ->
-    {mp_mixed_eof, Client#client{multipart={Length, Cont}}};
+  {mp_mixed_eof, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, eof)
-        when Length =:= 0 orelse Length =:= nil ->
-    Client2 = end_stream_body(<<>>, Client),
-    {eof, Client2#client{body_state=done, multipart=nil}};
+  when Length =:= 0 orelse Length =:= nil ->
+  Client2 = end_stream_body(<<>>, Client),
+  {eof, Client2#client{body_state=done, multipart=nil}};
 multipart_data(Client, _, eof) ->
-    %% We just want to skip so no need to stream data here.
-    {skip, Client2} = skip_body(Client),
-    {eof, Client2#client{multipart=nil}};
+  %% We just want to skip so no need to stream data here.
+  {skip, Client2} = skip_body(Client),
+  {eof, Client2#client{multipart=nil}};
 multipart_data(Client, Length, {more, Parser})
-        when Length > 0 orelse Length =:= nil->
-    case stream_body(Client) of
-        {ok, Data, Client2} when Length =:= nil ->
-            multipart_data(Client2, Length, Parser(Data));
-        {ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
-            multipart_data(Client2#client{buffer=Buffer}, 0,
-                           Parser(Data));
-        {ok, Data, Client2} ->
-            multipart_data(Client2, Length - byte_size(Data),
-                           Parser(Data))
-    end.
+  when Length > 0 orelse Length =:= nil->
+  case stream_body(Client) of
+    {ok, Data, Client2} when Length =:= nil ->
+      multipart_data(Client2, Length, Parser(Data));
+    {ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
+      multipart_data(Client2#client{buffer=Buffer}, 0,
+        Parser(Data));
+    {ok, Data, Client2} ->
+      multipart_data(Client2, Length - byte_size(Data),
+        Parser(Data))
+  end.
 
 %% @doc Skip a part returned by the multipart parser.
 %%
@@ -244,16 +244,16 @@ multipart_data(Client, Length, {more, Parser})
 %% <em>{end_of_part, Req}</em> or <em>{eof, Req}</em> is parsed.
 -spec skip_multipart(Client) -> {ok, Client} when Client::#client{}.
 skip_multipart(Client) ->
-        case stream_multipart(Client) of
-                {end_of_part, Client2} -> {ok, Client2};
-                {eof, Client2} -> {ok, Client2};
-                {_, _, Client2} -> skip_multipart(Client2)
-        end.
+  case stream_multipart(Client) of
+    {end_of_part, Client2} -> {ok, Client2};
+    {eof, Client2} -> {ok, Client2};
+    {_, _, Client2} -> skip_multipart(Client2)
+  end.
 
 %% @doc Return the full body sent with the request.
 -spec body(#client{}) -> {ok, binary(), #client{}} | {error, atom()}.
 body(Client) ->
-	read_body(infinity, Client, <<>>).
+  read_body(infinity, Client, <<>>).
 
 %% @doc Return the full body sent with the request as long as the body
 %% length doesn't go over MaxLength.
@@ -265,78 +265,78 @@ body(Client) ->
 %% When the response is larger than MaxLength, this function will return
 %% the body it received up to the last chunk, which might be a bit more than MaxLength.
 -spec body(non_neg_integer() | infinity, #client{})
-	-> {ok, binary(), #client{}} | {error, atom()}.
+    -> {ok, binary(), #client{}} | {error, atom()}.
 body(MaxLength, Client) ->
-	read_body(MaxLength, Client, <<>>).
+  read_body(MaxLength, Client, <<>>).
 
 -spec skip_body(#client{}) -> {ok, #client{}} | {error, atom()}.
 skip_body(Client) ->
-	case stream_body(Client) of
-		{ok, _, Client2} -> skip_body(Client2);
-		{done, Client2} -> {skip, Client2};
-		{error, Reason} -> {error, Reason}
-	end.
+  case stream_body(Client) of
+    {ok, _, Client2} -> skip_body(Client2);
+    {done, Client2} -> {skip, Client2};
+    {error, Reason} -> {error, Reason}
+  end.
 
 end_stream_body(Rest, Client0) ->
-    Client = Client0#client{response_state=done,
-                            body_state=done,
-                            parser=nil,
-                            buffer=Rest,
-                            stream_to=false,
-                            async=false},
-
-    Pool = hackney_connect:is_pool(Client),
-
-    case maybe_close(Client) of
-        true ->
-            close(Client);
-        false when Pool /= false ->
-            #client{socket=Socket,
-                    socket_ref=Ref,
-                    pool_handler=Handler}=Client,
-
-            Handler:checkin(Ref, Socket),
-            Client#client{state=closed, socket=nil, socket_ref=nil,
-                          buffer = <<>>};
-        false ->
-            Client
-    end.
+  Client = Client0#client{response_state=done,
+    body_state=done,
+    parser=nil,
+    buffer=Rest,
+    stream_to=false,
+    async=false},
+  
+  Pool = hackney_connect:is_pool(Client),
+  
+  case maybe_close(Client) of
+    true ->
+      close(Client);
+    false when Pool /= false ->
+      #client{socket=Socket,
+        socket_ref=Ref,
+        pool_handler=Handler}=Client,
+      
+      Handler:checkin(Ref, Socket),
+      Client#client{state=closed, socket=nil, socket_ref=nil,
+        buffer = <<>>};
+    false ->
+      Client
+  end.
 
 
 -spec read_body(non_neg_integer() | infinity, #client{}, binary())
-	-> {ok, binary(), #client{}} | {error, any()}.
+    -> {ok, binary(), #client{}} | {error, any()}.
 read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
-    case stream_body(Client) of
-        {ok, Data, Client2} ->
-            read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
-        {done, Client2} ->
-            {ok, Acc, Client2};
-        {error, {closed, Bin}} when is_binary(Bin) ->
-            {error, {closed, << Acc/binary, Bin/binary >>}};
-        {error, Reason} ->
-            {error, Reason}
-    end;
+  case stream_body(Client) of
+    {ok, Data, Client2} ->
+      read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
+    {done, Client2} ->
+      {ok, Acc, Client2};
+    {error, {closed, Bin}} when is_binary(Bin) ->
+      {error, {closed, << Acc/binary, Bin/binary >>}};
+    {error, Reason} ->
+      {error, Reason}
+  end;
 
 read_body(_MaxLength, Client, Acc) ->
-    Client2 = end_stream_body(<<>>, Client),
-    {ok, Acc, Client2}.
+  Client2 = end_stream_body(<<>>, Client),
+  {ok, Acc, Client2}.
 
 
 maybe_close(#client{socket=nil}) ->
-    true;
+  true;
 maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
-    case Connection of
-        <<"close">> -> true;
-        <<"keep-alive">> -> false;
-        _ when Min =< 0 orelse Maj < 1 -> true;
-        _ -> false
-    end.
+  case Connection of
+    <<"close">> -> true;
+    <<"keep-alive">> -> false;
+    _ when Min =< 0 orelse Maj < 1 -> true;
+    _ -> false
+  end.
 
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
-    Transport:recv(Skt, 0, Timeout).
+  Transport:recv(Skt, 0, Timeout).
 
 close(#client{socket=nil}=Client) ->
-    Client#client{state = closed};
+  Client#client{state = closed};
 close(#client{transport=Transport, socket=Skt}=Client) ->
-    Transport:close(Skt),
-    Client#client{state = closed, socket=nil}.
+  Transport:close(Skt),
+  Client#client{state = closed, socket=nil}.

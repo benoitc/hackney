@@ -24,20 +24,18 @@
 %% ===================================================================
 
 start_link() ->
-    {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
-    %% start the pool handler
-    PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
-    ok = PoolHandler:start(),
-
-    %% finish to start the application
-    {ok, Pid}.
+  {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+  %% start the pool handler
+  PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+  ok = PoolHandler:start(),
+  
+  %% finish to start the application
+  {ok, Pid}.
 
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
 
 init([]) ->
-
-    Manager = ?CHILD(hackney_manager, worker),
-
-    {ok, { {one_for_one, 10000, 1}, [Manager]}}.
+  Manager = ?CHILD(hackney_manager, worker),
+  {ok, { {one_for_one, 10000, 1}, [Manager]}}.
