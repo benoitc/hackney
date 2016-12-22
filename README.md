@@ -188,7 +188,7 @@ couple of requests.
 ```erlang
 
 Transport = hackney_tcp,
-Host = << "https://friendpaste.com" >>,
+Host = << "friendpaste.com" >>,
 Port = 443,
 Options = [],
 {ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
