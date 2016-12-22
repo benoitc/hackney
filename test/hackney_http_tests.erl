@@ -24,9 +24,11 @@ parse_response_missing_reason_phrase_test() ->
 	?assertEqual(Reason, <<"">>).
 
 parse_response_header_with_continuation_line_test() ->
-	Response = <<"HTTP/1.1 200\r\nContent-Type: multipart/related;\r\n\tboundary=\"--:\"\r\n\r\n">>,
+	Response = <<"HTTP/1.1 200\r\nContent-Type: multipart/related;\r\n\tboundary=\"--:\"\r\nOther-Header: test\r\n\r\n">>,
 	ST1 = #hparser{},
 	{response, _Version, _StatusInt, _Reason, ST2} = hackney_http:execute(ST1, Response),
 	{header, Header, ST3} = hackney_http:execute(ST2),
 	?assertEqual({<<"Content-Type">>, <<"multipart/related; boundary=\"--:\"">>}, Header),
-	{headers_complete, _ST4} = hackney_http:execute(ST3).
+  {header, Header1, ST4} = hackney_http:execute(ST3),
+  ?assertEqual({<<"Other-Header">>, <<"test">>}, Header1),
+	{headers_complete, _ST5} = hackney_http:execute(ST4).
