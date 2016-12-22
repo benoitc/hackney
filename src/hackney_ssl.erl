@@ -33,6 +33,14 @@
      "ECDHE-RSA-AES128-SHA","DHE-DSS-AES128-SHA","ECDH-ECDSA-AES128-SHA",
      "ECDH-RSA-AES128-SHA","AES128-SHA"]).
 
+-define(WITHOUT_ECC_CIPHERS,
+    ["DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
+     "AES256-GCM-SHA384","AES256-SHA256", "DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
+     "AES128-GCM-SHA256","AES128-SHA256", "DHE-DSS-AES256-SHA", "AES256-SHA",
+     "DHE-DSS-AES128-SHA", "AES128-SHA"]).
+
+
+
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
 
@@ -40,17 +48,26 @@ connect(Host, Port, Opts) ->
 	connect(Host, Port, Opts, infinity).
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
-	(Timeout =:= infinity orelse is_integer(Timeout)) ->
+                                        (Timeout =:= infinity orelse is_integer(Timeout)) ->
   BaseOpts = [binary, {active, false}, {packet, raw},
               {secure_renegotiate, true},
               {reuse_sessions, true},
               {honor_cipher_order, true},
               {versions,['tlsv1.2', 'tlsv1.1', tlsv1, sslv3]},
-              {ciphers, ?DEFAULT_CIPHERS}],
+              {ciphers, ciphers()}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
 
-    %% connect
-		ssl:connect(Host, Port, Opts1, Timeout).
+  %% connect
+  ssl:connect(Host, Port, Opts1, Timeout).
+
+
+ciphers() ->
+  case lists:keymember(ecdh_rsa, 1, ssl:cipher_suites()) of
+    true -> ?DEFAULT_CIPHERS;
+    false ->
+      error_logger:warning_msg("hackney_ssl: ECC not enabled"),
+      ?WITHOUT_ECC_CIPHERS
+  end.
 
 recv(Socket, Length) ->
     recv(Socket, Length, infinity).
