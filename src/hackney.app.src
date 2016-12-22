@@ -35,15 +35,12 @@
  {files, [
     "src",
     "include",
-    "mix.exs",
-    "mix.lock",
     "rebar.config",
     "rebar.lock",
     "README.md",
     "NEWS.md",
     "LICENSE",
     "NOTICE",
-    "MAINTAINERS"]},
- {build_tools, [<<"rebar3">>, <<"mix">>]}
+    "MAINTAINERS"]}
  ]
 }.
