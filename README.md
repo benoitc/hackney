@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2016 Benoît Chesneau.
 
-__Version:__ 1.6.3
+__Version:__ 1.6.4
 
 # hackney
 
@@ -188,7 +188,7 @@ couple of requests.
 ```erlang
 
 Transport = hackney_tcp,
-Host = << "friendpaste.com" >>,
+Host = << "https://friendpaste.com" >>,
 Port = 443,
 Options = [],
 {ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
