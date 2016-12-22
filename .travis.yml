@@ -1,14 +1,6 @@
 language: erlang
 otp_release:
   - 19.1
-  - 18.1
-  - 18.0
-  - 17.0
-  - 17.1
-  - R16B03
-  - R16B02
-  - R16B01
-  - R16B
 env:
   - TEST=1
 before_script:
