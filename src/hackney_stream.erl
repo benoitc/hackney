@@ -236,7 +236,7 @@ async_recv(Parent, Owner, Ref,
     {Ref, stream_next} ->
       async_recv(Parent, Owner, Ref, Client, Buffer);
     {Ref, pause} ->
-      %% make sure that the proces won't be awoken by a tcp msg
+      %% make sure that the process won't be awoken by a tcp msg
       Transport:setopts(TSock, [{active, false}]),
       proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
         Client, Buffer]);
