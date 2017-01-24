@@ -24,7 +24,7 @@
 %% Note: that it starts a tracer server.
 %% When Destination is the atom io (or the tuple {io, Verbosity}),
 %% %% all (printable) inets trace events (trace_ts events which has
-%% %% Severity withing Limit) will be written to stdout using io:format.
+%% %% Severity within Limit) will be written to stdout using io:format.
 -spec enable(trace_level(), trace_type()) -> ok.
 enable(Level, File) when is_list(File) ->
   case file:open(File, [write]) of
