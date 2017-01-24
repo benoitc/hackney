@@ -108,7 +108,7 @@ cancel_request(Ref) ->
 %% @doc set client options.
 %% Options are:
 %% - `async': to fetch the response asynchronously
-%% - `{async, once}': to receive the response asynchronosly once time.
+%% - `{async, once}': to receive the response asynchronously once time.
 %% To receive the next message use the function `hackney:stream_next/1'.
 %% - `{stream_to, pid()}': to set the pid where the messages of an
 %% asynchronous response will be sent.
@@ -137,9 +137,9 @@ request_info(Ref) ->
     #client{transport=Transport,
       socket=Socket,
       method=Method} = State,
-    
+
     Location = hackney_request:location(State),
-    
+
     [{method, Method},
       {location, Location},
       {transport, Transport},
@@ -243,18 +243,18 @@ request(Method, URL, Headers, Body) ->
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
 %%          <li>`{connect_timeout, infinity | integer()}': timeout used when
-%%          estabilishing a connection, in milliseconds. Default is 8000</li>
+%%          establishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>`{recv_timeout, infinity | integer()}': timeout used when
 %%          receiving a connection. Default is 5000</li>
 %%      </ul>
 %%
-%%      <blocquote>Note: if the response is async, only
+%%      <blockquote>Note: if the response is async, only
 %%      `follow_redirect' is take in consideration for the redirection.
 %%      If a valid redirection happen you receive the messages:
 %%      <ul>
 %%        <li>`{redirect, To, Headers'}</li>
 %%        <li>`{see_other, To, Headers}' for status 303 POST requests.</li>
-%%      </ul></blocquote>
+%%      </ul></blockquote>
 %%
 %%      </li>
 %%
@@ -265,7 +265,7 @@ request(Method, URL, Headers, Body) ->
 %%          <li>{Host::binary(), Port::binary}: Host and port to connect,
 %%          for HTTP proxy</li>
 %%          <li>{socks5, Host::binary(), Port::binary()}: Host and Port
-%%          to connect to a socks5 proxt.</li>
+%%          to connect to a socks5 proxy.</li>
 %%          <li>{connect, Host::binary(), Port::binary()}: Host and Port
 %%          to connect to an HTTP tunnel.</li>
 %%      </ul></p>
@@ -279,12 +279,12 @@ request(Method, URL, Headers, Body) ->
 %%  Return:
 %%  <ul>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
-%%  request if the response succeded.</li>
+%%  request if the response succeeded.</li>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
-%%  the response succeded. The request reference is used later to
+%%  the response succeeded. The request reference is used later to
 %%  retrieve the body.</li>
 %%  <li><code>{ok, Ref}</code> Return the request reference when you
-%%  decide to stream the requet. You can use the returned reference to
+%%  decide to stream the request. You can use the returned reference to
 %%  stream the request body and continue to handle the response.</li>
 %%  <li><code>{error, {closed, PartialBody}}</code> A body was expected but
 %%  instead the remote closed the response after sending the headers.
@@ -300,23 +300,23 @@ request(Method, URL, Headers, Body) ->
 request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
   PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
     fun hackney_url:pathencode/1),
-  
-  
+
+
   %% normalize the url encoding
   URL = hackney_url:normalize(URL0, PathEncodeFun),
-  
+
   ?report_trace("request", [{method, Method},
     {url, URL},
     {headers, Headers},
     {body, Body},
     {options, Options0}]),
-  
+
   #hackney_url{transport=Transport,
     host = Host,
     port = Port,
     user = User,
     password = Password} = URL,
-  
+
   Options = case User of
               <<>> ->
                 Options0;
@@ -324,7 +324,7 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
                 lists:keystore(basic_auth, 1, Options0,
                   {basic_auth, {User, Password}})
             end,
-  
+
   case maybe_proxy(Transport, Host, Port, Options) of
     {ok, Ref, AbsolutePath} ->
       Request = make_request(Method, URL, Headers, Body,
@@ -476,9 +476,9 @@ stream_body(Ref) ->
 %% <li>`{headers, Headers}': the part headers</li>
 %% <li>`{body, Bin}': part of the content</li>
 %% <li>`end_of_part' : end of part</li>
-%% <li>`mp_mixed': notify the begininning of a mixed multipart part</li>
+%% <li>`mp_mixed': notify the beginning of a mixed multipart part</li>
 %% <li>`mp_mixed_eof': notify the end  of a mixed multipart part</li>
-%% <li>`eof': notify the end of the nultipart request</li>
+%% <li>`eof': notify the end of the multipart request</li>
 %% </ul>
 -spec stream_multipart(client_ref())
     -> {headers, list()} | {body, binary()} | eof | end_of_part
@@ -570,16 +570,16 @@ host_header(#hackney_url{netloc=Netloc}, Headers) ->
 make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
   #hackney_url{host = Host,
     port = Port}= URL,
-  
+
   %% place the correct host
   Headers1 = host_header(URL, Headers),
-  
+
   Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
   {connect, Path, Headers1, Body};
 make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
   %% place the correct host
   Headers1 = host_header(URL, Headers0),
-  
+
   FinalPath = hackney_url:unparse_url(URL),
   Headers = case proplists:get_value(proxy_auth, Options) of
               undefined ->
@@ -593,10 +593,10 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
 make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
   #hackney_url{path = Path,
     qs = Query} = URL,
-  
+
   %% place the correct host
   Headers1 = host_header(URL, Headers),
-  
+
   FinalPath = case Query of
                 <<>> ->
                   Path;
@@ -647,14 +647,14 @@ maybe_proxy(Transport, Host, Port, Options)
     {connect, ProxyHost, ProxyPort} ->
       ?report_debug("HTTP tunnel request", [{proxy_host, ProxyHost},
         {proxy_port, ProxyPort}]),
-      
+
       ProxyAuth = proplists:get_value(proxy_auth, Options),
       do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
         Port, Options);
     {socks5, ProxyHost, ProxyPort} ->
       ?report_debug("SOCKS proxy request", [{proxy_host, ProxyHost},
         {proxy_port, ProxyPort}]),
-      
+
       %% create connection options
       ProxyUser = proplists:get_value(socks5_user, Options),
       ProxyPass = proplists:get_value(socks5_pass, Options),
@@ -667,7 +667,7 @@ maybe_proxy(Transport, Host, Port, Options)
         {socks5_pass, ProxyPass},
         {socks5_resolve, ProxyResolve},
         {socks5_transport, Transport} | ConnectOpts],
-      
+
       %% ssl options?
       Insecure = proplists:get_value(insecure, Options, false),
       ConnectOpts2 =  case proplists:get_value(ssl_options,
@@ -678,10 +678,10 @@ maybe_proxy(Transport, Host, Port, Options)
                           [{ssl_options, SslOpts},
                             {insecure, Insecure}] ++ ConnectOpts1
                       end,
-      
+
       Options1 = lists:keystore(connect_options, 1, Options,
         {connect_options, ConnectOpts2}),
-      
+
       %% connect using a socks5 proxy
       hackney_connect:connect(hackney_socks5, Host, Port,
         Options1, true);
@@ -703,7 +703,7 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
     {connect_transport, Transport},
     {connect_user, ProxyUser},
     {connect_pass, ProxyPass}| ConnectOpts],
-  
+
   %% ssl options?
   Insecure = proplists:get_value(insecure, Options, false),
   ConnectOpts2 =  case proplists:get_value(ssl_options, Options) of
@@ -713,10 +713,10 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
                       [{ssl_options, SslOpts},
                         {insecure, Insecure}] ++ ConnectOpts1
                   end,
-  
+
   Options1 = lists:keystore(connect_options, 1, Options,
     {connect_options, ConnectOpts2}),
-  
+
   %% connect using a socks5 proxy
   hackney_connect:connect(hackney_http_connect, ProxyHost, ProxyPort,
     Options1, true).
@@ -784,12 +784,12 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
         {req, Req},
         {resp, Resp},
         {tries, Tries}]),
-      
+
       NewReq = {get, Location, [], <<>>},
       maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
         Req);
     false when S =:= 303 ->
-      ?report_debug("invalid redirecttion", [{location, Location},
+      ?report_debug("invalid redirection", [{location, Location},
         {req, Req},
         {resp, Resp},
         {tries, Tries}]),
@@ -801,13 +801,13 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
 redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   %% skip the body
   {skip, Client} = hackney_response:skip_body(Client0),
-  
+
   %% close the connection if we don't use a pool
   RedirectUrl = hackney_url:parse_url(NewLocation),
   #hackney_url{transport=RedirectTransport,
     host=RedirectHost,
     port=RedirectPort}=RedirectUrl,
-  
+
   #client{transport=Transport,
     host=Host,
     port=Port,
@@ -816,7 +816,7 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
     max_redirect=MaxRedirect,
     retries=Tries,
     redirect=Redirect} = Client,
-  
+
   NewHeaders = case RedirectHost of
                  Host -> Headers;
                  _    -> lists:keystore(<<"Host">>, 1, Headers,
@@ -825,18 +825,18 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
     Client#client.options, false),
   %% make a request without any redirection
-  
+
   Opts = lists:keystore(follow_redirect, 1, Opts0,
     {follow_redirect, false}),
-  
+
   Client1 = hackney_connect:check_or_close(Client),
-  
+
   %% update the state with the redirect info
   Client2 = Client1#client{transport=RedirectTransport,
     host=RedirectHost,
     port=RedirectPort,
     options=Opts},
-  
+
   %% send a request to the new location
   case send_request(Client2, RedirectRequest) of
     {ok,  S, H, RedirectRef} when is_reference(RedirectRef) ->
