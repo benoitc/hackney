@@ -561,11 +561,18 @@ stop_async(Ref) ->
 %%
 %%
 %%
-host_header(#hackney_url{netloc=Netloc}, Headers) ->
+host_header(#hackney_url{transport=Transport,netloc=Netloc}, Headers) ->
   case proplists:get_value(<<"Host">>, Headers) of
-    undefined -> Headers ++ [{<<"Host">>, Netloc}];
+    undefined ->
+          Host = host_header_encode(Transport, Netloc),
+          Headers ++ [{<<"Host">>, Host}];
     _ -> Headers
   end.
+
+host_header_encode(hackney_local_tcp, Netloc) ->
+    hackney_url:urlencode(Netloc);
+host_header_encode(_Transport, Netloc) -> Netloc.
+
 
 make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
   #hackney_url{host = Host,
