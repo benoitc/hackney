@@ -184,6 +184,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
   %% new request
   {_RequestRef, Client} = hackney_manager:new_request(Client0),
 
+   % io:format("HACKNEY: checkout: ~p, ~p, ~p~n", [Host, Port, Transport]),
   case PoolHandler:checkout(Host, Port, Transport, Client) of
     {ok, Ref, Skt} ->
       ?report_debug("reuse a connection", [{pool, PoolName}]),

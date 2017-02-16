@@ -35,82 +35,97 @@
 %% @doc initialise an header dict
 -spec new() -> headers().
 new() ->
-  dict:new().
+  {ordheaders, []}.
 
 -spec new(list()) -> headers().
-new({dict, _}=D) ->
+new({ordheaders, _}=D) ->
   D;
 
 new(Headers) when is_list(Headers) ->
+  {ordheaders,
   lists:foldl(fun
                 ({K, V}, D) ->
                   insert(hackney_bstr:to_binary(K), hackney_bstr:to_binary(V), D);
                 ({K, V, P}, D) ->
                   insert(hackney_bstr:to_binary(K), header_value(V, P), D)
-              end, dict:new(), Headers).
+              end, [], Headers)}.
 
 %% @doc extend the headers with a new list of `{Key, Value}' pair.
+update({ordheaders, Headers}, KVs) ->
+ {ordheaders, update(Headers, KVs)};
 update(Headers, KVs) ->
+   % io:format("HACKNEY: update: ~9999p   ||   ~9999p~n", [Headers, KVs]),
   lists:foldl(fun
                 ({K, V}, D) ->
                   K1 = hackney_bstr:to_binary(K),
                   V1 = hackney_bstr:to_binary(V),
-                  dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D);
+                  LKey = hackney_bstr:to_lower(K1),
+                  lists:keystore(LKey, 1, D, {LKey, {K1, V1}});
                 ({K, V, P}, D) ->
                   K1 = hackney_bstr:to_binary(K),
                   V1 = header_value(V, P),
-                  dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D)
+                  LKey = hackney_bstr:to_lower(K1),
+                  lists:keystore(LKey, 1, D, {LKey, {K1, V1}})
               end, Headers, KVs).
 
 %% convert the header to a list
-to_list(Headers) ->
-  lists:reverse(dict:fold(fun(_K, KV, Acc) ->
+to_list({ordheaders, Headers}) ->
+  lists:reverse(lists:foldl(fun({_K, KV}, Acc) ->
     [KV | Acc]
                           end, [], Headers)).
 
 %% @doc get the value of the header
+get_value(Key, {ordheaders, Headers}) ->
+   get_value(Key, Headers);
 get_value(Key, Headers) ->
   get_value(Key, Headers, undefined).
 
+get_value(Key, {ordheaders, Headers}, Default) ->
+   get_value(Key, Headers, Default);
 get_value(Key, Headers, Default) ->
-  case dict:find(hackney_bstr:to_lower(Key), Headers) of
-    {ok, {_K, V}} ->
+  case lists:keyfind(hackney_bstr:to_lower(Key), 1, Headers) of
+    {_K, V} ->
       V;
     _ ->
       Default
   end.
 
 %% @doc store the pair into the headers, replacing any pre-existing key.
+store(Key, Value, {ordheaders, Headers}) ->
+   {ordheaders, store(Key, Value, Headers)};
 store(Key, Value, Headers) ->
-  dict:store(hackney_bstr:to_lower(Key), {Key, Value}, Headers).
+   LKey = hackney_bstr:to_lower(Key),
+   lists:keystore(LKey, 1, Headers, {LKey, {Key, Value}}).
 
 
 %% @doc Insert the pair into the headers, merging with any pre-existing key.
 %% A merge is done with Value = V0 ++ ", " ++ V1.
+insert(Key, Value, {ordheaders, Headers}) ->
+   {ordheaders, insert(Key, Value, Headers)};
 insert(Key, Value, Headers) ->
   Key1 = hackney_bstr:to_lower(Key),
-  Value1 = case dict:find(Key1, Headers) of
-             {ok, {_, OldValue}} ->
+  Value1 = case lists:keyfind(Key1, 1, Headers) of
+             {_, OldValue} ->
                << OldValue/binary, ", ", Value/binary >>;
              _ ->
                Value
            end,
-  dict:store(Key1, {Key, Value1}, Headers).
+  lists:keystore(Key1, 1, Headers, {Key1, {Key, Value1}}).
 
 %% @doc same as `insert/3' but allows to add params to the header value.
-insert(Key, Value, Params, Headers) ->
+insert(Key, Value, Params, {ordheaders, Headers}) ->
   insert(Key, header_value(Value, Params), Headers).
 
 %% @doc Delete the header corresponding to key if it is present.
-delete(Key, Headers) ->
-  dict:erase(hackney_bstr:to_lower(Key), Headers).
+delete(Key, {ordict, Headers}) ->
+  {ordheaders, lists:keydelete(hackney_bstr:to_lower(Key), 1, Headers)}.
 
 %% @doc fold the list of headers
-fold(Fun, Acc0, Headers) ->
-  Wrapper = fun(_K, KV, Acc) ->
+fold(Fun, Acc0, {ordheaders, Headers}) ->
+  Wrapper = fun({_K, KV}, Acc) ->
     Fun(KV, Acc)
             end,
-  dict:fold(Wrapper, Acc0, Headers).
+  {ordheaders, lists:foldl(Wrapper, Acc0, Headers)}.
 
 %% @doc return all the headers as a binary that can be sent over the
 %% wire.
