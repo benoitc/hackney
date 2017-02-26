@@ -4,7 +4,7 @@
 {application, hackney,
   [
     {description, "simple HTTP client"},
-    {vsn, "1.6.4"},
+    {vsn, "1.6.5"},
     {registered, [hackney_pool]},
     {applications, [kernel,
       stdlib,
@@ -25,7 +25,7 @@
       {shutdown, 10000},
       {maxr, 10},
       {maxt, 1}]},
-    
+
     {maintainers,
       ["Benoit Chesneau",
         "Eduardo Gurgel"
