@@ -4,7 +4,7 @@
 
 %% ... hm?
 
-new_test() -> 
+new_test() ->
     D = dict:new(),
     ?assertEqual(hackney_headers:new(), D).
 
@@ -29,6 +29,14 @@ get_value_test()->
     ?assertEqual(hackney_headers:get_value(A,Ha),V),
     ?assertEqual(hackney_headers:get_value(B,Ha),V),
     ?assertEqual(hackney_headers:get_value(C,Ha),V).
+
+header_multiple_test() ->
+  HList = [{<<"a">>, <<"1">>},
+           {<<"x-a">>, <<"a, b">>},
+           {<<"x-a">>, <<"c">>}],
+  Headers = hackney_headers:new(HList),
+  Expected = <<"a: 1\r\nx-a: a, b, c\r\n\r\n">>,
+  ?assertEqual(Expected, hackney_headers:to_binary(Headers)).
 
 authorization_header_test() ->
     Auth = {<<"Aladdin">>,<<"open sesame">>},
