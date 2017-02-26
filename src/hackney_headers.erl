@@ -53,13 +53,9 @@ new(Headers) when is_list(Headers) ->
 update(Headers, KVs) ->
   lists:foldl(fun
                 ({K, V}, D) ->
-                  K1 = hackney_bstr:to_binary(K),
-                  V1 = hackney_bstr:to_binary(V),
-                  dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D);
+                  insert(hackney_bstr:to_binary(K), hackney_bstr:to_binary(V), D);
                 ({K, V, P}, D) ->
-                  K1 = hackney_bstr:to_binary(K),
-                  V1 = header_value(V, P),
-                  dict:store(hackney_bstr:to_lower(K1), {K1, V1}, D)
+                  insert(hackney_bstr:to_binary(K), header_value(V, P), D)
               end, Headers, KVs).
 
 %% convert the header to a list

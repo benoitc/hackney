@@ -32,10 +32,21 @@ get_value_test()->
 
 header_multiple_test() ->
   HList = [{<<"a">>, <<"1">>},
-           {<<"x-a">>, <<"a, b">>},
-           {<<"x-a">>, <<"c">>}],
+           {<<"x-a">>, <<"a, b,c">>},
+           {<<"x-a">>, <<"e,f, g">>}],
   Headers = hackney_headers:new(HList),
-  Expected = <<"a: 1\r\nx-a: a, b, c\r\n\r\n">>,
+  Expected = <<"a: 1\r\nx-a: a, b,c, e,f, g\r\n\r\n">>,
+  ?assertEqual(Expected, hackney_headers:to_binary(Headers)).
+
+headers_update_with_multiple_test() ->
+  HList0 = [{<<"a">>, <<"1">>}],
+  HList1 = [{<<"x-a">>, <<"a, b,c">>},
+            {<<"x-a">>, <<"e,f, g">>}],
+  Headers = hackney_headers:update(
+              hackney_headers:new(HList0),
+              HList1
+             ),
+  Expected = <<"a: 1\r\nx-a: a, b,c, e,f, g\r\n\r\n">>,
   ?assertEqual(Expected, hackney_headers:to_binary(Headers)).
 
 authorization_header_test() ->
