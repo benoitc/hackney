@@ -344,13 +344,13 @@ redirection even on POST
 transfers without checking the certificate
 
 * `{connect_timeout, infinity | integer()}`: timeout used when
-estabilishing a connection, in milliseconds. Default is 8000
+establishing a connection, in milliseconds. Default is 8000
 
 * `{recv_timeout, infinity | integer()}`: timeout used when
 receiving a connection. Default is 5000
 
 
-<blocquote>Note: if the response is async, only
+<blockquote>Note: if the response is async, only
 `follow_redirect` is take in consideration for the redirection.
 If a valid redirection happen you receive the messages:
 
@@ -358,7 +358,7 @@ If a valid redirection happen you receive the messages:
 
 * `{see_other, To, Headers}` for status 303 POST requests.
 
-</blocquote>
+</blockquote>
 
 * `proxy_options()`:  options to connect by a proxy:
 
@@ -369,7 +369,7 @@ proxy
 for HTTP proxy
 
 * {socks5, Host::binary(), Port::binary()}: Host and Port
-to connect to a socks5 proxt.
+to connect to a socks5 proxy.
 
 * {connect, Host::binary(), Port::binary()}: Host and Port
 to connect to an HTTP tunnel.
@@ -384,14 +384,14 @@ syntax.</bloquote>
 Return:
 
 * `{ok, ResponseStatus, ResponseHeaders}`: On HEAD
-request if the response succeded.
+request if the response succeeded.
 
 * `{ok, ResponseStatus, ResponseHeaders, Ref}`: when
-the response succeded. The request reference is used later to
+the response succeeded. The request reference is used later to
 retrieve the body.
 
 * `{ok, Ref}` Return the request reference when you
-decide to stream the requet. You can use the returned reference to
+decide to stream the request. You can use the returned reference to
 stream the request body and continue to handle the response.
 
 * `{error, {closed, PartialBody}}` A body was expected but
@@ -514,7 +514,7 @@ setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt;
 set client options.
 Options are:
 - `async`: to fetch the response asynchronously
-- `{async, once}`: to receive the response asynchronosly once time.
+- `{async, once}`: to receive the response asynchronously once time.
 To receive the next message use the function `hackney:stream_next/1`.
 - `{stream_to, pid()}`: to set the pid where the messages of an
 asynchronous response will be sent.
@@ -623,11 +623,11 @@ Return:
 
 * `end_of_part` : end of part
 
-* `mp_mixed`: notify the begininning of a mixed multipart part
+* `mp_mixed`: notify the beginning of a mixed multipart part
 
 * `mp_mixed_eof`: notify the end  of a mixed multipart part
 
-* `eof`: notify the end of the nultipart request
+* `eof`: notify the end of the multipart request
 
 
 <a name="stream_next-1"></a>
