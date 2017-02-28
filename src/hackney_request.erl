@@ -346,42 +346,44 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                             {S, CT, Body0}
                         end,
   
+
+  Headers0 = hackney_headers:delete(<<"content-type">>, Headers),
   {NewHeaders, ReqType} = case {ReqType0, Body} of
                             {chunked, {file, _}} ->
       
                               NewHeadersKV = [{<<"Content-Type">>, CType},
                                 {<<"Content-Length">>, CLen}],
                               Headers1 = hackney_headers:delete(<<"transfer-encoding">>,
-                                Headers),
+                                Headers0),
                               {hackney_headers:update(Headers1, NewHeadersKV), normal};
                             {chunked, F} when is_function(F) ->
                               NewHeadersKV = [{<<"Content-Type">>, CType}],
                               Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
+                                Headers0),
                               {hackney_headers:update(Headers1, NewHeadersKV), chunked};
                             {chunked, {F, _}} when is_function(F) ->
                               NewHeadersKV = [{<<"Content-Type">>, CType}],
                               Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
+                                Headers0),
                               {hackney_headers:update(Headers1, NewHeadersKV), chunked};
     
                             {chunked, _} ->
                               NewHeadersKV = [{<<"Content-Type">>, CType}],
                               Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
+                                Headers0),
                               {hackney_headers:update(Headers1, NewHeadersKV), chunked};
     
                             {_, _} when CLen =:= undefined ->
                               NewHeadersKV = [{<<"Content-Type">>, CType},
                                 {<<"Transfer-Encoding">>, <<"chunked">>}],
                               Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
+                                Headers0),
                               {hackney_headers:update(Headers1, NewHeadersKV), chunked};
     
                             {_, _} ->
                               NewHeadersKV = [{<<"Content-Type">>, CType},
                                 {<<"Content-Length">>, CLen}],
-                              {hackney_headers:update(Headers, NewHeadersKV), normal}
+                              {hackney_headers:update(Headers0, NewHeadersKV), normal}
                           end,
   {NewHeaders, ReqType, Body, Client}.
 
