@@ -51,13 +51,21 @@ merge_test() ->
 header_multiple_test() ->
   HList = [{<<"a">>, <<"1">>},
            {<<"x-a">>, <<"a, b,c">>},
-           {<<"x-a">>, <<"e,f, g">>}],
+           {<<"X-a">>, <<"e,f, g">>}],
   Headers = hackney_headers_new:from_list(HList),
   ?assertEqual(HList, hackney_headers_new:to_list(Headers)),
   ?assertEqual(
-    << "a: 1\r\nx-a: a, b,c\r\nx-a: e,f, g\r\n\r\n" >>,
+    << "a: 1\r\nx-a: a, b,c\r\nX-a: e,f, g\r\n\r\n" >>,
     hackney_headers_new:to_binary(Headers)
   ).
+
+lookup_test() ->
+  HList = [{<<"a">>, <<"1">>},
+           {<<"x-a">>, <<"a, b,c">>},
+           {<<"X-a">>, <<"e,f, g">>}],
   
-  
+  Headers = hackney_headers_new:from_list(HList),
+  ?assertEqual([{<<"a">>, <<"1">>}], hackney_headers_new:lookup(<<"a">>, Headers)),
+  ?assertEqual([{<<"x-a">>, <<"a, b,c">>},
+                {<<"X-a">>, <<"e,f, g">>}], hackney_headers_new:lookup(<<"x-a">>, Headers)).
   

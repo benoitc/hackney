@@ -66,7 +66,7 @@ is_key(Key, {_, Headers}) -> dict:is_key(?kl(Key), Headers).
 
 lookup(Key, {_, Headers}) ->
   case dict:find(?kl(Key), Headers) of
-    {ok, KVs} -> [Value || {_, _, Value} <- KVs];
+    {ok, KVs} -> [{K, V} || {_, K, V} <- KVs];
     error -> []
   end.
 
