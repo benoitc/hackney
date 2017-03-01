@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.6.6
+__Version:__ 1.6.7
 
 # hackney
 
@@ -527,6 +527,7 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
 <tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="hackney_headers_new.md" class="module">hackney_headers_new</a></td></tr>
 <tr><td><a href="hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
 <tr><td><a href="hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
