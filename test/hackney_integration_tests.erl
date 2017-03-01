@@ -18,6 +18,7 @@ all_tests() ->
    relative_redirect_request_no_follow(),
    relative_redirect_request_follow(),
    test_duplicate_headers(),
+   test_custom_host_headers(),
    async_request(),
    async_head_request(),
    async_no_content_request()].
@@ -162,7 +163,16 @@ test_duplicate_headers() ->
   ReqHeaders = proplists:get_value(<<"headers">>, Obj),
   ?_assertEqual(<<"application/json">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
 
-  
+test_custom_host_headers() ->
+  URL = <<"http://localhost:8000/get">>,
+  Headers = [{<<"Host">>, <<"myhost.com">>}],
+  Options = [with_body],
+  {ok, 200, _H, JsonBody} = hackney:get(URL, Headers, <<>>, Options),
+  Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+  ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+  ?_assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
+
+
 
 %%local_socket_request() ->
 %%    URL = <<"http+unix://httpbin.sock/get">>,
