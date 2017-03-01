@@ -13,13 +13,13 @@
 -include_lib("hackney_internal.hrl").
 
 -export([perform/2,
-  location/1,
-  send/2, send_chunk/2,
-  sendfile/3,
-  stream_body/2, end_stream_body/1,
-  stream_multipart/2,
-  encode_form/1,
-  default_ua/0]).
+         location/1,
+         send/2, send_chunk/2,
+         sendfile/3,
+         stream_body/2, end_stream_body/1,
+         stream_multipart/2,
+         encode_form/1,
+         default_ua/0]).
 
 -export([is_default_port/1]).
 
@@ -29,97 +29,102 @@
 
 perform(Client0, {Method0, Path, Headers0, Body0}) ->
   Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
-  
+
   #client{options=Options} = Client0,
-  
-  DefaultHeaders0 =  [{<<"User-Agent">>, default_ua()}],
-  %% basic authorization handling
+
+  %% basic & Cookies authorization handling
+  Cookies = proplists:get_value(cookie, Options, []),
   DefaultHeaders = case proplists:get_value(basic_auth, Options) of
                      undefined ->
-                       DefaultHeaders0;
+                      maybe_add_cookies(Cookies, [{<<"User-Agent">>, default_ua()}]);
                      {User, Pwd} ->
                        User1 = hackney_bstr:to_binary(User),
                        Pwd1 = hackney_bstr:to_binary(Pwd),
                        Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
-                       DefaultHeaders0 ++ [{<<"Authorization">>,
-                         <<"Basic ", Credentials/binary>>}]
+                       maybe_add_cookies(
+                         Cookies,
+                         [{<<"User-Agent">>, default_ua()},
+                          {<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
+                        )
                    end,
-  
-  %% add any cookies passed to options
-  Cookies = proplists:get_value(cookie, Options, []),
-  DefaultHeaders1 = maybe_add_cookies(Cookies, DefaultHeaders),
-  
-  HeadersDict0 = hackney_headers:update(hackney_headers:new(DefaultHeaders1),
-    Headers0),
-  
-  {HeadersDict, ReqType0} = req_type(HeadersDict0, Body0),
-  
-  HeadersDict1 = maybe_add_host(HeadersDict, Client0#client.netloc),
-  
-  Expect = expectation(HeadersDict),
-  
+
+  %% detect the request type: normal or chunked
+  {Headers1, ReqType0} = req_type(
+                           hackney_headers_new:merge(Headers0, hackney_headers_new:new(DefaultHeaders)),
+                           Body0
+                          ),
+
+  %% add host eventually
+  Headers2 = maybe_add_host(Headers1, Client0#client.netloc),
+
+  %% get expect headers
+  Expect = expectation(Headers2),
+
   %% build headers with the body.
-  {HeaderDict2, ReqType, Body, Client1} = case Body0 of
+  {FinalHeaders, ReqType, Body, Client1} = case Body0 of
                                             stream ->
-                                              {HeadersDict1, ReqType0, stream, Client0};
+                                               {Headers2, ReqType0, stream, Client0};
                                             stream_multipart ->
-                                              handle_multipart_body(HeadersDict1, ReqType0, Client0);
+                                              handle_multipart_body(Headers2, ReqType0, Client0);
                                             {stream_multipart, Size} ->
-                                              handle_multipart_body(HeadersDict1, ReqType0, Size, Client0);
+                                              handle_multipart_body(Headers2, ReqType0, Size, Client0);
                                             {stream_multipart, Size, Boundary} ->
-                                              handle_multipart_body(HeadersDict1, ReqType0, Size,
-                                                Boundary, Client0);
+                                              handle_multipart_body(Headers2, ReqType0,
+                                                                    Size, Boundary, Client0);
                                             <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(HeadersDict1, ReqType0, Body0, Client0);
+                                              handle_body(Headers2, ReqType0, Body0, Client0);
                                             <<>> ->
-                                              {HeadersDict1, ReqType0, Body0, Client0};
+                                              {Headers2, ReqType0, Body0, Client0};
                                             [] ->
-                                              {HeadersDict1, ReqType0, Body0, Client0};
+                                              {Headers2, ReqType0, Body0, Client0};
                                             _ ->
-                                              handle_body(HeadersDict1, ReqType0, Body0, Client0)
+                                              handle_body(Headers2, ReqType0, Body0, Client0)
                                           end,
-  
+
+  %% build final client record
   Client = case ReqType of
              normal ->
-               Client1#client{send_fun=fun hackney_request:send/2,
-                 req_type=normal};
+               Client1#client{send_fun=fun hackney_request:send/2, req_type=normal};
              chunked ->
-               Client1#client{send_fun=fun hackney_request:send_chunk/2,
-                 req_type=chunked}
+               Client1#client{send_fun=fun hackney_request:send_chunk/2, req_type=chunked}
            end,
-  
-  HeadersData = iolist_to_binary([
-    << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
-    hackney_headers:to_binary(HeaderDict2)]),
-  
+
+  %% request to send
+  HeadersData = [
+                 << Method/binary, " ", Path/binary, " HTTP/1.1", "\r\n" >>,
+                 hackney_headers_new:to_iolist(FinalHeaders)
+                ],
+
   PerformAll = proplists:get_value(perform_all, Options, true),
-  
+
   ?report_verbose("perform request", [{header_data, HeadersData},
-    {perform_all, PerformAll},
-    {expect, Expect}]),
-  
-  
+                                      {perform_all, PerformAll},
+                                      {expect, Expect}]),
+
+
   case can_perform_all(Body, Expect, PerformAll) of
     true ->
       perform_all(Client, HeadersData, Body, Method, Path, Expect);
     _ ->
       case hackney_request:send(Client, HeadersData) of
         ok when Body =:= stream ->
-          {ok, Client#client{response_state=stream, method=Method,
-            path=Path, expect=Expect}};
+          {ok, Client#client{response_state=stream,
+                             method=Method,
+                             path=Path,
+                             expect=Expect}};
         ok ->
           case stream_body(Body, Client#client{expect=Expect}) of
             {error, _Reason}=E ->
               E;
             {stop, Client2} ->
               FinalClient = Client2#client{method=Method,
-                path=Path},
+                                           path=Path},
               hackney_response:start_response(FinalClient);
             {ok, Client2} ->
               case end_stream_body(Client2) of
                 {ok, Client3} ->
                   FinalClient = Client3#client{method=Method,
-                    path=Path},
+                                               path=Path},
                   hackney_response:start_response(FinalClient);
                 Error ->
                   Error
@@ -134,7 +139,7 @@ location(#client{location=Location}) when is_binary(Location) ->
   Location;
 location(Client) ->
   #client{transport=Transport, netloc=Netloc, path=Path} = Client,
-  
+
   Scheme = hackney_url:transport_scheme(Transport),
   Url = #hackney_url{scheme=Scheme, netloc=Netloc, path=Path},
   hackney_url:unparse_url(Url).
@@ -280,7 +285,7 @@ sendfile(FileName, Opts, #client{transport=hackney_tcp_tansport, socket=Skt,
   req_type=normal}) ->
   Offset = proplists:get_value(offset, Opts, 0),
   Bytes = proplists:get_value(bytes, Opts, 0),
-  
+
   SendFileOpts = case proplists:get_value(chunk_size, Opts, ?CHUNK_SIZE) of
                    undefined -> Opts;
                    ChunkSize -> [{chunk_size, ChunkSize}]
@@ -302,7 +307,6 @@ encode_form(KVs) ->
   CType = <<"application/x-www-form-urlencoded; charset=utf-8">>,
   {erlang:byte_size(Lines), CType, Lines}.
 
-
 %% internal
 handle_body(Headers, ReqType0, Body0, Client) ->
   {CLen, CType, Body} = case Body0 of
@@ -317,142 +321,141 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                           {file, FileName} ->
                             S= filelib:file_size(FileName),
                             FileName1 = hackney_bstr:to_binary(FileName),
-                            CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                              mimerl:filename(FileName1)),
+                            CT = hackney_headers_new:get_value(
+                                   <<"content-type">>, Headers, mimerl:filename(FileName1)
+                                  ),
                             {S, CT, Body0};
                           Func when is_function(Func) ->
-                            CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                              <<"application/octet-stream">>),
-                            S = hackney_headers:get_value(<<"content-length">>,
-                              Headers),
+                            CT = hackney_headers_new:get_value(
+                                   <<"content-type">>, Headers, <<"application/octet-stream">>
+                                  ),
+                            S = hackney_headers_new:get_value(<<"content-length">>, Headers),
                             {S, CT, Body0};
                           {Func, _} when is_function(Func) ->
-                            CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                              <<"application/octet-stream">>),
-                            S = hackney_headers:get_value(<<"content-length">>,
-                              Headers),
+                            CT = hackney_headers_new:get_value(
+                                   <<"content-type">>, Headers, <<"application/octet-stream">>
+                                  ),
+                            S = hackney_headers_new:get_value(<<"content-length">>, Headers),
                             {S, CT, Body0};
-    
+
                           _ when is_list(Body0) -> % iolist case
                             Body1 = iolist_to_binary(Body0),
                             S = erlang:byte_size(Body1),
-                            CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                              <<"application/octet-stream">>),
+                            CT = hackney_headers_new:get_value(
+                                   <<"content-type">>, Headers, <<"application/octet-stream">>
+                                  ),
                             {S, CT, Body1};
                           _ when is_binary(Body0) ->
                             S = erlang:byte_size(Body0),
-                            CT = hackney_headers:get_value(<<"content-type">>, Headers,
-                              <<"application/octet-stream">>),
+                            CT = hackney_headers_new:get_value(
+                                   <<"content-type">>, Headers, <<"application/octet-stream">>
+                                  ),
                             {S, CT, Body0}
                         end,
-  
+
   {NewHeaders, ReqType} = case {ReqType0, Body} of
                             {chunked, {file, _}} ->
-      
-                              NewHeadersKV = [{<<"Content-Type">>, CType},
-                                {<<"Content-Length">>, CLen}],
-                              Headers1 = hackney_headers:delete(<<"transfer-encoding">>,
-                                Headers),
-                              {hackney_headers:update(Headers1, NewHeadersKV), normal};
-                            {chunked, F} when is_function(F) ->
-                              NewHeadersKV = [{<<"Content-Type">>, CType}],
-                              Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
-                              {hackney_headers:update(Headers1, NewHeadersKV), chunked};
-                            {chunked, {F, _}} when is_function(F) ->
-                              NewHeadersKV = [{<<"Content-Type">>, CType}],
-                              Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
-                              {hackney_headers:update(Headers1, NewHeadersKV), chunked};
-    
+                              Headers1 = hackney_headers_new:delete(
+                                           <<"transfer-encoding">>,
+                                           hackney_headers_new:store(
+                                             <<"Content-Type">>, CType,
+                                             hacknet_headers_new:store(
+                                               <<"Content-Length">>, CLen, Headers))),
+                              {Headers1, normal};
                             {chunked, _} ->
-                              NewHeadersKV = [{<<"Content-Type">>, CType}],
-                              Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
-                              {hackney_headers:update(Headers1, NewHeadersKV), chunked};
-    
+                              Headers1 = hackney_headers_new:delete(
+                                           <<"content-length">>,
+                                           hackney_headers_new:store(
+                                             <<"Content-Type">>, CType, Headers)),
+                              {Headers1, chunked};
                             {_, _} when CLen =:= undefined ->
-                              NewHeadersKV = [{<<"Content-Type">>, CType},
-                                {<<"Transfer-Encoding">>, <<"chunked">>}],
-                              Headers1 = hackney_headers:delete(<<"content-length">>,
-                                Headers),
-                              {hackney_headers:update(Headers1, NewHeadersKV), chunked};
-    
+                              Headers1 = hackney_headers_new:delete(
+                                           <<"content-length">>,
+                                           hackney_headers_new:store(
+                                             [{<<"Content-Type">>, CType},
+                                              {<<"Transfer-Encoding">>, <<"chunked">>}],
+                                             Headers)),
+                              {Headers1, chunked};
                             {_, _} ->
-                              NewHeadersKV = [{<<"Content-Type">>, CType},
-                                {<<"Content-Length">>, CLen}],
-                              {hackney_headers:update(Headers, NewHeadersKV), normal}
+                              Headers1 = hackney_headers_new:delete(
+                                           <<"transfer-encoding">>,
+                                           hackney_headers_new:store(
+                                             [{<<"Content-Type">>, CType},
+                                              {<<"Content-Length">>, CLen}],
+                                             Headers)),
+                              {Headers1, normal}
                           end,
   {NewHeaders, ReqType, Body, Client}.
 
 handle_multipart_body(Headers, ReqType, Client) ->
-  handle_multipart_body(Headers, ReqType, chunked,
-    hackney_multipart:boundary(), Client).
+  handle_multipart_body(Headers, ReqType, chunked, hackney_multipart:boundary(), Client).
 
 handle_multipart_body(Headers, ReqType, CLen, Client) ->
-  handle_multipart_body(Headers, ReqType, CLen,
-    hackney_multipart:boundary(), Client).
+  handle_multipart_body(Headers, ReqType, CLen, hackney_multipart:boundary(), Client).
 
 handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
-  CType = case hackney_headers:parse(<<"content-type">>, Headers) of
-            {<<"multipart">>, _, _} ->
-              hackney_headers:get_value(<<"content-type">>, Headers);
-            _ ->
-              << "multipart/form-data; boundary=", Boundary/binary >>
+  CType = case hackney_headers_new:get_value(<<"content-type">>, Headers) of
+            undefined ->
+              << "multipart/form-data; boundary=", Boundary/binary >>;
+            Value ->
+              case hackney_headers_new:parse_content_type(Value) of
+                {<<"multipart">>, _, _} -> Value;
+                _ ->
+                  << "multipart/form-data; boundary=", Boundary/binary >>
+              end
           end,
-  
+
   {NewHeaders, ReqType1}  = case {CLen, ReqType} of
-                              {chunked, normal} ->
-                                NewHeadersKV = [{<<"Content-Type">>, CType},
-                                  {<<"Transfer-Encoding">>, <<"chunked">>}],
-                                Headers1 = hackney_headers:delete(<<"content-length">>,  Headers),
-                                {hackney_headers:update(Headers1, NewHeadersKV), chunked};
                               {chunked, _} ->
-                                NewHeadersKV = [{<<"Content-Type">>, CType}],
-                                {hackney_headers:update(Headers, NewHeadersKV), chunked};
-                              {_, chunked} ->
-                                NewHeadersKV = [{<<"Content-Type">>, CType},
-                                  {<<"Content-Length">>, CLen}],
-                                Headers1 = hackney_headers:delete(<<"transfer-encoding">>,
-                                  Headers),
-                                {hackney_headers:update(Headers1, NewHeadersKV), normal};
+                                Headers1 = hackney_headers_new:delete(
+                                             <<"content-length">>,
+                                             hacknet_headers_new:store(
+                                               [{<<"Content-Type">>, CType},
+                                                {<<"Transfer-Encoding">>, <<"chunked">>}],
+                                               Headers)),
+                                {Headers1, chunked};
                               {_, _} ->
-                                NewHeadersKV = [{<<"Content-Type">>, CType},
-                                  {<<"Content-Length">>, CLen}],
-                                {hackney_headers:update(Headers, NewHeadersKV), normal}
+                                Headers1 = hackney_headers_new:delete(
+                                             <<"transfer-encoding">>,
+                                             hackney_headers_new:store(
+                                               [{<<"Content-Type">>, CType},
+                                                {<<"Content-Length">>, CLen}],
+                                               Headers)),
+                                {Headers1, normal}
                             end,
   {NewHeaders, ReqType1, stream, Client#client{response_state=stream,
-    mp_boundary=Boundary}}.
+                                               mp_boundary=Boundary}}.
 
 req_type(Headers, stream) ->
-  TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),
-  CLen = hackney_headers:get_value(<<"Content-Length">>, Headers,
-    undefined),
-  
-  case hackney_bstr:to_lower(TE) of
-    <<"chunked">> ->
-      {Headers, chunked};
-    _ when CLen =:= undefined ->
-      Headers1 = hackney_headers:update(Headers,
-        [{<<"Transfer-Encoding">>,
-          <<"chunked">>}]),
-      {Headers1, chunked};
+  Te = hackney_bstr:to_lower(
+         hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, <<>>)
+        ),
+  case Te of
+    <<"chunked">> -> {Headers, chunked};
     _ ->
-      {Headers, normal}
+      case hackney_headers_new:get_value(<<"content-length">>, Headers) of
+        undefined ->
+          Headers2 = hackney_headers_new:store(
+                       <<"Transfer-Encoding">>, <<"chunked">>, Headers
+                      ),
+          {Headers2, chunked};
+        _ ->
+          {Headers, normal}
+      end
   end;
 req_type(Headers, _Body) ->
-  TE = hackney_headers:get_value(<<"Transfer-Encoding">>, Headers, <<>>),
-  case hackney_bstr:to_lower(TE) of
+  Te = hackney_bstr:to_lower(
+         hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, <<>>)
+        ),
+  case Te of
     <<"chunked">> -> {Headers, chunked};
     _ -> {Headers, normal}
   end.
 
+
 expectation(Headers) ->
-  ExpectHdr = hackney_headers:get_value(<<"Expect">>, Headers, <<>>),
-  case hackney_bstr:to_lower(ExpectHdr) of
-    <<"100-continue">> -> true;
-    _ -> false
-  end.
+  Expect = hackney_headers_new:get_value(<<"expect">>, Headers, <<>>),
+  (hackney_bstr:to_lower(Expect) =:= <<"100-continue">>).
 
 end_stream_body(#client{req_type=chunked}=Client) ->
   case send_chunk(Client, <<>>) of
@@ -493,7 +496,7 @@ sendfile_fallback(Fd, Opts, Client) ->
   Offset = proplists:get_value(offset, Opts, 0),
   Bytes = proplists:get_value(bytes, Opts, 0),
   ChunkSize = proplists:get_value(chunk_size, Opts, ?CHUNK_SIZE),
-  
+
   {ok, CurrPos} = file:position(Fd, {cur, 0}),
   {ok, _NewPos} = file:position(Fd, {bof, Offset}),
   Res = sendfile_fallback(Fd, Bytes, ChunkSize, Client, 0),
@@ -503,11 +506,11 @@ sendfile_fallback(Fd, Opts, Client) ->
 
 sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
   when Bytes > Sent orelse Bytes =:= 0 ->
-  
+
   Length = if Bytes > 0 -> erlang:min(ChunkSize, Bytes - Sent);
              true -> ChunkSize
            end,
-  
+
   case file:read(Fd, Length) of
     {ok, Data} ->
       Len = iolist_size(Data),
@@ -568,10 +571,10 @@ make_multipart_stream(Parts, Boundary) ->
                            PartBin = << MpHeader/binary, Bin/binary, "\r\n" >>,
                            [PartBin | Acc]
                        end, [], Parts),
-  
+
   FinalStream = lists:reverse([hackney_multipart:mp_eof(Boundary) |
     Stream]),
-  
+
   %% function used to stream
   StreamFun = fun
                 ([]) ->
@@ -579,7 +582,7 @@ make_multipart_stream(Parts, Boundary) ->
                 ([Part | Rest]) ->
                   {ok, Part, Rest}
               end,
-  
+
   {StreamFun, FinalStream}.
 
 
@@ -614,13 +617,9 @@ default_ua() ->
             end,
   << "hackney/", Version/binary >>.
 
-maybe_add_host(HeadersDict, Netloc) ->
-  case hackney_headers:get_value(<<"Host">>, HeadersDict) of
-    undefined ->
-      hackney_headers:store(<<"Host">>, Netloc, HeadersDict);
-    _ ->
-      HeadersDict
-  end.
+maybe_add_host(Headers0, Netloc) ->
+  {_, Headers1} = hackney_headers_new:store_new(<<"Host">>, Netloc, Headers0),
+  Headers1.
 
 is_default_port(#client{transport=hackney_tcp, port=80}) ->
   true;

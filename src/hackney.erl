@@ -297,7 +297,7 @@ request(Method, URL, Headers, Body) ->
   | {ok, integer(), list()}
   | {ok, client_ref()}
   | {error, term()}.
-request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
+request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
     fun hackney_url:pathencode/1),
 
@@ -307,7 +307,7 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
 
   ?report_trace("request", [{method, Method},
     {url, URL},
-    {headers, Headers},
+    {headers, Headers0},
     {body, Body},
     {options, Options0}]),
 
@@ -325,13 +325,18 @@ request(Method, #hackney_url{}=URL0, Headers, Body, Options0) ->
                   {basic_auth, {User, Password}})
             end,
 
+  Headers1 = hackney_headers_new:new(Headers0),
+
   case maybe_proxy(Transport, Host, Port, Options) of
     {ok, Ref, AbsolutePath} ->
-      Request = make_request(Method, URL, Headers, Body,
-        Options, AbsolutePath),
+      Request = make_request(
+                  Method, URL, Headers1, Body, Options, AbsolutePath
+                 ),
       send_request(Ref, Request);
     {ok, Ref} ->
-      Request = make_request(Method, URL, Headers, Body, Options, false),
+      Request = make_request(
+                  Method, URL, Headers1, Body, Options, false
+                 ),
       send_request(Ref, Request);
     Error ->
       Error
@@ -365,12 +370,10 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
     {ok, Client} ->
       case {Client#client.response_state, Client#client.body_state} of
         {start, waiting} ->
-          Resp = hackney_request:perform(Client, {Method,
-            Path,
-            Headers,
-            Body}),
-          ?report_trace("got response", [{response, Resp},
-            {client, Client}]),
+          Resp = hackney_request:perform(
+                   Client, {Method, Path, Headers, Body}
+                  ),
+          ?report_trace("got response", [{response, Resp}, {client, Client}]),
           Reply = maybe_redirect(Resp, Req),
           reply_response(Reply, Client);
         _ ->
@@ -378,15 +381,13 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
           reply_response({error, invalide_state}, Client)
       end;
     Error ->
-      ?report_trace("response error", [{error, Error},
-        {client, Client0}]),
+      ?report_trace("response error", [{error, Error}, {client, Client0}]),
       reply_response(Error, Client0)
   end.
 
 %% @doc send the request body until eob. It's issued after sending a request using
 %% the `request' and `send_request' functions.
--spec send_body(client_ref(), term())
-    -> ok | {error, term()}.
+-spec send_body(client_ref(), term()) -> ok | {error, term()}.
 send_body(Ref, Body) ->
   hackney_manager:get_state(Ref, fun(State) ->
     Reply = hackney_request:stream_body(Body, State),
@@ -448,16 +449,16 @@ start_response(Ref) ->
 -spec cookies(list()) -> list().
 cookies(Headers) ->
   lists:foldl(fun({K, V}, Acc) ->
-    case hackney_bstr:to_lower(K) of
-      <<"set-cookie">> ->
-        case hackney_cookie:parse_cookie(V) of
-          {error, _} -> Acc;
-          [{Name, _} | _]=Cookie ->
-            [{Name, Cookie} | Acc]
-        end;
-      _ ->
-        Acc
-    end
+                  case hackney_bstr:to_lower(K) of
+                    <<"set-cookie">> ->
+                      case hackney_cookie:parse_cookie(V) of
+                        {error, _} -> Acc;
+                        [{Name, _} | _]=Cookie ->
+                          [{Name, Cookie} | Acc]
+                      end;
+                    _ ->
+                      Acc
+                  end
               end, [], Headers).
 
 %% @doc Stream the response body.
@@ -562,21 +563,17 @@ stop_async(Ref) ->
 %%
 %%
 host_header(#hackney_url{transport=Transport,netloc=Netloc}, Headers) ->
-  case proplists:get_value(<<"Host">>, Headers) of
-    undefined ->
-          Host = host_header_encode(Transport, Netloc),
-          Headers ++ [{<<"Host">>, Host}];
-    _ -> Headers
-  end.
+  {_, Headers1} = hackney_headers_new:store_new(
+                    <<"Host">>, host_header_encode(Transport, Netloc), Headers
+                   ),
+  Headers1.
 
-host_header_encode(hackney_local_tcp, Netloc) ->
-    hackney_url:urlencode(Netloc);
+host_header_encode(hackney_local_tcp, Netloc) -> hackney_url:urlencode(Netloc);
 host_header_encode(_Transport, Netloc) -> Netloc.
 
 
 make_request(connect, #hackney_url{}=URL, Headers, Body, _, _) ->
-  #hackney_url{host = Host,
-    port = Port}= URL,
+  #hackney_url{host = Host, port = Port}= URL,
 
   %% place the correct host
   Headers1 = host_header(URL, Headers),
@@ -589,17 +586,17 @@ make_request(Method, #hackney_url{}=URL, Headers0, Body, Options, true) ->
 
   FinalPath = hackney_url:unparse_url(URL),
   Headers = case proplists:get_value(proxy_auth, Options) of
-              undefined ->
-                Headers1;
+              undefined -> Headers1;
               {User, Pwd} ->
                 Credentials = base64:encode(<< User/binary, ":", Pwd/binary >>),
-                Headers1 ++ [{<<"Proxy-Authorization">>,
-                  <<"Basic ", Credentials/binary>>}]
+                hackney_headers_new:store(
+                  <<"Proxy-Authorization">>, <<"Basic ", Credentials/binary>>,
+                  Headers1
+                )
             end,
   {Method, FinalPath, Headers, Body};
 make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
-  #hackney_url{path = Path,
-    qs = Query} = URL,
+  #hackney_url{path = Path, qs = Query} = URL,
 
   %% place the correct host
   Headers1 = host_header(URL, Headers),
@@ -620,78 +617,65 @@ maybe_proxy(Transport, Host, Port, Options)
       ?report_debug("HTTP proxy request", [{url, Url}]),
       Url1 = hackney_url:parse_url(Url),
       #hackney_url{transport = PTransport,
-        host = ProxyHost,
-        port = ProxyPort} = hackney_url:normalize(Url1),
+                   host = ProxyHost,
+                   port = ProxyPort} = hackney_url:normalize(Url1),
       ProxyAuth = proplists:get_value(proxy_auth, Options),
       case {Transport, PTransport} of
-        {hackney_ssl, hackney_ssl} ->
-          {error, invalid_proxy_transport};
+        {hackney_ssl, hackney_ssl} -> {error, invalid_proxy_transport};
         {hackney_ssl, _} ->
-          do_connect(ProxyHost, ProxyPort, ProxyAuth,
-            Transport, Host, Port, Options);
+          do_connect(ProxyHost, ProxyPort, ProxyAuth,Transport, Host, Port, Options);
         _ ->
-          case hackney_connect:connect(Transport, ProxyHost,
-            ProxyPort, Options, true) of
+          case hackney_connect:connect(Transport, ProxyHost,ProxyPort, Options, true) of
             {ok, Ref} -> {ok, Ref, true};
             Error -> Error
           end
       end;
     {ProxyHost, ProxyPort} ->
-      ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost},
-        {proxy_port, ProxyPort}]),
+      ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost}, {proxy_port, ProxyPort}]),
       case Transport of
         hackney_ssl ->
           ProxyAuth = proplists:get_value(proxy_auth, Options),
-          do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
-            Port, Options);
+          do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host, Port, Options);
         _ ->
           case hackney_connect:connect(Transport, ProxyHost,
-            ProxyPort, Options, true) of
+                                       ProxyPort, Options, true) of
             {ok, Ref} -> {ok, Ref, true};
             Error -> Error
           end
       end;
     {connect, ProxyHost, ProxyPort} ->
-      ?report_debug("HTTP tunnel request", [{proxy_host, ProxyHost},
-        {proxy_port, ProxyPort}]),
-
+      ?report_debug("HTTP tunnel request", [{proxy_host, ProxyHost}, {proxy_port, ProxyPort}]),
       ProxyAuth = proplists:get_value(proxy_auth, Options),
-      do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host,
-        Port, Options);
+      do_connect(ProxyHost, ProxyPort, ProxyAuth, Transport, Host, Port, Options);
     {socks5, ProxyHost, ProxyPort} ->
-      ?report_debug("SOCKS proxy request", [{proxy_host, ProxyHost},
-        {proxy_port, ProxyPort}]),
+      ?report_debug("SOCKS proxy request", [{proxy_host, ProxyHost}, {proxy_port, ProxyPort}]),
 
       %% create connection options
       ProxyUser = proplists:get_value(socks5_user, Options),
       ProxyPass = proplists:get_value(socks5_pass, Options),
       ProxyResolve = proplists:get_value(socks5_resolve, Options),
-      ConnectOpts = proplists:get_value(connect_options, Options,
-        []),
+      ConnectOpts0 = proplists:get_value(connect_options, Options, []),
       ConnectOpts1 = [{socks5_host, ProxyHost},
-        {socks5_port, ProxyPort},
-        {socks5_user, ProxyUser},
-        {socks5_pass, ProxyPass},
-        {socks5_resolve, ProxyResolve},
-        {socks5_transport, Transport} | ConnectOpts],
+                      {socks5_port, ProxyPort},
+                      {socks5_user, ProxyUser},
+                      {socks5_pass, ProxyPass},
+                      {socks5_resolve, ProxyResolve},
+                      {socks5_transport, Transport} | ConnectOpts0],
 
       %% ssl options?
       Insecure = proplists:get_value(insecure, Options, false),
-      ConnectOpts2 =  case proplists:get_value(ssl_options,
-        Options) of
+      ConnectOpts2 =  case proplists:get_value(ssl_options, Options) of
                         undefined ->
                           [{insecure, Insecure}] ++ ConnectOpts1;
                         SslOpts ->
                           [{ssl_options, SslOpts},
-                            {insecure, Insecure}] ++ ConnectOpts1
+                           {insecure, Insecure}] ++ ConnectOpts1
                       end,
 
-      Options1 = lists:keystore(connect_options, 1, Options,
-        {connect_options, ConnectOpts2}),
+      Options1 = lists:keystore(connect_options, 1, Options, {connect_options, ConnectOpts2}),
 
       %% connect using a socks5 proxy
-      hackney_connect:connect(hackney_socks5, Host, Port,
-        Options1, true);
+      hackney_connect:connect(hackney_socks5, Host, Port, Options1, true);
     _ ->
       ?report_debug("request without proxy", []),
       hackney_connect:connect(Transport, Host, Port, Options, true)
@@ -699,17 +683,15 @@ maybe_proxy(Transport, Host, Port, Options)
 
 
 do_connect(ProxyHost, ProxyPort, undefined, Transport, Host, Port, Options) ->
-  do_connect(ProxyHost, ProxyPort, {undefined, <<>>}, Transport, Host,
-    Port, Options);
-do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
-  Port, Options) ->
+  do_connect(ProxyHost, ProxyPort, {undefined, <<>>}, Transport, Host, Port, Options);
+do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host, Port, Options) ->
   %% create connection options
   ConnectOpts = proplists:get_value(connect_options, Options, []),
   ConnectOpts1 = [{connect_host, Host},
-    {connect_port, Port},
-    {connect_transport, Transport},
-    {connect_user, ProxyUser},
-    {connect_pass, ProxyPass}| ConnectOpts],
+                  {connect_port, Port},
+                  {connect_transport, Transport},
+                  {connect_user, ProxyUser},
+                  {connect_pass, ProxyPass}| ConnectOpts],
 
   %% ssl options?
   Insecure = proplists:get_value(insecure, Options, false),
@@ -718,26 +700,24 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host,
                       [{insecure, Insecure}] ++ ConnectOpts1;
                     SslOpts ->
                       [{ssl_options, SslOpts},
-                        {insecure, Insecure}] ++ ConnectOpts1
+                       {insecure, Insecure}] ++ ConnectOpts1
                   end,
 
-  Options1 = lists:keystore(connect_options, 1, Options,
-    {connect_options, ConnectOpts2}),
+  Options1 = lists:keystore(connect_options, 1, Options, {connect_options, ConnectOpts2}),
 
   %% connect using a socks5 proxy
-  hackney_connect:connect(hackney_http_connect, ProxyHost, ProxyPort,
-    Options1, true).
+  hackney_connect:connect(hackney_http_connect, ProxyHost, ProxyPort, Options1, true).
 
 
 
-maybe_redirect({ok, _}=Resp, _Req) ->
-  Resp;
-maybe_redirect({ok, S, H, #client{follow_redirect=true,
-  retries=Tries}=Client}=Resp, Req)
-  when Tries > 0 ->
+maybe_redirect({ok, _}=Resp, _Req) -> Resp;
+maybe_redirect(
+  {ok, S, _H, #client{headers=Headers, follow_redirect=true, retries=Tries}=Client}=Resp,
+  Req
+ ) when Tries > 0 ->
   %% check if the given location is an absolute url,
   %% else return an error.
-  case redirect_location(H) of
+  case redirect_location(Headers) of
     undefined -> Resp;
     Location ->
       IsRedirect = lists:member(S, [301, 302, 303, 307]),
@@ -764,9 +744,9 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
   case lists:member(S, [301, 302, 307]) of
     true  ->
       ?report_debug("redirect request", [{location, Location},
-        {req, Req},
-        {resp, Resp},
-        {tries, Tries}]),
+                                         {req, Req},
+                                         {resp, Resp},
+                                         {tries, Tries}]),
       %% redirect the location if possible. If the method is
       %% different from  get or head it will return
       %% `{ok, {maybe_redirect, Status, Headers, Client}}' to let
@@ -774,12 +754,10 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
       case lists:member(Method, [get, head]) of
         true ->
           NewReq = {Method, Location, Headers, Body},
-          maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
-            Req);
+          maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq), Req);
         false when Client#client.force_redirect =:= true ->
           NewReq = {Method, Location, Headers, Body},
-          maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
-            Req);
+          maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq), Req);
         false ->
           {ok, {maybe_redirect, S, H, Client}}
       end;
@@ -788,18 +766,17 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
       %% see other. If method is not POST it is
       %% considered an invalid redirection.
       ?report_debug("redirect request", [{location, Location},
-        {req, Req},
-        {resp, Resp},
-        {tries, Tries}]),
+                                         {req, Req},
+                                         {resp, Resp},
+                                         {tries, Tries}]),
 
       NewReq = {get, Location, [], <<>>},
-      maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq),
-        Req);
+      maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq), Req);
     false when S =:= 303 ->
       ?report_debug("invalid redirection", [{location, Location},
-        {req, Req},
-        {resp, Resp},
-        {tries, Tries}]),
+                                            {req, Req},
+                                            {resp, Resp},
+                                            {tries, Tries}]),
       {error, {invalid_redirection, Resp}};
     _ ->
       Resp
@@ -812,37 +789,35 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   %% close the connection if we don't use a pool
   RedirectUrl = hackney_url:parse_url(NewLocation),
   #hackney_url{transport=RedirectTransport,
-    host=RedirectHost,
-    port=RedirectPort}=RedirectUrl,
+               host=RedirectHost,
+               port=RedirectPort}=RedirectUrl,
 
   #client{transport=Transport,
-    host=Host,
-    port=Port,
-    options=Opts0,
-    follow_redirect=FollowRedirect,
-    max_redirect=MaxRedirect,
-    retries=Tries,
-    redirect=Redirect} = Client,
+          host=Host,
+          port=Port,
+          options=Opts0,
+          follow_redirect=FollowRedirect,
+          max_redirect=MaxRedirect,
+          retries=Tries,
+          redirect=Redirect} = Client,
+
 
   NewHeaders = case RedirectHost of
                  Host -> Headers;
-                 _    -> lists:keystore(<<"Host">>, 1, Headers,
-                   {<<"Host">>, RedirectHost})
+                 _    ->
+                   hackney_headers_new:store(<<"Host">>, RedirectHost, Headers)
                end,
   RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
-    Client#client.options, false),
+                                 Client#client.options, false),
   %% make a request without any redirection
-
-  Opts = lists:keystore(follow_redirect, 1, Opts0,
-    {follow_redirect, false}),
-
+  Opts = lists:keystore(follow_redirect, 1, Opts0, {follow_redirect, false}),
   Client1 = hackney_connect:check_or_close(Client),
 
   %% update the state with the redirect info
   Client2 = Client1#client{transport=RedirectTransport,
-    host=RedirectHost,
-    port=RedirectPort,
-    options=Opts},
+                           host=RedirectHost,
+                           port=RedirectPort,
+                           options=Opts},
 
   %% send a request to the new location
   case send_request(Client2, RedirectRequest) of
@@ -851,40 +826,42 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
       RedirectState1 = case Redirect of
                          nil ->
                            RedirectState#client{redirect=Redirect,
-                             follow_redirect=FollowRedirect,
-                             max_redirect=MaxRedirect,
-                             retries=Tries,
-                             options=Opts0};
+                                                follow_redirect=FollowRedirect,
+                                                max_redirect=MaxRedirect,
+                                                retries=Tries,
+                                                options=Opts0};
                          _ ->
                            NewRedirect = {Transport, Host, Port, Opts0},
                            RedirectState#client{redirect=NewRedirect,
-                             follow_redirect=FollowRedirect,
-                             max_redirect=MaxRedirect,
-                             retries=Tries,
-                             options=Opts0}
+                                                follow_redirect=FollowRedirect,
+                                                max_redirect=MaxRedirect,
+                                                retries=Tries,
+                                                options=Opts0}
                        end,
       {ok, S, H, RedirectState1};
     {ok,  S, H, #client{}=RedirectClient} when Redirect /= nil ->
       NewClient = RedirectClient#client{redirect=Redirect,
-        follow_redirect=FollowRedirect,
-        max_redirect=MaxRedirect,
-        retries=Tries,
-        options=Opts0},
+                                        follow_redirect=FollowRedirect,
+                                        max_redirect=MaxRedirect,
+                                        retries=Tries,
+                                        options=Opts0},
       {ok, S, H, NewClient};
     {ok, S, H, #client{}=RedirectClient} ->
       NewRedirect = {Transport, Host, Port, Opts0},
       NewClient = RedirectClient#client{redirect=NewRedirect,
-        follow_redirect=FollowRedirect,
-        max_redirect=MaxRedirect,
-        retries=Tries,
-        options=Opts0},
+                                        follow_redirect=FollowRedirect,
+                                        max_redirect=MaxRedirect,
+                                        retries=Tries,
+                                        options=Opts0},
       {ok, S, H, NewClient};
     Response ->
       Response
   end.
 
+redirect_location(Headers) when is_list(Headers) ->
+  redirect_location(hackney_headers_new:from_list(Headers));
 redirect_location(Headers) ->
-  hackney_headers:get_value(<<"location">>, hackney_headers:new(Headers)).
+  hackney_headers_new:get_value(<<"location">>, Headers).
 
 absolute_url(<<"http://", _Rest/binary >>= URL, _Client) ->
   URL;
@@ -903,10 +880,10 @@ absolute_url(RelativeUrl, #client{transport=T, host=Host, port=Port,
                 end
             end,
   Parsed = hackney_url:normalize(#hackney_url{scheme=Scheme,
-    host=Host,
-    port=Port,
-    netloc=Netloc,
-    path=NewPath}),
+                                              host=Host,
+                                              port=Port,
+                                              netloc=Netloc,
+                                              path=NewPath}),
   hackney_url:unparse_url(Parsed).
 
 
@@ -955,8 +932,9 @@ reply_response({ok, Status, Headers, #client{method= <<"HEAD">>}=NState},
   {skip, NState2} = hackney_response:skip_body(NState),
   maybe_update_req(NState2),
   {ok, Status, Headers};
-reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
-  _State) when Status =:= 204 orelse Status =:= 304 ->
+reply_response(
+  {ok, Status, Headers, #client{request_ref=Ref}=NState}, _State
+ )  when Status =:= 204 orelse Status =:= 304 ->
   case NState#client.with_body of
     false ->
       hackney_manager:update_state(NState#client{clen = 0}),
@@ -964,8 +942,7 @@ reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
     true ->
       reply_with_body(Status, Headers, NState#client{clen = 0})
   end;
-reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState},
-  _State) ->
+reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState}, _State) ->
   case NState#client.with_body of
     false ->
       hackney_manager:update_state(NState),
