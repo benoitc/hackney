@@ -21,6 +21,7 @@
         redirect = nil,
         location=nil,
         parser=nil,
+        headers=hackney_headers_new:new(),
         state,
         response_state = start,
         mp_boundary = nil,

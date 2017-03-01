@@ -41,7 +41,7 @@ start_response(#client{response_state=stream} = Client) ->
 start_response(#client{request_ref=Ref, response_state=waiting,
   async=Async}=Client)
   when Async =:= true orelse Async =:= once ->
-  
+
   hackney_manager:update_state(Client),
   case hackney_manager:start_async_response(Ref) of
     ok ->
@@ -89,7 +89,7 @@ wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
   end.
 
 wait_headers(#client{parser=Parser}=Client, Status) ->
-  wait_headers(hackney_http:execute(Parser), Client, Status, []).
+  wait_headers(hackney_http:execute(Parser), Client, Status, hackney_headers_new:new()).
 
 
 wait_headers({more, Parser}, Client, Status, Headers) ->
@@ -100,24 +100,9 @@ wait_headers({more, Parser}, Client, Status, Headers) ->
     Error  ->
       Error
   end;
-wait_headers({header, {Key, Value}=KV, Parser}, Client, Status, Headers) ->
-  Client1 = case hackney_bstr:to_lower(Key) of
-              <<"content-length">> ->
-                CLen = list_to_integer(binary_to_list(Value)),
-                Client#client{clen=CLen};
-              <<"transfer-encoding">> ->
-                Client#client{te=hackney_bstr:to_lower(Value)};
-              <<"connection">> ->
-                Client#client{connection=hackney_bstr:to_lower(Value)};
-              <<"content-type">> ->
-                Client#client{ctype=Value};
-              <<"location">> ->
-                Client#client{location=Value};
-              _ ->
-                Client
-            end,
-  wait_headers(hackney_http:execute(Parser), Client1, Status,
-    [KV | Headers]);
+wait_headers({header, {Key, Value}, Parser}, Client, Status, Headers) ->
+  Headers2 = hackney_headers_new:append(Key, Value, Headers),
+  wait_headers(hackney_http:execute(Parser), Client, Status, Headers2);
 
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   ResponseTime = timer:now_diff(os:timestamp(),
@@ -125,7 +110,17 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   metrics:update_histogram(Client#client.mod_metrics,
     [hackney, Client#client.host, response_time],
     ResponseTime),
-  {ok, Status, lists:reverse(Headers), Client#client{parser=Parser}}.
+  HeadersList = hackney_headers_new:to_list(Headers),
+  TE = hackney_headers_new:get_value("transfer-encoding", Headers, nil),
+  CLen = case hackney_headers_new:lookup("content-length", Headers) of
+           [] -> nil;
+           [{_, Len} |_] -> list_to_integer(binary_to_list(Len))
+         end,
+  Client2 = Client#client{parser=Parser,
+                          headers=Headers,
+                          te=TE,
+                          clen=CLen},
+  {ok, Status, HeadersList, Client2}.
 
 stream_body(Client=#client{response_state=done}) ->
   {done, Client};
@@ -194,10 +189,9 @@ stream_body_recv(Buffer, Client=#client{version=Version,
 -spec stream_multipart(#client{})
     -> {headers, list(), #client{}} | {body, binary(), #client{}}
   | {eof|end_of_part|mp_mixed|mp_mixed_eof, #client{}}.
-stream_multipart(Client=#client{body_state=waiting,
-  ctype=CType,
-  clen=Length}) ->
-  {<<"multipart">>, _, Params} = hackney_headers:content_type(CType),
+stream_multipart(Client=#client{headers=Headers, body_state=waiting, clen=Length}) ->
+  CType = hackney_headers_new:get_value(<<"content-type">>, Headers),
+  {<<"multipart">>, _, Params} = hackney_headers_new:parse_content_type(CType),
   {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
   Parser = hackney_multipart:parser(Boundary),
   multipart_data(Client#client{body_state=processing}, Length,
@@ -284,9 +278,9 @@ end_stream_body(Rest, Client0) ->
     buffer=Rest,
     stream_to=false,
     async=false},
-  
+
   Pool = hackney_connect:is_pool(Client),
-  
+
   case maybe_close(Client) of
     true ->
       close(Client);
@@ -294,7 +288,7 @@ end_stream_body(Rest, Client0) ->
       #client{socket=Socket,
         socket_ref=Ref,
         pool_handler=Handler}=Client,
-      
+
       Handler:checkin(Ref, Socket),
       Client#client{state=closed, socket=nil, socket_ref=nil,
         buffer = <<>>};
@@ -324,7 +318,10 @@ read_body(_MaxLength, Client, Acc) ->
 
 maybe_close(#client{socket=nil}) ->
   true;
-maybe_close(#client{version={Min,Maj}, connection=Connection}) ->
+maybe_close(#client{version={Min,Maj}, headers=Headers}) ->
+  Connection = hackney_bstr:to_lower(
+                 hackney_headers_new:get_value(<<"connection">>, Headers, <<"">>)
+                ),
   case Connection of
     <<"close">> -> true;
     <<"keep-alive">> -> false;
