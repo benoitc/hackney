@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.6.7
+__Version:__ 1.7.0
 
 # hackney
 
@@ -44,16 +44,16 @@ information on what still needs to be done.
 
 #### Useful modules are:
 
-- [`hackney`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney.md): main module. It contains all HTTP client functions.
-- [`hackney_http`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
+- [`hackney`](http://github.com/benoitc/hackney/blob/master/doc/hackney.md): main module. It contains all HTTP client functions.
+- [`hackney_http`](http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
 to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetected if it's a request or a response that's needed.
 
-- [`hackney_headers`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_headers.md) Module to manipulate HTTP headers.
-- [`hackney_cookie`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_cookie.md): Module to manipulate cookies.
-- [`hackney_multipart`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_multipart.md): Module to encode/decode multipart.
-- [`hackney_url`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_url.md): Module to parse and create URIs.
-- [`hackney_date`](http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_date.md): Module to parse HTTP dates.
+- [`hackney_headers`](http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md) Module to manipulate HTTP headers.
+- [`hackney_cookie`](http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md): Module to manipulate cookies.
+- [`hackney_multipart`](http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md): Module to encode/decode multipart.
+- [`hackney_url`](http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md): Module to parse and create URIs.
+- [`hackney_date`](http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md): Module to parse HTTP dates.
 
 Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
 to get the last changelog.
@@ -520,29 +520,29 @@ $ kill `cat httpbin.pid`
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney.md" class="module">hackney</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_headers_new.md" class="module">hackney_headers_new</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_http.md" class="module">hackney_http</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_manager.md" class="module">hackney_manager</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_socks5.md" class="module">hackney_socks5</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_ssl.md" class="module">hackney_ssl</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_stream.md" class="module">hackney_stream</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_tcp.md" class="module">hackney_tcp</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/issue-388/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers_new.md" class="module">hackney_headers_new</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md" class="module">hackney_http</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_manager.md" class="module">hackney_manager</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_socks5.md" class="module">hackney_socks5</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_ssl.md" class="module">hackney_ssl</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_stream.md" class="module">hackney_stream</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_tcp.md" class="module">hackney_tcp</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
 
