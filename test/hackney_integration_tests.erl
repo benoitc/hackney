@@ -124,7 +124,7 @@ relative_redirect_request_follow() ->
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(200, StatusCode),
-     ?_assertEqual(<<"/get">>, Location)].
+     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
 
 async_request() ->
     URL = <<"http://localhost:8000/get">>,
