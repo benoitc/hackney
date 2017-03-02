@@ -8,13 +8,32 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-to_list_test() ->
+from_list_test() ->
   Headers = [
     {<<"d">>, <<"e">>},
     {<<"a">>, <<"b">>},
     {<<"c">>, <<"b">>}
   ],
   ?assertEqual(Headers, hackney_headers_new:to_list(hackney_headers_new:from_list(Headers))).
+
+key_type_test() ->
+  HeadersList = [
+    {<<"d">>, <<"e">>},
+    {a, <<"b">>},
+    {"c", <<"f">>}
+  ],
+  Headers = hackney_headers_new:from_list(HeadersList),
+  ?assertEqual(HeadersList, hackney_headers_new:to_list(Headers)),
+  ?assertEqual(<<"e">>, hackney_headers_new:get_value(<<"d">>, Headers)),
+  ?assertEqual(<<"e">>, hackney_headers_new:get_value(d, Headers)),
+  ?assertEqual(<<"e">>, hackney_headers_new:get_value("d", Headers)),
+  ?assertEqual(<<"b">>, hackney_headers_new:get_value(a, Headers)),
+  ?assertEqual(<<"b">>, hackney_headers_new:get_value(<<"a">>, Headers)),
+  ?assertEqual(<<"b">>, hackney_headers_new:get_value("a", Headers)),
+  ?assertEqual(<<"f">>, hackney_headers_new:get_value("c", Headers)),
+  ?assertEqual(<<"f">>, hackney_headers_new:get_value(<<"c">>, Headers)),
+  ?assertEqual(<<"f">>, hackney_headers_new:get_value(c, Headers)).
+  
 
 
 store_test() ->

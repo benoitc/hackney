@@ -103,7 +103,7 @@ store_new(Key, Value, {_N, DictHeaders}=Headers) ->
 delete(Key, {N, Headers}=H) ->
   KL = ?kl(Key),
   case dict:find(KL, Headers) of
-    {ok, Values} ->
+    {ok, Values} ->
       Headers2 = dict:erase(KL, Headers),
       {N - length(Values), Headers2};
     error ->
