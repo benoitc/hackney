@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.7.0
+__Version:__ 1.7.1
 
 # hackney
 
