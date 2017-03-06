@@ -65,12 +65,14 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
+                  gen_tcp:close(Socket),
                   Error
               end;
             _ ->
               {ok, {Transport, Socket}}
           end;
         Error ->
+          gen_tcp:close(Socket),
           Error
       end;
     Error ->
