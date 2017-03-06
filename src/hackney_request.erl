@@ -361,7 +361,7 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                                            <<"transfer-encoding">>,
                                            hackney_headers_new:store(
                                              <<"Content-Type">>, CType,
-                                             hacknet_headers_new:store(
+                                             hackney_headers_new:store(
                                                <<"Content-Length">>, CLen, Headers))),
                               {Headers1, normal};
                             {chunked, _} ->
@@ -411,7 +411,7 @@ handle_multipart_body(Headers, ReqType, CLen, Boundary, Client) ->
                               {chunked, _} ->
                                 Headers1 = hackney_headers_new:delete(
                                              <<"content-length">>,
-                                             hacknet_headers_new:store(
+                                             hackney_headers_new:store(
                                                [{<<"Content-Type">>, CType},
                                                 {<<"Transfer-Encoding">>, <<"chunked">>}],
                                                Headers)),
