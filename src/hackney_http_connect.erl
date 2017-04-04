@@ -192,6 +192,6 @@ check_status(<< "HTTP/1.0 200", _/bits >>) ->
   ok;
 check_status(<< "HTTP/1.0 201", _/bits >>) ->
   ok;
-check_status(Else) ->
-  error_logger:error_msg("proxy error: ~w~n", [Else]),
+check_status(_Else) ->
+%%   error_logger:error_msg("proxy error: ~w~n", [Else]),
   {error, proxy_error}.
