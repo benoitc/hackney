@@ -67,7 +67,7 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   Connection = case catch gen_server:call(Pool, {checkout,
       {Host, Port, Transport}, Pid, RequestRef}, ConnectTimeout) of
     {'EXIT', {timeout, _}} -> {error, connect_timeout};
-    Error -> Error
+    Conn -> Conn
   end,
   case Connection of
     {ok, Socket, Owner} ->
