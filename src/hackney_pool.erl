@@ -58,13 +58,18 @@ start() ->
 
 %% @doc fetch a socket from the pool
 checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
+  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   Host = string:to_lower(Host0),
   Pid = self(),
   RequestRef = Client#client.request_ref,
   Name = proplists:get_value(pool, Opts, default),
   Pool = find_pool(Name, Opts),
-  case gen_server:call(Pool, {checkout, {Host, Port, Transport},
-    Pid, RequestRef}, infinity) of
+  Connection = case catch gen_server:call(Pool, {checkout,
+      {Host, Port, Transport}, Pid, RequestRef}, ConnectTimeout) of
+    {'EXIT', {timeout, _}} -> {error, connect_timeout};
+    Error -> Error
+  end,
+  case Connection of
     {ok, Socket, Owner} ->
       CheckinReference = {Host, Port, Transport},
       {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
