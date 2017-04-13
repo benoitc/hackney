@@ -64,8 +64,8 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   RequestRef = Client#client.request_ref,
   Name = proplists:get_value(pool, Opts, default),
   Pool = find_pool(Name, Opts),
-  case catch gen_server:call(Pool, {checkout, {Host, Port, Transport}, Pid,
-      RequestRef}, ConnectTimeout) of
+  case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
+    Pid, RequestRef}, ConnectTimeout) of
     {ok, Socket, Owner} ->
       CheckinReference = {Host, Port, Transport},
       {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
