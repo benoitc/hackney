@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.8.0
+__Version:__ 1.8.1
 
 # hackney
 
@@ -63,11 +63,10 @@ to get the last changelog.
 Download the sources from our [Github
 repository](http://github.com/benoitc/hackney)
 
-To build the application simply run 'make'. This should build .beam, .app
-files and documentation.
+To build the application simply run 'rebar3 compile'.
 
-To run tests run 'make test'.
-To generate doc, run 'make doc'.
+To run tests run 'rebar3 eunit'.
+To generate doc, run 'rebar3 edoc'.
 
 Or add it to your rebar config
 
