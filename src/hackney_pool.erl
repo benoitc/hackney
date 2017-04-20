@@ -63,8 +63,9 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   RequestRef = Client#client.request_ref,
   Name = proplists:get_value(pool, Opts, default),
   Pool = find_pool(Name, Opts),
-  case gen_server:call(Pool, {checkout, {Host, Port, Transport},
-    Pid, RequestRef}, infinity) of
+  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+  case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
+    Pid, RequestRef}, ConnectTimeout) of
     {ok, Socket, Owner} ->
       CheckinReference = {Host, Port, Transport},
       {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
@@ -72,9 +73,9 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
       CheckinReference = {Host, Port, Transport},
       {error, no_socket, {Name, RequestRef, CheckinReference, Owner,
         Transport}};
-    
     {error, Reason} ->
-      {error, Reason}
+      {error, Reason};
+    {'EXIT', {timeout, _}} -> {error, connect_timeout}
   end.
 
 %% @doc release a socket in the pool
