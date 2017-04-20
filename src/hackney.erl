@@ -805,7 +805,9 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   NewHeaders = case RedirectHost of
                  Host -> Headers;
                  _    ->
-                   hackney_headers_new:store(<<"Host">>, RedirectHost, Headers)
+                   hackney_headers_new:store(<<"Host">>,
+                                             hackney_bstr:to_binary(RedirectHost),
+                                             Headers)
                end,
   RedirectRequest = make_request(Method, RedirectUrl, NewHeaders, Body,
                                  Client#client.options, false),
