@@ -371,7 +371,7 @@ send_request(Client0, {Method, Path, Headers, Body}=Req) ->
       case {Client#client.response_state, Client#client.body_state} of
         {start, waiting} ->
           Resp = hackney_request:perform(
-                   Client, {Method, Path, Headers, Body}
+                   Client, {Method, Path, hackney_headers_new:new(Headers), Body}
                   ),
           ?report_trace("got response", [{response, Resp}, {client, Client}]),
           Reply = maybe_redirect(Resp, Req),
