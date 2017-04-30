@@ -1,32 +1,33 @@
 -record(hackney_url, {
-        transport,
-        scheme,
-        netloc,
-        raw_path,
-        path = <<>>,
-        qs = <<>>,
-        fragment = <<>>,
-        host,
-        port,
-        user = <<>>,
-        password = <<>> }).
+  transport        :: atom(),
+     scheme        :: atom(),
+     netloc        :: binary(),
+   raw_path        :: binary(),
+       path = <<>> :: binary(),
+         qs = <<>> :: binary(),
+   fragment = <<>> :: binary(),
+       host        :: string(),
+       port        :: integer(),
+       user = <<>> :: binary(),
+   password = <<>> :: binary()
+}).
 
-%% common types
 -type hackney_url() :: #hackney_url{}.
 
-
--record(hparser, {type=auto,
-                  max_line_length=4096,
-                  max_empty_lines=10,
-                  empty_lines=0,
-                  state=on_first_line,
-                  buffer = <<>>,
-                  version,
-                  method,
-                  partial_headers=[],
-                  clen,
-                  te,
-                  connection,
-                  ctype,
-                  location,
-                  body_state=waiting}).
+-record(hparser, {
+             type = auto          :: atom(),
+  max_line_length = 4096          :: integer(),
+  max_empty_lines = 10            :: integer(),
+      empty_lines = 0             :: integer(),
+            state = on_first_line :: atom(),
+           buffer = <<>>          :: binary(),
+          version                 :: binary(),
+           method                 :: binary(),
+  partial_headers = []            :: list(),
+             clen                 :: integer(),
+               te                 :: binary(),
+       connection                 :: binary(),
+            ctype                 :: binary(),
+         location                 :: binary(),
+       body_state = waiting       :: atom()
+}).
