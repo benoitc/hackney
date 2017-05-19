@@ -167,9 +167,12 @@ start_async_response(Ref) ->
           %% delete the current state from the process dictionnary
           %% since it's not the owner
           erase(Ref),
-          
+
           %% transfert the control of the socket
-          Transport:controlling_process(Socket, Pid);
+          case Transport:controlling_process(Socket, Pid) of
+            ok -> Pid ! controlling_process_done, ok;
+            Else -> Else
+          end;
         Error ->
           Error
       end

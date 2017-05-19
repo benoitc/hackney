@@ -25,6 +25,8 @@ init(Parent, Owner, Ref, Client) ->
   %% register the stream
   ok = proc_lib:init_ack(Parent, {ok, self()}),
 
+  ok = wait_for_controlling_process(),
+
   Parser = hackney_http:parser([response]),
   try
     stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
@@ -34,6 +36,14 @@ init(Parent, Owner, Ref, Client) ->
       {{Class, Reason,
         erlang:get_stacktrace()},
         "An unexpected error occurred."}}}}
+  end.
+
+wait_for_controlling_process() ->
+  receive
+    controlling_process_done ->
+      ok
+  after 10000 ->
+    timeout
   end.
 
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
