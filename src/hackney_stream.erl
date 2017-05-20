@@ -106,6 +106,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
     {Ref, resume} ->
       stream_loop(Parent, Owner, Ref, Client);
     {Ref, pause} ->
+      Transport:setopts(Socket, [{active, false}]),
       proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
         Client]);
     {Ref, stop_async, From} ->
@@ -146,11 +147,13 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
   after 5000 ->
-
+    Transport:setopts(Socket, [{active, false}]),
     proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
       Client])
 
   end.
+  
+
 
 
 %% if follow_redirect is true, we are parsing the headers to fetch the
