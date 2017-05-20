@@ -1,12 +1,12 @@
 {"1.1.0",
-[{<<"certifi">>,{pkg,<<"certifi">>,<<"1.1.0">>},0},
+[{<<"certifi">>,{pkg,<<"certifi">>,<<"1.2.0">>},0},
  {<<"idna">>,{pkg,<<"idna">>,<<"5.0.0">>},0},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.1">>},0}]}.
 [
 {pkg_hash,[
- {<<"certifi">>, <<"C9B71A547016C2528A590CCFC28DE786C7EDB74AAFA17446B84F54E04EFC00EE">>},
+ {<<"certifi">>, <<"8305B46825DD70817E09BDC00AB26CC93409E4762B16E59CC97900F2425AFDB1">>},
  {<<"idna">>, <<"E0B3003BD7FE9B3BE59B9C96333E7E1D71C20F361A0DE178C3969BD3077AEBEA">>},
  {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
  {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
