@@ -39,7 +39,7 @@ http_requests_test_() ->
      end}.
 
 start() ->
-    hackney:start(),
+    {ok, _} = application:ensure_all_started(hackney),
     ok.
 
 stop(ok) -> ok.
