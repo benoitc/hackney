@@ -5,24 +5,24 @@
 %%%
 
 -module(hackney).
--export([start/0, start/1, stop/0]).
+
 -export([connect/1, connect/2, connect/3, connect/4,
-  close/1,
-  request_info/1,
-  location/1,
-  request/1, request/2, request/3, request/4, request/5,
-  send_request/2, send_request/3,
-  start_response/1,
-  cookies/1,
-  send_body/2, finish_send_body/1,
-  send_multipart_body/2,
-  body/1, body/2, skip_body/1,
-  stream_body/1,
-  stream_multipart/1,
-  skip_multipart/1,
-  controlling_process/2,
-  cancel_request/1,
-  setopts/2]).
+         close/1,
+         request_info/1,
+         location/1,
+         request/1, request/2, request/3, request/4, request/5,
+         send_request/2, send_request/3,
+         start_response/1,
+         cookies/1,
+         send_body/2, finish_send_body/1,
+         send_multipart_body/2,
+         body/1, body/2, skip_body/1,
+         stream_body/1,
+         stream_multipart/1,
+         skip_multipart/1,
+         controlling_process/2,
+         cancel_request/1,
+         setopts/2]).
 
 -export([redirect_location/1]).
 
@@ -48,21 +48,6 @@
 
 -type client_ref() :: term().
 -export_type([client_ref/0]).
-
-%% @doc Start the hackney process. Useful when testing using the shell.
-start() ->
-  application:load(hackney),
-  hackney_app:ensure_deps_started(),
-  application:start(hackney).
-
-start(PoolHandler) ->
-  application:set_env(hackney, pool_handler, PoolHandler),
-  start().
-
-%% @doc Stop the hackney process. Useful when testing using the shell.
-stop() ->
-  application:stop(hackney).
-
 
 connect(URL) ->
   connect(URL, []).
