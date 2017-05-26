@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2016 Benoît Chesneau.
+Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.6.4
+__Version:__ 1.8.3
 
 # hackney
 
@@ -63,11 +63,10 @@ to get the last changelog.
 Download the sources from our [Github
 repository](http://github.com/benoitc/hackney)
 
-To build the application simply run 'make'. This should build .beam, .app
-files and documentation.
+To build the application simply run 'rebar3 compile'.
 
-To run tests run 'make test'.
-To generate doc, run 'make doc'.
+To run tests run 'rebar3 eunit'.
+To generate doc, run 'rebar3 edoc'.
 
 Or add it to your rebar config
 
@@ -527,6 +526,7 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers_new.md" class="module">hackney_headers_new</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md" class="module">hackney_http</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>

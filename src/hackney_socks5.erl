@@ -62,12 +62,14 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
+                  gen_tcp:close(Socket),
                   Error
               end;
             _ ->
               {ok, {Transport, Socket}}
           end;
         Error ->
+          gen_tcp:close(Socket),
           Error
       end;
     Error ->

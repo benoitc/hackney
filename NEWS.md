@@ -9,7 +9,7 @@
 - fix: `hackney_util:merge_opts/2`
 - improvements: inet6 support in socks5 sockets
 - doc: miscenaleous docs fixes
-- security: beeing more strict in ssl support
+- security: being more strict in ssl support
 - security: bump to certifi 0.7
 
 1.6.1 - 2016-07-10
@@ -513,7 +513,7 @@ fix: fix file upload content type
 - Set the connection timeout
 - Make sure sendfile correctly handle chunked encoding
 - Add support for partial file uploads
-- Return received buffer when no content lenght is given (http 1.0)
+- Return received buffer when no content length is given (http 1.0)
 - Instead of returning `{error, closed}`, return `{error, {closed,
   Buffer}}` when you receive the body, so you can figure what happened
 and maybe use the partial body.

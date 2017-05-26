@@ -24,7 +24,9 @@ start_link(Owner, Ref, Client) ->
 init(Parent, Owner, Ref, Client) ->
   %% register the stream
   ok = proc_lib:init_ack(Parent, {ok, self()}),
-  
+
+  ok = wait_for_controlling_process(),
+
   Parser = hackney_http:parser([response]),
   try
     stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
@@ -36,14 +38,22 @@ init(Parent, Owner, Ref, Client) ->
         "An unexpected error occurred."}}}}
   end.
 
+wait_for_controlling_process() ->
+  receive
+    controlling_process_done ->
+      ok
+  after 10000 ->
+    timeout
+  end.
+
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
-  socket=Socket,
-  response_state=on_body,
-  method= <<"HEAD">>,
-  parser=Parser}=Client) ->
+                                        socket=Socket,
+                                        response_state=on_body,
+                                        method= <<"HEAD">>,
+                                        parser=Parser}=Client) ->
   Buffer = hackney_http:get(Parser, buffer),
-  
-  
+
+
   hackney_manager:store_state(finish_response(Buffer, Client)),
   %% pass the control of the socket to the manager so we make
   %% sure a new request will be able to use it
@@ -51,10 +61,10 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
   %% tell the client we are done
   Owner ! {hackney_response, Ref, done};
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
-  socket=Socket,
-  response_state=on_body,
-  clen=0, te=TE,
-  parser=Parser}=Client)
+                                        socket=Socket,
+                                        response_state=on_body,
+                                        clen=0, te=TE,
+                                        parser=Parser}=Client)
   when TE /= <<"chunked">> ->
   Buffer = hackney_http:get(Parser, buffer),
   hackney_manager:store_state(finish_response(Buffer, Client)),
@@ -64,7 +74,7 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
   %% tell the client we are done
   Owner ! {hackney_response, Ref, done};
 stream_loop(Parent, Owner, Ref, #client{transport=Transport,
-  socket=Socket}=Client) ->
+                                        socket=Socket}=Client) ->
   case parse(Client) of
     {loop, Client2} ->
       stream_loop(Parent, Owner, Ref, Client2);
@@ -90,12 +100,13 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
   end.
 
 maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
-  socket=Socket,
-  async=true}=Client) ->
+                                           socket=Socket,
+                                           async=true}=Client) ->
   receive
     {Ref, resume} ->
       stream_loop(Parent, Owner, Ref, Client);
     {Ref, pause} ->
+      Transport:setopts(Socket, [{active, false}]),
       proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
         Client]);
     {Ref, stop_async, From} ->
@@ -111,13 +122,13 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
     Else ->
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
-  
+
   after 0 ->
     stream_loop(Parent, Owner, Ref, Client)
   end;
 maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
-  socket=Socket,
-  async=once}=Client) ->
+                                           socket=Socket,
+                                           async=once}=Client) ->
   receive
     {Ref, stream_next} ->
       stream_loop(Parent, Owner, Ref, Client);
@@ -136,11 +147,13 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
   after 5000 ->
-    
+    Transport:setopts(Socket, [{active, false}]),
     proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
       Client])
-  
+
   end.
+  
+
 
 
 %% if follow_redirect is true, we are parsing the headers to fetch the
@@ -151,10 +164,10 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
 %% - {redirect, To, Headers}
 %% - {see_other, To, Headers} for status 303 and POST requests.
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
-  #client{transport=Transport,
-    socket=Socket,
-    method=Method,
-    follow_redirect=true}=Client) ->
+               #client{transport=Transport,
+                       socket=Socket,
+                       method=Method,
+                       follow_redirect=true}=Client) ->
   case lists:member(StatusInt, [301, 302, 307]) of
     true ->
       Transport:setopts(Socket, [{active, false}]),
@@ -221,10 +234,10 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
 
 
 async_recv(Parent, Owner, Ref,
-  #client{transport=Transport,
-    socket=TSock,
-    recv_timeout=Timeout}=Client, Buffer) ->
-  
+           #client{transport=Transport,
+                   socket=TSock,
+                   recv_timeout=Timeout}=Client, Buffer) ->
+
   {OK, Closed, Error} = Transport:messages(TSock),
   Sock = raw_sock(TSock),
   Transport:setopts(TSock, [{active, once}]),
@@ -236,7 +249,7 @@ async_recv(Parent, Owner, Ref,
     {Ref, stream_next} ->
       async_recv(Parent, Owner, Ref, Client, Buffer);
     {Ref, pause} ->
-      %% make sure that the proces won't be awoken by a tcp msg
+      %% make sure that the process won't be awoken by a tcp msg
       Transport:setopts(TSock, [{active, false}]),
       proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
         Client, Buffer]);
@@ -306,7 +319,7 @@ process({more, NParser, Buffer}, Client) ->
   {more, NClient, Buffer};
 process({response, Version, Status, Reason, Parser}, Client0) ->
   Client1 = update_client(Parser, Client0#client{version=Version,
-    response_state=on_header}),
+                                                 response_state=on_header}),
   Client2 = case Status of
               S when S =:= 204 orelse S =:= 304 ->
                 Client1#client{clen = 0};
@@ -336,9 +349,9 @@ process({header, {Key, Value}=KV, NParser},
   NClient = update_client(NParser, Client1#client{partial_headers=NHeaders}),
   {loop, NClient};
 process({headers_complete, NParser},
-  #client{partial_headers=Headers}=Client) ->
+        #client{partial_headers=Headers}=Client) ->
   NClient = update_client(NParser, Client#client{partial_headers=[],
-    response_state=on_body}),
+                                                 response_state=on_body}),
   {ok, {headers, lists:reverse(Headers)}, NClient};
 process({ok, Data, NParser}, Client) ->
   NClient = update_client(NParser, Client),
@@ -361,12 +374,12 @@ update_client(Parser, Client) ->
 
 finish_response(Rest, Client0) ->
   Client = Client0#client{response_state=done,
-    body_state=done,
-    parser=nil,
-    buffer=Rest,
-    async=false,
-    stream_to=false},
-  
+                          body_state=done,
+                          parser=nil,
+                          buffer=Rest,
+                          async=false,
+                          stream_to=false},
+
   Pool = hackney_connect:is_pool(Client),
   case hackney_response:maybe_close(Client) of
     true ->
