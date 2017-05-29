@@ -1,15 +1,15 @@
 -record(hackney_url, {
-  transport        :: atom(),
-     scheme        :: atom(),
-     netloc        :: binary(),
-   raw_path        :: binary(),
-       path = <<>> :: binary(),
-         qs = <<>> :: binary(),
-   fragment = <<>> :: binary(),
-       host        :: string(),
-       port        :: integer(),
-       user = <<>> :: binary(),
-   password = <<>> :: binary()
+  transport        :: atom() | undefined,
+     scheme        :: atom() | undefined,
+     netloc        :: binary() | undefined,
+   raw_path        :: binary() | undefined,
+       path = <<>> :: binary() | undefined | nil,
+         qs = <<>> :: binary() | undefined,
+   fragment = <<>> :: binary() | undefined,
+       host        :: string() | undefined,
+       port        :: integer() | undefined,
+       user = <<>> :: binary() | undefined,
+   password = <<>> :: binary() | undefined
 }).
 
 -type hackney_url() :: #hackney_url{}.
