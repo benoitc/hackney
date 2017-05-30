@@ -34,7 +34,7 @@ client_ref() = term()
 
 
 <pre><code>
-url() = #hackney_url{}
+url() = #hackney_url{} | binary()
 </code></pre>
 
 <a name="index"></a>

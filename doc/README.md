@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2017 Benoît Chesneau.
 
-__Version:__ 1.8.4
+__Version:__ 1.8.5
 
 # hackney
 
@@ -382,9 +382,7 @@ behaviour.
 
 See for example the
 [hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
-Pool dispatcher based on dispcount].
-
-> Note: for now you can`t force the pool handler / client.
+Pool dispatcher based on dispcount].> Note: for now you can`t force the pool handler / client.
 
 ### Automatically follow a redirection
 

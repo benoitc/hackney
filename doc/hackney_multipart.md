@@ -232,7 +232,7 @@ create a generic multipart header
 ### mp_mixed_header/2 ###
 
 <pre><code>
-mp_mixed_header(Name::binary(), Boundary::binary()) -&gt; {binary(), 0}
+mp_mixed_header(X1::{Name::binary(), MixedBoundary::binary()}, Boundary::binary()) -&gt; {binary(), 0}
 </code></pre>
 <br />
 
