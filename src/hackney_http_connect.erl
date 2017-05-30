@@ -53,7 +53,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
   %% connnect to the proxy, and upgrade the socket if needed.
   case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts) of
     {ok, Socket} ->
-      case do_handshake(Socket, Host, Port, Opts) of
+      Ret = case do_handshake(Socket, Host, Port, Opts) of
         ok ->
           %% if we are connecting to a remote https source, we
           %% upgrade the connection socket to handle SSL.
@@ -74,7 +74,12 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
         Error ->
           gen_tcp:close(Socket),
           Error
-      end;
+      end,
+	  case Ret of
+		  {ok, _} -> ok;
+		  {error, _} -> gen_tcp:close(Socket)
+	  end,
+	  Ret;
     Error ->
       Error
   end.
@@ -189,6 +194,6 @@ check_status(<< "HTTP/1.0 200", _/bits >>) ->
   ok;
 check_status(<< "HTTP/1.0 201", _/bits >>) ->
   ok;
-check_status(Else) ->
-  error_logger:error_msg("proxy error: ~w~n", [Else]),
+check_status(_Else) ->
+%%   error_logger:error_msg("proxy error: ~w~n", [Else]),
   {error, proxy_error}.
