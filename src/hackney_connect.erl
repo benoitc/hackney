@@ -6,14 +6,14 @@
 -module(hackney_connect).
 
 -export([connect/3, connect/4, connect/5,
-  create_connection/4, create_connection/5,
-  maybe_connect/1,
-  reconnect/4,
-  set_sockopts/2,
-  ssl_opts/2,
-  check_or_close/1,
-  close/1,
-  is_pool/1]).
+         create_connection/4, create_connection/5,
+         maybe_connect/1,
+         reconnect/4,
+         set_sockopts/2,
+         ssl_opts/2,
+         check_or_close/1,
+         close/1,
+         is_pool/1]).
 
 -export([partial_chain/1]).
 
@@ -187,8 +187,8 @@ socket_from_pool(Host, Port, Transport, Client0) ->
   case PoolHandler:checkout(Host, Port, Transport, Client) of
     {ok, Ref, Skt} ->
       ?report_debug("reuse a connection", [{pool, PoolName}]),
-      metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
-      metrics:increment_counter(Metrics, [hackney_pool, Host, reuse_connection]),
+      _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
+      _ = metrics:increment_counter(Metrics, [hackney_pool, Host, reuse_connection]),
       Client1 = Client#client{socket=Skt,
         socket_ref=Ref,
         pool_handler=PoolHandler,
@@ -198,7 +198,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
       {ok, Client1};
     {error, no_socket, Ref} ->
       ?report_trace("no socket in the pool", [{pool, PoolName}]),
-      metrics:increment_counter(Metrics, [hackney_pool, PoolName, no_socket]),
+      _ = metrics:increment_counter(Metrics, [hackney_pool, PoolName, no_socket]),
       do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
         pool);
     Error ->
@@ -247,20 +247,20 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
     {ok, Skt} ->
       ?report_trace("new connection", []),
       ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
-      metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
-      metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
+      _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
+      _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
       Client1 = Client#client{socket=Skt,
         state = connected},
       hackney_manager:update_state(Client1),
       {ok, Client1};
     {error, timeout} ->
       ?report_trace("connect timeout", []),
-      metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
+      _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
       hackney_manager:cancel_request(Client),
       {error, connect_timeout};
     Error ->
       ?report_trace("connect error", []),
-      metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
+      _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
       hackney_manager:cancel_request(Client),
       Error
   end.

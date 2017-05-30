@@ -137,7 +137,7 @@ execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
   %% update the state with the new buffer
   NBuffer = << Buffer/binary, Bin/binary >>,
   St1 = St#hparser{buffer=NBuffer},
-  
+
   %% process the right state.
   case Status of
     done -> done;
@@ -166,15 +166,8 @@ parse_first_line(Buffer, St=#hparser{type=Type,
       parse_first_line(Rest, St, Empty + 1);
     _ when Type =:= auto ->
       case parse_request_line(St) of
-        {error, bad_request} ->
-          case parse_response_line(St) of
-            {error, bad_request} = Error ->
-              Error;
-            OK ->
-              OK
-          end;
-        OK ->
-          OK
+        {request, _Method, _URI, _Version, _NState} = Req -> Req;
+        {error, bad_request} -> parse_response_line(St)
       end;
     _ when Type =:= response ->
       parse_response_line(St);
@@ -217,7 +210,7 @@ parse_status(<< C, Rest/bits >>, St, Version, Acc) ->
 
 parse_reason(Reason, St, Version, StatusCode) ->
   StatusInt = list_to_integer(binary_to_list(StatusCode)),
-  
+
   NState = St#hparser{type=response,
     version=Version,
     state=on_header,
@@ -252,7 +245,7 @@ parse_uri_path(<< C, Rest/bits >>, St, Method, Acc) ->
 parse_version(<< "HTTP/", High, ".", Low, $\r , $\n, Rest/binary >>, St, Method, URI)
   when High >= $0, High =< $9, Low >= $0, Low =< $9 ->
   Version = { High -$0, Low - $0},
-  
+
   NState = St#hparser{type=request,
     version=Version,
     method=Method,

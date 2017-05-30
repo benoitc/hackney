@@ -27,9 +27,9 @@
 -export([redirect_location/1]).
 
 -export([stream_next/1,
-  stop_async/1,
-  pause_stream/1,
-  resume_stream/1]).
+         stop_async/1,
+         pause_stream/1,
+         resume_stream/1]).
 
 -define(METHOD_TPL(Method),
   -export([Method/1, Method/2, Method/3, Method/4])).
@@ -40,7 +40,7 @@
 -include("hackney_internal.hrl").
 
 
--type url() :: #hackney_url{}.
+-type url() :: #hackney_url{} | binary().
 -export_type([url/0]).
 
 -opaque client() :: #client{}.
@@ -755,7 +755,7 @@ maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) -
                                          {resp, Resp},
                                          {tries, Tries}]),
 
-      NewReq = {get, Location, [], <<>>},
+      NewReq = {get, Location, hackney_headers_new:new(), <<>>},
       maybe_redirect(redirect(Client#client{retries=Tries-1}, NewReq), Req);
     false when S =:= 303 ->
       ?report_debug("invalid redirection", [{location, Location},

@@ -214,10 +214,8 @@ stream_multipart(eof, #client{mp_boundary=Boundary}=Client) ->
     Error ->
       Error
   end;
-stream_multipart({mp_mixed, Name, MixedBoundary},
-  #client{mp_boundary=Boundary}=Client) ->
-  {MpHeader, _} = hackney_multipart:mp_mixed_header({Name, MixedBoundary},
-    Boundary),
+stream_multipart({mp_mixed, Name, MixedBoundary}, #client{mp_boundary=Boundary}=Client) ->
+  {MpHeader, _} = hackney_multipart:mp_mixed_header({Name, MixedBoundary}, Boundary),
   stream_body(<< MpHeader/binary, "\r\n" >>, Client);
 stream_multipart({mp_mixed_eof, MixedBoundary}, Client) ->
   Eof = hackney_multipart:mp_eof(MixedBoundary),
@@ -299,7 +297,7 @@ sendfile(FileName, Opts, Client) ->
       {error, Reason};
     {ok, Fd} ->
       Res = sendfile_fallback(Fd, Opts, Client),
-      file:close(Fd),
+      ok = file:close(Fd),
       Res
   end.
 
@@ -502,9 +500,8 @@ sendfile_fallback(Fd, Opts, Client) ->
   {ok, CurrPos} = file:position(Fd, {cur, 0}),
   {ok, _NewPos} = file:position(Fd, {bof, Offset}),
   Res = sendfile_fallback(Fd, Bytes, ChunkSize, Client, 0),
-  file:position(Fd, {bof, CurrPos}),
+  {ok, _} = file:position(Fd, {bof, CurrPos}),
   Res.
-
 
 sendfile_fallback(Fd, Bytes, ChunkSize, #client{send_fun=Send}=Client, Sent)
   when Bytes > Sent orelse Bytes =:= 0 ->
