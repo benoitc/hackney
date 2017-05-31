@@ -93,7 +93,7 @@ When Destination is the atom io (or the tuple {io, Verbosity}),
 ### set_level/1 ###
 
 <pre><code>
-set_level(Level::<a href="#type-trace_level">trace_level()</a>) -&gt; ok
+set_level(Level::<a href="#type-trace_level">trace_level()</a>) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 

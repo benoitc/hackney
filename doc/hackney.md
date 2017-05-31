@@ -34,7 +34,7 @@ client_ref() = term()
 
 
 <pre><code>
-url() = #hackney_url{}
+url() = #hackney_url{} | binary()
 </code></pre>
 
 <a name="index"></a>
@@ -71,7 +71,7 @@ multipart content</li>
 multipart content</li>
 </ul><p></p>Note: You can calculate the full length of a multipart stream using
 the function <code>hackney_multipart:len_mp_stream/2</code> .</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#send_request-3">send_request/3</a></td><td>send a request using the current client state and pass new
-options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the hackney process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the hackney process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
+options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -547,20 +547,6 @@ skip_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {err
 
 Stream the response body.
 
-<a name="start-0"></a>
-
-### start/0 ###
-
-`start() -> any()`
-
-Start the hackney process. Useful when testing using the shell.
-
-<a name="start-1"></a>
-
-### start/1 ###
-
-`start(PoolHandler) -> any()`
-
 <a name="start_response-1"></a>
 
 ### start_response/1 ###
@@ -573,14 +559,6 @@ start_response(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, inte
 start a response.
 Useful if you stream the body by yourself. It will fetch the status
 and headers of the response. and return
-
-<a name="stop-0"></a>
-
-### stop/0 ###
-
-`stop() -> any()`
-
-Stop the hackney process. Useful when testing using the shell.
 
 <a name="stop_async-1"></a>
 

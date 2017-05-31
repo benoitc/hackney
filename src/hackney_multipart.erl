@@ -202,13 +202,13 @@ len_mp_stream(Parts, Boundary) ->
     Size + byte_size(mp_eof(Boundary)).
 
 %% @doc return the mixed multipart header
--spec mp_mixed_header(Name :: binary(), Boundary :: binary())  ->
+-spec mp_mixed_header({Name :: binary(), MixedBoundary :: binary()}, Boundary :: binary())  ->
     {binary(), 0}.
-mp_mixed_header(Name, Boundary) ->
+mp_mixed_header({Name, MixedBoundary}, Boundary) ->
     Headers = [{<<"Content-Disposition">>, <<"form-data">>,
                 [{<<"name">>, <<"\"", Name/binary, "\"">>}]},
                {<<"Content-Type">>, <<"multipart/mixed">>,
-                [{<<"boundary">>, Boundary}]}],
+                [{<<"boundary">>, MixedBoundary}]}],
     {mp_header(Headers, Boundary), 0}.
 
 

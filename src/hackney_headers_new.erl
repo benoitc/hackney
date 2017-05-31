@@ -31,7 +31,7 @@
 
 
 -type headers() ::term().
--type key() :: binary().
+-type key() :: binary() | string().
 -type value() :: binary() | {binary() | list({binary(), binary()} | binary())}.
 -type headers_list() :: [{key(), value()}].
 

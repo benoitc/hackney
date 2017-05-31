@@ -36,7 +36,7 @@ headers_list() = [{<a href="#type-key">key()</a>, <a href="#type-value">value()<
 
 
 <pre><code>
-key() = binary()
+key() = binary() | string()
 </code></pre>
 
 

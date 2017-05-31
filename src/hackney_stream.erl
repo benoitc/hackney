@@ -152,7 +152,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       Client])
 
   end.
-  
+
 
 
 
@@ -267,14 +267,18 @@ async_recv(Parent, Owner, Ref,
         on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
                        andalso CLen =:= nil ->
           Owner ! {hackney_response, Ref, Buffer},
-          Owner ! {hackney_response, Ref, done};
+          Owner ! {hackney_response, Ref, done},
+          ok;
         on_body when TE =:= <<"identity">> ->
           Owner ! {hackney_response, Ref, Buffer},
-          Owner ! {hackney_response, Ref, done};
+          Owner ! {hackney_response, Ref, done},
+          ok;
         on_body ->
-          Owner ! {hackney_response, Ref, {error, {closed, Buffer}}};
+          Owner ! {hackney_response, Ref, {error, {closed, Buffer}}},
+          ok;
         _ ->
-          Owner ! {hackney_response, Ref, {error, closed}}
+          Owner ! {hackney_response, Ref, {error, closed}},
+          ok
       end,
       Transport:close(Sock);
     {Error, Sock, Reason} ->

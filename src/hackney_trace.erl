@@ -45,7 +45,7 @@ enable(Level, {Fun, _Data}=HandleSpec) when is_function(Fun) ->
 do_enable(Level, Type, HandleSpec) ->
   case dbg:tracer(Type, HandleSpec) of
     {ok, _} ->
-      set_level(Level),
+      _ = set_level(Level),
       ok;
     Error ->
       Error
@@ -59,7 +59,7 @@ disable() ->
 
 
 %% @doc change the trace level when tracing has already started.
--spec set_level(trace_level()) -> ok.
+-spec set_level(trace_level()) -> ok | {error, term()}.
 set_level(Level) ->
   Pat = make_pattern(?MODULE, Level),
   change_pattern(Pat).
@@ -88,17 +88,19 @@ change_pattern({Mod, Service, Pattern})
   case Pattern of
     [] ->
       try
-        error_to_exit(ctp, dbg:ctp(MFA)),
-        error_to_exit(p,   dbg:p(all, clear))
+        _ = error_to_exit(ctp, dbg:ctp(MFA)),
+        _ = error_to_exit(p,   dbg:p(all, clear)),
+        ok
       catch
         exit:{Where, Reason} ->
           {error, {Where, Reason}}
       end;
     List when is_list(List) ->
       try
-        error_to_exit(ctp, dbg:ctp(MFA)),
-        error_to_exit(tp,  dbg:tp(MFA, Pattern)),
-        error_to_exit(p,   dbg:p(all, [call, timestamp]))
+        _ = error_to_exit(ctp, dbg:ctp(MFA)),
+        _ = error_to_exit(tp,  dbg:tp(MFA, Pattern)),
+        _ = error_to_exit(p,   dbg:p(all, [call, timestamp])),
+        ok
       catch
         exit:{Where, Reason} ->
           {error, {Where, Reason}}

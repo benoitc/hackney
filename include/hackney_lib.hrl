@@ -1,13 +1,13 @@
 -record(hackney_url, {
   transport        :: atom(),
      scheme        :: atom(),
-     netloc        :: binary(),
-   raw_path        :: binary(),
-       path = <<>> :: binary(),
+   netloc   = <<>> :: binary(),
+   raw_path        :: binary() | undefined,
+       path        :: binary() | undefined | nil,
          qs = <<>> :: binary(),
    fragment = <<>> :: binary(),
-       host        :: string(),
-       port        :: integer(),
+       host = ""   :: string(),
+       port        :: integer() | undefined,
        user = <<>> :: binary(),
    password = <<>> :: binary()
 }).
@@ -21,13 +21,13 @@
       empty_lines = 0             :: integer(),
             state = on_first_line :: atom(),
            buffer = <<>>          :: binary(),
-          version                 :: binary(),
-           method                 :: binary(),
+          version                 :: {integer(), integer()} | undefined,
+           method = <<>>          :: binary(),
   partial_headers = []            :: list(),
-             clen                 :: integer(),
-               te                 :: binary(),
-       connection                 :: binary(),
-            ctype                 :: binary(),
-         location                 :: binary(),
-       body_state = waiting       :: atom()
+             clen                 :: integer() | undefined,
+               te = <<>>          :: binary(),
+       connection = <<>>          :: binary(),
+            ctype = <<>>          :: binary(),
+         location = <<>>          :: binary(),
+       body_state = waiting       :: atom() | tuple()
 }).
