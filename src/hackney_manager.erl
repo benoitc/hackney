@@ -479,6 +479,17 @@ do_start_async_response(Ref, StreamTo, Client, State) ->
       {error, What}
   end.
 
+%% cleanup socket
+cleanup_socket(Ref) ->
+   case ets:lookup(?MODULE, Ref) of
+      [{Ref, #request{ref=Ref,
+                      state=#client{transport=Transport,
+                                    socket=Socket}}}] ->
+         catch Transport:close(Socket),
+         ok;
+      [] ->
+         ok
+   end.
 
 %% a stream exited
 handle_exit(Pid, {Ref, stream}, Reason, State) ->
@@ -498,6 +509,9 @@ handle_exit(Pid, {Ref, stream}, Reason, State) ->
             normal ->  ok;
             _ -> Owner ! {'DOWN', Ref, Reason}
           end,
+
+      %% cleanup socket
+      ok = cleanup_socket(Ref),
       %% remove the reference
       _ = ets:delete(?REFS, Ref),
       _ = ets:delete(?MODULE, Ref),
@@ -523,6 +537,8 @@ handle_exit(Pid, {Ref, owner}, Reason, State) ->
       {noreply, State#mstate{pids=Pids1}};
     [{Ref, {Pid, nil, #request_info{pool=Pool}=Info}}] ->
       %% no stream
+      %% cleanup socket
+      ok = cleanup_socket(Ref),
       %% remove the reference
       ets:delete(?REFS, Ref),
       ets:delete(?MODULE, Ref),
@@ -537,6 +553,8 @@ handle_exit(Pid, {Ref, owner}, Reason, State) ->
       Pids2 = dict:erase(Stream, Pids1),
       %% terminate the async stream
       ok = terminate_async_response(Stream),
+      %% cleanup socket
+      ok = cleanup_socket(Ref),
       %% remove the reference
       ets:delete(?REFS, Ref),
       ets:delete(?MODULE, Ref),
