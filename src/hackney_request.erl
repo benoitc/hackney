@@ -32,6 +32,12 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
 
   #client{options=Options} = Client0,
 
+  DefaultHeaders0 =
+      case proplists:get_value(no_add_headers, Options) of
+         true -> [];
+         _ -> [{<<"User-Agent">>, default_ua()}]
+      end,
+
   %% basic & Cookies authorization handling
   Cookies = proplists:get_value(cookie, Options, []),
   DefaultHeaders = case proplists:get_value(basic_auth, Options) of
@@ -274,6 +280,7 @@ stream_multipart({part_bin, Bin}, Client) ->
   stream_body(Bin, Client).
 
 send(#client{transport=Transport, socket=Skt}, Data) ->
+  % io:format("HACKNEY: ~9999p~n", [Data]),
   Transport:send(Skt, Data).
 
 send_chunk(Client, Data) ->
@@ -309,7 +316,13 @@ encode_form(KVs) ->
 
 %% internal
 handle_body(Headers, ReqType0, Body0, Client) ->
-  {CLen, CType, Body} = case Body0 of
+   % io:format("HACKNEY BODY: ~9999p~n", [Headers]),
+   #client{options=Options} = Client,
+   case proplists:get_value(no_add_headers, Options) of
+      true -> {Headers, ReqType0, Body0, Client};
+      _ ->
+         {CLen, CType, Body} =
+            case Body0 of
                           {form, KVs} ->
                             encode_form(KVs);
                           {multipart, Parts} ->
@@ -385,7 +398,8 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                                              Headers)),
                               {Headers1, normal}
                           end,
-  {NewHeaders, ReqType, Body, Client}.
+         {NewHeaders, ReqType, Body, Client}
+   end.
 
 handle_multipart_body(Headers, ReqType, Client) ->
   handle_multipart_body(Headers, ReqType, chunked, hackney_multipart:boundary(), Client).
