@@ -52,7 +52,7 @@
 
 
 start() ->
-  case hackney:get_app_env(ssl, false) of
+  case hackney_app:get_app_env(ssl, false) of
     true ->
       application:start(crypto),
       application:start(public_key),
