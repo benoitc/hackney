@@ -61,7 +61,7 @@ start() ->
       _ ->
         ok
     end,
-  application:start(hackney).
+  application:ensure_all_started(hackney).
 
 connect(URL) ->
   connect(URL, []).
