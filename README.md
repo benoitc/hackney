@@ -114,7 +114,7 @@ application:start(crypto),
 application:start(public_key),
 application:start(ssl),
 %% Then:
-application:start(hackney).
+application:ensure_all_started(hackney).
 ```
 
 Or add hackney to the applications property of your .app in a release
