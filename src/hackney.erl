@@ -54,9 +54,9 @@
 start() ->
   case hackney_app:get_app_env(ssl, false) of
     true ->
-      application:start(crypto),
-      application:start(public_key),
-      application:start(ssl);
+      _ = application:start(crypto),
+      _ = application:start(public_key),
+      _ = application:start(ssl);
     _ ->
       ok
   end,
