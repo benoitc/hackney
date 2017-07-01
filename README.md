@@ -102,17 +102,18 @@ This fixes zsh (and maybe other shells) escript-related bugs. Also this should s
 
 ```erlang-repl
 
-1>> hackney:start().
+1> hackney:start().
 ok
 ```
 
 It will start hackney and all of the application it depends on:
 
 ```erlang
-
+%% If you specified {ssl, true} in application environment:
 application:start(crypto),
 application:start(public_key),
 application:start(ssl),
+%% Then:
 application:start(hackney).
 ```
 
