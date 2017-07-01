@@ -52,14 +52,15 @@
 
 
 start() ->
-  case hackney_app:get_app_env(ssl, false) of
-    true ->
-      _ = application:start(crypto),
-      _ = application:start(public_key),
-      _ = application:start(ssl);
-    _ ->
-      ok
-  end,
+  _ = 
+    case hackney_app:get_app_env(ssl, false) of
+      true ->
+        _ = application:start(crypto),
+        _ = application:start(public_key),
+        _ = application:start(ssl);
+      _ ->
+        ok
+    end,
   application:start(hackney).
 
 connect(URL) ->
