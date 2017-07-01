@@ -6,7 +6,8 @@
 
 -module(hackney).
 
--export([connect/1, connect/2, connect/3, connect/4,
+-export([start/0,
+         connect/1, connect/2, connect/3, connect/4,
          close/1,
          request_info/1,
          location/1,
@@ -48,6 +49,19 @@
 
 -type client_ref() :: term().
 -export_type([client_ref/0]).
+
+
+start() ->
+  _ = 
+    case hackney_app:get_app_env(ssl, false) of
+      true ->
+        _ = application:start(crypto),
+        _ = application:start(public_key),
+        _ = application:start(ssl);
+      _ ->
+        ok
+    end,
+  application:ensure_all_started(hackney).
 
 connect(URL) ->
   connect(URL, []).
