@@ -5,6 +5,7 @@
 
 - security: certifi 2.0.0
 - dependency: update idna 5.1.0 (fix windows build and usage with elixir)
+- doc: fix typo hackney_multipart doc (#422)
 
 1.8.6 - 2017-06-09
 --------------------
