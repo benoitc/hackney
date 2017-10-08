@@ -75,7 +75,10 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
         Transport}};
     {error, Reason} ->
       {error, Reason};
-    {'EXIT', {timeout, _}} -> {error, connect_timeout}
+    {'EXIT', {timeout, _}} ->
+      % socket will still checkout so to avoid deadlock we send in a cancellation
+      gen_server:cast(Pool, {checkout_cancel, {Host, Port, Transport}, RequestRef}),
+      {error, connect_timeout}
   end.
 
 %% @doc release a socket in the pool
@@ -304,6 +307,16 @@ handle_cast({set_maxconn, MaxConn}, State) ->
 handle_cast({set_timeout, NewTimeout}, State) ->
   {noreply, State#state{timeout=NewTimeout}};
 
+handle_cast({checkout_cancel, Dest, Ref}, State) ->
+  {Queues, Removed} = del_from_queue(Dest, Ref, State#state.queues),
+  case Removed of
+    true ->
+      NbWaiters = State#state.nb_waiters - 1,
+      {noreply, State#state{queues=Queues, nb_waiters=NbWaiters}};
+    false ->
+      % we leak the socket here but 'DOWN' will mop up for us when it times out
+      {noreply, dequeue(Dest, Ref, State)}
+  end;
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
@@ -324,19 +337,7 @@ handle_info({ssl_error, Socket, _}, State) ->
 handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
   case dict:find(Ref, State#state.clients) of
     {ok, Dest} ->
-      Clients2 = dict:erase(Ref, State#state.clients),
-      case queue_out(Dest, State#state.queues) of
-        empty ->
-          {noreply, State#state{clients = Clients2}};
-        {ok, {From, Ref2}, Queues2} ->
-          NbWaiters = State#state.nb_waiters - 1,
-          _ = metrics:update_histogram(State#state.metrics,
-            [hackney_pool, State#state.name, queue_count], NbWaiters),
-          gen_server:reply(From, {error, no_socket, self()}),
-          State2 = State#state{queues = Queues2, clients = Clients2,
-            nb_waiters=NbWaiters},
-          {noreply, monitor_client(Dest, Ref2, State2)}
-      end;
+      {noreply, dequeue(Dest, Ref, State)};
     error ->
       {noreply, State}
   end;
@@ -358,6 +359,21 @@ terminate(_Reason, #state{name=PoolName, metrics=Engine, sockets=Sockets}) ->
   ok.
 
 %% internals
+
+dequeue(Dest, Ref, State) ->
+  Clients2 = dict:erase(Ref, State#state.clients),
+  case queue_out(Dest, State#state.queues) of
+    empty ->
+      State#state{clients = Clients2};
+    {ok, {From, Ref2}, Queues2} ->
+      NbWaiters = State#state.nb_waiters - 1,
+      _ = metrics:update_histogram(State#state.metrics,
+        [hackney_pool, State#state.name, queue_count], NbWaiters),
+      gen_server:reply(From, {error, no_socket, self()}),
+      State2 = State#state{queues = Queues2, clients = Clients2,
+        nb_waiters=NbWaiters},
+      monitor_client(Dest, Ref2, State2)
+  end.
 
 find_connection({_Host, _Port, Transport}=Dest, Pid,
   #state{connections=Conns, sockets=Sockets}=State) ->
@@ -451,6 +467,25 @@ add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
       dict:store(Dest, queue:in({From, Ref}, queue:new()), Queues);
     {ok, Q} ->
       dict:store(Dest, queue:in({From, Ref}, Q), Queues)
+  end.
+
+%------------------------------------------------------------------------------
+%% @private
+%%------------------------------------------------------------------------------
+del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
+  case dict:find(Dest, Queues) of
+    error ->
+      {Queues, 0};
+    {ok, Q} ->
+      Q2 = queue:filter(fun({_, R}) -> R =/= Ref end, Q),
+      Removed = queue:len(Q) =/= queue:len(Q2),
+      Queues2 = case queue:is_empty(Q2) of
+                  true ->
+                    dict:erase(Dest, Queues);
+                  false ->
+                    dict:store(Dest, Q2, Queues)
+                end,
+      {Queues2, Removed}
   end.
 
 %------------------------------------------------------------------------------
