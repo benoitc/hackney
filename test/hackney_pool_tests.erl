@@ -14,6 +14,7 @@ start() ->
     error_logger:tty(false),
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(hackney),
+    hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
     Host = '_',
     Resource = {"/pool", pool_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
@@ -22,6 +23,7 @@ start() ->
 stop({ok, _Pid}) ->
     cowboy:stop_listener(test_server),
     application:stop(cowboy),
+    hackney_pool:stop_pool(pool_test),
     application:stop(hackney),
     error_logger:tty(true),
     ok.
@@ -30,8 +32,7 @@ queue_timeout() ->
     fun() ->
         URL = <<"http://localhost:8123/pool">>,
         Headers = [],
-        Opts = [{pool, true}, {connect_timeout, 100}],
-        ok = application:set_env(hackney, max_connections, 1),
+        Opts = [{pool, pool_test}, {connect_timeout, 100}],
         case hackney:request(post, URL, Headers, stream, Opts) of
             {ok, Ref} ->
                 {error, _} = hackney:request(post, URL, Headers, stream, Opts),
