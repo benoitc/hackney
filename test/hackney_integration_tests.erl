@@ -134,7 +134,9 @@ async_request() ->
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
-    [?_assertEqual(200, StatusCode),
+    {mstate, Dict, _} = sys:get_state(hackney_manager),
+    [?assertEqual(0, dict:size(Dict)),
+     ?_assertEqual(200, StatusCode),
      ?_assertEqual([body, headers, status], Keys)].
 
 async_head_request() ->
