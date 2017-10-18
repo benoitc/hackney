@@ -9,8 +9,12 @@ all_tests() ->
    ].
 
 stream_test_() ->
-    {setup, fun start/0, fun stop/1,
-      fun(ok) -> all_tests() end}.
+    {setup,
+     fun start/0,
+     fun stop/1,
+      fun(ok) ->
+          {inparallel, all_tests()}
+      end}.
 
 
 start() ->
@@ -27,21 +31,9 @@ async_request() ->
     {StatusCode, Keys} = receive_response(ClientRef),
     timer:sleep(100),
     {mstate, Dict, _} = sys:get_state(hackney_manager),
-    [?assertEqual(0, dict:size(Dict)),
+    [?_assertEqual(0, dict:size(Dict)),
      ?_assertEqual(200, StatusCode),
      ?_assertEqual([body, headers, status], Keys)].
-
-
-
-
-version_pad([Major]) ->
-    {list_to_integer(Major), 0, 0};
-version_pad([Major, Minor]) ->
-    {list_to_integer(Major), list_to_integer(Minor), 0};
-version_pad([Major, Minor, Patch]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
-version_pad([Major, Minor, Patch | _]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),
