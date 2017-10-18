@@ -503,7 +503,7 @@ handle_exit(Pid, {Ref, stream}, Reason, State) ->
     [{Ref, {Owner, Pid, #request_info{pool=Pool}=Info}}] ->
       %% unlink the owner
       unlink(Owner),
-      Pids2 = dict:erase(Pid, Pids1),
+      Pids2 = dict:erase(Owner, Pids1),
       %% if anormal reason let the owner knows
       _ = case Reason of
             normal ->  ok;
