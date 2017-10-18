@@ -40,7 +40,7 @@ init(Parent, Owner, Ref, Client) ->
 wait_for_controlling_process() ->
   receive
     controlling_process_done ->
-      ok;
+      ok
   after 10000 ->
     timeout
   end.
