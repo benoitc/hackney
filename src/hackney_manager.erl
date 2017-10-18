@@ -472,6 +472,7 @@ handle_stream_exit(Pid, Ref, Reason, State) ->
       %% if anormal reason let the owner knows
       _ = case Reason of
             normal ->  ok;
+            {owner_down, Owner, _} -> ok; %% we were streaming to
             _ -> Owner ! {'DOWN', Ref, Reason}
           end,
       %% cleanup socket
