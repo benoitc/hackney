@@ -199,8 +199,9 @@ socket_from_pool(Host, Port, Transport, Client0) ->
     {error, no_socket, Ref} ->
       ?report_trace("no socket in the pool", [{pool, PoolName}]),
       _ = metrics:increment_counter(Metrics, [hackney_pool, PoolName, no_socket]),
-      do_connect(Host, Port, Transport, Client#client{socket_ref=Ref},
-        pool);
+      Client1 = Client#client{socket_ref=Ref, pool_handler=PoolHandler},
+
+      do_connect(Host, Port, Transport, Client1, pool);
     Error ->
       Error
   end.

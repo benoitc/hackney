@@ -38,7 +38,7 @@
 -type body_result() :: {body, binary(), body_cont()} | end_of_part().
 -type end_of_part() :: {end_of_part, cont(more(part_result()))}.
 
-%% @doc encode a list of parts a multiart form.
+%% @doc encode a list of parts a multipart form.
 %% Parts can be under the form:
 %%  - `{file, Path}' : to send a file
 %%  - `{file, Path, ExtraHeaders}' : to send a file with extra headers
