@@ -15,6 +15,7 @@ start() ->
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(hackney),
     hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
+
     Host = '_',
     Resource = {"/pool", pool_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
