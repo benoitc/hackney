@@ -410,7 +410,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
       handle_stream_exit(Pid, Ref, Reason, State);
     {ok, Refs} when is_list(Refs) ->
       handle_owner_exit(Pid, Refs, Reason, State);
-    _ ->
+    _Else ->
       {noreply, State}
   end;
 
@@ -438,7 +438,7 @@ do_start_async_response(Ref, StreamTo, Client, State) ->
   case catch hackney_stream:start_link(StreamTo2, Ref, Client) of
     {ok, Pid} when is_pid(Pid) ->
       ets:insert(?REFS, {Ref, {Owner, Pid, Info}}),
-      Pids2 = dict:store(Pid, {Ref, stream}, State#mstate.pids),
+      Pids2 = dict:store(Pid, {stream, Ref}, State#mstate.pids),
       {ok, Pid, State#mstate{pids=Pids2}};
     {error, What} ->
       {error, What};
