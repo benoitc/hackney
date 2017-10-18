@@ -24,9 +24,8 @@ start_link(Owner, Ref, Client) ->
 init(Parent, Owner, Ref, Client) ->
   %% register the stream
   ok = proc_lib:init_ack(Parent, {ok, self()}),
-
   ok = wait_for_controlling_process(),
-
+  _MRef = erlang:monitor(process, Owner),
   Parser = hackney_http:parser([response]),
   try
     stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
@@ -116,6 +115,8 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       From ! {Ref, ok};
     {Ref, close} ->
       hackney_response:close(Client);
+    {'DOWN', _MRef, process, Owner, Reason} ->
+      exit({owner_down, Owner, Reason});
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {stream_loop, Parent, Owner, Ref, Client});
@@ -139,6 +140,8 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       From ! {Ref, ok};
     {Ref, close} ->
       hackney_response:close(Client);
+        {'DOWN', _MRef, process, Owner, Reason} ->
+      exit({owner_down, Owner, Reason});
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {maybe_continue, Parent, Owner, Ref,
@@ -152,8 +155,6 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       Client])
 
   end.
-
-
 
 
 %% if follow_redirect is true, we are parsing the headers to fetch the
@@ -284,6 +285,8 @@ async_recv(Parent, Owner, Ref,
     {Error, Sock, Reason} ->
       Owner ! {hackney_response, Ref, {error, Reason}},
       Transport:close(TSock);
+    {'DOWN', _MRef, process, Owner, Reason} ->
+      exit({owner_down, Owner, Reason});
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {async_recv, Parent, Owner, Ref, Client});

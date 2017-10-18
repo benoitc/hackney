@@ -182,19 +182,19 @@ test_custom_host_headers() ->
 
 %% Helpers
 
-has_unix_socket() ->
-    {ok, Vsn} = application:get_key(kernel, vsn),
-    ParsedVsn = version_pad(string:tokens(Vsn, ".")),
-    ParsedVsn >= {5, 0, 0}.
+%%has_unix_socket() ->
+%%    {ok, Vsn} = application:get_key(kernel, vsn),
+%%    ParsedVsn = version_pad(string:tokens(Vsn, ".")),
+%%    ParsedVsn >= {5, 0, 0}.
 
-version_pad([Major]) ->
-    {list_to_integer(Major), 0, 0};
-version_pad([Major, Minor]) ->
-    {list_to_integer(Major), list_to_integer(Minor), 0};
-version_pad([Major, Minor, Patch]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
-version_pad([Major, Minor, Patch | _]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
+%%version_pad([Major]) ->
+%%  {list_to_integer(Major), 0, 0};
+%%version_pad([Major, Minor]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), 0};
+%%version_pad([Major, Minor, Patch]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
+%%version_pad([Major, Minor, Patch | _]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),

@@ -267,20 +267,16 @@ start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init(_) ->
-  _ = ets:new(hackney_pool, [
-    named_table,
-    set,
-    public
-  ]),
+  _ = ets:new(hackney_pool, [named_table,
+                             set,
+                             public]),
 
-  _ = ets:new(?MODULE, [
-    set,
-    {keypos, 1},
-    public,
-    named_table,
-    {read_concurrency, true},
-    {write_concurrency, true}
-  ]),
+  _ = ets:new(?MODULE, [set,
+                        {keypos, 1},
+                        public,
+                        named_table,
+                        {read_concurrency, true},
+                        {write_concurrency, true}]),
 
   _ = ets:new(?REFS, [named_table, set, protected]),
 
@@ -301,16 +297,12 @@ handle_call({new_request, Pid, Ref, Client}, _From, #mstate{pids=Pids}=State) ->
   %% set requInfo
   StartTime = os:timestamp(),
   ReqInfo = #request_info{pool=Pool,
-    start_time=StartTime,
-    host=Client#client.host},
-
+                          start_time=StartTime,
+                          host=Client#client.host},
   %% start the request
   _ = start_request(ReqInfo, State),
-
-  %% link the request owner
-  link(Pid),
-  %% store the pid
-  Pids2 = dict:store(Pid, {Ref, owner}, Pids),
+  %% track the request owner
+  Pids2 = track_owner(Pid, Ref, Pids),
   ets:insert(?REFS, {Ref, {Pid, nil, ReqInfo}}),
   {reply, {ok, StartTime}, State#mstate{pids=Pids2}};
 
@@ -323,10 +315,9 @@ handle_call({take_control, Ref, Client}, _From, State) ->
       {reply, {ok, StartTime}, State};
     [{Ref, {Owner, Stream, Info}}] ->
       NInfo = Info#request_info{start_time=StartTime,
-        host=Client#client.host},
+                                host=Client#client.host},
       %% start the request
       _ = start_request(NInfo, State),
-
       ets:insert(?REFS, {Ref, {Owner, Stream, NInfo}}),
       {reply, {ok, StartTime}, State}
   end;
@@ -358,20 +349,12 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
           unlink(Stream),
           ets:insert(?REFS, {Ref, {To, nil, Info}}),
           Pids1 = dict:erase(Stream, State#mstate.pids),
-
+          %% if the owner change we need to track the request for this new pid
           Pids2 = case To of
-                    Owner ->
-                      %% same owner do nothing
-                      Pids1;
+                    Owner -> Pids1;
                     _ ->
-                      %% new owner, link it and un link the old
-                      %% one
-                      unlink(Owner),
-                      link(To),
-                      dict:store(To, {Ref, owner},
-                        dict:erase(Owner, Pids1))
+                      track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
                   end,
-
           {reply, {ok, Ref}, State#mstate{pids=Pids2}}
       after 5000 ->
         {reply, {error, timeout}, State}
@@ -385,11 +368,8 @@ handle_call({controlling_process, Ref, Pid}, _From, State) ->
       %% the request is already controlled by this process just return
       {reply, ok, State};
     [{Ref, {Owner, Stream, Info}}] ->
-      %% new owner, link it.
-      unlink(Owner),
-      link(Pid),
-      Pids2 = dict:store(Pid, {Ref, owner},
-        dict:erase(Owner, State#mstate.pids)),
+      %% new owner, track it
+      Pids2 = track_owner(Pid, Ref, untrack_owner(Owner, Ref, State#mstate.pids)),
       ets:insert(?REFS, {Ref, {Pid, Stream, Info}}),
       {reply, ok, State#mstate{pids=Pids2}}
   end.
@@ -400,20 +380,17 @@ handle_cast({cancel_request, Ref}, State) ->
     [] ->
       {noreply, State};
     [{Ref, {Owner, nil, #request_info{pool=Pool}=Info}}] ->
-      %% no stream just cancel the request and unlink the owner.
-      unlink(Owner),
-      ets:delete(?REFS, Ref),
-      Pids2 = dict:erase(Owner, State#mstate.pids),
+      %% no stream just cancel the request and untrack the owner.
+      Pids2 = untrack_owner(Owner, Ref, State#mstate.pids),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
       ok = finish_request(Info, State),
       {noreply, State#mstate{pids=Pids2}};
-    [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}]
-      when is_pid(Stream) ->
-      unlink(Owner),
+    [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}] when is_pid(Stream) ->
+      %% unlink the stream and untrack the owner
       unlink(Stream),
-      Pids2 = dict:erase(Stream, dict:erase(Owner, State#mstate.pids)),
+      Pids2 = dict:erase(Stream, untrack_owner(Owner, Ref, State#mstate.pids)),
       ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       _ = PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
@@ -429,9 +406,11 @@ handle_cast(_Msg, Children) ->
 
 handle_info({'EXIT', Pid, Reason}, State) ->
   case dict:find(Pid, State#mstate.pids) of
-    {ok, PidInfo} ->
-      handle_exit(Pid, PidInfo, Reason, State);
-    _ ->
+    {ok, {stream, Ref}} ->
+      handle_stream_exit(Pid, Ref, Reason, State);
+    {ok, Refs} when is_list(Refs) ->
+      handle_owner_exit(Pid, Refs, Reason, State);
+    _Else ->
       {noreply, State}
   end;
 
@@ -458,20 +437,8 @@ do_start_async_response(Ref, StreamTo, Client, State) ->
   %% start the stream process
   case catch hackney_stream:start_link(StreamTo2, Ref, Client) of
     {ok, Pid} when is_pid(Pid) ->
-      ets:insert(?REFS, {Ref, {StreamTo2, Pid, Info}}),
-      Pids2 = case StreamTo2 of
-                Owner ->
-                  dict:store(Pid, {Ref, stream}, State#mstate.pids);
-                _ ->
-                  %% unlink and replace the old owner by the new
-                  %% target of the request
-                  unlink(Owner),
-                  Pids1 = dict:store(StreamTo2, {Ref, stream},
-                                     dict:erase(Owner,
-                                                State#mstate.pids)),
-                  %% store stthe stream
-                  dict:store(Pid, {Ref, stream}, Pids1)
-              end,
+      ets:insert(?REFS, {Ref, {Owner, Pid, Info}}),
+      Pids2 = dict:store(Pid, {stream, Ref}, State#mstate.pids),
       {ok, Pid, State#mstate{pids=Pids2}};
     {error, What} ->
       {error, What};
@@ -492,49 +459,50 @@ cleanup_socket(Ref) ->
    end.
 
 %% a stream exited
-handle_exit(Pid, {Ref, stream}, Reason, State) ->
+handle_stream_exit(Pid, Ref, Reason, State) ->
   %% delete the pid from our list
   Pids1 = dict:erase(Pid, State#mstate.pids),
-
   case ets:lookup(?REFS, Ref) of
     [] ->
       %% ref already removed just return
       {noreply, State#mstate{pids=Pids1}};
     [{Ref, {Owner, Pid, #request_info{pool=Pool}=Info}}] ->
-      %% unlink the owner
-      unlink(Owner),
-      Pids2 = dict:erase(Pid, Pids1),
+      %% untrack the owner
+      Pids2 = untrack_owner(Owner, Ref, Pids1),
       %% if anormal reason let the owner knows
       _ = case Reason of
             normal ->  ok;
+            {owner_down, Owner, _} -> ok; %% we were streaming to
             _ -> Owner ! {'DOWN', Ref, Reason}
           end,
-
       %% cleanup socket
       ok = cleanup_socket(Ref),
       %% remove the reference
       _ = ets:delete(?REFS, Ref),
       _ = ets:delete(?MODULE, Ref),
-
       %% notify the pool that the request have been canceled
       PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, Reason}),
-
       %% update metrics
       ok = finish_request(Info, State),
-
       %% reply
       {noreply, State#mstate{pids=Pids2}}
-  end;
+  end.
+
+
 %% owner exited
-handle_exit(Pid, {Ref, owner}, Reason, State) ->
+handle_owner_exit(Pid, Refs, Reason, State) ->
   PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
   %% delete the pid from our list
   Pids1 = dict:erase(Pid, State#mstate.pids),
+  NewState = clean_requests(Refs, Pid, Reason, PoolHandler, State#mstate{pids=Pids1}),
+  {noreply, NewState}.
+
+clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
   case ets:lookup(?REFS, Ref) of
     [] ->
       %% ref already removed just return
-      {noreply, State#mstate{pids=Pids1}};
+      clean_requests(Rest, Pid, Reason, PoolHandler, State);
     [{Ref, {Pid, nil, #request_info{pool=Pool}=Info}}] ->
       %% no stream
       %% cleanup socket
@@ -546,11 +514,12 @@ handle_exit(Pid, {Ref, owner}, Reason, State) ->
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
       ok = finish_request(Info, State),
-      %% reply
-      {noreply, State#mstate{pids=Pids1}};
+      %% continue
+      clean_requests(Rest, Pid, Reason, PoolHandler, State);
     [{Ref, {Pid, Stream, #request_info{pool=Pool}=Info}}] ->
+      %% unlink the stream
       unlink(Stream),
-      Pids2 = dict:erase(Stream, Pids1),
+      Pids2 = dict:erase(Stream, State#mstate.pids),
       %% terminate the async stream
       ok = terminate_async_response(Stream),
       %% cleanup socket
@@ -562,8 +531,11 @@ handle_exit(Pid, {Ref, owner}, Reason, State) ->
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
       ok = finish_request(Info, State),
-      {noreply, State#mstate{pids=Pids2}}
-  end.
+      %% continue
+      clean_requests(Rest, Pid, Reason, PoolHandler, State#mstate{pids=Pids2})
+  end;
+clean_requests([], _Pid, _Reason, _PoolHandler, State) ->
+  State.
 
 monitor_child(Pid) ->
   erlang:monitor(process, Pid),
@@ -596,6 +568,33 @@ wait_async_response(Stream) ->
     {'DOWN', _MRef, process, Stream, _Reason} ->
       ok
   end.
+
+
+track_owner(Pid, Ref, Pids) ->
+  case dict:is_key(Pid, Pids) of
+    true ->
+      dict:append(Pid, Ref, Pids);
+    false ->
+      link(Pid),
+      dict:append(Pid, Ref, Pids)
+  end.
+
+
+untrack_owner(Pid, Ref, Pids) ->
+  case dict:find(Pid, Pids) of
+    {ok, Refs} ->
+      case lists:delete(Ref, Refs) of
+        [] ->
+          unlink(Pid),
+          dict:erase(Pid, Pids);
+        Refs2 ->
+          dict:store(Pid, Refs2, Pids)
+      end;
+    error ->
+      catch unlink(Pid),
+      Pids
+  end.
+
 
 init_metrics() ->
   %% get metrics module
