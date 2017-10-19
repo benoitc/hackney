@@ -544,6 +544,8 @@ monitor_child(Pid) ->
   receive
     {'EXIT', Pid, Reason} ->
       receive
+        {'DOWN', _, process, Pid, normal} ->
+          ok;
         {'DOWN', _, process, Pid, _} ->
           {error, Reason}
       end
