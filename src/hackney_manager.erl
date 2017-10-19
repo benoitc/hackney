@@ -382,6 +382,7 @@ handle_cast({cancel_request, Ref}, State) ->
     [{Ref, {Owner, nil, #request_info{pool=Pool}=Info}}] ->
       %% no stream just cancel the request and untrack the owner.
       Pids2 = untrack_owner(Owner, Ref, State#mstate.pids),
+      ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
