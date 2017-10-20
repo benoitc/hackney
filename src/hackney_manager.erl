@@ -518,8 +518,7 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% continue
       clean_requests(Rest, Pid, Reason, PoolHandler, State);
     [{Ref, {Pid, Stream, #request_info{pool=Pool}=Info}}] ->
-      %% unlink the stream
-      unlink(Stream),
+      %% erase the stream
       Pids2 = dict:erase(Stream, State#mstate.pids),
       %% terminate the async stream
       ok = terminate_async_response(Stream),
