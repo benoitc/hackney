@@ -1,6 +1,13 @@
 # NEWS
 
-1.10.0 - 2017-10-28
+1.10.1 - 2017-10-20
+-------------------
+
+- improvement: ignore port empty values on redirect (#444)
+- fix: fix reference leak introduced in latest version (#445)
+- fix: stream termination, don't raise an error on normal exit
+
+1.10.0 - 2017-10-18
 -------------------
 
 - fix owner tracking (#443)
