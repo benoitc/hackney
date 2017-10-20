@@ -547,6 +547,8 @@ monitor_child(Pid) ->
       receive
         {'DOWN', _, process, Pid, normal} ->
           ok;
+        {'DOWN', _, process, Pid, noproc} ->
+          ok;
         {'DOWN', _, process, Pid, _} ->
           {error, Reason}
       end
