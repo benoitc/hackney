@@ -339,8 +339,10 @@ process({header, {Key, Value}=KV, NParser},
   %% store useful headers
   Client1 = case hackney_bstr:to_lower(Key) of
               <<"content-length">> ->
-                CLen = list_to_integer(binary_to_list(Value)),
-                Client#client{clen=CLen};
+                case catch list_to_integer(binary_to_list(Value)) of
+                  CLen when is_integer(CLen) -> Client#client{clen=CLen};
+                  _ -> Client
+                end;
               <<"transfer-encoding">> ->
                 Client#client{te=hackney_bstr:to_lower(Value)};
               <<"connection">> ->

@@ -114,7 +114,11 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   TE = hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, nil),
   CLen = case hackney_headers_new:lookup("content-length", Headers) of
            [] -> nil;
-           [{_, Len} |_] -> list_to_integer(binary_to_list(Len))
+           [{_, Len} |_] ->
+             case catch list_to_integer(binary_to_list(Len)) of
+               V when is_integer(V) -> V;
+                 _ -> nil
+             end
          end,
   Client2 = Client#client{parser=Parser,
                           headers=Headers,
@@ -128,8 +132,9 @@ stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
   Buffer = hackney_http:get(Parser, buffer),
   Client2 = end_stream_body(Buffer, Client),
   {done, Client2};
-stream_body(Client=#client{parser=Parser, clen=0, te=TE})
-  when TE /= <<"chunked">> ->
+stream_body(Client=#client{parser=Parser, clen=CLen, te=TE})
+  when (CLen =:= 0 orelse not is_integer(CLen)) andalso
+       TE /= <<"chunked">> ->
   Buffer = hackney_http:get(Parser, buffer),
   Client2 = end_stream_body(Buffer, Client),
   {done, Client2};

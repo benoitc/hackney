@@ -293,8 +293,10 @@ parse_header(Line, St) ->
                  end,
   St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
           <<"content-length">> ->
-            CLen = list_to_integer(binary_to_list(hackney_bstr:trim(Value))),
-            St#hparser{clen=CLen};
+            case catch list_to_integer(binary_to_list(Value)) of
+              CLen when is_integer(CLen) -> St#hparser{clen=CLen};
+              _ -> St
+            end;
           <<"transfer-encoding">> ->
             TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
             St#hparser{te=TE};
@@ -331,10 +333,12 @@ parse_body(St=#hparser{body_state=waiting, te=TE, clen=Length,
       {stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
     _ when Length =:= 0 orelse Method =:= <<"HEAD">> ->
       {done, Buffer};
-    _ ->
+    _ when is_integer(Length) ->
       parse_body(St#hparser{body_state=
       {stream, fun te_identity/2, {0, Length},
-        fun ce_identity/1}})
+        fun ce_identity/1}});
+    _ ->
+      {done, Buffer}
   end;
 parse_body(#hparser{body_state=done, buffer=Buffer}) ->
   {done, Buffer};
