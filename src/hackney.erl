@@ -801,9 +801,14 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   Client1 = hackney_connect:check_or_close(Client),
 
   %% update the state with the redirect info
+  RedirectNetloc = hackney_url:netloc(
+                     hackney_url:transport_scheme(RedirectTransport),
+                     RedirectHost,
+                     RedirectPort),
   Client2 = Client1#client{transport=RedirectTransport,
                            host=RedirectHost,
                            port=RedirectPort,
+                           netloc=RedirectNetloc,
                            options=Opts},
 
   %% send a request to the new location

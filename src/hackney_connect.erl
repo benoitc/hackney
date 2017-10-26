@@ -49,12 +49,8 @@ create_connection(Transport, Host, Port, Options) ->
 
 create_connection(Transport, Host, Port, Options, Dynamic)
   when is_list(Options) ->
-  Netloc = case {Transport, Port} of
-             {hackney_tcp, 80}  -> list_to_binary(Host);
-             {hackney_ssl, 443} -> list_to_binary(Host);
-             _ ->
-               iolist_to_binary([Host, ":", integer_to_list(Port)])
-           end,
+  Netloc = hackney_url:netloc(hackney_url:transport_scheme(Transport),
+                              Host, Port),
   %% default timeout
   Timeout = proplists:get_value(recv_timeout, Options, ?RECV_TIMEOUT),
   FollowRedirect = proplists:get_value(follow_redirect, Options, false),

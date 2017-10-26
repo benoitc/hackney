@@ -13,6 +13,7 @@
 
 -export([parse_url/1,
   transport_scheme/1,
+  netloc/3,
   unparse_url/1,
   urldecode/1, urldecode/2,
   urlencode/1, urlencode/2,
@@ -94,14 +95,7 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
       
                        %% encode domain if needed
                        Host2 = idna:to_ascii(Host1),
-                       Netloc1 = case {Scheme, Port} of
-                                   {http, 80} -> list_to_binary(Host2);
-                                   {https, 443} -> list_to_binary(Host2);
-                                   {http_unix, _} -> list_to_binary(Host2);
-                                   _ ->
-                                     iolist_to_binary([Host2, ":", integer_to_list(Port)])
-                                 end,
-                       {Host2, Netloc1}
+                       {Host2, netloc(Scheme, Host2, Port)}
                    end,
   Path1 = Fun(Path),
   Url#hackney_url{host=Host, netloc=Netloc, path=Path1}.
@@ -112,6 +106,15 @@ transport_scheme(hackney_ssl) ->
   https;
 transport_scheme(hackney_local_tcp) ->
   http_unix.
+
+netloc(http, Host, 80) ->
+    list_to_binary(Host);
+netloc(https, Host, 443) ->
+    list_to_binary(Host);
+netloc(http_unix, Host, _Port) ->
+    list_to_binary(Host);
+netloc(_, Host, Port) ->
+    iolist_to_binary([Host, ":", integer_to_list(Port)]).
 
 unparse_url(#hackney_url{}=Url) ->
   #hackney_url{scheme = Scheme,
