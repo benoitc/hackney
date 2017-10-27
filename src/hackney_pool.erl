@@ -475,7 +475,7 @@ add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
 del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
   case dict:find(Dest, Queues) of
     error ->
-      {Queues, 0};
+      {Queues, false};
     {ok, Q} ->
       Q2 = queue:filter(fun({_, R}) -> R =/= Ref end, Q),
       Removed = queue:len(Q) =/= queue:len(Q2),
