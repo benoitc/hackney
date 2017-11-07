@@ -24,6 +24,18 @@
 -type http_socket() :: {atom(), inet:socket()}.
 -export_type([http_socket/0]).
 
+-ifdef(no_proxy_sni_support).
+
+ssl_opts(Host, Opts) ->
+  hackney_connect:ssl_opts(Host, Opts).
+
+-else.
+
+ssl_opts(Host, Opts) ->
+  [{server_name_indication, Host} | hackney_connect:ssl_opts(Host,Opts)].
+
+-endif.
+
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages({hackney_ssl, _}) ->
   {ssl, ssl_closed, ssl_error};
@@ -59,7 +71,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
           %% upgrade the connection socket to handle SSL.
           case Transport of
             hackney_ssl ->
-              SSLOpts = hackney_connect:ssl_opts(Host, Opts),
+              SSLOpts = ssl_opts(Host, Opts),
               %% upgrade the tcp connection
               case ssl:connect(Socket, SSLOpts) of
                 {ok, SslSocket} ->
