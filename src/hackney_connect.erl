@@ -66,7 +66,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
   MaxBody = proplists:get_value(max_body, Options),
 
   %% get mod metrics
-  Engine = metrics:init(hackney_util:mod_metrics()),
+  {ok, Engine} = application:get_env(hackney, metrics),
 
   %% initial state
   InitialState = #client{mod_metrics=Engine,

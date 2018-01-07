@@ -209,7 +209,6 @@ start_link(Name, Options0) ->
   gen_server:start_link(?MODULE, [Name, Options], []).
 
 init([Name, Options]) ->
-  process_flag(priority, high),
   case lists:member({seed,1}, ssl:module_info(exports)) of
     true ->
       % Make sure that the ssl random number generator is seeded
