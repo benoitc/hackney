@@ -102,7 +102,7 @@ This fixes zsh (and maybe other shells) escript-related bugs. Also this should s
 
 ```erlang-repl
 
-1>> hackney:start().
+1>> application:ensure_all_started(hackney).
 ok
 ```
 
