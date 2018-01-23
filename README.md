@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2017 Benoît Chesneau.
+Copyright (c) 2012-2018 Benoît Chesneau.
 
-__Version:__ 1.10.1
+__Version:__ 1.11.0
 
 # hackney
 
@@ -512,7 +512,7 @@ Running the tests:
 
 ```
 $ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ rebar3 eunit
+$ make test
 $ kill `cat httpbin.pid`
 ```
 
@@ -546,3 +546,4 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
+
