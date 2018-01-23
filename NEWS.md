@@ -1,5 +1,17 @@
 # NEWS
 
+1.11.0 - 2018-01-23
+-------------------
+
+- add: send SNI for Erlang >= 17
+- fix: better handling of stream exits in `hackney_manager`
+- improvement: remove high priority flag from the pool process
+- fix: change when hackney loads the hackney metric module (speed improvement)
+- fix: return value from the function `del_from_queue` in connection pool
+- fix: handle empty or invalid content-length
+- fix documentation on removed method
+
+
 1.10.1 - 2017-10-20
 -------------------
 
