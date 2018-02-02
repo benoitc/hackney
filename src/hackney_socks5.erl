@@ -228,10 +228,10 @@ addr(Host, Port, Resolve) ->
 
 recv_addr_port(1 = AType, Transport, Socket) -> % IPv4
    {ok, Data} = Transport:recv(Socket, 6, ?TIMEOUT),
-   <<AType, Data>>;
+   <<AType, Data/binary>>;
 recv_addr_port(4 = AType, Transport, Socket) -> % IPv6
    {ok, Data} = Transport:recv(Socket, 18, ?TIMEOUT),
-   <<AType, Data>>;
+   <<AType, Data/binary>>;
 recv_addr_port(3 = AType, Transport, Socket) -> % Domain
    {ok, <<DLen/integer>>} = Transport:recv(Socket, 1, ?TIMEOUT),
    {ok, AddrPort} = Transport:recv(Socket, DLen + 2, ?TIMEOUT),
