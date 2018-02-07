@@ -17,13 +17,18 @@ all_tests() ->
    absolute_redirect_request_follow(),
    relative_redirect_request_no_follow(),
    relative_redirect_request_follow(),
+   test_duplicate_headers(),
+   test_custom_host_headers(),
    async_request(),
    async_head_request(),
-   async_no_content_request()].
+   async_no_content_request(),
+   test_frees_manager_ets_when_body_is_in_client(),
+   test_frees_manager_ets_when_body_is_in_response()].
 
 %%all_tests() ->
 %%    case has_unix_socket() of
-%%        true -> default_tests() ++ [local_socket_request()];
+%%        true -> def
+%% ault_tests() ++ [local_socket_request()];
 %%        false -> default_tests()
 %%    end.
 
@@ -36,7 +41,7 @@ http_requests_test_() ->
      end}.
 
 start() ->
-    hackney:start(),
+    {ok, _} = application:ensure_all_started(hackney),
     ok.
 
 stop(ok) -> ok.
@@ -124,7 +129,7 @@ relative_redirect_request_follow() ->
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(200, StatusCode),
-     ?_assertEqual(<<"/get">>, Location)].
+     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
 
 async_request() ->
     URL = <<"http://localhost:8000/get">>,
@@ -150,6 +155,45 @@ async_no_content_request() ->
     [?_assertEqual(204, StatusCode),
      ?_assertEqual([headers, status], Keys)].
 
+test_duplicate_headers() ->
+  URL = <<"http://localhost:8000/post">>,
+  Headers = [{<<"Content-Type">>, <<"application/json">>}],
+  Body = <<"{\"test\": \"ok\" }">>,
+  Options = [with_body],
+  {ok, 200, _H, JsonBody} = hackney:post(URL, Headers, Body, Options),
+  Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+  ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+  ?_assertEqual(<<"application/json">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
+
+test_custom_host_headers() ->
+  URL = <<"http://localhost:8000/get">>,
+  Headers = [{<<"Host">>, <<"myhost.com">>}],
+  Options = [with_body],
+  {ok, 200, _H, JsonBody} = hackney:get(URL, Headers, <<>>, Options),
+  Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+  ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+  ?_assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
+
+test_frees_manager_ets_when_body_is_in_client() ->
+    URL = <<"http://localhost:8000/get">>,
+    BeforeCount = ets:info(hackney_manager_refs, size),
+    {ok, 200, _, Client} = hackney:get(URL),
+    DuringCount = ets:info(hackney_manager_refs, size),
+    {ok, _unusedBody} = hackney:body(Client),
+    AfterCount = ets:info(hackney_manager_refs, size),
+    ?_assertEqual(DuringCount, BeforeCount + 1),
+    ?_assertEqual(BeforeCount, AfterCount).
+
+test_frees_manager_ets_when_body_is_in_response() ->
+    URL = <<"http://localhost:8000/get">>,
+    Headers = [],
+    Options = [with_body],
+    BeforeCount = ets:info(hackney_manager_refs, size),
+    {ok, 200, _, _} = hackney:get(URL, Headers, <<>>, Options),
+    AfterCount = ets:info(hackney_manager_refs, size),
+    ?_assertEqual(BeforeCount, AfterCount).
+
+
 %%local_socket_request() ->
 %%    URL = <<"http+unix://httpbin.sock/get">>,
 %%    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
@@ -158,19 +202,19 @@ async_no_content_request() ->
 
 %% Helpers
 
-has_unix_socket() ->
-    {ok, Vsn} = application:get_key(kernel, vsn),
-    ParsedVsn = version_pad(string:tokens(Vsn, ".")),
-    ParsedVsn >= {5, 0, 0}.
+%%has_unix_socket() ->
+%%    {ok, Vsn} = application:get_key(kernel, vsn),
+%%    ParsedVsn = version_pad(string:tokens(Vsn, ".")),
+%%    ParsedVsn >= {5, 0, 0}.
 
-version_pad([Major]) ->
-    {list_to_integer(Major), 0, 0};
-version_pad([Major, Minor]) ->
-    {list_to_integer(Major), list_to_integer(Minor), 0};
-version_pad([Major, Minor, Patch]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
-version_pad([Major, Minor, Patch | _]) ->
-    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
+%%version_pad([Major]) ->
+%%  {list_to_integer(Major), 0, 0};
+%%version_pad([Major, Minor]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), 0};
+%%version_pad([Major, Minor, Patch]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)};
+%%version_pad([Major, Minor, Patch | _]) ->
+%%    {list_to_integer(Major), list_to_integer(Minor), list_to_integer(Patch)}.
 
 receive_response(Ref) ->
     Dict = receive_response(Ref, orddict:new()),

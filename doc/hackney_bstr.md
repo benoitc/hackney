@@ -156,7 +156,7 @@ quoted_string(X1::binary(), Fun::function()) -&gt; any()
 ### to_lower/1 ###
 
 <pre><code>
-to_lower(L::binary()) -&gt; binary()
+to_lower(L::binary() | atom() | list()) -&gt; binary()
 </code></pre>
 <br />
 
@@ -166,7 +166,10 @@ Convert a binary string to lowercase.
 
 ### to_upper/1 ###
 
-`to_upper(L) -> any()`
+<pre><code>
+to_upper(U::binary() | atom() | list()) -&gt; binary()
+</code></pre>
+<br />
 
 <a name="token-2"></a>
 

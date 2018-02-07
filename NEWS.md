@@ -1,5 +1,111 @@
 # NEWS
 
+1.11.0 - 2018-01-23
+-------------------
+
+- add: send SNI for Erlang >= 17
+- fix: better handling of stream exits in `hackney_manager`
+- improvement: remove high priority flag from the pool process
+- fix: change when hackney loads the hackney metric module (speed improvement)
+- fix: return value from the function `del_from_queue` in connection pool
+- fix: handle empty or invalid content-length
+- fix documentation on removed method
+
+
+1.10.1 - 2017-10-20
+-------------------
+
+- improvement: ignore port empty values on redirect (#444)
+- fix: fix reference leak introduced in latest version (#445)
+- fix: stream termination, don't raise an error on normal exit
+
+1.10.0 - 2017-10-18
+-------------------
+
+- fix owner tracking (#443)
+- fix: fix deadlock in `hackney_pool` during request timeout (#420)
+- fix: set PoolHandler on connect (#427)
+- fix: fix unicode in include file (#426)
+
+1.9.0 - 2017-07-30
+------------------
+
+- security: certifi 2.0.0
+- dependency: update idna 5.1.0 (fix windows build and usage with elixir)
+- doc: fix typo `hackney_multipart` doc (#422)
+
+1.8.6 - 2017-06-09
+--------------------
+
+- fix: cleanup socket in async request (#411)
+
+1.8.5 - 2017-05-30
+------------------
+
+- fix: dialyzer
+
+1.8.4 - 2017-05-28
+------------------
+
+- fix: tests
+- dependency: update idna  5.0.2 (fix compatibility with erlang R20)
+
+1.8.3 - 2017-05-22
+------------------
+
+- security: certifi 1.2.1
+- dependency: update idna  5.0.1
+
+1.8.2 - 2017-05-20
+------------------
+
+- fix: race condition in controlling process (#407)
+- fix: spec of #hackney_url{} (#404)
+- fix: make sure to not lost a message during hiberntion in async request
+- security: certifi 1.2.0
+- dependency: update idna  5.0.0
+
+1.8.0 - 2017-04-20
+-----------------
+
+- fix: undefined function (#393)
+- fix: close connection if proxy handshake failed (#392)
+- fix: handle all headers with the new datastructure introduced in 1.7.0 (#395)
+- fix: host header when redirect (#400)
+- fix: use connect timeout when retrieving from the pool (#402)
+- security: new certifi version
+
+1.7.1 - 2017-03-02
+------------------
+
+- fix: regression in headers handling (handle different key types)
+
+1.7.0 - 2017-03-01
+------------------
+
+- fix: new datastructure to handle headers (#390)
+- security: new certifi version
+
+1.6.6 - 2017-02-26
+------------------
+
+- fix: fix header appending
+- fix: Url encode host header for unix domain sockets (#382)
+- security: new certifi version
+- doc: fix few typos
+
+1.6.4 - 2016-12-22
+------------------
+
+- add: optional urlencode options to qs (#368)
+- fix: handle continuation lines in HTTP headers correctly (#366)
+- doc: Fix a few documentation typos
+
+1.6.3 - 2016-10-27
+------------------
+
+- fix: handle trailing whitespace in header values
+
 1.6.2 - 2016-10-22
 ------------------
 
@@ -9,7 +115,7 @@
 - fix: `hackney_util:merge_opts/2`
 - improvements: inet6 support in socks5 sockets
 - doc: miscenaleous docs fixes
-- security: beeing more strict in ssl support
+- security: being more strict in ssl support
 - security: bump to certifi 0.7
 
 1.6.1 - 2016-07-10
@@ -513,7 +619,7 @@ fix: fix file upload content type
 - Set the connection timeout
 - Make sure sendfile correctly handle chunked encoding
 - Add support for partial file uploads
-- Return received buffer when no content lenght is given (http 1.0)
+- Return received buffer when no content length is given (http 1.0)
 - Instead of returning `{error, closed}`, return `{error, {closed,
   Buffer}}` when you receive the body, so you can figure what happened
 and maybe use the partial body.

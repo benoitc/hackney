@@ -34,7 +34,7 @@ client_ref() = term()
 
 
 <pre><code>
-url() = #hackney_url{}
+url() = #hackney_url{} | binary()
 </code></pre>
 
 <a name="index"></a>
@@ -71,7 +71,7 @@ multipart content</li>
 multipart content</li>
 </ul><p></p>Note: You can calculate the full length of a multipart stream using
 the function <code>hackney_multipart:len_mp_stream/2</code> .</td></tr><tr><td valign="top"><a href="#send_request-2">send_request/2</a></td><td>send a request using the current client state.</td></tr><tr><td valign="top"><a href="#send_request-3">send_request/3</a></td><td>send a request using the current client state and pass new
-options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>Start the hackney process.</td></tr><tr><td valign="top"><a href="#start-1">start/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop-0">stop/0</a></td><td>Stop the hackney process.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
+options to it.</td></tr><tr><td valign="top"><a href="#setopts-2">setopts/2</a></td><td>set client options.</td></tr><tr><td valign="top"><a href="#skip_body-1">skip_body/1</a></td><td>skip the full body.</td></tr><tr><td valign="top"><a href="#skip_multipart-1">skip_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#start_response-1">start_response/1</a></td><td>start a response.</td></tr><tr><td valign="top"><a href="#stop_async-1">stop_async/1</a></td><td>stop to receive asynchronously.</td></tr><tr><td valign="top"><a href="#stream_body-1">stream_body/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_multipart-1">stream_multipart/1</a></td><td>Stream the response body.</td></tr><tr><td valign="top"><a href="#stream_next-1">stream_next/1</a></td><td>continue to the next stream message.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -263,7 +263,7 @@ make a request
 ### request/5 ###
 
 <pre><code>
-request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary() | list(), Headers::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
+request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary() | list(), Headers0::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
 </code></pre>
 <br />
 
@@ -344,13 +344,13 @@ redirection even on POST
 transfers without checking the certificate
 
 * `{connect_timeout, infinity | integer()}`: timeout used when
-estabilishing a connection, in milliseconds. Default is 8000
+establishing a connection, in milliseconds. Default is 8000
 
 * `{recv_timeout, infinity | integer()}`: timeout used when
 receiving a connection. Default is 5000
 
 
-<blocquote>Note: if the response is async, only
+<blockquote>Note: if the response is async, only
 `follow_redirect` is take in consideration for the redirection.
 If a valid redirection happen you receive the messages:
 
@@ -358,7 +358,7 @@ If a valid redirection happen you receive the messages:
 
 * `{see_other, To, Headers}` for status 303 POST requests.
 
-</blocquote>
+</blockquote>
 
 * `proxy_options()`:  options to connect by a proxy:
 
@@ -369,7 +369,7 @@ proxy
 for HTTP proxy
 
 * {socks5, Host::binary(), Port::binary()}: Host and Port
-to connect to a socks5 proxt.
+to connect to a socks5 proxy.
 
 * {connect, Host::binary(), Port::binary()}: Host and Port
 to connect to an HTTP tunnel.
@@ -384,14 +384,14 @@ syntax.</bloquote>
 Return:
 
 * `{ok, ResponseStatus, ResponseHeaders}`: On HEAD
-request if the response succeded.
+request if the response succeeded.
 
 * `{ok, ResponseStatus, ResponseHeaders, Ref}`: when
-the response succeded. The request reference is used later to
+the response succeeded. The request reference is used later to
 retrieve the body.
 
 * `{ok, Ref}` Return the request reference when you
-decide to stream the requet. You can use the returned reference to
+decide to stream the request. You can use the returned reference to
 stream the request body and continue to handle the response.
 
 * `{error, {closed, PartialBody}}` A body was expected but
@@ -514,7 +514,7 @@ setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt;
 set client options.
 Options are:
 - `async`: to fetch the response asynchronously
-- `{async, once}`: to receive the response asynchronosly once time.
+- `{async, once}`: to receive the response asynchronously once time.
 To receive the next message use the function `hackney:stream_next/1`.
 - `{stream_to, pid()}`: to set the pid where the messages of an
 asynchronous response will be sent.
@@ -547,20 +547,6 @@ skip_multipart(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {err
 
 Stream the response body.
 
-<a name="start-0"></a>
-
-### start/0 ###
-
-`start() -> any()`
-
-Start the hackney process. Useful when testing using the shell.
-
-<a name="start-1"></a>
-
-### start/1 ###
-
-`start(PoolHandler) -> any()`
-
 <a name="start_response-1"></a>
 
 ### start_response/1 ###
@@ -573,14 +559,6 @@ start_response(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, inte
 start a response.
 Useful if you stream the body by yourself. It will fetch the status
 and headers of the response. and return
-
-<a name="stop-0"></a>
-
-### stop/0 ###
-
-`stop() -> any()`
-
-Stop the hackney process. Useful when testing using the shell.
 
 <a name="stop_async-1"></a>
 
@@ -623,11 +601,11 @@ Return:
 
 * `end_of_part` : end of part
 
-* `mp_mixed`: notify the begininning of a mixed multipart part
+* `mp_mixed`: notify the beginning of a mixed multipart part
 
 * `mp_mixed_eof`: notify the end  of a mixed multipart part
 
-* `eof`: notify the end of the nultipart request
+* `eof`: notify the end of the multipart request
 
 
 <a name="stream_next-1"></a>

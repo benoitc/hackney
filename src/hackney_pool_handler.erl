@@ -24,18 +24,23 @@ behaviour_info(_) ->
 
 -else.
 
-%% start a bool handler
+%% start a pool handler
 -callback start() -> ok | {error, Reason :: any()}.
 
+%% checkout a connection for use
 -callback checkout(Host::host(), Port::integer(),Transport::atom(),
   Client::client()) ->
   {ok, {Info::any(), CheckingReference::any(), Owner::pid(),
     Transport::atom()}, Socket::inet:socket()}
   | {error, Reason :: any()}.
 
+%% checkin an open connection after use
 -callback checkin({Info::any(), CheckingReference::any(), Owner::pid(),
   Transport::atom()}, Socket::inet:socket()) ->
   ok
   | {error, Reason :: any()}.
+
+%% pass a message to the given pool
+-callback notify(Pool::atom(), Message::any()) -> ok.
 
 -endif.

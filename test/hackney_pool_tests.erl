@@ -1,4 +1,4 @@
--module(hackney_multipart_tests).
+-module(hackney_pool_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("hackney_lib.hrl").
 
@@ -8,37 +8,38 @@ dummy_test() ->
 
 multipart_test_() ->
     {setup, fun start/0, fun stop/1,
-      [multipart_post()]}.
+      [queue_timeout()]}.
 
 start() ->
     error_logger:tty(false),
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(hackney),
+    hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
     Host = '_',
-    Resource = {"/mp", upload_resource, []},
+    Resource = {"/pool", pool_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
     cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
 
 stop({ok, _Pid}) ->
     cowboy:stop_listener(test_server),
     application:stop(cowboy),
+    hackney_pool:stop_pool(pool_test),
     application:stop(hackney),
     error_logger:tty(true),
     ok.
 
-multipart_post() ->
+queue_timeout() ->
     fun() ->
-        URL = <<"http://localhost:8123/mp">>,
+        URL = <<"http://localhost:8123/pool">>,
         Headers = [],
-        Parts = [
-            {<<"part1">>, <<"foo">>},
-            {<<"part2">>, <<"bar">>},
-            {<<"part3">>, <<"baz">>}],
-        case hackney:request(post, URL, Headers, {multipart, Parts}, []) of
-            {ok, Code, _Headers, Ref} when code >= 200, Code < 300 ->
-                {ok, Body} = hackney:body(Ref),
-                hackney:close(Ref),
-                ?assertEqual(Parts, binary_to_term(Body))
+        Opts = [{pool, pool_test}, {connect_timeout, 100}],
+        case hackney:request(post, URL, Headers, stream, Opts) of
+            {ok, Ref} ->
+                {error, _} = hackney:request(post, URL, Headers, stream, Opts),
+                ok = hackney:finish_send_body(Ref),
+                {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
+                ok = hackney:skip_body(Ref),
+                {ok, _} = hackney:request(post, URL, Headers, stream, Opts)
         end
     end.
 

@@ -1,11 +1,21 @@
 language: erlang
 otp_release:
-  - 19.1
+  - 19.3
+
 env:
   - TEST=1
 before_script:
     - kerl list installations
     - "gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&"
+
 before_install:
   - sudo pip install -q httpbin
   - sudo pip install -q gunicorn
+
+script:
+  - ./support/rebar3 eunit
+  - ./support/rebar3 dialyzer
+
+cache:
+  directories:
+    - $HOME/.cache/rebar3

@@ -38,7 +38,7 @@
 -type body_result() :: {body, binary(), body_cont()} | end_of_part().
 -type end_of_part() :: {end_of_part, cont(more(part_result()))}.
 
-%% @doc encode a list of parts a multiart form.
+%% @doc encode a list of parts a multipart form.
 %% Parts can be under the form:
 %%  - `{file, Path}' : to send a file
 %%  - `{file, Path, ExtraHeaders}' : to send a file with extra headers
@@ -202,13 +202,13 @@ len_mp_stream(Parts, Boundary) ->
     Size + byte_size(mp_eof(Boundary)).
 
 %% @doc return the mixed multipart header
--spec mp_mixed_header(Name :: binary(), Boundary :: binary())  ->
+-spec mp_mixed_header({Name :: binary(), MixedBoundary :: binary()}, Boundary :: binary())  ->
     {binary(), 0}.
-mp_mixed_header(Name, Boundary) ->
+mp_mixed_header({Name, MixedBoundary}, Boundary) ->
     Headers = [{<<"Content-Disposition">>, <<"form-data">>,
                 [{<<"name">>, <<"\"", Name/binary, "\"">>}]},
                {<<"Content-Type">>, <<"multipart/mixed">>,
-                [{<<"boundary">>, Boundary}]}],
+                [{<<"boundary">>, MixedBoundary}]}],
     {mp_header(Headers, Boundary), 0}.
 
 

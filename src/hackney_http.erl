@@ -137,7 +137,7 @@ execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
   %% update the state with the new buffer
   NBuffer = << Buffer/binary, Bin/binary >>,
   St1 = St#hparser{buffer=NBuffer},
-  
+
   %% process the right state.
   case Status of
     done -> done;
@@ -166,15 +166,8 @@ parse_first_line(Buffer, St=#hparser{type=Type,
       parse_first_line(Rest, St, Empty + 1);
     _ when Type =:= auto ->
       case parse_request_line(St) of
-        {error, bad_request} ->
-          case parse_response_line(St) of
-            {error, bad_request} = Error ->
-              Error;
-            OK ->
-              OK
-          end;
-        OK ->
-          OK
+        {request, _Method, _URI, _Version, _NState} = Req -> Req;
+        {error, bad_request} -> parse_response_line(St)
       end;
     _ when Type =:= response ->
       parse_response_line(St);
@@ -217,7 +210,7 @@ parse_status(<< C, Rest/bits >>, St, Version, Acc) ->
 
 parse_reason(Reason, St, Version, StatusCode) ->
   StatusInt = list_to_integer(binary_to_list(StatusCode)),
-  
+
   NState = St#hparser{type=response,
     version=Version,
     state=on_header,
@@ -252,7 +245,7 @@ parse_uri_path(<< C, Rest/bits >>, St, Method, Acc) ->
 parse_version(<< "HTTP/", High, ".", Low, $\r , $\n, Rest/binary >>, St, Method, URI)
   when High >= $0, High =< $9, Low >= $0, Low =< $9 ->
   Version = { High -$0, Low - $0},
-  
+
   NState = St#hparser{type=request,
     version=Version,
     method=Method,
@@ -300,8 +293,10 @@ parse_header(Line, St) ->
                  end,
   St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
           <<"content-length">> ->
-            CLen = list_to_integer(binary_to_list(hackney_bstr:trim(Value))),
-            St#hparser{clen=CLen};
+            case catch list_to_integer(binary_to_list(Value)) of
+              CLen when is_integer(CLen) -> St#hparser{clen=CLen};
+              _ -> St
+            end;
           <<"transfer-encoding">> ->
             TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
             St#hparser{te=TE};
@@ -338,10 +333,12 @@ parse_body(St=#hparser{body_state=waiting, te=TE, clen=Length,
       {stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
     _ when Length =:= 0 orelse Method =:= <<"HEAD">> ->
       {done, Buffer};
-    _ ->
+    _ when is_integer(Length) ->
       parse_body(St#hparser{body_state=
       {stream, fun te_identity/2, {0, Length},
-        fun ce_identity/1}})
+        fun ce_identity/1}});
+    _ ->
+      {done, Buffer}
   end;
 parse_body(#hparser{body_state=done, buffer=Buffer}) ->
   {done, Buffer};

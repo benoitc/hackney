@@ -41,14 +41,14 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
   ProxyHost = proplists:get_value(socks5_host, Opts),
   ProxyPort = proplists:get_value(socks5_port, Opts),
   Transport = proplists:get_value(socks5_transport, Opts),
-  
+
   %% filter connection options
   AcceptedOpts =  [linger, nodelay, send_timeout,
     send_timeout_close, raw, inet6],
   BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
     {nodelay, true}],
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
-  
+
   %% connect to the socks 5 proxy
   case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, Socket} ->
@@ -62,12 +62,14 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
+                  gen_tcp:close(Socket),
                   Error
               end;
             _ ->
               {ok, {Transport, Socket}}
           end;
         Error ->
+          gen_tcp:close(Socket),
           Error
       end;
     Error ->
@@ -184,8 +186,9 @@ do_connection(Socket, Host, Port, Options) ->
   case addr(Host, Port, Resolve) of
     Addr when is_binary(Addr) ->
       ok = gen_tcp:send(Socket, << 5, 1, 0, Addr/binary >>),
-      case gen_tcp:recv(Socket, 10, ?TIMEOUT) of
-        {ok, << 5, 0, 0, BoundAddr/binary >>} ->
+      case gen_tcp:recv(Socket, 4, ?TIMEOUT) of
+        {ok, << 5, 0, 0, AType>>} ->
+          BoundAddr = recv_addr_port(AType, gen_tcp, Socket),
           check_connection(BoundAddr);
         {ok, _} ->
           {error, badarg};
@@ -222,6 +225,19 @@ addr(Host, Port, Resolve) ->
           << 3, HostLength, Host1/binary, Port:16 >>
       end
   end.
+
+recv_addr_port(1 = AType, Transport, Socket) -> % IPv4
+   {ok, Data} = Transport:recv(Socket, 6, ?TIMEOUT),
+   <<AType, Data>>;
+recv_addr_port(4 = AType, Transport, Socket) -> % IPv6
+   {ok, Data} = Transport:recv(Socket, 18, ?TIMEOUT),
+   <<AType, Data>>;
+recv_addr_port(3 = AType, Transport, Socket) -> % Domain
+   {ok, <<DLen/integer>>} = Transport:recv(Socket, 1, ?TIMEOUT),
+   {ok, AddrPort} = Transport:recv(Socket, DLen + 2, ?TIMEOUT),
+   <<AType, DLen, AddrPort/binary>>;
+recv_addr_port(_, _, _) ->
+   error.
 
 check_connection(<< 3, _DomainLen:8, _Domain/binary >>) ->
   ok;

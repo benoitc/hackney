@@ -4,7 +4,7 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-__This module defines the `hackney_pool_handler` behaviour.__<br /> Required callback functions: `start/0`, `checkout/4`, `checkin/2`.
+__This module defines the `hackney_pool_handler` behaviour.__<br /> Required callback functions: `start/0`, `checkout/4`, `checkin/2`, `notify/2`.
 
 <a name="index"></a>
 

@@ -176,12 +176,12 @@ parse_addr(Addr, S) ->
   end.
 
 parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
-  case binary:split(Rest, <<"]">>) of
-    [Host, <<>>] when Transport =:= hackney_tcp ->
+  case binary:split(Rest, <<"]">>, [trim]) of
+    [Host] when Transport =:= hackney_tcp ->
       S#hackney_url{host=binary_to_list(Host), port=80};
-    [Host, <<>>] when Transport =:= hackney_ssl ->
+    [Host] when Transport =:= hackney_ssl ->
       S#hackney_url{host=binary_to_list(Host), port=443};
-    [Host, <<":", Port/binary>>] ->
+    [Host, <<":", Port/binary>>] when Port /= <<>> ->
       S#hackney_url{host=binary_to_list(Host),
         port=list_to_integer(binary_to_list(Port))};
     _ ->
@@ -189,7 +189,7 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
   end;
 
 parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
-  case binary:split(Netloc, <<":">>) of
+  case binary:split(Netloc, <<":">>, [trim]) of
     [Host] when Transport =:= hackney_tcp ->
       S#hackney_url{host=unicode:characters_to_list((Host)),
         port=80};

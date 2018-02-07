@@ -80,7 +80,7 @@ the port Port or to a  trace handler.
 Note: that it starts a tracer server.
 When Destination is the atom io (or the tuple {io, Verbosity}),
 %% all (printable) inets trace events (trace_ts events which has
-%% Severity withing Limit) will be written to stdout using io:format.
+%% Severity within Limit) will be written to stdout using io:format.
 
 <a name="report_event-4"></a>
 
@@ -93,7 +93,7 @@ When Destination is the atom io (or the tuple {io, Verbosity}),
 ### set_level/1 ###
 
 <pre><code>
-set_level(Level::<a href="#type-trace_level">trace_level()</a>) -&gt; ok
+set_level(Level::<a href="#type-trace_level">trace_level()</a>) -&gt; ok | {error, term()}
 </code></pre>
 <br />
 
