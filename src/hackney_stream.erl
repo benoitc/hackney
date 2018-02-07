@@ -71,15 +71,12 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
     {more, Client2, Rest} ->
       async_recv(Parent, Owner, Ref, Client2, Rest);
     {ok, StatusInt, Reason, Client2} ->
-	  io:format("stream_loop -> maybe_redirect",[]),
       maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
         Client2);
     {ok, {headers, Headers}, Client2} ->
-	  io:format("maybe 00 ~p~n~p~n~p~n", [Owner, Ref, Headers]),
       Owner ! {hackney_response, Ref, {headers, Headers}},
       maybe_continue(Parent, Owner, Ref, Client2);
     {ok, Data, Client2} ->
-	  io:format("maybe 01 ~p~n~p~n~p~n~p~n", [Parent, Owner, Ref, Client2]),
       Owner ! {hackney_response, Ref, Data},
       maybe_continue(Parent, Owner, Ref, Client2);
     done ->
@@ -106,25 +103,15 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       Transport:setopts(Socket, [{active, false}]),
       Transport:controlling_process(Socket, From),
       From ! {Ref, ok};
-	{ssl_closed, _} ->
-	  io:format("~nssl_closed~n", []),
-	  Owner ! {hackney_response, Ref, {status, 500, <<"ssl_closed">>}},
-	  hackney_response:close(Client);
+    {ssl_closed, _} ->
+      Owner ! {hackney_response, Ref, {status, 500, <<"ssl_closed">>}},
+      hackney_response:close(Client);
     {Ref, close} ->
       hackney_response:close(Client);
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {stream_loop, Parent, Owner, Ref, Client});
     Else ->
-	  io:format("Client ~p", [Client]),
-	  io:format("Socket ~p", [Socket]),
-	  io:format("Owner ~p", [Owner]),
-	  io:format("Transport ~p", [Transport]),
-	  try
-	    A = 1/0
-	  catch
-		E1:E2 -> erlang:display(E1), erlang:display(E2), erlang:display(erlang:get_stacktrace())
-	  end,
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
   
@@ -144,25 +131,16 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       From ! {Ref, ok};
     {Ref, close} ->
       hackney_response:close(Client);
-	{ssl_closed, _} ->
+    {ssl_closed, _} ->
       hackney_response:close(Client);
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {maybe_continue, Parent, Owner, Ref,
           Client});
     Else ->
-	  io:format("Socket ~p", [Socket]),
-	  io:format("Client ~p", [Client]),
-	  io:format("Transport ~p", [Transport]),
-	  try
-	    A = 1/0
-	  catch
-		E1:E2 -> erlang:display(E1), erlang:display(E2), erlang:display(erlang:get_stacktrace())
-	  end,
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
   after 5000 ->
-    io:format("maybe_continue proc_lib ~n~p~n",[1]),
     proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
       Client])
   
@@ -238,13 +216,11 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
           Owner ! {hackney_response, Ref, {error, Error}}
       end;
     _ ->
-	  io:format("maybe 02 ~p~n~p~n~p~n~p~n", [Owner, Ref, StatusInt, Reason]),
       Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
       maybe_continue(Parent, Owner, Ref, Client)
   end;
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
   Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
-  io:format("maybe 03 ~p~n~p~n~p~n~p~n~p~n~p~n", [Parent, Owner, StatusInt, Reason, Ref, Client]),
   maybe_continue(Parent, Owner, Ref, Client).
 
 
@@ -299,14 +275,6 @@ async_recv(Parent, Owner, Ref,
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {async_recv, Parent, Owner, Ref, Client});
     Else ->
-	  io:format("Sock ~p", [Sock]),
-	  io:format("TSock ~p", [TSock]),
-	  io:format("Closed ~p", [Closed]),
-	  try
-	    A = 1/0
-	  catch
-		E1:E2 -> erlang:display(E1), erlang:display(E2), erlang:display(erlang:get_stacktrace())
-	  end,
       ?report_trace("stream: unexpected message", [{message, Else},
         {sock, TSock}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
@@ -316,7 +284,6 @@ async_recv(Parent, Owner, Ref,
   end.
 
 system_continue(_, _, {maybe_continue, Parent, Owner, Ref, Client}) ->
-  io:format("maybe 04 ~p~n~p~n~p~n~p~n", [Parent, Owner, Ref, Client]),
   maybe_continue(Parent, Owner, Ref, Client);
 system_continue(_, _, {stream_loop, Parent, Owner, Ref, Client}) ->
   stream_loop(Parent, Owner, Ref, Client);
