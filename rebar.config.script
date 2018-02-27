@@ -10,7 +10,7 @@ Rebar2Deps0 = [{idna, ".*",
 
                {certifi, ".*",
                 {git, "https://github.com/certifi/erlang-certifi",
-                 {tag, "2.0.0"}}},
+                 {tag, "2.3.0"}}},
 
                {metrics, ".*",
                 {git, "https://github.com/benoitc/erlang-metrics",
