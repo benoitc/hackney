@@ -262,6 +262,7 @@ async_recv(Parent, Owner, Ref,
       Transport:controlling_process(TSock, From),
       From ! {Ref, ok};
     {OK, Sock, Data} ->
+      Transport:setopts(TSock, [{active, false}]),
       stream_loop(Parent, Owner, Ref, Client#client{buffer=Data});
     {Closed, Sock} ->
       case Client#client.response_state of
