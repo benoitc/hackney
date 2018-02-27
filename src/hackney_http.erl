@@ -325,7 +325,7 @@ parse_trailers(St, Acc) ->
     _ -> error
   end.
 
-parse_body(#hparser{body_state=waiting, method= <<"HEAD">>, buffer=Buffer} = St) ->
+parse_body(#hparser{body_state=waiting, method= <<"HEAD">>, buffer=Buffer}) ->
   {done, Buffer};
 parse_body(#hparser{body_state=waiting, te=TE, clen=Length, buffer=Buffer} = St) ->
   case {TE, Length} of
@@ -345,7 +345,7 @@ parse_body(#hparser{body_state=waiting, te=TE, clen=Length, buffer=Buffer} = St)
   end;
 parse_body(#hparser{body_state=done, buffer=Buffer}) ->
   {done, Buffer};
-parse_body(St=#hparser{buffer=Buffer, body_state={stream, _, _, _}}) when byte_size(Buffer) > 0 ->
+parse_body(#hparser{buffer=Buffer, body_state={stream, _, _, _}}=St) when byte_size(Buffer) > 0 ->
   transfer_decode(Buffer, St#hparser{buffer= <<>>});
 parse_body(St) ->
   {more, St, <<>>}.
