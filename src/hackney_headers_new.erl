@@ -57,7 +57,7 @@ from_list(HeadersList) when is_list(HeadersList) ->
 from_list(_) -> erlang:error(badarg).
 
 %% @doc append a new value to the list of value for the the header field
-%% if the key has not been recorded the list will be created witht eh value as the first item.
+%% if the key has not been recorded the list will be created with the value as the first item.
 -spec append(key(), value(), headers()) -> headers().
 append(Key, Value, {N, Headers}) ->
   KL = ?kl(Key),
