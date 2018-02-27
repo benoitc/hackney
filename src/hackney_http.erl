@@ -447,7 +447,7 @@ read_size(Data) ->
   case read_size(Data, [], true) of
     {ok, Line, Rest} ->
       case io_lib:fread("~16u", Line) of
-        {ok, [Size], []} ->
+        {ok, [Size], _} ->
           {ok, Size, Rest};
         _ ->
           {error, {poorly_formatted_size, Line}}
