@@ -293,9 +293,9 @@ parse_header(Line, St) ->
                  end,
   St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
           <<"content-length">> ->
-            case catch list_to_integer(binary_to_list(Value)) of
-              CLen when is_integer(CLen) -> St#hparser{clen=CLen};
-              _ -> St
+            case hackney_util:to_int(Value) of
+              {ok, CLen} -> St#hparser{clen=CLen};
+              false -> St
             end;
           <<"transfer-encoding">> ->
             TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
@@ -325,29 +325,30 @@ parse_trailers(St, Acc) ->
     _ -> error
   end.
 
-parse_body(St=#hparser{body_state=waiting, te=TE, clen=Length,
-  method=Method, buffer=Buffer}) ->
-  case TE of
-    <<"chunked">> ->
+parse_body(#hparser{body_state=waiting, method= <<"HEAD">>, buffer=Buffer} = St) ->
+  {done, Buffer};
+parse_body(#hparser{body_state=waiting, te=TE, clen=Length, buffer=Buffer} = St) ->
+  case {TE, Length} of
+    {<<"chunked">>, _} ->
       parse_body(St#hparser{body_state=
       {stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
-    _ when Length =:= 0 orelse Method =:= <<"HEAD">> ->
-      {done, Buffer};
-    _ when is_integer(Length) ->
-      parse_body(St#hparser{body_state=
-      {stream, fun te_identity/2, {0, Length},
-        fun ce_identity/1}});
+    {_, Length} when is_integer(Length), Length > 0 ->
+      parse_body(
+        St#hparser{body_state={stream, fun te_identity/2, {0, Length}, fun ce_identity/1}}
+       );
+    {_, undefined} ->
+      parse_body(
+        St#hparser{body_state={stream, fun te_identity/2, {0, undefined}, fun ce_identity/1}}
+       );
     _ ->
       {done, Buffer}
   end;
 parse_body(#hparser{body_state=done, buffer=Buffer}) ->
   {done, Buffer};
-parse_body(St=#hparser{buffer=Buffer, body_state={stream, _, _, _}})
-  when byte_size(Buffer) > 0 ->
+parse_body(St=#hparser{buffer=Buffer, body_state={stream, _, _, _}}) when byte_size(Buffer) > 0 ->
   transfer_decode(Buffer, St#hparser{buffer= <<>>});
 parse_body(St) ->
   {more, St, <<>>}.
-
 
 -spec transfer_decode(binary(), #hparser{})
     -> {ok, binary(), #hparser{}} | {error, atom()}.

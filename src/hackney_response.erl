@@ -113,11 +113,11 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   HeadersList = hackney_headers_new:to_list(Headers),
   TE = hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, nil),
   CLen = case hackney_headers_new:lookup("content-length", Headers) of
-           [] -> nil;
+           [] -> undefined;
            [{_, Len} |_] ->
-             case catch list_to_integer(binary_to_list(Len)) of
-               V when is_integer(V) -> V;
-                 _ -> nil
+             case hackney_util:to_int(Len) of
+               {ok, I} -> I;
+               false -> bad_int
              end
          end,
   Client2 = Client#client{parser=Parser,
@@ -132,18 +132,19 @@ stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
   Buffer = hackney_http:get(Parser, buffer),
   Client2 = end_stream_body(Buffer, Client),
   {done, Client2};
-stream_body(Client=#client{parser=Parser, clen=CLen, te=TE})
-  when (CLen =:= 0 orelse not is_integer(CLen)) andalso
-       TE /= <<"chunked">> ->
-  Buffer = hackney_http:get(Parser, buffer),
-  Client2 = end_stream_body(Buffer, Client),
-  {done, Client2};
+stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) when TE /= <<"chunked">> ->
+  if
+    CLen =:= 0; CLen =:= bad_int ->
+      Buffer = hackney_http:get(Parser, buffer),
+      Client2 = end_stream_body(Buffer, Client),
+      {done, Client2};
+    true ->
+      stream_body1(hackney_http:execute(Parser), Client)
+  end;
 stream_body(Client=#client{parser=Parser}) ->
   stream_body1(hackney_http:execute(Parser), Client).
-
 stream_body(Data, #client{parser=Parser}=Client) ->
   stream_body1(hackney_http:execute(Parser, Data), Client).
-
 stream_body1({more, Parser, Buffer}, Client) ->
   stream_body_recv(Buffer, Client#client{parser=Parser});
 stream_body1({ok, Data, Parser}, Client) ->
@@ -156,7 +157,6 @@ stream_body1(done, Client) ->
   {done, Client2};
 stream_body1(Error, _Client) ->
   Error.
-
 
 -spec stream_body_recv(binary(), #client{})
     -> {ok, binary(), #client{}} | {error, term()}.

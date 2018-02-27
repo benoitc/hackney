@@ -24,7 +24,7 @@
  version                :: {integer(), integer()} | undefined,
  method = <<>>          :: binary(),
  partial_headers = []   :: list(),
- clen                   :: integer() | undefined,
+ clen = undefined        :: integer() | undefined,
  te = <<>>              :: binary(),
  connection = <<>>      :: binary(),
  ctype = <<>>           :: binary(),
