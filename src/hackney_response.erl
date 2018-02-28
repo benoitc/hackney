@@ -170,7 +170,7 @@ stream_body_recv(Buffer, Client=#client{version=Version,
       Client2 = close(Client),
       case Reason of
         closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                    andalso CLen =:= undefined ->
+                    andalso CLen =:= nil ->
           {ok, Buffer, Client2#client{response_state=done,
             body_state=done,
             buffer = <<>>,
