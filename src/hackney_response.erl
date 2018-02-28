@@ -132,17 +132,18 @@ stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
   Buffer = hackney_http:get(Parser, buffer),
   Client2 = end_stream_body(Buffer, Client),
   {done, Client2};
-stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) when TE /= <<"chunked">> ->
-  if
-    CLen =:= 0; CLen =:= bad_int ->
+stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) ->
+  case {TE, CLen} of
+    {<<"chunked">>, _} ->
+      stream_body1(hackney_http:execute(Parser), Client);
+    {_, CLen} when CLen =:= 0 orelse CLen =:= bad_int ->
       Buffer = hackney_http:get(Parser, buffer),
       Client2 = end_stream_body(Buffer, Client),
       {done, Client2};
-    true ->
+    {_, _} ->
       stream_body1(hackney_http:execute(Parser), Client)
-  end;
-stream_body(Client=#client{parser=Parser}) ->
-  stream_body1(hackney_http:execute(Parser), Client).
+  end.
+
 stream_body(Data, #client{parser=Parser}=Client) ->
   stream_body1(hackney_http:execute(Parser, Data), Client).
 stream_body1({more, Parser, Buffer}, Client) ->
@@ -169,7 +170,7 @@ stream_body_recv(Buffer, Client=#client{version=Version,
       Client2 = close(Client),
       case Reason of
         closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                      andalso CLen =:= nil ->
+                    andalso CLen =:= undefined ->
           {ok, Buffer, Client2#client{response_state=done,
             body_state=done,
             buffer = <<>>,

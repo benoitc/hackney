@@ -295,7 +295,7 @@ parse_header(Line, St) ->
           <<"content-length">> ->
             case hackney_util:to_int(Value) of
               {ok, CLen} -> St#hparser{clen=CLen};
-              false -> St
+              false -> St#hparser{clen=bad_int}
             end;
           <<"transfer-encoding">> ->
             TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
@@ -332,16 +332,14 @@ parse_body(#hparser{body_state=waiting, te=TE, clen=Length, buffer=Buffer} = St)
     {<<"chunked">>, _} ->
       parse_body(St#hparser{body_state=
       {stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
-    {_, Length} when is_integer(Length), Length > 0 ->
+    {_, 0} ->
+      {done, Buffer};
+    {_, bad_int} ->
+      {done, Buffer};
+    {_, _} ->
       parse_body(
         St#hparser{body_state={stream, fun te_identity/2, {0, Length}, fun ce_identity/1}}
-       );
-    {_, undefined} ->
-      parse_body(
-        St#hparser{body_state={stream, fun te_identity/2, {0, undefined}, fun ce_identity/1}}
-       );
-    _ ->
-      {done, Buffer}
+       )
   end;
 parse_body(#hparser{body_state=done, buffer=Buffer}) ->
   {done, Buffer};

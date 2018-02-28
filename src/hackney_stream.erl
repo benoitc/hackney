@@ -266,7 +266,7 @@ async_recv(Parent, Owner, Ref,
     {Closed, Sock} ->
       case Client#client.response_state of
         on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                       andalso CLen =:= nil ->
+                       andalso CLen =:= undefined ->
           Owner ! {hackney_response, Ref, Buffer},
           Owner ! {hackney_response, Ref, done},
           ok;
@@ -341,7 +341,7 @@ process({header, {Key, Value}=KV, NParser},
               <<"content-length">> ->
                 case hackney_util:to_int(Value) of
                   {ok, CLen} -> Client#client{clen=CLen};
-                  false -> Client
+                  false -> Client#client{clen=bad_int}
                 end;
               <<"transfer-encoding">> ->
                 Client#client{te=hackney_bstr:to_lower(Value)};
