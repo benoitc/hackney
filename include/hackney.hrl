@@ -1,4 +1,4 @@
--define(RECV_TIMEOUT, 5000).
+-define(RECV_TIMEOUT, 15000).
 
 -record(client,  {
   start_time,

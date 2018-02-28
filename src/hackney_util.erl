@@ -15,6 +15,7 @@
 -export([to_atom/1]).
 
 -export([merge_opts/2]).
+-export([to_int/1]).
 
 -include("hackney.hrl").
 
@@ -136,3 +137,13 @@ merge_opts([K | Rest], Options) when is_atom(K) ->
   end;
 merge_opts([_ | Rest], Options) ->
   merge_opts(Rest, Options).
+
+to_int(S) when is_binary(S) ->
+  to_int(binary_to_list(S));
+to_int(S) ->
+  try
+    I = list_to_integer(S),
+    {ok, I}
+  catch
+    error:badarg -> false
+  end.

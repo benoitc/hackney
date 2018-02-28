@@ -956,6 +956,8 @@ reply_with_body(Status, Headers, State) ->
   case reply(Reply, State) of
     {ok, Body} ->
       {ok, Status, Headers, Body};
+    {closed, Body} ->
+      {ok, Status, Headers, Body};
     Error ->
       Error
   end.
