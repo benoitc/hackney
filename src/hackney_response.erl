@@ -328,7 +328,7 @@ read_body(_MaxLength, Client, Acc) ->
 
 maybe_close(#client{socket=nil}) ->
   true;
-maybe_close(#client{version={Min,Maj}, headers=Headers}) ->
+maybe_close(#client{version={Min,Maj}, headers=Headers, clen=CLen}) ->
   Connection = hackney_bstr:to_lower(
                  hackney_headers_new:get_value(<<"connection">>, Headers, <<"">>)
                 ),
@@ -336,6 +336,7 @@ maybe_close(#client{version={Min,Maj}, headers=Headers}) ->
     <<"close">> -> true;
     <<"keep-alive">> -> false;
     _ when Min =< 0 orelse Maj < 1 -> true;
+    _ when CLen =:= bad_int -> true;
     _ -> false
   end.
 
