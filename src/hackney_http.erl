@@ -334,7 +334,7 @@ parse_body(#hparser{body_state=waiting, te=TE, clen=Length, buffer=Buffer} = St)
       {stream, fun te_chunked/2, {0, 0}, fun ce_identity/1}});
     {_, 0} ->
       {done, Buffer};
-    {_, bad_int} ->
+    {_, bad_int} ->
       {done, Buffer};
     {_, _} ->
       parse_body(

@@ -39,4 +39,4 @@ parse_no_clen_test() ->
 	ST1 = #hparser{},
 	{response, {1, 1}, 200, _Reason, ST2} = hackney_http:execute(ST1, Response),
 	{headers_complete, ST3} = hackney_http:execute(ST2),
-  {done, <<"test of body">>} = hackney_http:execute(ST3).
+  {ok, <<"test of body">>, _ST4} = hackney_http:execute(ST3).
