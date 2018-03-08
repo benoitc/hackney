@@ -40,7 +40,7 @@
 -include("hackney_internal.hrl").
 
 
--type url() :: #hackney_url{} | binary().
+-type url() :: #hackney_url{} | binary().
 -export_type([url/0]).
 
 -opaque client() :: #client{}.
