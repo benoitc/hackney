@@ -195,7 +195,7 @@ test_frees_manager_ets_when_body_is_in_response() ->
     ?_assertEqual(BeforeCount, AfterCount).
 
 test_no_clen() ->
-    URL = <<"https://localhost:8000/stream/1020">>,
+    URL = <<"http://localhost:8000/stream/1020">>,
     Headers = [],
     Options = [with_body],
     {ok, 200, _H, Bin} = hackney:get(URL, Headers, <<>>, Options),
