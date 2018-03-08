@@ -32,3 +32,11 @@ parse_response_header_with_continuation_line_test() ->
   {header, Header1, ST4} = hackney_http:execute(ST3),
   ?assertEqual({<<"Other-Header">>, <<"test">>}, Header1),
 	{headers_complete, _ST5} = hackney_http:execute(ST4).
+
+
+parse_no_clen_test() ->
+	Response = <<"HTTP/1.1 200\r\n\r\ntest of body">>,
+	ST1 = #hparser{},
+	{response, {1, 1}, 200, _Reason, ST2} = hackney_http:execute(ST1, Response),
+	{headers_complete, ST3} = hackney_http:execute(ST2),
+  {done, <<"test of body">>} = hackney_http:execute(ST3).
