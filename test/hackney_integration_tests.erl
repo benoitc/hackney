@@ -23,7 +23,8 @@ all_tests() ->
    async_head_request(),
    async_no_content_request(),
    test_frees_manager_ets_when_body_is_in_client(),
-   test_frees_manager_ets_when_body_is_in_response()].
+   test_frees_manager_ets_when_body_is_in_response(),
+   test_no_clen()].
 
 %%all_tests() ->
 %%    case has_unix_socket() of
@@ -192,6 +193,14 @@ test_frees_manager_ets_when_body_is_in_response() ->
     {ok, 200, _, _} = hackney:get(URL, Headers, <<>>, Options),
     AfterCount = ets:info(hackney_manager_refs, size),
     ?_assertEqual(BeforeCount, AfterCount).
+
+test_no_clen() ->
+    URL = <<"https://localhost:8000/stream/1020">>,
+    Headers = [],
+    Options = [with_body],
+    {ok, 200, _H, Bin} = hackney:get(URL, Headers, <<>>, Options),
+    Lines = re:split(Bin, <<"\n">>, [{return, binary}]),
+    ?_assertEqual(1021, length(Lines)).
 
 
 %%local_socket_request() ->
