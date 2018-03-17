@@ -49,6 +49,13 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
+  Host1 = try
+            Parts = string:split(Host, ".", all),
+            4 = length(Parts),
+            list_to_tuple(lists:map(fun list_to_integer/1, Parts))
+          catch
+            _:_ -> Host
+          end,
   BaseOpts = [binary, {active, false}, {packet, raw},
     {secure_renegotiate, true},
     {reuse_sessions, true},
@@ -58,7 +65,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
   
   %% connect
-  ssl:connect(Host, Port, Opts1, Timeout).
+  ssl:connect(Host1, Port, Opts1, Timeout).
 
 
 ciphers() ->
