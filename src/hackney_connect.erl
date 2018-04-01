@@ -284,24 +284,29 @@ check_mod_metrics(State) ->
 ssl_opts(Host, Options) ->
   case proplists:get_value(ssl_options, Options) of
     undefined ->
-      Insecure =  proplists:get_value(insecure, Options, false),
-      CACerts = certifi:cacerts(),
-      case Insecure of
-        true ->
-          [{verify, verify_none}];
-        false ->
-          VerifyFun = {
-            fun ssl_verify_hostname:verify_fun/3,
-            [{check_hostname, Host}]
-          },
-          [{verify, verify_peer},
-            {depth, 99},
-            {cacerts, CACerts},
-            {partial_chain, fun partial_chain/1},
-            {verify_fun, VerifyFun}]
-      end;
+      ssl_opts_1(Host, Options);
+    [] ->
+      ssl_opts_1(Host, Options);
     SSLOpts ->
       SSLOpts
+  end.
+
+ssl_opts_1(Host, Options) ->
+  Insecure =  proplists:get_value(insecure, Options, false),
+  CACerts = certifi:cacerts(),
+  case Insecure of
+    true ->
+      [{verify, verify_none}];
+    false ->
+      VerifyFun = {
+        fun ssl_verify_hostname:verify_fun/3,
+        [{check_hostname, Host}]
+       },
+      [{verify, verify_peer},
+       {depth, 99},
+       {cacerts, CACerts},
+       {partial_chain, fun partial_chain/1},
+       {verify_fun, VerifyFun}]
   end.
 
 %% code from rebar3 undert BSD license
