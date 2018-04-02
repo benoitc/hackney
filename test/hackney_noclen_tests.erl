@@ -19,7 +19,7 @@ teardown(_) -> ok.
 
 empty_clen_test_() ->
   {
-    "test empty content lenght",
+    "test empty content length",
     {
       setup,
       fun start/0, fun stop/1,
@@ -43,7 +43,7 @@ start() ->
   cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
 
 stop(_) ->
-  cowboy:stop_listener(test_server),
+  _ = (catch cowboy:stop_listener(test_server)),
   application:stop(cowboy),
   application:stop(hackney),
   error_logger:tty(true),
