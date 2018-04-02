@@ -108,7 +108,8 @@ setopts(Ref, Options) ->
   hackney_manager:get_state(Ref, fun(State) ->
     State2 = parse_options(Options, State),
     hackney_manager:update_state(Ref, State2)
-                                 end).
+                                 end),
+  ok.
 
 %% @doc close the client
 close(Ref) ->
