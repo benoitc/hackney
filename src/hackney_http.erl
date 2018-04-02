@@ -465,6 +465,9 @@ read_size(<<"\r\n", Rest/binary>>, Acc, _) ->
 read_size(<<$;, Rest/binary>>, Acc, _) ->
   read_size(Rest, Acc, false);
 
+read_size(<<$\s, Rest/binary>>, Acc, _) ->
+  read_size(Rest, Acc, false);
+
 read_size(<<C, Rest/binary>>, Acc, AddToAcc) ->
   case AddToAcc of
     true ->
