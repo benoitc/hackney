@@ -602,8 +602,7 @@ untrack_owner(Pid, Ref, Pids) ->
 
 init_metrics() ->
   %% get metrics module
-  Engine = metrics:init(hackney_util:mod_metrics()),
-
+  Engine = hackney_metrics:get_engine(),
   %% initialise metrics
   _ = metrics:new(Engine, counter, [hackney, nb_requests]),
   _ = metrics:new(Engine, counter, [hackney, total_requests]),

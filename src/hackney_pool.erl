@@ -554,7 +554,7 @@ monitor_client(Dest, Ref, State) ->
 
 init_metrics(PoolName) ->
   %% get metrics module
-  Engine = metrics:init(hackney_util:mod_metrics()),
+  Engine = hackney_metrics:get_engine(),
 
   %% initialise metrics
   _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, take_rate]),

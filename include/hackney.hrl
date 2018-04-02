@@ -45,3 +45,6 @@
   path,
   ctype = nil
 }).
+
+
+-define(CONFIG, hackney_config).

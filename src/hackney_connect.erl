@@ -66,7 +66,7 @@ create_connection(Transport, Host, Port, Options, Dynamic)
   MaxBody = proplists:get_value(max_body, Options),
 
   %% get mod metrics
-  {ok, Engine} = application:get_env(hackney, metrics),
+  Engine = hackney_metrics:get_engine(),
 
   %% initial state
   InitialState = #client{mod_metrics=Engine,
@@ -279,7 +279,7 @@ check_mod_metrics(#client{mod_metrics=Mod}=State)
   when Mod /= nil, Mod /= undefined ->
   State;
 check_mod_metrics(State) ->
-  State#client{mod_metrics=metrics:init(hackney_util:mod_metrics())}.
+  State#client{mod_metrics=hackney_metrics:get_engine()}.
 
 ssl_opts(Host, Options) ->
   case proplists:get_value(ssl_options, Options) of

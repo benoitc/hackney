@@ -20,8 +20,6 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-  Metrics = metrics:init(hackney_util:mod_metrics()),
-  application:set_env(hackney, metrics, Metrics),
   hackney_sup:start_link().
 
 stop(_State) ->
