@@ -24,6 +24,18 @@
 -type socks5_socket() :: {atom(), inet:socket()}.
 -export_type([socks5_socket/0]).
 
+-ifdef(no_proxy_sni_support).
+
+ssl_opts(Host, Opts) ->
+  hackney_connect:ssl_opts(Host, Opts).
+
+-else.
+
+ssl_opts(Host, Opts) ->
+  [{server_name_indication, Host} | hackney_connect:ssl_opts(Host,Opts)].
+
+-endif.
+
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages({hackney_ssl, _}) ->
   {ssl, ssl_closed, ssl_error};
@@ -56,9 +68,9 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
         ok ->
           case Transport of
             hackney_ssl ->
-              SSlOpts = hackney_connect:ssl_opts(Host, Opts),
+              SSLOpts = ssl_opts(Host, Opts),
               %% upgrade the tcp connection
-              case ssl:connect(Socket, SSlOpts) of
+              case ssl:connect(Socket, SSLOpts) of
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
