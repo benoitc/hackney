@@ -59,7 +59,7 @@ disable() ->
 
 
 %% @doc change the trace level when tracing has already started.
--spec set_level(trace_level()) -> ok | {error, term()}.
+-spec set_level(trace_level()) -> ok | {error, term()}.
 set_level(Level) ->
   Pat = make_pattern(?MODULE, Level),
   change_pattern(Pat).

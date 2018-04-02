@@ -196,7 +196,7 @@ stream_body_recv(Buffer, Client=#client{version=Version,
     -> {headers, list(), #client{}} | {body, binary(), #client{}}
   | {eof|end_of_part|mp_mixed|mp_mixed_eof, #client{}}.
 stream_multipart(Client=#client{headers=Headers, body_state=waiting, clen=Length}) ->
-  CType = hackney_headers_new:get_value(<<"content-type">>, Headers),
+  CType = hackney_headers_new:get_value(<<"content-type">>, Headers),
   {<<"multipart">>, _, Params} = hackney_headers_new:parse_content_type(CType),
   {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
   Parser = hackney_multipart:parser(Boundary),
@@ -311,9 +311,9 @@ read_body(MaxLength, Client, Acc) when MaxLength > byte_size(Acc) ->
       read_body(MaxLength, Client2, << Acc/binary, Data/binary >>);
     {done, Client2} ->
       {ok, Acc, Client2};
-    {error, Reason}=Error ->
+    {error, Reason}=Error ->
       case Reason of
-        {closed, Bin} when is_binary(Bin) ->
+        {closed, Bin} when is_binary(Bin) ->
           {error, {closed, << Acc/binary, Bin/binary >>}};
         _ ->
           Error
