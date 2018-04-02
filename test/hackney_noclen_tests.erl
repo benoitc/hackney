@@ -34,19 +34,15 @@ empty_clen_test_() ->
   }.
 
 start() ->
-  error_logger:tty(false),
   {ok, _} = application:ensure_all_started(cowboy),
   {ok, _} = application:ensure_all_started(hackney),
   Host = '_',
   Resource = {"/empty", empty_clen_resource, []},
   Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-  cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
+  cowboy:start_http(test_empty_clen_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
 
 stop(_) ->
-  _ = (catch cowboy:stop_listener(test_server)),
-  application:stop(cowboy),
-  application:stop(hackney),
-  error_logger:tty(true),
+  ok = cowboy:stop_listener(test_empty_clen_server),
   ok.
 
 empty_clen(_) ->
