@@ -499,7 +499,7 @@ handle_owner_exit(Pid, Refs, Reason, State) ->
   NewState = clean_requests(Refs, Pid, Reason, PoolHandler, State#mstate{pids=Pids1}),
   {noreply, NewState}.
 
-clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
+clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
   case ets:lookup(?REFS, Ref) of
     [] ->
       %% ref already removed just return
