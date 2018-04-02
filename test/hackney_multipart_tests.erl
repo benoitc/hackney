@@ -12,8 +12,8 @@ multipart_test_() ->
 
 start() ->
     error_logger:tty(false),
-    {ok, _} = application:ensure_all_started(cowboy),
-    {ok, _} = application:ensure_all_started(hackney),
+    {ok, _} = application:ensure_all_started(cowboy),
+    {ok, _} = application:ensure_all_started(hackney),
     Host = '_',
     Resource = {"/mp", upload_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
