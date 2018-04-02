@@ -37,12 +37,10 @@ start() ->
   error_logger:tty(false),
   {ok, _} = application:ensure_all_started(cowboy),
   {ok, _} = application:ensure_all_started(hackney),
-  hackney_trace:enable(max, io),
   Host = '_',
   Resource = {"/empty", empty_clen_resource, []},
   Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-  cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]),
-  ok.
+  cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
 
 stop(_) ->
   cowboy:stop_listener(test_server),
