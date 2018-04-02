@@ -113,11 +113,11 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   HeadersList = hackney_headers_new:to_list(Headers),
   TE = hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, nil),
   CLen = case hackney_headers_new:lookup("content-length", Headers) of
-           [] -> nil;
+           [] -> undefined;
            [{_, Len} |_] ->
-             case catch list_to_integer(binary_to_list(Len)) of
-               V when is_integer(V) -> V;
-                 _ -> nil
+             case hackney_util:to_int(Len) of
+               {ok, I} -> I;
+               false -> bad_int
              end
          end,
   Client2 = Client#client{parser=Parser,
@@ -132,18 +132,20 @@ stream_body(Client=#client{method= <<"HEAD">>, parser=Parser}) ->
   Buffer = hackney_http:get(Parser, buffer),
   Client2 = end_stream_body(Buffer, Client),
   {done, Client2};
-stream_body(Client=#client{parser=Parser, clen=CLen, te=TE})
-  when (CLen =:= 0 orelse not is_integer(CLen)) andalso
-       TE /= <<"chunked">> ->
-  Buffer = hackney_http:get(Parser, buffer),
-  Client2 = end_stream_body(Buffer, Client),
-  {done, Client2};
-stream_body(Client=#client{parser=Parser}) ->
-  stream_body1(hackney_http:execute(Parser), Client).
+stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) ->
+  case {TE, CLen} of
+    {<<"chunked">>, _} ->
+      stream_body1(hackney_http:execute(Parser), Client);
+    {_, CLen} when CLen =:= 0 orelse CLen =:= bad_int ->
+      Buffer = hackney_http:get(Parser, buffer),
+      Client2 = end_stream_body(Buffer, Client),
+      {done, Client2};
+    {_, _} ->
+      stream_body1(hackney_http:execute(Parser), Client)
+  end.
 
 stream_body(Data, #client{parser=Parser}=Client) ->
   stream_body1(hackney_http:execute(Parser, Data), Client).
-
 stream_body1({more, Parser, Buffer}, Client) ->
   stream_body_recv(Buffer, Client#client{parser=Parser});
 stream_body1({ok, Data, Parser}, Client) ->
@@ -157,7 +159,6 @@ stream_body1(done, Client) ->
 stream_body1(Error, _Client) ->
   Error.
 
-
 -spec stream_body_recv(binary(), #client{})
     -> {ok, binary(), #client{}} | {error, term()}.
 stream_body_recv(Buffer, Client=#client{version=Version,
@@ -169,7 +170,7 @@ stream_body_recv(Buffer, Client=#client{version=Version,
       Client2 = close(Client),
       case Reason of
         closed when (Version =:= {1, 0} orelse Version =:= {1, 1})
-                      andalso CLen =:= nil ->
+                    andalso CLen =:= nil ->
           {ok, Buffer, Client2#client{response_state=done,
             body_state=done,
             buffer = <<>>,
@@ -327,7 +328,7 @@ read_body(_MaxLength, Client, Acc) ->
 
 maybe_close(#client{socket=nil}) ->
   true;
-maybe_close(#client{version={Min,Maj}, headers=Headers}) ->
+maybe_close(#client{version={Min,Maj}, headers=Headers, clen=CLen}) ->
   Connection = hackney_bstr:to_lower(
                  hackney_headers_new:get_value(<<"connection">>, Headers, <<"">>)
                 ),
@@ -335,6 +336,7 @@ maybe_close(#client{version={Min,Maj}, headers=Headers}) ->
     <<"close">> -> true;
     <<"keep-alive">> -> false;
     _ when Min =< 0 orelse Maj < 1 -> true;
+    _ when CLen =:= bad_int -> true;
     _ -> false
   end.
 
