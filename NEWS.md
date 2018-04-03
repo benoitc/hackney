@@ -1,13 +1,18 @@
 # NEWS
 
-1.12.0 -- 2018-04-03
---------------------
+1.12.1 - 2018-04-03
+-------------------
+
+- fix terminate_async_response (#498)
+
+1.12.0 - 2018-04-03
+-------------------
 
 - fix socks5 badarg error when an IP is given
 - upgrade IDNA to 5.1.1
 - upgrade certifi to 2.3.1
 - fix handling of requests with content-length or transfer-encoding given (#475)
-- improvments: send SNI in socks5 SSL
+- improvements: send SNI in socks5 SSL
 - fix:  Allow trailing spaces at the end of chunk sizes (#489)
 - fix: set once the metrics engine
 - fix leak in the socket pool (#462)
