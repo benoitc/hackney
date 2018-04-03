@@ -51,9 +51,9 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
                                         method= <<"HEAD">>,
                                         parser=Parser}=Client) ->
   Buffer = hackney_http:get(Parser, buffer),
-
-
   hackney_manager:store_state(finish_response(Buffer, Client)),
+  %% remove ant message in the socket
+  _ = flush(Transport, Socket),
   %% pass the control of the socket to the manager so we make
   %% sure a new request will be able to use it
   Transport:controlling_process(Socket, Parent),
@@ -67,6 +67,8 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
   when TE /= <<"chunked">> ->
   Buffer = hackney_http:get(Parser, buffer),
   hackney_manager:store_state(finish_response(Buffer, Client)),
+  %% remove ant message in the socket
+  _ = flush(Transport, Socket),
   %% pass the control of the socket to the manager so we make
   %% sure a new request will be able to use it
   Transport:controlling_process(Socket, Parent),
@@ -89,6 +91,8 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
       Owner ! {hackney_response, Ref, Data},
       maybe_continue(Parent, Owner, Ref, Client2);
     done ->
+      %% remove ant message in the socket
+      _ = flush(Transport, Socket),
       %% pass the control of the socket to the manager so we make
       %% sure a new request will be able to use it
       Transport:controlling_process(Socket, Parent),
@@ -410,3 +414,15 @@ raw_sock({hackney_tcp, RawSock}) ->
   RawSock;
 raw_sock(RawSock) ->
   RawSock.
+
+%% check that no events from the sockets is received
+%% after giving the control back.
+flush(Transport, Socket) ->
+  {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
+  receive
+    {Msg, Socket, _} -> flush(Transport, Socket) ;
+    {MsgClosed, Socket} -> flush(Transport, Socket) ;
+    {MsgError, Socket, _} -> flush(Transport, Socket)
+  after 0 ->
+    ok
+  end.
