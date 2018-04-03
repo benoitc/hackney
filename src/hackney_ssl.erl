@@ -46,8 +46,9 @@ messages(_) -> {ssl, ssl_closed, ssl_error}.
 
 %% @doc The ssl:connect/4 (and related) doesn't work with textual representation
 %% of IP addresses. It accepts either a string with a DNS-resolvable name or a
-%% tuple and parts of the IP as numbers. This function returns a tuple like
-%% that, or the original string if it's impossible to parse as an IP.
+%% tuple with parts of an IP as numbers. This function attempts to parse given
+%% string and either returns such tuple, or the string if it's impossible to
+%% parse.
 parse_address(Host) when is_list(Host) ->
   case inet:parse_address() of
     {ok, Address} -> Address;
