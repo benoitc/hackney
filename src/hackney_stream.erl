@@ -117,6 +117,9 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       Transport:setopts(Socket, [{active, false}]),
       Transport:controlling_process(Socket, From),
       From ! {Ref, ok};
+    {ssl_closed, _} ->
+      Owner ! {hackney_response, Ref, {status, 500, <<"ssl_closed">>}},
+      hackney_response:close(Client);
     {Ref, close} ->
       hackney_response:close(Client);
     {'DOWN', _MRef, process, Owner, Reason} ->
@@ -144,8 +147,13 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       From ! {Ref, ok};
     {Ref, close} ->
       hackney_response:close(Client);
-        {'DOWN', _MRef, process, Owner, Reason} ->
+
+    {ssl_closed, _} ->
+      hackney_response:close(Client);
+
+    {'DOWN', _MRef, process, Owner, Reason} ->
       exit({owner_down, Owner, Reason});
+
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {maybe_continue, Parent, Owner, Ref,
