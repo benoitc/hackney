@@ -164,8 +164,6 @@ stream_body1(Error, _Client) ->
 -spec stream_body_recv(binary(), #client{})
     -> {ok, binary(), #client{}} | {error, term()}.
 stream_body_recv(Buffer, Client=#client{version=Version, clen=CLen}) ->
-  io:format("receive ~p~n", [Buffer]),
-
   case recv(Client) of
     {ok, Data} ->
       stream_body(Data, Client);
