@@ -16,10 +16,13 @@
   checkout/4,
   checkin/2]).
 
--export([start_pool/2,
+-export([
+  get_stats/1,
+  start_pool/2,
   stop_pool/1,
   find_pool/1,
-  notify/2]).
+  notify/2
+]).
 
 
 -export([count/1, count/2,
@@ -98,6 +101,9 @@ checkin({_Name, Ref, Dest, Owner, Transport}, Socket) ->
         catch Transport:close(Socket),
       ok
   end.
+
+get_stats(Pool) ->
+  gen_server:call(find_pool(Pool), stats).
 
 
 %% @doc start a pool
@@ -235,6 +241,8 @@ init([Name, Options]) ->
   {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
     timeout=Timeout}}.
 
+handle_call(stats, _From, State) ->
+  {reply, handle_stats(State), State};
 handle_call(count, _From, #state{sockets=Sockets}=State) ->
   {reply, dict:size(Sockets), State};
 handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
@@ -581,3 +589,12 @@ update_usage(
   _ = metrics:update_histogram(Engine, [hackney_pool, PoolName, free_count],
     dict:size(Sockets) - 1),
   ok.
+
+
+handle_stats(State) ->
+  #state{name=PoolName, max_connections=Max, sockets=Sockets, clients=Clients, nb_waiters=NbWaiters} = State,
+  [{name, PoolName},
+   {max, Max},
+   {in_use_count,  dict:size(Clients) - 1},
+   {free_count, dict:size(Sockets) - 1},
+   {queue_count, NbWaiters - 1}].
