@@ -9,7 +9,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#filter_options-3">filter_options/3</a></td><td>filter a proplists and only keep allowed keys.</td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#merge_opts-2">merge_opts/2</a></td><td></td></tr><tr><td valign="top"><a href="#mod_metrics-0">mod_metrics/0</a></td><td></td></tr><tr><td valign="top"><a href="#privdir-0">privdir/0</a></td><td></td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr><tr><td valign="top"><a href="#set_option_default-3">set_option_default/3</a></td><td>set the default options in a proplists if not defined.</td></tr><tr><td valign="top"><a href="#to_atom-1">to_atom/1</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#filter_options-3">filter_options/3</a></td><td>filter a proplists and only keep allowed keys.</td></tr><tr><td valign="top"><a href="#is_ipv6-1">is_ipv6/1</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_apply_defaults-2">maybe_apply_defaults/2</a></td><td></td></tr><tr><td valign="top"><a href="#merge_opts-2">merge_opts/2</a></td><td></td></tr><tr><td valign="top"><a href="#mod_metrics-0">mod_metrics/0</a></td><td></td></tr><tr><td valign="top"><a href="#privdir-0">privdir/0</a></td><td></td></tr><tr><td valign="top"><a href="#require-1">require/1</a></td><td>Start the given applications if they were not already started.</td></tr><tr><td valign="top"><a href="#set_option_default-3">set_option_default/3</a></td><td>set the default options in a proplists if not defined.</td></tr><tr><td valign="top"><a href="#to_atom-1">to_atom/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_int-1">to_int/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -86,4 +86,10 @@ set the default options in a proplists if not defined
 ### to_atom/1 ###
 
 `to_atom(V) -> any()`
+
+<a name="to_int-1"></a>
+
+### to_int/1 ###
+
+`to_int(S) -> any()`
 

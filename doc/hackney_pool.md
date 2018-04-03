@@ -15,7 +15,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#checkin-2">checkin/2</a></td><td>release a socket in the pool.</td></tr><tr><td valign="top"><a href="#checkout-4">checkout/4</a></td><td>fetch a socket from the pool.</td></tr><tr><td valign="top"><a href="#child_spec-2">child_spec/2</a></td><td>return a child spec suitable for embeding your pool in the
-supervisor.</td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#count-1">count/1</a></td><td>get the number of connections in the pool.</td></tr><tr><td valign="top"><a href="#count-2">count/2</a></td><td>get the number of connections in the pool for <code>{Host0, Port, Transport}</code></td></tr><tr><td valign="top"><a href="#find_pool-1">find_pool/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#max_connections-1">max_connections/1</a></td><td>get max pool size.</td></tr><tr><td valign="top"><a href="#notify-2">notify/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_max_connections-2">set_max_connections/2</a></td><td>change the pool size.</td></tr><tr><td valign="top"><a href="#set_timeout-2">set_timeout/2</a></td><td>change the connection timeout.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td></td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr><tr><td valign="top"><a href="#timeout-1">timeout/1</a></td><td>get timeout.</td></tr></table>
+supervisor.</td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#count-1">count/1</a></td><td>get the number of connections in the pool.</td></tr><tr><td valign="top"><a href="#count-2">count/2</a></td><td>get the number of connections in the pool for <code>{Host0, Port, Transport}</code></td></tr><tr><td valign="top"><a href="#find_pool-1">find_pool/1</a></td><td></td></tr><tr><td valign="top"><a href="#get_stats-1">get_stats/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#max_connections-1">max_connections/1</a></td><td>get max pool size.</td></tr><tr><td valign="top"><a href="#notify-2">notify/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_max_connections-2">set_max_connections/2</a></td><td>change the pool size.</td></tr><tr><td valign="top"><a href="#set_timeout-2">set_timeout/2</a></td><td>change the connection timeout.</td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td></td></tr><tr><td valign="top"><a href="#start_pool-2">start_pool/2</a></td><td>start a pool.</td></tr><tr><td valign="top"><a href="#stop_pool-1">stop_pool/1</a></td><td>stop a pool.</td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr><tr><td valign="top"><a href="#timeout-1">timeout/1</a></td><td>get timeout.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -74,6 +74,12 @@ get the number of connections in the pool for `{Host0, Port, Transport}`
 ### find_pool/1 ###
 
 `find_pool(Name) -> any()`
+
+<a name="get_stats-1"></a>
+
+### get_stats/1 ###
+
+`get_stats(Pool) -> any()`
 
 <a name="handle_call-3"></a>
 
