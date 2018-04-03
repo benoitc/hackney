@@ -1,11 +1,11 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! -pa ./ebin -pa ./deps/mimetypes/ebin
+%%! -pa ../_build/default/lib/hackney/ebin  -pa ../_build/default/lib/*/ebin  -pa ../_build/default/lib/certifi/ebin  -pa ../_build/default/lib/idna/ebin  -pa ../_build/default/lib/metrics/ebin -pa ../_build/default/lib/mimerl/ebin   -pa ../_build/default/lib/ssl_verify_fun/ebin -pa ../_build/default/lib/unicode_util_compat/ebin
 
 -module(test2).
 
 main(_) ->
-    hackney:start(),
+    application:ensure_all_started(hackney),
     ReqBody = << "{\"snippet\": \"test2.erl\" }" >>,
 
     io:format("Req body ~p~n", [ReqBody]),

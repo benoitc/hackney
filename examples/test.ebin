@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! -pa ./ebin -pa ./deps/mimetypes/ebin
+%%! -pa ../_build/default/lib/hackney/ebin  -pa ../_build/default/lib/*/ebin  -pa ../_build/default/lib/certifi/ebin  -pa ../_build/default/lib/idna/ebin  -pa ../_build/default/lib/metrics/ebin -pa ../_build/default/lib/mimerl/ebin   -pa ../_build/default/lib/ssl_verify_fun/ebin -pa ../_build/default/lib/unicode_util_compat/ebin
 
 -module(test).
 
@@ -10,7 +10,7 @@ display_request_info(Ref) ->
     io:format("socket is ~p~n", [Info]).
 
 main(_) ->
-    hackney:start(),
+    application:ensure_all_started(hackney),
     application:set_env(hackney, use_default_pool, false),
 
     io:format("step 1~n", []),

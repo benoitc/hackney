@@ -1,15 +1,15 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! -pa ./ebin -pa ./deps/mimetypes/ebin
+%%! -pa ../_build/default/lib/hackney/ebin  -pa ../_build/default/lib/*/ebin  -pa ../_build/default/lib/certifi/ebin  -pa ../_build/default/lib/idna/ebin  -pa ../_build/default/lib/metrics/ebin -pa ../_build/default/lib/mimerl/ebin   -pa ../_build/default/lib/ssl_verify_fun/ebin -pa ../_build/default/lib/unicode_util_compat/ebin
 
 -module(test1).
 
 
 
 main(_) ->
-    hackney:start(),
+  application:ensure_all_started(hackney),
 
-    io:format("step 1~n", []),
+  io:format("step 1~n", []),
     {ok, _, _, Ref} = hackney:request(get, <<"https://friendpaste.com">>,
                                          [], <<>>, [{pool, default}]),
     {ok, Body} = hackney:body(Ref),
