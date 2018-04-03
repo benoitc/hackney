@@ -345,8 +345,6 @@ handle_info({ssl_error, Socket, _}, State) ->
 handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
   case dict:find(Ref, State#state.clients) of
     {ok, Dest} ->
-      io:format("pool ~p got down message ~p~n", [State#state.name, {'DOWN', Ref, request, _Pid, _Reason}]),
-      io:format("dequeue ~p~n", [Ref]),
       {noreply, dequeue(Dest, Ref, State)};
     error ->
       NewState = remove_pending(Ref, State),
@@ -378,7 +376,6 @@ dequeue(Dest, Ref, State) ->
     empty ->
       State#state{clients = Clients2};
     {ok, {From, Ref2}, Queues2} ->
-      io:format("~p tell another client ~p~n", [Ref,  {From, Ref2}]),
       Pending2 = del_pending(Ref, Pending),
       _ = metrics:update_histogram(
         State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
