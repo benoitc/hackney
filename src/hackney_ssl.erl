@@ -50,7 +50,7 @@ messages(_) -> {ssl, ssl_closed, ssl_error}.
 %% string and either returns such tuple, or the string if it's impossible to
 %% parse.
 parse_address(Host) when is_list(Host) ->
-  case inet:parse_address() of
+  case inet:parse_address(Host) of
     {ok, Address} -> Address;
     {error, _} -> Host
   end.
