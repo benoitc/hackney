@@ -256,8 +256,7 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
     max_connections=MaxConn,
     clients=Clients,
     queues = Queues,
-    pending = Pending,
-    nb_waiters = NbWaiters} = State,
+    pending = Pending} = State,
 
   {Reply, State2} = find_connection(Dest, Pid, State),
   case Reply of
@@ -270,9 +269,10 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
         true ->
           Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
           Pending2 =add_pending(RequestRef, From, Dest, Pending),
-          NbWaiters2 = NbWaiters + 1,
-          _ = metrics:update_histogram(Engine,  [hackney_pool, PoolName, queue_count], NbWaiters2),
-          {noreply, State2#state{queues = Queues2, pending = Pending2, nb_waiters=NbWaiters2}};
+          _ = metrics:update_histogram(
+            Engine, [hackney_pool, PoolName, queue_count], dict:size(Pending2)
+          ),
+          {noreply, State2#state{queues = Queues2, pending = Pending2}};
         false ->
           State3 = monitor_client(Dest, RequestRef, State2),
           ok = update_usage(State3),
