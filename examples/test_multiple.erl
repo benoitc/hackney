@@ -12,7 +12,7 @@ wait_request() ->
 request(WaitPid) ->
     wait_request(),
     Method = get,
-    Url = <<"https://friendpaste.com">>,
+    Url = <<"https://httparrot.herokuapp.com/get">>,
     Headers = [{<<"Connection">>, <<"keep-alive">>}],
     Options = [{pool, default}],
     {ok, _, _Headers, Ref} = hackney:request(Method, Url, Headers, <<>>, Options),

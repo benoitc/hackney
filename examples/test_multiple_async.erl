@@ -25,7 +25,7 @@ wait_request() ->
 
 request(WaitPid) ->
     wait_request(),
-    Url = <<"https://friendpaste.com/_all_languages">>,
+    Url = <<"https://httparrot.herokuapp.com/get">>,
     Opts = [async],
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     loop(Ref, WaitPid).

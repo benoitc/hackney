@@ -29,7 +29,7 @@ loop(Ref) ->
 main(_) ->
     application:ensure_all_started(hackney),
 
-    Url = <<"https://friendpaste.com/_all_languages">>,
+    Url = <<"https://httparrot.herokuapp.com/get">>,
     Opts = [async],
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     loop(Ref).

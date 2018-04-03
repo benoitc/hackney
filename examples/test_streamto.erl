@@ -30,7 +30,7 @@ main(_) ->
     application:ensure_all_started(hackney),
     Self = self(),
     Pid = spawn(fun() -> wait_response(Self) end),
-    Url = <<"https://friendpaste.com/_all_languages">>,
+    Url = <<"https://httparrot.herokuapp.com/get">>,
     Opts = [async, {stream_to, Pid}],
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     receive
