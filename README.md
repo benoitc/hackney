@@ -158,7 +158,7 @@ where `Method`, can be any HTTP method in lowercase.
 ```erlang
 
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Ref) of
+	case hackney:stream_body(Ref) of
 		{ok, Data} ->
 			read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
 		done ->
