@@ -186,11 +186,11 @@ couple of requests.
 
 ```erlang
 
-Transport = hackney_tcp,
-Host = << "https://friendpaste.com" >>,
+Transport = hackney_ssl,
+Host = << "friendpaste.com" >>,
 Port = 443,
 Options = [],
-{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options).
 ```
 
 > To create a connection that will use an HTTP proxy use
@@ -203,13 +203,13 @@ to make a request:
 
 ```erlang
 
-ReqBody = << "{	\"snippet\": \"some snippet\" }" >>,
+ReqBody = << "{\"snippet\": \"some snippet\"}" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
-NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
+NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody},
 {ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
-{ok, Body1} = hackney:body(ConnRef),
+{ok, Body1} = hackney:body(ConnRef).
 ```
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
