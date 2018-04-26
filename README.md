@@ -149,7 +149,7 @@ where `Method`, can be any HTTP method in lowercase.
 ### Read the body
 
 ```erlang
-{ok, Body} = hackney:body(Client).
+{ok, Body} = hackney:body(ClientRef).
 ```
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
