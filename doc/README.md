@@ -100,9 +100,9 @@ $ ./rebar3 shell
 It is suggested that you install rebar3 user-wide as described [here](http://blog.erlware.org/rebar3-features-part-1-local-install-and-upgrade/).
 This fixes zsh (and maybe other shells) escript-related bugs. Also this should speed things up.
 
-```erlang-repl
+```erlang
 
-1>> application:ensure_all_started(hackney).
+> application:ensure_all_started(hackney).
 ok
 ```
 
@@ -149,7 +149,7 @@ where `Method`, can be any HTTP method in lowercase.
 ### Read the body
 
 ```erlang
-{ok, Body} = hackney:body(Client).
+{ok, Body} = hackney:body(ClientRef).
 ```
 
 `hackney:body/1` fetch the body. To fetch it by chunk you can use the
@@ -158,7 +158,7 @@ where `Method`, can be any HTTP method in lowercase.
 ```erlang
 
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Ref) of
+	case hackney:stream_body(Ref) of
 		{ok, Data} ->
 			read_body(MaxLength, Ref, << Acc/binary, Data/binary >>);
 		done ->
@@ -186,15 +186,24 @@ couple of requests.
 
 ```erlang
 
-Transport = hackney_tcp,
-Host = << "https://friendpaste.com" >>,
+Transport = hackney_ssl,
+Host = << "friendpaste.com" >>,
 Port = 443,
 Options = [],
-{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options).
 ```
 
 > To create a connection that will use an HTTP proxy use
 > `hackney_http_proxy:connect_proxy/5` instead.
+
+
+#### To get local and remote ip and port information of a connection:
+
+```erlang
+
+> hackney:peername(ConnRef).
+> hackney:sockname(ConnRef).
+```
 
 #### Make a request
 
@@ -207,9 +216,9 @@ ReqBody = << "{	\"snippet\": \"some snippet\" }" >>,
 ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
-NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
+NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody},
 {ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
-{ok, Body1} = hackney:body(ConnRef),
+{ok, Body1} = hackney:body(ConnRef).
 ```
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
