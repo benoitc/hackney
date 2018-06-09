@@ -44,11 +44,24 @@
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
 
+%% @doc The ssl:connect/4 (and related) doesn't work with textual representation
+%% of IP addresses. It accepts either a string with a DNS-resolvable name or a
+%% tuple with parts of an IP as numbers. This function attempts to parse given
+%% string and either returns such tuple, or the string if it's impossible to
+%% parse.
+parse_address(Host) when is_list(Host) ->
+  case inet:parse_address(Host) of
+    {ok, Address} -> Address;
+    {error, _} -> Host
+  end.
+
+
 connect(Host, Port, Opts) ->
   connect(Host, Port, Opts, infinity).
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
+
   BaseOpts = [binary, {active, false}, {packet, raw},
     {secure_renegotiate, true},
     {reuse_sessions, true},
@@ -56,9 +69,9 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
     {versions,['tlsv1.2', 'tlsv1.1', tlsv1, sslv3]},
     {ciphers, ciphers()}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
-  
+  Host1 = parse_address(Host),
   %% connect
-  ssl:connect(Host, Port, Opts1, Timeout).
+  ssl:connect(Host1, Port, Opts1, Timeout).
 
 
 ciphers() ->
