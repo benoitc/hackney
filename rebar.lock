@@ -1,6 +1,6 @@
 {"1.1.0",
 [{<<"certifi">>,{pkg,<<"certifi">>,<<"2.3.1">>},0},
- {<<"idna">>,{pkg,<<"idna">>,<<"5.1.1">>},0},
+ {<<"idna">>,{pkg,<<"idna">>,<<"5.1.2">>},0},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.2.0">>},1},
@@ -9,7 +9,7 @@
 [
 {pkg_hash,[
  {<<"certifi">>, <<"D0F424232390BF47D82DA8478022301C561CF6445B5B5FB6A84D49A9E76D2639">>},
- {<<"idna">>, <<"CBC3B2FA1645113267CC59C760BAFA64B2EA0334635EF06DBAC8801E42F7279C">>},
+ {<<"idna">>, <<"E21CB58A09F0228A9E0B95EAA1217F1BCFC31A1AAA6E1FDF2F53A33F7DBD9494">>},
  {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
  {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
  {<<"parse_trans">>, <<"2ADFA4DAF80C14DC36F522CF190EB5C4EE3E28008FC6394397C16F62A26258C2">>},
