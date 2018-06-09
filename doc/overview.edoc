@@ -118,8 +118,8 @@ $ ./rebar3 shell
 It is suggested that you install rebar3 user-wide as described [here](http://blog.erlware.org/rebar3-features-part-1-local-install-and-upgrade/).
 This fixes zsh (and maybe other shells) escript-related bugs. Also this should speed things up.
 
-<pre lang="erlang-repl">
-1>> application:ensure_all_started(hackney).
+<pre lang="erlang">
+> application:ensure_all_started(hackney).
 ok</pre>
 
 It will start hackney and all of the application it depends on:
@@ -161,14 +161,14 @@ where `Method', can be any HTTP method in lowercase.
 
 ### Read the body
 
-<pre lang="erlang">{ok, Body} = hackney:body(Client).</pre>
+<pre lang="erlang">{ok, Body} = hackney:body(ClientRef).</pre>
 
 `hackney:body/1' fetch the body. To fetch it by chunk you can use the
 `hackney:stream_body/1' function:
 
 <pre lang="erlang">
 read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
-	case stream_body(Ref) of
+	case hackney:stream_body(Ref) of
 		{ok, Data} ->
 			read_body(MaxLength, Ref, &lt;&lt; Acc/binary, Data/binary >>);
 		done ->
@@ -194,14 +194,20 @@ couple of requests.
 #### To create a connection:
 
 <pre lang="erlang">
-Transport = hackney_tcp,
-Host = &lt;&lt; "https://friendpaste.com" >>,
+Transport = hackney_ssl,
+Host = &lt;&lt; "friendpaste.com" >>,
 Port = 443,
 Options = [],
-{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options)</pre>
+{ok, ConnRef} = hackney:connect(Transport, Host, Port, Options).</pre>
 
 > To create a connection that will use an HTTP proxy use
 > `hackney_http_proxy:connect_proxy/5' instead.
+
+#### To get local and remote ip and port information of a connection:
+
+<pre lang="erlang">
+> hackney:peername(ConnRef).
+> hackney:sockname(ConnRef).</pre>
 
 #### Make a request
 
@@ -213,9 +219,9 @@ ReqBody = &lt;&lt; "{	\"snippet\": \"some snippet\" }" >>,
 ReqHeaders = [{&lt;&lt;"Content-Type">>, &lt;&lt;"application/json">>}],
 NextPath = &lt;&lt;"/">>,
 NextMethod = post,
-NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody}
-{ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
-{ok, Body1} = hackney:body(ConnRef),</pre>
+NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody},
+{ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq),
+{ok, Body1} = hackney:body(ConnRef).</pre>
 
 Here we are posting a JSON payload to '/' on the friendpaste service to
 create a paste. Then we close the client connection.
