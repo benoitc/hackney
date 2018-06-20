@@ -160,12 +160,15 @@ parse_addr1(Addr, S) ->
   case binary:split(Addr, <<"?">>) of
     [_Addr] ->
      {Addr1, Fragment} = parse_fragment(Addr),
-     parse_addr(Addr1, S#hackney_url{fragment = Fragment});
+     RawPath = case Fragment of
+                 <<"">> -> <<"">>;
+                 _ -> << "#", Fragment/binary >>
+               end,
+     parse_addr(Addr1, S#hackney_url{raw_path=RawPath, fragment = Fragment});
     [Addr1, Query] ->
       {Query1, Fragment} = parse_fragment(Query),
-      #hackney_url{raw_path = RawPath0 } = S,
-      RawPath1 = << RawPath0/binary, "?", Query1/binary >>,
-      parse_addr(Addr1, S#hackney_url{raw_path=RawPath1, qs=Query1, fragment=Fragment})
+      RawPath = << "?", Query/binary >>,
+      parse_addr(Addr1, S#hackney_url{raw_path=RawPath, qs=Query1, fragment=Fragment})
   end.
 
 parse_addr(Addr, S) ->
