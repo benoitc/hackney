@@ -181,6 +181,19 @@ parse_url_test_() ->
                           port = 80,
                           user = <<"">>,
                           password = <<"">>}
+            },
+            {<<"http://www.example.com?q=123">>,
+             #hackney_url{transport =hackney_tcp,
+                          scheme = http,
+                          netloc = <<"www.example.com">>,
+                          raw_path = <<"/?q=123">>,
+                          path = <<"/">>,
+                          qs = <<"q=123">>,
+                          fragment = <<"">>,
+                          host = "www.example.com",
+                          port = 80,
+                          user = <<"">>,
+                          password = <<"">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
