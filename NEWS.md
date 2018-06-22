@@ -1,5 +1,13 @@
 # NEWS
 
+1.13.0 - 2018-06-22
+-------------------
+
+- fix compatibility with Erlang/OTP 21
+- fix parsing query parameters on url without path (#512)
+- bump idna to 1.5.2: fix compatibility with rebar2 (#509)
+- fix accessing HTTPS sites with an IP address (#494)
+
 1.12.1 - 2018-04-03
 -------------------
 
