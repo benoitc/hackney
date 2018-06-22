@@ -30,11 +30,8 @@ init(Parent, Owner, Ref, Client) ->
   try
     stream_loop(Parent, Owner, Ref, Client#client{parser=Parser,
       response_state=on_status})
-  catch Class:Reason ->
-    Owner ! {hackney_response, Ref, {error, {unknown_error,
-      {{Class, Reason,
-        erlang:get_stacktrace()},
-        "An unexpected error occurred."}}}}
+  catch _:Reason ->
+    Owner ! {hackney_response, Ref, {error, {unknown_error, Reason}}}
   end.
 
 wait_for_controlling_process() ->
