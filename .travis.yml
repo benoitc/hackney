@@ -1,6 +1,7 @@
 language: erlang
 otp_release:
-  - 20.2
+  - 21.0.2
+  - 20.3
   - 19.3
 
 env:
