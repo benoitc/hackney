@@ -26,6 +26,7 @@
 -include("hackney_lib.hrl").
 
 -type qs_vals() :: [{binary(), binary() | true}].
+-type qs_opt() :: noplus | upper.
 
 %% @doc Parse an url and return a #hackney_url record.
 -spec parse_url(URL::binary()|list()) -> hackney_url().
@@ -288,7 +289,7 @@ urlencode(Bin) ->
 %% characters, `\s', as `+'. The `upper' option overrides the default behaviour
 %% of writing hex numbers using lowecase letters to using uppercase letters
 %% instead.
--spec urlencode(binary() | string(), [noplus|upper]) -> binary().
+-spec urlencode(binary() | string(), [qs_opt()]) -> binary().
 urlencode(Bin, Opts) ->
   Plus = not proplists:get_value(noplus, Opts, false),
   Upper = proplists:get_value(upper, Opts, false),
@@ -344,7 +345,7 @@ qs(KVs) ->
 
 %% @doc encode query properties to binary
 %% Opts are passed to urlencode.
--spec qs(qs_vals(), [atom]) -> binary().
+-spec qs(qs_vals(), [qs_opt()]) -> binary().
 qs(KVs, Opts) ->
   qs(KVs, Opts, []).
 
