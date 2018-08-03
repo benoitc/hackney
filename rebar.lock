@@ -1,18 +1,20 @@
 {"1.1.0",
-[{<<"certifi">>,{pkg,<<"certifi">>,<<"2.3.1">>},0},
+[{<<"certifi">>,
+  {git,"https://github.com/certifi/erlang-certifi",
+       {ref,"26cb0f341151b67dc676ce97cd7e42b4bb99d31e"}},
+  0},
  {<<"idna">>,{pkg,<<"idna">>,<<"5.1.2">>},0},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
- {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.2.0">>},1},
- {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.1">>},0},
+ {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.3.0">>},1},
+ {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.4">>},0},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.3.1">>},1}]}.
 [
 {pkg_hash,[
- {<<"certifi">>, <<"D0F424232390BF47D82DA8478022301C561CF6445B5B5FB6A84D49A9E76D2639">>},
  {<<"idna">>, <<"E21CB58A09F0228A9E0B95EAA1217F1BCFC31A1AAA6E1FDF2F53A33F7DBD9494">>},
  {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
  {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
- {<<"parse_trans">>, <<"2ADFA4DAF80C14DC36F522CF190EB5C4EE3E28008FC6394397C16F62A26258C2">>},
- {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>},
+ {<<"parse_trans">>, <<"09765507A3C7590A784615CFD421D101AEC25098D50B89D7AA1D66646BC571C1">>},
+ {<<"ssl_verify_fun">>, <<"F0EAFFF810D2041E93F915EF59899C923F4568F4585904D010387ED74988E77B">>},
  {<<"unicode_util_compat">>, <<"A1F612A7B512638634A603C8F401892AFBF99B8CE93A45041F8AACA99CADB85E">>}]}
 ].
