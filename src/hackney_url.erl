@@ -328,8 +328,8 @@ tohexl(C) when C < 16 -> $a + C - 10.
 parse_qs(<<>>) ->
   [];
 parse_qs(Bin) ->
-  Tokens = binary:split(Bin, <<"&">>, [trim, global]),
-  [case binary:split(Token, <<"=">>, [trim]) of
+  Tokens = binary:split(Bin, <<"&">>, [trim_all, global]),
+  [case binary:split(Token, <<"=">>, [trim_all]) of
      [T] ->
        {urldecode(T), true};
      [Name, Value] ->
