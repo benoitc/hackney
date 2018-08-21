@@ -228,6 +228,8 @@ request(Method, URL, Headers, Body) ->
 %%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
+%%          <li>`{checkout_timeout, infinity | integer()}': timeout used when
+%%          checking out a socket from the pool, in milliseconds. Default is 8000</li>
 %%          <li>`{connect_timeout, infinity | integer()}': timeout used when
 %%          establishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>`{recv_timeout, infinity | integer()}': timeout used when
