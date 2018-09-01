@@ -60,7 +60,7 @@
 -include("hackney_lib.hrl").
 
 
--opaque parser() :: #hparser{}.
+-type parser() :: #hparser{}.
 -export_type([parser/0]).
 
 -type http_version() :: {integer(), integer()}.
@@ -70,12 +70,17 @@
 -type uri() :: binary().
 -type body_result() :: {more, parser(), binary()}
 | {ok, binary(), parser()}
-| {done, binary()}.
+| {done, binary()}
+| done.
+
+-type header_result() :: {headers_complete, parser()}
+| {header, {binary(), binary()}, parser()}.
 
 -type parser_result() ::
 {response, http_version(), status(), http_reason(), parser()}
-| {request, http_version(), http_method(), uri(), parser()}
+| {request, http_method(), uri(), http_version(), parser()}
 | {more, parser()}
+| header_result()
 | body_result()
 | {error, term()}.
 
@@ -350,7 +355,7 @@ parse_body(St) ->
 
 
 -spec transfer_decode(binary(), #hparser{})
-    -> {ok, binary(), #hparser{}} | {error, atom()}.
+    -> {ok, binary(), #hparser{}} | {done, binary()} | {error, atom()}.
 transfer_decode(Data, St=#hparser{
   body_state={stream, TransferDecode,
     TransferState, ContentDecode},
