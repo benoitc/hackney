@@ -43,7 +43,7 @@
 -type url() :: #hackney_url{} | binary().
 -export_type([url/0]).
 
--opaque client() :: #client{}.
+-type client() :: #client{}.
 -export_type([client/0]).
 
 -type client_ref() :: term().
