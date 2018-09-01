@@ -23,7 +23,9 @@ Rebar2Deps0 = [{idna, ".*",
 
 Rebar2Deps = case os:getenv("TEST") of
                  "1" -> [{cowboy, ".*", {git, "https://github.com/ninenines/cowboy.git",
-                                         {tag, "1.0.4"}}} | Rebar2Deps0];
+                                         {tag, "1.0.4"}}},
+                         {jsone, ".*", {git, "https://github.com/sile/jsone.git",
+                                        {tag, "1.4.7"}}} | Rebar2Deps0];
                  false ->
                      Rebar2Deps0
              end,
