@@ -67,7 +67,9 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   RequestRef = Client#client.request_ref,
   Name = proplists:get_value(pool, Opts, default),
   Pool = find_pool(Name, Opts),
-  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, 8000),
+  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+  %% Fall back to using connect_timeout if checkout_timeout is not set
+  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
   case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
     Pid, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
