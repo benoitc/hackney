@@ -68,8 +68,10 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   Name = proplists:get_value(pool, Opts, default),
   Pool = find_pool(Name, Opts),
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+  %% Fall back to using connect_timeout if checkout_timeout is not set
+  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
   case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
-    Pid, RequestRef}, ConnectTimeout) of
+    Pid, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
       CheckinReference = {Host, Port, Transport},
       {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
@@ -82,7 +84,7 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
     {'EXIT', {timeout, _}} ->
       % socket will still checkout so to avoid deadlock we send in a cancellation
       gen_server:cast(Pool, {checkout_cancel, {Host, Port, Transport}, RequestRef}),
-      {error, connect_timeout}
+      {error, checkout_timeout}
   end.
 
 %% @doc release a socket in the pool
