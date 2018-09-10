@@ -21,8 +21,14 @@
   word/2,
   trim/1]).
 
-%% Remove when OTP 17 not officially supported
+%% BEGIN: Remove when OTP 17 not officially supported
 -export([split/3]).
+
+-export_type([cp/0]).
+
+-opaque cp() :: {'am' | 'bm', binary()}.
+-type part() :: {Start :: non_neg_integer(), Length :: integer()}.
+%% END: Remove when OTP 17 not officially supported
 
 -export([quoted_string/2]).
 
