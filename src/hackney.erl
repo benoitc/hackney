@@ -8,6 +8,8 @@
 
 -export([connect/1, connect/2, connect/3, connect/4,
          close/1,
+         peername/1,
+         sockname/1,
          request_info/1,
          location/1,
          request/1, request/2, request/3, request/4, request/5,
@@ -115,6 +117,14 @@ setopts(Ref, Options) ->
 close(Ref) ->
   hackney_connect:close(Ref).
 
+
+%% @doc peername of the client
+peername(Ref) ->
+  hackney_connect:peername(Ref).
+
+%% @doc sockname of the client
+sockname(Ref) ->
+  hackney_connect:sockname(Ref).
 
 %% @doc get request info
 -spec request_info(client_ref()) -> list().
@@ -228,6 +238,8 @@ request(Method, URL, Headers, Body) ->
 %%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
+%%          <li>`{checkout_timeout, infinity | integer()}': timeout used when
+%%          checking out a socket from the pool, in milliseconds. Default is 8000</li>
 %%          <li>`{connect_timeout, infinity | integer()}': timeout used when
 %%          establishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>`{recv_timeout, infinity | integer()}': timeout used when
