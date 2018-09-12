@@ -15,6 +15,16 @@ module to manage urls.
 
 
 
+### <a name="type-qs_opt">qs_opt()</a> ###
+
+
+<pre><code>
+qs_opt() = noplus | upper
+</code></pre>
+
+
+
+
 ### <a name="type-qs_vals">qs_vals()</a> ###
 
 
@@ -129,7 +139,7 @@ encode query properties to binary
 ### qs/2 ###
 
 <pre><code>
-qs(KVs::<a href="#type-qs_vals">qs_vals()</a>, Opts::[atom]) -&gt; binary()
+qs(KVs::<a href="#type-qs_vals">qs_vals()</a>, Opts::[<a href="#type-qs_opt">qs_opt()</a>]) -&gt; binary()
 </code></pre>
 <br />
 
@@ -191,7 +201,7 @@ URL encode a string binary.
 ### urlencode/2 ###
 
 <pre><code>
-urlencode(Bin::binary() | string(), Opts::[noplus | upper]) -&gt; binary()
+urlencode(Bin::binary() | string(), Opts::[<a href="#type-qs_opt">qs_opt()</a>]) -&gt; binary()
 </code></pre>
 <br />
 

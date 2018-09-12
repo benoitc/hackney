@@ -90,7 +90,7 @@ handle Expect header
 ### skip_body/1 ###
 
 <pre><code>
-skip_body(Client::#client{}) -&gt; {ok, #client{}} | {error, atom()}
+skip_body(Client::#client{}) -&gt; {ok, #client{}} | {skip, #client{}} | {error, atom()}
 </code></pre>
 <br />
 

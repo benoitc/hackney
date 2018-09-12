@@ -65,7 +65,17 @@ given correpond to the non parsed part of the internal buffer.
 
 
 <pre><code>
-body_result() = {more, <a href="#type-parser">parser()</a>, binary()} | {ok, binary(), <a href="#type-parser">parser()</a>} | {done, binary()}
+body_result() = {more, <a href="#type-parser">parser()</a>, binary()} | {ok, binary(), <a href="#type-parser">parser()</a>} | {done, binary()} | done
+</code></pre>
+
+
+
+
+### <a name="type-header_result">header_result()</a> ###
+
+
+<pre><code>
+header_result() = {headers_complete, <a href="#type-parser">parser()</a>} | {header, {binary(), binary()}, <a href="#type-parser">parser()</a>}
 </code></pre>
 
 
@@ -104,7 +114,9 @@ http_version() = {integer(), integer()}
 ### <a name="type-parser">parser()</a> ###
 
 
-__abstract datatype__: `parser()`
+<pre><code>
+parser() = #hparser{}
+</code></pre>
 
 
 
@@ -133,7 +145,7 @@ parser_options() = [<a href="#type-parser_option">parser_option()</a>]
 
 
 <pre><code>
-parser_result() = {response, <a href="#type-http_version">http_version()</a>, <a href="#type-status">status()</a>, <a href="#type-http_reason">http_reason()</a>, <a href="#type-parser">parser()</a>} | {request, <a href="#type-http_version">http_version()</a>, <a href="#type-http_method">http_method()</a>, <a href="#type-uri">uri()</a>, <a href="#type-parser">parser()</a>} | {more, <a href="#type-parser">parser()</a>} | <a href="#type-body_result">body_result()</a> | {error, term()}
+parser_result() = {response, <a href="#type-http_version">http_version()</a>, <a href="#type-status">status()</a>, <a href="#type-http_reason">http_reason()</a>, <a href="#type-parser">parser()</a>} | {request, <a href="#type-http_method">http_method()</a>, <a href="#type-uri">uri()</a>, <a href="#type-http_version">http_version()</a>, <a href="#type-parser">parser()</a>} | {more, <a href="#type-parser">parser()</a>} | <a href="#type-header_result">header_result()</a> | <a href="#type-body_result">body_result()</a> | {error, term()}
 </code></pre>
 
 

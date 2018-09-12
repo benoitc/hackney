@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2018 Benoît Chesneau.
 
-__Version:__ 1.13.0
+__Version:__ 1.14.0
 
 # hackney
 
@@ -196,7 +196,6 @@ Options = [],
 > To create a connection that will use an HTTP proxy use
 > `hackney_http_proxy:connect_proxy/5` instead.
 
-
 #### To get local and remote ip and port information of a connection:
 
 ```erlang
@@ -217,7 +216,7 @@ ReqHeaders = [{<<"Content-Type">>, <<"application/json">>}],
 NextPath = <<"/">>,
 NextMethod = post,
 NextReq = {NextMethod, NextPath, ReqHeaders, ReqBody},
-{ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq).
+{ok, _, _, ConnRef} = hackney:send_request(ConnRef, NextReq),
 {ok, Body1} = hackney:body(ConnRef).
 ```
 

@@ -1,5 +1,17 @@
 # NEWS
 
+1.14.0 - 2018-09-12
+-------------------
+
+- bump to certifi 2.4.2
+- bump to idna 0.6.0
+- fix support of rebar2
+- fix specs
+- add `hackney:sockname/1` adn `hackney:peername/1` functions
+- add new `checkout_timeout` option for clarity
+- improve `hackney_url:parse_qs/1` to trim leading and trailing empty values
+
+
 1.13.0 - 2018-06-22
 -------------------
 

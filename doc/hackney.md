@@ -15,7 +15,9 @@
 ### <a name="type-client">client()</a> ###
 
 
-__abstract datatype__: `client()`
+<pre><code>
+client() = #client{}
+</code></pre>
 
 
 
@@ -350,6 +352,9 @@ redirection even on POST
 
 * `insecure`: to perform "insecure" SSL connections and
 transfers without checking the certificate
+
+* `{checkout_timeout, infinity | integer()}`: timeout used when
+checking out a socket from the pool, in milliseconds. Default is 8000
 
 * `{connect_timeout, infinity | integer()}`: timeout used when
 establishing a connection, in milliseconds. Default is 8000
