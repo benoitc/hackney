@@ -33,11 +33,14 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
   #client{options=Options} = Client0,
 
   %% basic & Cookies authorization handling
+  UseLibHeaders = proplists:get_value(lib_headers, Options),
   Cookies = proplists:get_value(cookie, Options, []),
-  DefaultHeaders = case proplists:get_value(basic_auth, Options) of
-                     undefined ->
+  DefaultHeaders = case {proplists:get_value(basic_auth, Options), UseLibHeaders} of
+                     {_, none} ->
+                       [];
+                     {undefined, _} ->
                       maybe_add_cookies(Cookies, [{<<"User-Agent">>, default_ua()}]);
-                     {User, Pwd} ->
+                     {{User, Pwd}, _} ->
                        User1 = hackney_bstr:to_binary(User),
                        Pwd1 = hackney_bstr:to_binary(Pwd),
                        Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
@@ -55,13 +58,13 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                           ),
 
   %% add host eventually
-  Headers2 = maybe_add_host(Headers1, Client0#client.netloc),
+  Headers2 = maybe_add_host(Headers1, Client0#client.netloc, UseLibHeaders),
 
   %% get expect headers
   Expect = expectation(Headers2),
 
   %% build headers with the body.
-  {FinalHeaders, ReqType, Body, Client1} = case Body0 of
+  {Headers3, ReqType, Body, Client1} = case Body0 of
                                             stream ->
                                                {Headers2, ReqType0, stream, Client0};
                                             stream_multipart ->
@@ -80,6 +83,13 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                                             _ ->
                                               handle_body(Headers2, ReqType0, Body0, Client0)
                                           end,
+
+  FinalHeaders = case UseLibHeaders of
+                   none ->
+                     Headers2;
+                   _ ->
+                     Headers3
+                 end,
 
   %% build final client record
   Client = case ReqType of
@@ -616,7 +626,9 @@ default_ua() ->
             end,
   << "hackney/", Version/binary >>.
 
-maybe_add_host(Headers0, Netloc) ->
+maybe_add_host(Headers, Netloc, none) ->
+  Headers;
+maybe_add_host(Headers0, Netloc, _) ->
   {_, Headers1} = hackney_headers_new:store_new(<<"Host">>, Netloc, Headers0),
   Headers1.
 
