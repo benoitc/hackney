@@ -235,6 +235,7 @@ request(Method, URL, Headers, Body) ->
 %%          redirection for a request</li>
 %%          <li>`{force_redirect, boolean}': false by default, to force the
 %%          redirection even on POST</li>
+%%          <li>`{basic_auth, {binary, binary}}`: HTTP basic auth username and password.</li>
 %%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
