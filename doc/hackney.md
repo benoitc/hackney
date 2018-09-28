@@ -348,7 +348,8 @@ redirection for a request
 * `{force_redirect, boolean}`: false by default, to force the
 redirection even on POST
 
-* `{proxy, proxy_options()}`: to connect via a proxy.
+* `{basic_auth, {binary, binary}}`: HTTP basic auth username and password.</li>
+<li>`{proxy, proxy_options()}`: to connect via a proxy.
 
 * `insecure`: to perform "insecure" SSL connections and
 transfers without checking the certificate

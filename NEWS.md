@@ -1,5 +1,11 @@
 # NEWS
 
+1.14.1 - 2018-09-28
+-------------------
+
+- fix: don't IDNA encode the host with unix scheme
+- doc: document `basic_auth` setting
+
 1.14.0 - 2018-09-12
 -------------------
 
