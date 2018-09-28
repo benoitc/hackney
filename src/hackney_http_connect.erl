@@ -83,7 +83,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
             _ ->
               {ok, {Transport, Socket}}
           end;
-        Error ->
+        Error = {error, _} ->
           gen_tcp:close(Socket),
           Error
       end;
@@ -188,19 +188,16 @@ do_handshake(Socket, Host, Port, Options) ->
 check_response(Socket) ->
   check_response(<<>>, Socket, 10).
 
-check_response(_Buffer, _Socket, 0) ->
-  {error, bad_request};
-
 check_response(Buffer, Socket, N) ->
   case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
     {ok, Data} ->
       NBuffer = << Data/binary, Buffer/binary >>,
-      parse_first_line(Buffer, Socket, N);
+      parse_first_line(NBuffer, Socket, N);
     Error ->
       Error
   end.
 
-parse_first_line(Buffer, Socket, 0) ->
+parse_first_line(_Buffer, _Socket, 0) ->
    {error, line_too_long};
 parse_first_line(Buffer, Socket, N) ->
   case match_eol(Buffer, 0) of
