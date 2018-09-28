@@ -36,8 +36,13 @@ connect(Transport, Host, Port, Options, Dynamic) ->
     {host, Host},
     {port, Port},
     {dynamic, Dynamic}]),
-  case create_connection(Transport, idna:utf8_to_ascii(Host), Port,
-    Options, Dynamic) of
+
+  Host2 = case Transport of
+            hackney_local_tcp -> Host;
+            _ ->  idna:utf8_to_ascii(Host)
+          end,
+
+  case create_connection(Transport, Host2, Port, Options, Dynamic) of
     {ok, #client{request_ref=Ref}} ->
       {ok, Ref};
     Error ->
