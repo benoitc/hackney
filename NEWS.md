@@ -1,6 +1,6 @@
 # NEWS
 
-1.14.1 - 2018-09-28
+1.14.2 - 2018-09-28
 -------------------
 
 - fix: don't IDNA encode the host with unix scheme
