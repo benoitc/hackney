@@ -20,6 +20,7 @@
   sockname/1]).
 
 -define(TIMEOUT, infinity).
+-define(MAX_RESPONSE_HEADER_SIZE, 8192).
 
 -type http_socket() :: {atom(), inet:socket()}.
 -export_type([http_socket/0]).
@@ -186,12 +187,34 @@ do_handshake(Socket, Host, Port, Options) ->
   end.
 
 check_response(Socket) ->
-  case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
+  case gather_response(Socket, <<>>) of
     {ok, Data} ->
       check_status(Data);
     Error ->
       Error
   end.
+
+gather_response(Socket, Buffer) ->
+  ReadResult = gen_tcp:recv(Socket, 0, ?TIMEOUT),
+  case gather_lines(Buffer, ReadResult) of
+    {match, NBuffer} ->
+      {ok, NBuffer};
+    {nomatch, NBuffer} ->
+      gather_response(Socket, NBuffer);
+    Error ->
+      Error
+  end.
+
+gather_lines(Buffer, {ok, Data}) when (size(Buffer) + size(Data)) > ?MAX_RESPONSE_HEADER_SIZE ->
+  {error, response_to_big};
+gather_lines(Buffer, {ok, Data}) ->
+  NBuffer = <<Buffer/binary, Data/binary >>,
+  case binary:match(NBuffer, <<"\r\n\r\n\r\n">>) of
+    nomatch -> {nomatch, NBuffer};
+    _Match -> {match, NBuffer}
+  end;
+gather_lines(_, Error) ->
+  Error.
 
 check_status(<< "HTTP/1.1 200", _/bits >>) ->
   ok;
