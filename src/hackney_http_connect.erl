@@ -209,7 +209,7 @@ gather_lines(Buffer, {ok, Data}) when (size(Buffer) + size(Data)) > ?MAX_RESPONS
   {error, response_to_big};
 gather_lines(Buffer, {ok, Data}) ->
   NBuffer = <<Buffer/binary, Data/binary >>,
-  case binary:match(NBuffer, <<"\r\n\r\n\r\n">>) of
+  case binary:match(NBuffer, <<"\r\n\r\n">>) of
     nomatch -> {nomatch, NBuffer};
     _Match -> {match, NBuffer}
   end;
