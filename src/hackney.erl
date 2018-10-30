@@ -240,7 +240,8 @@ request(Method, URL, Headers, Body) ->
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
 %%          <li>`{checkout_timeout, infinity | integer()}': timeout used when
-%%          checking out a socket from the pool, in milliseconds. Default is 8000</li>
+%%          checking out a socket from the pool, in milliseconds.
+%%          By default is equal to connect_timeout</li>
 %%          <li>`{connect_timeout, infinity | integer()}': timeout used when
 %%          establishing a connection, in milliseconds. Default is 8000</li>
 %%          <li>`{recv_timeout, infinity | integer()}': timeout used when
