@@ -51,8 +51,7 @@
   queues = dict:new(),  % Dest => queue of Froms,
   pending = dict:new(),
   connections = dict:new(),
-  sockets = dict:new(),
-  nb_waiters=0}).
+  sockets = dict:new()}).
 
 
 start() ->
@@ -322,7 +321,7 @@ handle_cast({checkout_cancel, Dest, Ref}, State) ->
   case Removed of
     true ->
       Pending2 = del_pending(Ref, Pending),
-      {noreply, State#state{queues=Queues2, nb_waiters=Pending2}};
+      {noreply, State#state{queues=Queues2, pending=Pending2}};
     false ->
       % we leak the socket here but 'DOWN' will mop up for us when it times out
       {noreply, dequeue(Dest, Ref, State)}
