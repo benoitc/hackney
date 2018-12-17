@@ -236,6 +236,7 @@ the request body:
   - `eof`: end the multipart request
   - `{file, Path}`: to stream a file
   - `{file, Path, ExtraHeaders}`: to stream a file
+  - `{file, Path, Name, ExtraHeaders}` : to stream a file with DOM element name
   - `{Name, Content}`: to send a full part
   - `{Name, Content, ExtraHeaders}`: to send a full part
   - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a
