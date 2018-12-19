@@ -228,6 +228,9 @@ mp_mixed_header({Name, MixedBoundary}, Boundary) ->
                      {file, Path :: binary(),
                             ExtraHeaders :: [{binary(), binary()}]} |
                      {file, Path :: binary(),
+                            Name :: binary(),
+                            ExtraHeaders :: [{binary(), binary()}]} |
+                     {file, Path :: binary(),
                             {Disposition :: binary(), Params :: [{binary(), binary()}]},
                             ExtraHeaders :: [{binary(), binary()}]},
                      Boundary :: binary()) ->
