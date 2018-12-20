@@ -67,16 +67,16 @@ encode_form(Parts, Boundary) ->
                     {ok, Bin} = file:read_file(Path),
                     PartBin = << MpHeader/binary, Bin/binary, "\r\n"  >>,
                     {AccSize1, << AccBin/binary, PartBin/binary >>};
-                ({file, Path, <<Name/binary>>, ExtraHeaders}, {AccSize, AccBin}) ->
-                    {MpHeader, Len} = mp_file_header({file, Path, Name,
+                ({file, Path, {Disposition, Params}, ExtraHeaders}, {
+                                AccSize, AccBin}) ->
+                    {MpHeader, Len} = mp_file_header({file, Path, {Disposition, Params},
                                                       ExtraHeaders}, Boundary),
                     AccSize1 = AccSize + byte_size(MpHeader) + Len + 2,
                     {ok, Bin} = file:read_file(Path),
                     PartBin = << MpHeader/binary, Bin/binary, "\r\n"  >>,
                     {AccSize1, << AccBin/binary, PartBin/binary >>};
-                ({file, Path, {Disposition, Params}, ExtraHeaders}, {
-                                AccSize, AccBin}) ->
-                    {MpHeader, Len} = mp_file_header({file, Path, {Disposition, Params},
+                ({file, Path, Name, ExtraHeaders}, {AccSize, AccBin}) ->
+                    {MpHeader, Len} = mp_file_header({file, Path, Name,
                                                       ExtraHeaders}, Boundary),
                     AccSize1 = AccSize + byte_size(MpHeader) + Len + 2,
                     {ok, Bin} = file:read_file(Path),
@@ -239,7 +239,7 @@ mp_file_header({file, Path}, Boundary) ->
     mp_file_header({file, Path, []}, Boundary);
 mp_file_header({file, Path, ExtraHeaders}, Boundary) ->
     mp_file_header({file, Path, <<"file">>, ExtraHeaders}, Boundary);
-mp_file_header({file, Path, <<Name/binary>>, ExtraHeaders}, Boundary) ->
+mp_file_header({file, Path, Name, ExtraHeaders}, Boundary) when is_binary(Name) ->
     FName = hackney_bstr:to_binary(filename:basename(Path)),
     Disposition = <<"form-data">>,
     Params = [
