@@ -67,9 +67,16 @@ encode_form(Parts, Boundary) ->
                     {ok, Bin} = file:read_file(Path),
                     PartBin = << MpHeader/binary, Bin/binary, "\r\n"  >>,
                     {AccSize1, << AccBin/binary, PartBin/binary >>};
-                ({file, Path, Disposition, ExtraHeaders}, {
+                ({file, Path, {Disposition, Params}, ExtraHeaders}, {
                                 AccSize, AccBin}) ->
-                    {MpHeader, Len} = mp_file_header({file, Path, Disposition,
+                    {MpHeader, Len} = mp_file_header({file, Path, {Disposition, Params},
+                                                      ExtraHeaders}, Boundary),
+                    AccSize1 = AccSize + byte_size(MpHeader) + Len + 2,
+                    {ok, Bin} = file:read_file(Path),
+                    PartBin = << MpHeader/binary, Bin/binary, "\r\n"  >>,
+                    {AccSize1, << AccBin/binary, PartBin/binary >>};
+                ({file, Path, Name, ExtraHeaders}, {AccSize, AccBin}) ->
+                    {MpHeader, Len} = mp_file_header({file, Path, Name,
                                                       ExtraHeaders}, Boundary),
                     AccSize1 = AccSize + byte_size(MpHeader) + Len + 2,
                     {ok, Bin} = file:read_file(Path),
@@ -164,8 +171,12 @@ len_mp_stream(Parts, Boundary) ->
                     {MpHeader, Len} = mp_file_header({file, Path,
                                                       ExtraHeaders}, Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
-                ({file, Path, Disposition, ExtraHeaders}, AccSize) ->
-                    {MpHeader, Len} = mp_file_header({file, Path, Disposition,
+                ({file, Path, <<Name/binary>>, ExtraHeaders}, AccSize) ->
+                    {MpHeader, Len} = mp_file_header({file, Path, Name,
+                                                      ExtraHeaders}, Boundary),
+                    AccSize + byte_size(MpHeader) + Len + 2;
+                ({file, Path, {Disposition, Params}, ExtraHeaders}, AccSize) ->
+                    {MpHeader, Len} = mp_file_header({file, Path, {Disposition, Params},
                                                       ExtraHeaders}, Boundary),
                     AccSize + byte_size(MpHeader) + Len + 2;
                 ({mp_mixed, Name, MixedBoundary}, AccSize) ->
@@ -217,6 +228,9 @@ mp_mixed_header({Name, MixedBoundary}, Boundary) ->
                      {file, Path :: binary(),
                             ExtraHeaders :: [{binary(), binary()}]} |
                      {file, Path :: binary(),
+                            Name :: binary(),
+                            ExtraHeaders :: [{binary(), binary()}]} |
+                     {file, Path :: binary(),
                             {Disposition :: binary(), Params :: [{binary(), binary()}]},
                             ExtraHeaders :: [{binary(), binary()}]},
                      Boundary :: binary()) ->
@@ -224,11 +238,15 @@ mp_mixed_header({Name, MixedBoundary}, Boundary) ->
 mp_file_header({file, Path}, Boundary) ->
     mp_file_header({file, Path, []}, Boundary);
 mp_file_header({file, Path, ExtraHeaders}, Boundary) ->
+    mp_file_header({file, Path, <<"file">>, ExtraHeaders}, Boundary);
+mp_file_header({file, Path, Name, ExtraHeaders}, Boundary) when is_binary(Name) ->
     FName = hackney_bstr:to_binary(filename:basename(Path)),
-    Disposition = {<<"form-data">>,
-                   [{<<"name">>, <<"\"file\"">>},
-                    {<<"filename">>, <<"\"", FName/binary, "\"">>}]},
-    mp_file_header({file, Path, Disposition, ExtraHeaders}, Boundary);
+    Disposition = <<"form-data">>,
+    Params = [
+        {<<"name">>,     <<"\"", Name/binary,  "\"">>},
+        {<<"filename">>, <<"\"", FName/binary, "\"">>}
+    ],
+    mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary);
 mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
     CType = mimerl:filename(Path),
     Len = filelib:file_size(Path),

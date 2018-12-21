@@ -222,7 +222,11 @@ stream_multipart({mp_mixed_eof, MixedBoundary}, Client) ->
   stream_body(<< Eof/binary, "\r\n" >>, Client);
 stream_multipart({file, Path}, Client) ->
   stream_multipart({file, Path, []}, Client);
-stream_multipart({file, Path, _ExtraHeaders}=File,
+stream_multipart({file, Path, <<Name/binary>>}, Client) ->
+  stream_multipart({file, Path, Name, []}, Client);
+stream_multipart({file, Path, ExtraHeaders}, Client) ->
+  stream_multipart({file, Path, <<"file">>, ExtraHeaders}, Client);
+stream_multipart({file, Path, _Name, _ExtraHeaders}=File,
   #client{mp_boundary=Boundary}=Client) ->
   {MpHeader, _} = hackney_multipart:mp_file_header(File, Boundary),
   case stream_body(MpHeader, Client) of
