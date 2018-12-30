@@ -16,6 +16,7 @@
       mimerl,
       certifi,
       ssl_verify_fun,
+      opencensus,
       metrics]},
     {included_applications, []},
     {mod, { hackney_app, []}},

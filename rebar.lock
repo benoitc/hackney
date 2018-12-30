@@ -1,18 +1,30 @@
 {"1.1.0",
 [{<<"certifi">>,{pkg,<<"certifi">>,<<"2.4.2">>},0},
+ {<<"counters">>,{pkg,<<"counters">>,<<"0.2.1">>},1},
+ {<<"ctx">>,{pkg,<<"ctx">>,<<"0.5.0">>},1},
  {<<"idna">>,{pkg,<<"idna">>,<<"6.0.0">>},0},
+ {<<"jsx">>,{pkg,<<"jsx">>,<<"2.9.0">>},1},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},0},
+ {<<"opencensus">>,{pkg,<<"opencensus">>,<<"0.6.0">>},0},
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.3.0">>},1},
+ {<<"rfc3339">>,{pkg,<<"rfc3339">>,<<"0.9.0">>},2},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.4">>},0},
- {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.4.1">>},1}]}.
+ {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.4.1">>},1},
+ {<<"wts">>,{pkg,<<"wts">>,<<"0.3.0">>},1}]}.
 [
 {pkg_hash,[
  {<<"certifi">>, <<"75424FF0F3BAACCFD34B1214184B6EF616D89E420B258BB0A5EA7D7BC628F7F0">>},
+ {<<"counters">>, <<"AA3D97E88F92573488987193D0F48EFCE0F3B2CD1443BF4EE760BC7F99322F0C">>},
+ {<<"ctx">>, <<"78E0F16712E12D707A7F34277381B8E193D7C71EAA24D37330DC02477C09EDA5">>},
  {<<"idna">>, <<"689C46CBCDF3524C44D5F3DDE8001F364CD7608A99556D8FBD8239A5798D4C10">>},
+ {<<"jsx">>, <<"D2F6E5F069C00266CAD52FB15D87C428579EA4D7D73A33669E12679E203329DD">>},
  {<<"metrics">>, <<"25F094DEA2CDA98213CECC3AEFF09E940299D950904393B2A29D191C346A8486">>},
  {<<"mimerl">>, <<"993F9B0E084083405ED8252B99460C4F0563E41729AB42D9074FD5E52439BE88">>},
+ {<<"opencensus">>, <<"90C1078A3BA18817D6445B3F79E7515122823198FEDD5A880F74D69C205D8B90">>},
  {<<"parse_trans">>, <<"09765507A3C7590A784615CFD421D101AEC25098D50B89D7AA1D66646BC571C1">>},
+ {<<"rfc3339">>, <<"2075653DC9407541C84B1E15F8BDA2ABE95FB17C9694025E079583F2D19C1060">>},
  {<<"ssl_verify_fun">>, <<"F0EAFFF810D2041E93F915EF59899C923F4568F4585904D010387ED74988E77B">>},
- {<<"unicode_util_compat">>, <<"D869E4C68901DD9531385BB0C8C40444EBF624E60B6962D95952775CAC5E90CD">>}]}
+ {<<"unicode_util_compat">>, <<"D869E4C68901DD9531385BB0C8C40444EBF624E60B6962D95952775CAC5E90CD">>},
+ {<<"wts">>, <<"5CDF22C775CB1EBAE24C326A5DB6074D753C42F4BD12A9AA47CC62D3E2C71AD1">>}]}
 ].

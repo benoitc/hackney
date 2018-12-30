@@ -41,6 +41,7 @@
 -include("hackney_lib.hrl").
 -include("hackney_internal.hrl").
 
+-include_lib("opencensus/include/opencensus.hrl").
 
 -type url() :: #hackney_url{} | binary().
 -export_type([url/0]).
@@ -325,19 +326,33 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                   {basic_auth, {User, Password}})
             end,
 
-  Headers1 = hackney_headers_new:new(Headers0),
+  {NewSpanCtx, ParentSpanCtx} = start_span(Method, URL),
+
+  %% add span context to http headers
+  EncodedSpanCtx = oc_span_ctx_header:encode(NewSpanCtx),
+  Headers1 = hackney_headers_new:new([{oc_span_ctx_header:field_name(), EncodedSpanCtx} | Headers0]),
 
   case maybe_proxy(Transport, Host, Port, Options) of
     {ok, Ref, AbsolutePath} ->
       Request = make_request(
                   Method, URL, Headers1, Body, Options, AbsolutePath
                  ),
-      send_request(Ref, Request);
+      ocp:with_span_ctx(NewSpanCtx),
+      try send_request(Ref, Request)
+      after
+        oc_trace:finish_span(NewSpanCtx),
+        ocp:with_span_ctx(ParentSpanCtx)
+      end;
     {ok, Ref} ->
       Request = make_request(
                   Method, URL, Headers1, Body, Options, false
                  ),
-      send_request(Ref, Request);
+      ocp:with_span_ctx(NewSpanCtx),
+      try send_request(Ref, Request)
+      after
+        oc_trace:finish_span(NewSpanCtx),
+        ocp:with_span_ctx(ParentSpanCtx)
+      end;
     Error ->
       Error
   end;
@@ -345,6 +360,19 @@ request(Method, URL, Headers, Body, Options)
   when is_binary(URL) orelse is_list(URL) ->
   request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
 
+start_span(Method, #hackney_url{host=Host,
+                                port=Port,
+                                raw_path=RawPath}) ->
+  HostBin = list_to_binary(Host),
+  PortBin = if Port =:= 80 ; Port =:= 443 -> <<>>; true -> <<":", (integer_to_binary(Port))/binary>> end,
+  SpanName = <<HostBin/binary, PortBin/binary, RawPath/binary>>,
+  ParentSpanCtx = ocp:current_span_ctx(),
+  NewSpanCtx = oc_trace:start_span(SpanName, ParentSpanCtx, #{kind => ?SPAN_KIND_CLIENT,
+                                                              attributes => #{<<"http.host">> => Host,
+                                                                              <<"http.method">> => Method,
+                                                                              <<"http.path">> => RawPath,
+                                                                              <<"http.url">> => SpanName}}),
+  {NewSpanCtx, ParentSpanCtx}.
 
 %% @doc send a request using the current client state and pass new
 %% options to it.
