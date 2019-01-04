@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2018 Benoît Chesneau.
+Copyright (c) 2012-2019 Benoît Chesneau.
 
-__Version:__ 1.14.3
+__Version:__ 1.15.0
 
 # hackney
 
@@ -236,7 +236,7 @@ the request body:
   - `eof`: end the multipart request
   - `{file, Path}`: to stream a file
   - `{file, Path, ExtraHeaders}`: to stream a file
-  - `{file, Path, Name, ExtraHeaders}` : to stream a file with DOM element name
+  - `{file, Path, Name, ExtraHeaders}` : to send a file with DOM element name and extra headers
   - `{Name, Content}`: to send a full part
   - `{Name, Content, ExtraHeaders}`: to send a full part
   - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a

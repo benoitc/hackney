@@ -355,7 +355,8 @@ redirection even on POST
 transfers without checking the certificate
 
 * `{checkout_timeout, infinity | integer()}`: timeout used when
-checking out a socket from the pool, in milliseconds. Default is 8000
+checking out a socket from the pool, in milliseconds.
+By default is equal to connect_timeout
 
 * `{connect_timeout, infinity | integer()}`: timeout used when
 establishing a connection, in milliseconds. Default is 8000

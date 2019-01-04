@@ -1,5 +1,11 @@
 # NEWS
 
+1.15.0 - 2019-01-04
+-------------------
+
+- improve multipart: send form with a field names for files
+- fix pool `checkout_cancel`: reduce the number of pending requests
+
 1.14.3 - 2018-09-29
 -------------------
 
