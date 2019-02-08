@@ -73,6 +73,8 @@ perform(Client0, {Method0, Path, Headers0, Body0}) ->
                                                                     Size, Boundary, Client0);
                                             <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
                                               handle_body(Headers2, ReqType0, Body0, Client0);
+                                            [] when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
+                                              handle_body(Headers2, ReqType0, Body0, Client0);
                                             <<>> ->
                                               {Headers2, ReqType0, Body0, Client0};
                                             [] ->
