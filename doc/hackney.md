@@ -362,7 +362,7 @@ By default is equal to connect_timeout
 establishing a connection, in milliseconds. Default is 8000
 
 * `{recv_timeout, infinity | integer()}`: timeout used when
-receiving a connection. Default is 5000
+receiving data over a connection. Default is 5000
 
 
 <blockquote>Note: if the response is async, only
