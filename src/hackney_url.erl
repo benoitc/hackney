@@ -91,14 +91,14 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                      {ok, {_, _, _, _, _, _, _, _}} ->
                        {Host0, Netloc0};
                      _ ->
-                       Host1 = unicode:characters_to_list(
+                       Host1 = binary_to_list(
                                  urldecode(unicode:characters_to_binary(Host0))
                                 ),
 
                        %% encode domain if needed
                        Host2 = case Scheme of
                                  http_unix -> Host1;
-                                 _ -> idna:to_ascii(Host1)
+                                 _ -> idnconvert_hostname(Host1)
                                end,
                        Netloc1 = case {Scheme, Port} of
                                    {http, 80} -> list_to_binary(Host2);
