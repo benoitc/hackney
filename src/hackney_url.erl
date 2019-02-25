@@ -23,6 +23,8 @@
   pathencode/1,
   normalize/1, normalize/2]).
 
+-export([idnconvert_hostname/1]).
+
 -include("hackney_lib.hrl").
 
 -type qs_vals() :: [{binary(), binary() | true}].
@@ -89,14 +91,14 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                      {ok, {_, _, _, _, _, _, _, _}} ->
                        {Host0, Netloc0};
                      _ ->
-                       Host1 = unicode:characters_to_list(
+                       Host1 = binary_to_list(
                                  urldecode(unicode:characters_to_binary(Host0))
                                 ),
 
                        %% encode domain if needed
                        Host2 = case Scheme of
                                  http_unix -> Host1;
-                                 _ -> idna:to_ascii(Host1)
+                                 _ -> idnconvert_hostname(Host1)
                                end,
                        Netloc1 = case {Scheme, Port} of
                                    {http, 80} -> list_to_binary(Host2);
@@ -116,6 +118,17 @@ transport_scheme(hackney_ssl) ->
   https;
 transport_scheme(hackney_local_tcp) ->
   http_unix.
+
+is_ascii(Host) ->
+  lists:all(fun(C) -> idna_ucs:is_ascii(C) end, Host).
+
+idnconvert_hostname(Host) ->
+  case is_ascii(Host) of
+    true ->
+      Host;
+    false ->
+      idna:utf8_to_ascii(Host)
+  end.
 
 unparse_url(#hackney_url{}=Url) ->
   #hackney_url{scheme = Scheme,

@@ -38,14 +38,10 @@ connect(Transport, Host, Port, Options, Dynamic) ->
     {dynamic, Dynamic}]),
 
   Host2 = case Transport of
-            hackney_local_tcp -> Host;
+            hackney_local_tcp ->
+              Host;
             _ ->
-              case inet:parse_address(Host) of
-                {ok, _} ->
-                  Host;
-                _ ->
-                  idna:utf8_to_ascii(Host)
-              end
+              hackney_url:idnconvert_hostname(Host)
           end,
 
   case create_connection(Transport, Host2, Port, Options, Dynamic) of
