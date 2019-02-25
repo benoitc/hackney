@@ -23,6 +23,8 @@
   pathencode/1,
   normalize/1, normalize/2]).
 
+-export([idnconvert_hostname/1]).
+
 -include("hackney_lib.hrl").
 
 -type qs_vals() :: [{binary(), binary() | true}].
@@ -116,6 +118,17 @@ transport_scheme(hackney_ssl) ->
   https;
 transport_scheme(hackney_local_tcp) ->
   http_unix.
+
+is_ascii(Host) ->
+  lists:all(fun(C) -> idna_ucs:is_ascii(C) end, Host).
+
+idnconvert_hostname(Host) ->
+  case is_ascii(Host) of
+    true ->
+      Host;
+    false ->
+      idna:utf8_to_ascii(Host)
+  end.
 
 unparse_url(#hackney_url{}=Url) ->
   #hackney_url{scheme = Scheme,
