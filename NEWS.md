@@ -10,7 +10,7 @@
 
 - doc: clarify `recv_timeout` usage
 - fix: don't try to encode hostname IPs to IDN
-- fix: path encoding to suppor `(` `)` characters
+- fix: path encoding to support `(` `)` characters
 - bump mimerl to 1.2
 - bump certifi to 2.5.1
 
