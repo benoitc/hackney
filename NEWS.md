@@ -3,7 +3,7 @@
 1.15.1 - 2019-02-26
 -------------------
 
-- fix: don't try to encode encode to IDN with full ASCII namee.
+- fix: don't try to encode encode to IDN with full ASCII names.
 
 > this behaviour is similar to curl and fix errors some people had with docker
 > creating domain names containing a `_`
