@@ -37,7 +37,7 @@ qs_vals() = [{binary(), binary() | true}]
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#fix_path-1">fix_path/1</a></td><td></td></tr><tr><td valign="top"><a href="#make_url-3">make_url/3</a></td><td> construct an url from a base url, a path and a list of
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#fix_path-1">fix_path/1</a></td><td></td></tr><tr><td valign="top"><a href="#idnconvert_hostname-1">idnconvert_hostname/1</a></td><td></td></tr><tr><td valign="top"><a href="#make_url-3">make_url/3</a></td><td> construct an url from a base url, a path and a list of
 properties to give to the url.</td></tr><tr><td valign="top"><a href="#normalize-1">normalize/1</a></td><td>Normalizes the encoding of a Url
 use the hackney_url:pathencode/1 to encode an url.</td></tr><tr><td valign="top"><a href="#normalize-2">normalize/2</a></td><td>Normalizes the encoding of a Url.</td></tr><tr><td valign="top"><a href="#parse_qs-1">parse_qs/1</a></td><td></td></tr><tr><td valign="top"><a href="#parse_url-1">parse_url/1</a></td><td>Parse an url and return a #hackney_url record.</td></tr><tr><td valign="top"><a href="#pathencode-1">pathencode/1</a></td><td>encode a URL path.</td></tr><tr><td valign="top"><a href="#qs-1">qs/1</a></td><td>encode query properties to binary.</td></tr><tr><td valign="top"><a href="#qs-2">qs/2</a></td><td>encode query properties to binary
 Opts are passed to urlencode.</td></tr><tr><td valign="top"><a href="#transport_scheme-1">transport_scheme/1</a></td><td></td></tr><tr><td valign="top"><a href="#unparse_url-1">unparse_url/1</a></td><td></td></tr><tr><td valign="top"><a href="#urldecode-1">urldecode/1</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urldecode-2">urldecode/2</a></td><td>Decode a URL encoded binary.</td></tr><tr><td valign="top"><a href="#urlencode-1">urlencode/1</a></td><td>URL encode a string binary.</td></tr><tr><td valign="top"><a href="#urlencode-2">urlencode/2</a></td><td>URL encode a string binary.</td></tr></table>
@@ -52,6 +52,12 @@ Opts are passed to urlencode.</td></tr><tr><td valign="top"><a href="#transport_
 ### fix_path/1 ###
 
 `fix_path(Path) -> any()`
+
+<a name="idnconvert_hostname-1"></a>
+
+### idnconvert_hostname/1 ###
+
+`idnconvert_hostname(Host) -> any()`
 
 <a name="make_url-3"></a>
 

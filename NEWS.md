@@ -1,5 +1,20 @@
 # NEWS
 
+1.15.1 - 2019-02-26
+-------------------
+
+- fix: don't try to encode encode to IDN with full ASCII namee.
+
+> this behaviour is similar to curl and fix errors some people had with docker
+> creating domain names containing a `_`
+
+- doc: clarify `recv_timeout` usage
+- fix: don't try to encode hostname IPs to IDN
+- fix: path encoding to suppor `(` `)` characters
+- bump mimerl to 1.2
+- bump certifi to 2.5.1
+
+
 1.15.0 - 2019-01-04
 -------------------
 
