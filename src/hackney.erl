@@ -554,7 +554,7 @@ resume_stream(Ref) ->
                                                end).
 
 %% @doc stop to receive asynchronously.
--spec stop_async(client_ref()) -> ok | {error, req_not_found} | {error, term()}.
+-spec stop_async(client_ref()) -> {ok, client_ref()} | {error, req_not_found} | {error, term()}.
 stop_async(Ref) ->
   hackney_manager:stop_async_response(Ref).
 
