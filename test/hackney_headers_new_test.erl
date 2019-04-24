@@ -39,12 +39,16 @@ key_type_test() ->
 store_test() ->
   A = [{<<"Foo">>, <<"Bar">>}],
   B = [{<<"Bar">>, <<"Baz">>}],
+  C = [{<<"Baz">>, <<"Bar">>}],
   Ha = hackney_headers_new:from_list(A),
   Hb = hackney_headers_new:from_list(B),
-  
+  Hc = hackney_headers_new:from_list(C),
+
   Expected1 = [{<<"Foo">>, <<"Bar">>}, {<<"Bar">>, <<"Baz">>}],
   Expected2 = [{<<"Bar">>, <<"Baz">>}, {<<"Foo">>, <<"Bar">>}],
-  
+  Expected3 = [{<<"Baz">>, <<"Bar">>},
+               {<<"Foo">>, <<"Bar">>},
+               {<<"Foo">>, <<"Baz">>}],  
   
   ?assertEqual(
     Expected1,
@@ -53,6 +57,12 @@ store_test() ->
   ?assertEqual(
     Expected2,
     hackney_headers_new:to_list(hackney_headers_new:store(<<"Foo">>, <<"Bar">>, Hb))
+  ),
+  ?assertEqual(
+    Expected3,
+    hackney_headers_new:to_list(hackney_headers_new:store(<<"Foo">>,
+                                                          [<<"Bar">>, <<"Baz">>],
+                                                          Hc))
   ).
 
 merge_test() ->
