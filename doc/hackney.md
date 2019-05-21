@@ -588,7 +588,7 @@ and headers of the response. and return
 ### stop_async/1 ###
 
 <pre><code>
-stop_async(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error, req_not_found} | {error, term()}
+stop_async(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, <a href="#type-client_ref">client_ref()</a>} | {error, req_not_found} | {error, term()}
 </code></pre>
 <br />
 
