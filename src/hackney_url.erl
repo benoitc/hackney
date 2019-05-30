@@ -7,7 +7,7 @@
 %%% Copyright (c) 2011, Magnus Klaar <magnus.klaar@gmail.com>
 %%%
 
-%% @doc module to manage urls.
+%% @doc module to manage URLs.
 
 -module(hackney_url).
 
@@ -30,7 +30,7 @@
 -type qs_vals() :: [{binary(), binary() | true}].
 -type qs_opt() :: noplus | upper.
 
-%% @doc Parse an url and return a #hackney_url record.
+%% @doc Parse an URL and return a #hackney_url record.
 -spec parse_url(URL::binary()|list()) -> hackney_url().
 parse_url(URL) when is_list(URL) ->
   case unicode:characters_to_binary(URL) of
@@ -63,15 +63,15 @@ parse_url(URL, S) ->
         fragment = Fragment})
   end.
 
-%% @doc Normalizes the encoding of a Url
-%% use the hackney_url:pathencode/1 to encode an url
+%% @doc Normalizes the encoding of an URL.
+%% Use the {@link hackney_url:pathencode/1} to encode an URL.
 -spec normalize(URL) -> NormalizedUrl when
   URL :: binary() | list() | hackney_url(),
   NormalizedUrl :: hackney_url().
 normalize(Url) ->
   normalize(Url, fun hackney_url:pathencode/1).
 
-%% @doc Normalizes the encoding of a Url
+%% @doc Normalizes the encoding of an URL.
 -spec normalize(URL, Fun) -> NormalizedUrl when
   URL :: binary() | list() | hackney_url(),
   Fun :: fun(),
@@ -256,13 +256,13 @@ parse_fragment(S) ->
   end.
 
 
-%% @doc Decode a URL encoded binary.
+%% @doc Decode an URL encoded binary.
 %% @equiv urldecode(Bin, crash)
 -spec urldecode(binary()) -> binary().
 urldecode(Bin) when is_binary(Bin) ->
   urldecode(Bin, <<>>, crash).
 
-%% @doc Decode a URL encoded binary.
+%% @doc Decode an URL encoded binary.
 %% The second argument specifies how to handle percent characters that are not
 %% followed by two valid hex characters. Use `skip' to ignore such errors,
 %% if `crash' is used the function will fail with the reason `badarg'.
@@ -341,7 +341,7 @@ tohexl(C) when C < 10 -> $0 + C;
 tohexl(C) when C < 16 -> $a + C - 10.
 
 
-%% parse a query or a form from a binary and return a list of properties
+%% Parse a query or a form from a binary and return a list of properties.
 -spec parse_qs(binary()) -> qs_vals().
 parse_qs(<<>>) ->
   [];
@@ -355,13 +355,13 @@ parse_qs(Bin) ->
    end || Token <- Tokens].
 
 
-%% @doc encode query properties to binary
+%% @doc Encode query properties to binary.
 -spec qs(qs_vals()) -> binary().
 qs(KVs) ->
   qs(KVs, []).
 
-%% @doc encode query properties to binary
-%% Opts are passed to urlencode.
+%% @doc Encode query properties to binary.
+%% Opts are passed to {@link urlencode/2.}
 -spec qs(qs_vals(), [qs_opt()]) -> binary().
 qs(KVs, Opts) ->
   qs(KVs, Opts, []).
@@ -374,8 +374,8 @@ qs([{K, V}|R], Opts, Acc) ->
   Line = << K1/binary, "=", V1/binary >>,
   qs(R, Opts, [Line | Acc]).
 
-%% @doc  construct an url from a base url, a path and a list of
-%% properties to give to the url.
+%% @doc Construct an URL from a base URL, a path and a list of
+%% properties to give to the URL.
 -spec make_url(binary(), binary() | [binary()], binary() | qs_vals())
     -> binary().
 make_url(Url, Path, Query) when is_list(Query) ->
@@ -409,7 +409,7 @@ fix_path(Path) ->
     _ -> Path
   end.
 
-%% @doc encode a URL path
+%% @doc Encode an URL path.
 %% @equiv pathencode(Bin, [])
 -spec pathencode(binary()) -> binary().
 pathencode(Bin) ->
