@@ -69,7 +69,7 @@ store(Key, Values, {N, Headers}) when is_list(Values) ->
   KL = ?kl(Key),
   lists:foldl(
     fun(V, {I, H}) ->
-      {I + 1, dict:append(KL, [{I, Key, V}], H)}
+      {I + 1, dict:append(KL, {I, Key, V}, H)}
     end,
     {N, dict:store(KL, [], Headers)},
     Values
