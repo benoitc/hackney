@@ -95,8 +95,8 @@ stream_loop(Parent, Owner, Ref, #client{transport=Transport,
       Transport:controlling_process(Socket, Parent),
       Owner ! {hackney_response, Ref, done};
     {error, _Reason} = Error ->
-      hackney_manager:handle_error(Client),
-      Owner ! {hackney_response, Ref, Error}
+      Owner ! {hackney_response, Ref, Error},
+      hackney_manager:handle_error(Client)
   end.
 
 maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
@@ -196,8 +196,8 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
               end
           end;
         {error, Error} ->
-          hackney_manager:handle_error(Client),
-          Owner ! {hackney_response, Ref, {error, Error}}
+          Owner ! {hackney_response, Ref, {error, Error}},
+          hackney_manager:handle_error(Client)
       end;
     false when StatusInt =:= 303, Method =:= post ->
       Transport:setopts(Socket, [{active, false}]),
@@ -223,8 +223,8 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
               end
           end;
         {error, Error} ->
-          hackney_manager:handle_error(Client),
-          Owner ! {hackney_response, Ref, {error, Error}}
+          Owner ! {hackney_response, Ref, {error, Error}},
+          hackney_manager:handle_error(Client)
       end;
     _ ->
       Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
