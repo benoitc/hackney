@@ -95,7 +95,7 @@ cancel_request(Ref) ->
 %% @doc set client options.
 %% Options are:
 %% - `async': to fetch the response asynchronously
-%% - `{async, once}': to receive the response asynchronously once time.
+%% - `{async, once}': to receive the response asynchronously one time.
 %% To receive the next message use the function `hackney:stream_next/1'.
 %% - `{stream_to, pid()}': to set the pid where the messages of an
 %% asynchronous response will be sent.
