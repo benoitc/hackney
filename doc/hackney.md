@@ -529,7 +529,7 @@ setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt;
 set client options.
 Options are:
 - `async`: to fetch the response asynchronously
-- `{async, once}`: to receive the response asynchronously once time.
+- `{async, once}`: to receive the response asynchronously one time.
 To receive the next message use the function `hackney:stream_next/1`.
 - `{stream_to, pid()}`: to set the pid where the messages of an
 asynchronous response will be sent.
@@ -642,4 +642,3 @@ stream_next(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error,
 
 continue to the next stream message. Only use it when
 `{async, once}` is set in the client options.
-
