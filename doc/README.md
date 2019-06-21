@@ -423,6 +423,51 @@ Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, Body1} = hackney:body(Ref).
 ```
 
+### Use SSL/TLS with self signed certificates
+
+Hackney uses CA bundles adapted from Mozilla by
+[certifi](https://hex.pm/packages/certifi).
+Recognising an organisation specific (self signed) certificates is possible
+by providing the necessary `ssl_options`. Note that `ssl_options` overrides all
+options passed to the ssl module.
+
+ex (>= Erlang 21):
+
+```erlang
+
+CACertFile = <path_to_self_signed_ca_bundle>,
+CrlCheckTimeout = 5000,
+SSLOptions = [
+{verify, verify_peer},
+{versions, ['tlsv1.2']},
+{cacertfile, CACertFile},
+{crl_check, peer},
+{crl_cache, {ssl_crl_cache, {internal, [{http, CrlCheckTimeout}]}}},
+{customize_hostname_check,
+  [{match_fun, public_key:pkix_verify_hostname_match_fun(https)}]}],
+
+Method = get,
+URL = "http://my-organisation/",
+ReqHeaders = [],
+ReqBody = <<>>,
+Options = [{ssl_options, SSLoptions}],
+{ok, S, H, Ref} = hackney:request(Method, URL, ReqHeaders,
+                                  ReqBody, Options),
+
+%% To provide client certificate:
+
+CertFile = <path_to_client_certificate>,
+KeyFile = <path_to_client_private_key>,
+SSLOptions1 = SSLoptions ++ [
+{certfile, CertFile},
+{keyfile, KeyFile}
+],
+Options1 = [{ssl_options, SSLoptions1}],
+{ok, S1, H1, Ref1} = hackney:request(Method, URL, ReqHeaders,
+                                     ReqBody, Options1).
+
+```
+
 ### Proxy a connection
 
 #### HTTP Proxy
