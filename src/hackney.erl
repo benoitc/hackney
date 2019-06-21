@@ -272,17 +272,19 @@ request(Method, URL, Headers, Body) ->
 %%      </li>
 %%  </ul>
 %%
-%%  <bloquote>Note: instead of doing `hackney:request(Method, ...)' you can
+%%  <blockquote>Note: instead of doing `hackney:request(Method, ...)' you can
 %%  also do `hackney:Method(...)' if you prefer to use the REST
-%%  syntax.</bloquote>
+%%  syntax.</blockquote>
 %%
 %%  Return:
 %%  <ul>
 %%  <li><code>{ok, ResponseStatus, ResponseHeaders}</code>: On HEAD
 %%  request if the response succeeded.</li>
-%%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: when
+%%  <li><code>{ok, ResponseStatus, ResponseHeaders, Ref}</code>: When
 %%  the response succeeded. The request reference is used later to
 %%  retrieve the body.</li>
+%%  <li><code>{ok, ResponseStatus, ResponseHeaders, Body}</code>: When the
+%%  option `with_body' is set to true and the response succeeded.</li>
 %%  <li><code>{ok, Ref}</code> Return the request reference when you
 %%  decide to stream the request. You can use the returned reference to
 %%  stream the request body and continue to handle the response.</li>
@@ -294,6 +296,7 @@ request(Method, URL, Headers, Body) ->
 %%  </ul>
 -spec request(term(), url() | binary() | list(), list(), term(), list())
     -> {ok, integer(), list(), client_ref()}
+  | {ok, integer(), list(), binary()}
   | {ok, integer(), list()}
   | {ok, client_ref()}
   | {error, term()}.
