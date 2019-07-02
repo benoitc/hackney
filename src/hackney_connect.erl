@@ -185,9 +185,7 @@ is_pool(#client{options=Opts}) ->
   case proplists:get_value(pool, Opts) of
     false ->
       false;
-    undefined when UseDefaultPool =:= true ->
-      true;
-    undefined ->
+    undefined when UseDefaultPool =:= false ->
       false;
     _ ->
       true
