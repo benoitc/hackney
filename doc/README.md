@@ -484,7 +484,7 @@ been started.
 |hackney.POOLNAME.take_rate    |meter    | meter recording rate at which a connection is retrieved from the pool|
 |hackney.POOLNAME.no_socket    |counter  | Count of new connections                                             |
 |hackney.POOLNAME.in_use_count |histogram| How many connections from the pool are used                          |
-|hackney.POOLNAME.free_count   |counter  | Number of free sockets in the pool                                   |
+|hackney.POOLNAME.free_count   |histogram| Number of free sockets in the pool                                   |
 |hackney.POOLNAME.queue_counter|histogram| queued clients                                                       |
 
 ## Contribute
