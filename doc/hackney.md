@@ -273,7 +273,7 @@ make a request
 ### request/5 ###
 
 <pre><code>
-request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary() | list(), Headers0::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
+request(Method::term(), Hackney_url::<a href="#type-url">url()</a> | binary() | list(), Headers0::list(), Body::term(), Options0::list()) -&gt; {ok, integer(), list(), <a href="#type-client_ref">client_ref()</a>} | {ok, integer(), list(), binary()} | {ok, integer(), list()} | {ok, <a href="#type-client_ref">client_ref()</a>} | {error, term()}
 </code></pre>
 <br />
 
@@ -392,18 +392,21 @@ to connect to an HTTP tunnel.
 
 
 
-<bloquote>Note: instead of doing `hackney:request(Method, ...)` you can
+<blockquote>Note: instead of doing `hackney:request(Method, ...)` you can
 also do `hackney:Method(...)` if you prefer to use the REST
-syntax.</bloquote>
+syntax.</blockquote>
 
 Return:
 
 * `{ok, ResponseStatus, ResponseHeaders}`: On HEAD
 request if the response succeeded.
 
-* `{ok, ResponseStatus, ResponseHeaders, Ref}`: when
+* `{ok, ResponseStatus, ResponseHeaders, Ref}`: When
 the response succeeded. The request reference is used later to
 retrieve the body.
+
+* `{ok, ResponseStatus, ResponseHeaders, Body}`: When the
+option `with_body` is set to true and the response succeeded.
 
 * `{ok, Ref}` Return the request reference when you
 decide to stream the request. You can use the returned reference to
@@ -642,3 +645,4 @@ stream_next(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; ok | {error,
 
 continue to the next stream message. Only use it when
 `{async, once}` is set in the client options.
+
