@@ -602,7 +602,7 @@ init_metrics(PoolName) ->
   _ = metrics:new(Engine, counter, [hackney_pool, PoolName, no_socket]),
   _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, in_use_count]),
   _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, free_count]),
-  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_counter]),
+  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_count]),
   Engine.
 
 delete_metrics(Engine, PoolName) ->
@@ -610,7 +610,7 @@ delete_metrics(Engine, PoolName) ->
   _ = metrics:delete(Engine, [hackney_pool, PoolName, no_socket]),
   _ = metrics:delete(Engine, [hackney_pool, PoolName, in_use_count]),
   _ = metrics:delete(Engine, [hackney_pool, PoolName, free_count]),
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, queue_counter]),
+  _ = metrics:delete(Engine, [hackney_pool, PoolName, queue_count]),
   ok.
 
 
