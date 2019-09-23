@@ -558,7 +558,7 @@ Running the tests:
 
 ```
 $ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
+$ rebar3 eunit
 $ kill `cat httpbin.pid`
 '''
 
