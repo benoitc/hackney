@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2019 Benoît Chesneau.
 
-__Version:__ 1.15.1
+__Version:__ 1.15.2
 
 # hackney
 
@@ -566,7 +566,7 @@ Running the tests:
 
 ```
 $ gunicorn --daemon --pid httpbin.pid httpbin:app
-$ make test
+$ rebar3 eunit
 $ kill `cat httpbin.pid`
 ```
 

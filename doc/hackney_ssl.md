@@ -125,7 +125,7 @@ __See also:__ [ssl:setopts/2](ssl.md#setopts-2).
 ### shutdown/2 ###
 
 <pre><code>
-shutdown(Socket::<a href="ssl.md#type-socket">ssl:socket()</a>, How::read | write | read_write) -&gt; ok
+shutdown(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, How::read | write | read_write) -&gt; ok | {error, any()}
 </code></pre>
 <br />
 

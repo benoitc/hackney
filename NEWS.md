@@ -1,5 +1,19 @@
 # NEWS
 
+1.15.2 - 2019-09-25
+-------------------
+
+- doc: fix tes run example in readme
+- fix: hackney stream, send `hackney_response` before calling `handle_error` 
+- fix: error remove ssl `honor_cipher_order` option
+- doc: document self-signed certificate usage
+- bump `ssl_verify_fun` to 1.1.5 
+- fix: don't use default pool if set to false
+- fix: `hackney_headers_new:store/3`  fix value appending to a list
+- fix: miscellaeous specs
+- doc: miscellaneous improvements
+
+
 1.15.1 - 2019-02-26
 -------------------
 
