@@ -26,10 +26,6 @@
       {maxr, 10},
       {maxt, 1}]},
 
-    {maintainers,
-      ["Benoit Chesneau",
-        "Eduardo Gurgel"
-      ]},
     {licenses, ["Apache 2.0"]},
     {links, [{"Github", "https://github.com/benoitc/hackney"}]},
     {files, [
