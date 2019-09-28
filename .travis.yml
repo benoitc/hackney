@@ -1,12 +1,12 @@
 language: erlang
 otp_release:
+  - 22.1
   - 22.0
-  - 21.0.2
-  - 20.3
-  - 19.3
+  - 21.3
 
 env:
   - TEST=1
+
 before_script:
     - kerl list installations
     - "gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&"
