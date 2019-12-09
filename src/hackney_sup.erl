@@ -16,9 +16,6 @@
 
 -include("hackney.hrl").
 
-%% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
-
 %% ===================================================================
 %% API functions
 %% ===================================================================
@@ -40,6 +37,13 @@ init([]) ->
   _ = ets:new(?CONFIG, [set, named_table, public]),
   %% initialize the metric engine
   hackney_metrics:init(),
-  Manager = ?CHILD(hackney_manager, worker),
-  {ok, { {one_for_one, 10000, 1}, [Manager]}}.
+  Specs = [% manager
+           #{ id => hackney_manager,
+              start => {hackney_manager, start_link, []} }
+          ],
+
+  SupFlags = #{ strategy => one_for_one,
+                intensity => 10000,
+                period => 1 },
+  {ok, { SupFlags, Specs}}.
 
