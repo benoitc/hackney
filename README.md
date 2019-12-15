@@ -365,7 +365,8 @@ Options = [{timeout, 150000}, {max_connections, 100}],
 ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
-`timeout` is the time we keep the connection alive in the pool,
+`timeout` is the connection idle timeout. Connection will be closed and removed from the pool after this.
+
 `max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
