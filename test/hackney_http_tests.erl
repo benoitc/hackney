@@ -32,3 +32,15 @@ parse_response_header_with_continuation_line_test() ->
   {header, Header1, ST4} = hackney_http:execute(ST3),
   ?assertEqual({<<"Other-Header">>, <<"test">>}, Header1),
 	{headers_complete, _ST5} = hackney_http:execute(ST4).
+
+parse_response_correct_200_leading_newlines_test() ->
+	Response = <<"\r\nHTTP/1.1 200 OK\r\n\r\n">>,
+	St = #hparser{},
+	{response, _Version, StatusInt, Reason, _NState} = hackney_http:execute(St, Response),
+	?assertEqual(StatusInt, 200),
+	?assertEqual(Reason, <<"OK">>).
+
+parse_response_error_too_many_newlines_test() ->
+	Response = <<"\r\nHTTP/1.1 200 OK\r\n\r\n">>,
+	St = #hparser{max_empty_lines = 0},
+	{error, bad_request} = hackney_http:execute(St, Response).
