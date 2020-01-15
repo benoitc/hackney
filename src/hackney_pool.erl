@@ -69,20 +69,30 @@ checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   %% Fall back to using connect_timeout if checkout_timeout is not set
   CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
-  case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
+  case Transport of
+    hackney_http_connect ->
+      ConnectOpts = proplists:get_value(connect_options, Opts),
+      ConnectHost = proplists:get_value(connect_host, ConnectOpts),
+      ConnectPort = proplists:get_value(connect_port, ConnectOpts),
+      ConnectTransport = proplists:get_value(connect_transport, ConnectOpts),
+      CheckinReference = {Host, Port, Transport,
+                          ConnectHost, ConnectPort, ConnectTransport};
+    _ ->
+      CheckinReference = {Host, Port, Transport,
+                          undefined, undefined, undefined}
+  end,
+  case catch gen_server:call(Pool, {checkout, CheckinReference,
     Pid, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
-      CheckinReference = {Host, Port, Transport},
       {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
     {error, no_socket, Owner} ->
-      CheckinReference = {Host, Port, Transport},
       {error, no_socket, {Name, RequestRef, CheckinReference, Owner,
         Transport}};
     {error, Reason} ->
       {error, Reason};
     {'EXIT', {timeout, _}} ->
       % socket will still checkout so to avoid deadlock we send in a cancellation
-      gen_server:cast(Pool, {checkout_cancel, {Host, Port, Transport}, RequestRef}),
+      gen_server:cast(Pool, {checkout_cancel, CheckinReference, RequestRef}),
       {error, checkout_timeout}
   end.
 
@@ -359,7 +369,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 terminate(_Reason, #state{name=PoolName, metrics=Engine, sockets=Sockets}) ->
   %% close any sockets in the pool
-  lists:foreach(fun({Socket, {{_, _, Transport}, Timer}}) ->
+  lists:foreach(fun({Socket, {{_, _, Transport, _, _, _}, Timer}}) ->
     cancel_timer(Socket, Timer),
     Transport:close(Socket)
                 end, dict:to_list(Sockets)),
@@ -386,7 +396,7 @@ dequeue(Dest, Ref, State) ->
       monitor_client(Dest, Ref2, State2)
   end.
 
-find_connection({_Host, _Port, Transport}=Dest, Pid,
+find_connection({_Host, _Port, Transport, _, _, _}=Dest, Pid,
   #state{connections=Conns, sockets=Sockets}=State) ->
   case dict:find(Dest, Conns) of
     {ok, [S | Rest]} ->
@@ -425,7 +435,7 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     [hackney, State#state.name, free_count],
     dict:size(Sockets)),
   case dict:find(Socket, Sockets) of
-    {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
+    {ok, {{_Host, _Port, Transport, _, _, _}=Key, Timer}} ->
       cancel_timer(Socket, Timer),
         catch Transport:close(Socket),
       ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
@@ -437,7 +447,7 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
   end.
 
 
-store_socket({_Host, _Port, Transport} = Dest, Socket,
+store_socket({_Host, _Port, Transport, _, _, _} = Dest, Socket,
   #state{timeout=Timeout, connections=Conns,
     sockets=Sockets}=State) ->
   Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
@@ -471,7 +481,7 @@ cancel_timer(Socket, Timer) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
+add_to_queue({_Host, _Port, _Transport, _, _, _} = Dest, From, Ref, Queues) ->
   case dict:find(Dest, Queues) of
     error ->
       dict:store(Dest, queue:in({From, Ref}, queue:new()), Queues);
@@ -482,7 +492,7 @@ add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
+del_from_queue({_Host, _Port, _Transport, _, _, _} = Dest, Ref, Queues) ->
   case dict:find(Dest, Queues) of
     error ->
       {Queues, false};
@@ -501,7 +511,7 @@ del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
+queue_out({_Host, _Port, _Transport, _, _, _} = Dest, Queues) ->
   case dict:find(Dest, Queues) of
     error ->
       empty;
@@ -519,7 +529,7 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
+deliver_socket(Socket, {_, _, Transport, _, _, _} = Dest, State) ->
   #state{queues = Queues, pending=Pending} = State,
   case queue_out(Dest, Queues) of
     empty ->
