@@ -148,7 +148,8 @@ execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
     done -> done;
     on_first_line -> parse_first_line(NBuffer, St1, 0);
     on_header -> parse_headers(St1);
-    on_body -> parse_body(St1)
+    on_body -> parse_body(St1);
+    on_trailers -> parse_trailers(St1)
   end.
 
 %% Empty lines must be using \r\n.
@@ -263,14 +264,7 @@ parse_version(_, _, _, _) ->
 
 %% @doc fetch all headers
 parse_headers(#hparser{}=St) ->
-  case parse_header(St) of
-    {more, St2} ->
-      {more, St2};
-    {headers_complete, St2} ->
-      {headers_complete, St2};
-    {header, KV, St2} ->
-      {header, KV, St2}
-  end.
+  parse_header(St).
 
 
 parse_header(#hparser{buffer=Buf}=St) ->
@@ -322,12 +316,19 @@ parse_header(Line, St) ->
 parse_header_value(H) ->
   hackney_bstr:trim(H).
 
+parse_trailers(St) ->
+  case parse_trailers(St, []) of
+    {ok, _Trailers, #hparser{buffer=Rest1}} ->
+      {done, Rest1};
+    {more, St2} ->
+      {more, St2}
+  end.
 
 parse_trailers(St, Acc) ->
   case parse_headers(St) of
     {header, Header, St2} -> parse_trailers(St2, [Header | Acc]);
     {headers_complete, St2} -> {ok, lists:reverse(Acc), St2};
-    _ -> error
+    {more, St2} -> {more, St2}
   end.
 
 parse_body(#hparser{body_state=waiting, method= <<"HEAD">>, buffer=Buffer}) ->
@@ -375,12 +376,7 @@ transfer_decode(Data, St=#hparser{
             TransferState2,
             ContentDecode}});
     {chunk_done, Rest} ->
-      case parse_trailers(St#hparser{buffer=Rest}, []) of
-        {ok, _Trailers, #hparser{buffer=Rest1}} ->
-          {done, Rest1};
-        _ ->
-          {done, Rest}
-      end;
+      parse_trailers(St#hparser{buffer=Rest, state=on_trailers, body_state=done});
     {chunk_ok, Chunk, Rest} ->
       {ok, Chunk, St#hparser{buffer=Rest}};
     more ->
