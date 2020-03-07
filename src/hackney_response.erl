@@ -328,6 +328,8 @@ read_body(_MaxLength, Client, Acc) ->
 
 maybe_close(#client{socket=nil}) ->
   true;
+maybe_close(#client{connection= <<"close">>}) ->
+  true;
 maybe_close(#client{version={Min,Maj}, headers=Headers, clen=CLen}) ->
   Connection = hackney_bstr:to_lower(
                  hackney_headers_new:get_value(<<"connection">>, Headers, <<"">>)
