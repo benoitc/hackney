@@ -169,7 +169,7 @@ parse_first_line(Buffer, St=#hparser{type=Type,
       {error, bad_request};
     1 ->
       << _:16, Rest/binary >> = Buffer,
-      parse_first_line(Rest, St, Empty + 1);
+      parse_first_line(Rest, St#hparser{buffer=Rest}, Empty + 1);
     _ when Type =:= auto ->
       case parse_request_line(St) of
         {request, _Method, _URI, _Version, _NState} = Req -> Req;
