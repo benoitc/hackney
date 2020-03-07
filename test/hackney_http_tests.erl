@@ -32,3 +32,24 @@ parse_response_header_with_continuation_line_test() ->
   {header, Header1, ST4} = hackney_http:execute(ST3),
   ?assertEqual({<<"Other-Header">>, <<"test">>}, Header1),
 	{headers_complete, _ST5} = hackney_http:execute(ST4).
+
+parse_chunked_response_crlf_test() ->
+	P0 = hackney_http:parser([response]),
+	{_, _, _, _, P1} = hackney_http:execute(P0, <<"HTTP/1.1 200 OK\r\n">>),
+	{_, _, P2} = hackney_http:execute(P1, <<"Transfer-Encoding: chunked\r\n">>),
+	{_, P3} = hackney_http:execute(P2, <<"\r\n">>),
+
+	?assertEqual({done, <<>>}, hackney_http:execute(P3, <<"0\r\n\r\n">>)),
+	?assertEqual({done, <<"a">>}, hackney_http:execute(P3, <<"0\r\n\r\na">>)),
+	{more, P4_1} = hackney_http:execute(P3, <<"0\r\n">>),
+	?assertEqual({done, <<>>}, hackney_http:execute(P4_1, <<"\r\n">>)),
+	{more, P4_2} = hackney_http:execute(P3, <<"0\r\n\r">>),
+	?assertEqual({done, <<>>}, hackney_http:execute(P4_2, <<"\n">>)).
+
+parse_chunked_response_trailers_test() ->
+	P0 = hackney_http:parser([response]),
+	{_, _, _, _, P1} = hackney_http:execute(P0, <<"HTTP/1.1 200 OK\r\n">>),
+	{_, _, P2} = hackney_http:execute(P1, <<"Transfer-Encoding: chunked\r\n">>),
+	{_, P3} = hackney_http:execute(P2, <<"\r\n">>),
+	{more, P4} = hackney_http:execute(P3, <<"0\r\nFoo: ">>),
+	?assertEqual({done, <<>>}, hackney_http:execute(P4, <<"Bar\r\n\r\n">>)).
