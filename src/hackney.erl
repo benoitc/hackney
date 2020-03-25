@@ -884,13 +884,12 @@ absolute_url(RelativeUrl, #client{transport=T, host=Host, port=Port,
                   _       -> <<Path/binary, "/", RelativeUrl/binary>>
                 end
             end,
-  Parsed = hackney_url:normalize(#hackney_url{scheme=Scheme,
-                                              host=Host,
-                                              port=Port,
-                                              netloc=Netloc,
-                                              path=NewPath}),
-  hackney_url:unparse_url(Parsed).
 
+  hackney_url:unparse_url(#hackney_url{scheme=Scheme,
+                                       host=Host,
+                                       port=Port,
+                                       netloc=Netloc,
+                                       path=NewPath}).
 
 %% handle send response
 reply({ok, Data, NState}, _State) ->
