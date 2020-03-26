@@ -233,6 +233,20 @@ parse_url_test_() ->
                           port = 80,
                           user = <<"username">>,
                           password = <<"pass word">>}
+            },
+            % From HTTP Basic Authentication RFC https://tools.ietf.org/html/rfc7617
+            {<<"http://Aladdin:open%20sesame@www.example.com">>,
+             #hackney_url{transport =hackney_tcp,
+                          scheme = http,
+                          netloc = <<"www.example.com">>,
+                          raw_path = <<"">>,
+                          path = <<"/">>,
+                          qs = <<"">>,
+                          fragment = <<"">>,
+                          host = "www.example.com",
+                          port = 80,
+                          user = <<"Aladdin">>,
+                          password = <<"open sesame">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
