@@ -149,9 +149,12 @@ unparse_url(#hackney_url{}=Url) ->
               <<>> ->
                 Netloc;
               _ when Password /= <<>>, Password /= <<"">> ->
-                << User/binary, ":", Password/binary, "@", Netloc/binary >>;
+              EncodedUser = urlencode(User),
+              EncodedPassword = urlencode(Password),
+                << EncodedUser/binary, ":", EncodedPassword/binary, "@", Netloc/binary >>;
               _ ->
-                << User/binary, "@", Netloc/binary >>
+                EncodedUser = urlencode(User),
+                << EncodedUser/binary, "@", Netloc/binary >>
             end,
 
   Qs1 = case Qs of
@@ -197,11 +200,11 @@ parse_addr(Addr, S) ->
       case binary:split(Credentials, <<":">>) of
         [User, Password] ->
           parse_netloc(Addr1, S#hackney_url{netloc=Addr1,
-            user = User,
-            password = Password});
+            user = urldecode(User),
+            password = urldecode(Password)});
         [User] ->
           parse_netloc(Addr1, S#hackney_url{netloc = Addr1,
-            user = User,
+            user = urldecode(User),
             password = <<>> })
       end
 

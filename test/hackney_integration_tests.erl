@@ -11,6 +11,7 @@ all_tests() ->
    not_modified_response(),
    basic_auth_request_failed(),
    basic_auth_request(),
+   basic_auth_url_request(),
    set_cookie_request(),
    send_cookies_request(),
    absolute_redirect_request_no_follow(),
@@ -76,6 +77,11 @@ basic_auth_request() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
     Options = [{basic_auth, {<<"username">>, <<"password">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
+    ?_assertEqual(200, StatusCode).
+
+basic_auth_url_request() ->
+    URL = <<"http://username:pass%26word@localhost:8000/basic-auth/username/pass%26word">>,
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
 
 basic_auth_request_failed() ->
