@@ -506,14 +506,19 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
     error ->
       empty;
     {ok, Q} ->
-      {{value, {From, Ref}}, Q2} = queue:out(Q),
-      Queues2 = case queue:is_empty(Q2) of
-                  true ->
-                    dict:erase(Dest, Queues);
-                  false ->
-                    dict:store(Dest, Q2, Queues)
-                end,
-      {ok, {From, Ref}, Queues2}
+      case queue:out(Q) of
+        {{value, {From, Ref}}, Q2} ->
+          Queues2 = case queue:is_empty(Q2) of
+                      true ->
+                        dict:erase(Dest, Queues);
+                      false ->
+                        dict:store(Dest, Q2, Queues)
+                    end,
+          {ok, {From, Ref}, Queues2};
+        {empty, _} ->
+          %% fix race condition
+          empty
+      end
   end.
 
 %------------------------------------------------------------------------------
