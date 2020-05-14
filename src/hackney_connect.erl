@@ -330,7 +330,7 @@ ssl_opts_1(Host, Options) ->
     false ->
       VerifyFun = {
         fun ssl_verify_hostname:verify_fun/3,
-        [{check_hostname, Host}]
+        [{check_hostname, string_compat:strip(Host, right, $.)}]
        },
       [{verify, verify_peer},
        {depth, 99},
