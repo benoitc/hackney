@@ -321,16 +321,17 @@ ssl_opts(Host, Options) ->
       SSLOpts
   end.
 
-ssl_opts_1(Host, Options) ->
+ssl_opts_1(Host0, Options) ->
   Insecure =  proplists:get_value(insecure, Options, false),
   CACerts = certifi:cacerts(),
   case Insecure of
     true ->
       [{verify, verify_none}];
     false ->
+      Host1 = string_compat:strip(Host0, right, $.),
       VerifyFun = {
         fun ssl_verify_hostname:verify_fun/3,
-        [{check_hostname, string_compat:strip(Host, right, $.)}]
+        [{check_hostname, Host1}]
        },
       [{verify, verify_peer},
        {depth, 99},
@@ -338,6 +339,7 @@ ssl_opts_1(Host, Options) ->
        {partial_chain, fun partial_chain/1},
        {verify_fun, VerifyFun}]
   end.
+
 
 %% code from rebar3 undert BSD license
 partial_chain(Certs) ->

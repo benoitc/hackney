@@ -63,14 +63,15 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
 
   BaseOpts = [binary, {active, false}, {packet, raw},
-    {secure_renegotiate, true},
-    {reuse_sessions, true},
-    {versions, proplists:get_value(available, ssl:versions())},
-    {ciphers, ciphers()}],
+              {secure_renegotiate, true},
+              {reuse_sessions, true},
+              {versions, ['tlsv1.2', 'tlsv1.1', tlsv1]},
+              {ciphers, ciphers()}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
-  Host1 = parse_address(Host),
+
+
   %% connect
-  ssl:connect(Host1, Port, Opts1, Timeout).
+  ssl:connect(Host, Port, Opts1, Timeout).
 
 
 ciphers() ->
