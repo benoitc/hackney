@@ -323,22 +323,50 @@ ssl_opts(Host, Options) ->
 
 ssl_opts_1(Host0, Options) ->
   Insecure =  proplists:get_value(insecure, Options, false),
-  CACerts = certifi:cacerts(),
   case Insecure of
     true ->
       [{verify, verify_none}];
     false ->
       Host1 = string_compat:strip(Host0, right, $.),
-      VerifyFun = {
+      SslOpts = [{verify, verify_peer},
+                 {depth, 99},
+                 {cacertfile, certifi:cacertfile()},
+                 {partial_chain, fun partial_chain/1}],
+      ssl_check_hostname_opts(Host1, SslOpts)
+  end.
+
+
+-ifdef(no_proxy_sni_support).
+ssl_check_hostname_opts(Host, Opts) ->
+  VerifyFun = {
         fun ssl_verify_hostname:verify_fun/3,
         [{check_hostname, Host1}]
        },
-      [{verify, verify_peer},
-       {depth, 99},
-       {cacerts, CACerts},
-       {partial_chain, fun partial_chain/1},
-       {verify_fun, VerifyFun}]
-  end.
+
+  [{verify_fun, VerifyFun}|Opts].
+-else.
+ssl_check_hostname_opts(Host, Opts) ->
+  [{server_name_indication, Host},
+   {customize_hostname_check, [{match_fun, fun match_fun/2}]} | Opts].
+
+match_fun({dns_id, Ref}, {dNSName, [$*, $. | Host]}) ->
+  case fqdn(Ref) of
+    [] ->
+      default;
+    Domain ->
+      string_compat:equal(Domain, Host, true)
+  end;
+match_fun(_, _) ->
+  default.
+
+
+fqdn([]) -> [];
+fqdn([$. | Domain]) -> Domain;
+fqdn([_ | Rest]) -> fqdn(Rest).
+
+-endif.
+
+
 
 
 %% code from rebar3 undert BSD license
