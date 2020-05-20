@@ -47,7 +47,7 @@ receive_response(Ref) ->
 checkout(_Host, _Port, _Transport, _Client) -> {error, no_socket, make_ref()}.
 handle_connection_close() ->
     URL = <<"http://localhost:8000/get">>,
-    Options = [async, pool],
+    Options = [async, {pool, false}],
 
     % Notice that ?MODULE has checkout/4 but not checkin, so if this test
     % passes, it means that checkin was not called (which is intended for closed
@@ -55,13 +55,11 @@ handle_connection_close() ->
     application:set_env(hackney, pool_handler, ?MODULE),
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     application:set_env(hackney, pool_handler, hackney_pool),
-
-    Socket = proplists:get_value(socket, hackney:request_info(ClientRef)),
     Dict = receive_response(ClientRef, orddict:new(), 5000),
     Headers = hackney_headers_new:from_list(orddict:fetch(headers, Dict)),
     CloseHeader = hackney_headers_new:get_value(<<"connection">>, Headers),
     [?_assertEqual(<<"close">>, CloseHeader),
-     ?_assertEqual({error, closed}, gen_tcp:send(Socket, <<>>))
+     ?_assertEqual({error, req_not_found},  hackney:request_info(ClientRef))
     ].
 
 receive_response(Ref, Dict0, Timeout) ->

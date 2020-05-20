@@ -69,9 +69,8 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
               {ciphers, ciphers()}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
 
-
   %% connect
-  ssl:connect(Host, Port, Opts1, Timeout).
+  ssl:connect(parse_address(Host), Port, Opts1, Timeout).
 
 
 ciphers() ->
