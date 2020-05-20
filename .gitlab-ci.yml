@@ -1,5 +1,3 @@
-image: erlang:23
-
 before_script:
     - apt-get -q update
     - apt-get -y install python3
@@ -8,7 +6,36 @@ before_script:
     - pip3 install -q gunicorn
     - gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&
 
-test:
+
+OTP-20.3:
+    image: erlang:20
+
     script:
-        - ./support/rebar3 eunit
-        - ./support/rebar3 dialyzer
+    - ./support/rebar3 eunit
+    - ./support/rebar3 dialyzer
+
+
+OTP-21:
+    image: erlang:21
+
+
+    script:
+    - ./support/rebar3 eunit
+    - ./support/rebar3 dialyzer
+
+
+OTP-22:
+    image: erlang:22
+
+    script:
+    - ./support/rebar3 eunit
+    - ./support/rebar3 dialyzer
+
+
+OTP-23:
+    image: erlang:23
+
+    script:
+    - ./support/rebar3 eunit
+    - ./support/rebar3 dialyzer
+
