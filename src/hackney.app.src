@@ -15,6 +15,7 @@
       idna,
       mimerl,
       certifi,
+      parse_trans,
       ssl_verify_fun,
       metrics]},
     {included_applications, []},

@@ -6,6 +6,8 @@
 %%% Copyright (c) 2011-2012, Loïc Hoguin <essen@ninenines.eu>
 
 -module(hackney_ssl).
+-compile({parse_transform, ct_expand}).
+
 -export([messages/1,
   connect/3, connect/4,
   recv/3, recv/2,
@@ -18,9 +20,6 @@
   sockname/1]).
 
 -export([check_hostname_opts/1]).
-
-
--include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -88,16 +87,14 @@ decoded_cacerts() ->
   ct_expand:term(
     lists:foldl(fun(Cert, Acc) ->
                     Dec = public_key:pkix_decode_cert(Cert, otp),
-                    [extract_public_key_info(Dec) | Acc]
+                    [hackney_ssl_certificate:public_key_info(Dec) | Acc]
                 end, [], certifi:cacerts())
    ).
 
 
-extract_public_key_info(Cert) ->
-  ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
-
 check_cert(CACerts, Cert) ->
-  lists:member(extract_public_key_info(Cert), CACerts).
+  PublicKeyInfo = hackney_ssl_certificate:public_key_info(Cert),
+  lists:member(PublicKeyInfo, CACerts).
 
 
 -spec find(fun(), list()) -> {ok, term()} | error.

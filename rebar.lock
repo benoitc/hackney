@@ -3,7 +3,7 @@
  {<<"idna">>,{pkg,<<"idna">>,<<"6.0.1">>},0},
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},0},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.2.0">>},0},
- {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.3.0">>},1},
+ {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.3.0">>},0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.6">>},0},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.5.0">>},1}]}.
 [
