@@ -355,21 +355,15 @@ check_hostname_opt(_Host, Opts) ->
 server_name_indication_opt(_Host, Opts) -> Opts.
 -else.
 server_name_indication_opt(Host, Opts) ->
-  io:format("host=~p", [Host]),
   [{server_name_indication, Host} | Opts].
 -endif.
-
-
 
 %% code from rebar3 undert BSD license
 partial_chain(Certs) ->
   Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
-    Cert <- Certs]),
-  CACerts = certifi:cacerts(),
-  CACerts1 = [public_key:pkix_decode_cert(Cert, otp) || Cert <- CACerts],
-
+                          Cert <- Certs]),
   case find(fun({_, Cert}) ->
-    check_cert(CACerts1, Cert)
+                check_cert(decoded_cacerts(), Cert)
             end, Certs1) of
     {ok, Trusted} ->
       {trusted_ca, element(1, Trusted)};
@@ -377,13 +371,22 @@ partial_chain(Certs) ->
       unknown_ca
   end.
 
+
+%% instead of parsing every time, compile this list at runtime
+decoded_cacerts() ->
+  ct_expand:term(
+    lists:foldl(fun(Cert, Acc) ->
+                    Dec = public_key:pkix_decode_cert(Cert, otp),
+                    [extract_public_key_info(Dec) | Acc]
+                end, [], certifi:cacerts())
+   ).
+
+
 extract_public_key_info(Cert) ->
   ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
 
 check_cert(CACerts, Cert) ->
-  lists:any(fun(CACert) ->
-    extract_public_key_info(CACert) == extract_public_key_info(Cert)
-            end, CACerts).
+  lists:member(extract_public_key_info(Cert), CACerts).
 
 -spec find(fun(), list()) -> {ok, term()} | error.
 find(Fun, [Head|Tail]) when is_function(Fun) ->
