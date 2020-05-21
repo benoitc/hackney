@@ -323,7 +323,10 @@ ssl_opts_1(Host, Options) ->
   Insecure =  proplists:get_value(insecure, Options, false),
   case Insecure of
     true ->
-      [{verify, verify_none}];
+      [{verify, verify_none} | ssl_opts_2()];
     false ->
-      hackney_ssl:check_hostname_opts(Host)
+      hackney_ssl:check_hostname_opts(Host) ++ ssl_opts_2()
   end.
+
+ssl_opts_2() ->
+    hackney_ssl:cipher_opts().

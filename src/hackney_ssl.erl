@@ -20,6 +20,7 @@
   sockname/1]).
 
 -export([check_hostname_opts/1]).
+-export([cipher_opts/0]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -50,6 +51,27 @@ check_hostname_opts(Host0) ->
 
   check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts)).
 
+-ifdef(buggy_chacha_ciphers).
+cipher_opts() ->
+    % Workaround for buggy ChaCha cipher in OTP 20, which breaks connectivity sometimes.
+    % See: https://bugs.erlang.org/browse/ERL-538
+    ct_expand:term(
+      (fun () ->
+               % This will be evaluated at compile time
+               TLSVersionsInfo = ssl:versions(),
+               {_, SupportedTLSVersions} = lists:keyfind(supported, 1, TLSVersionsInfo),
+               DefaultCipherSuitesPerTLSVersion = [ssl:cipher_suites(default, TLSVersion)
+                                                   || TLSVersion <- SupportedTLSVersions],
+               DefaultCipherSuites = lists:flatten(DefaultCipherSuitesPerTLSVersion),
+               CipherFilter = fun (Cipher) -> Cipher =/= chacha20_poly1305 end,
+               Ciphers = ssl:filter_cipher_suites(DefaultCipherSuites, [{cipher, CipherFilter}]),
+               [{ciphers, Ciphers}]
+       end)()
+     ).
+-else.
+cipher_opts() ->
+    [].
+-endif.
 
 -ifdef(no_customize_hostname_check).
 check_hostname_opt(_Host, Opts) ->
