@@ -55,7 +55,6 @@ parse_url(URL, S) ->
   {URL1, Fragment} =  parse_fragment(URL),
   case binary:split(URL1, <<"/">>) of
     [URL1] ->
-      io:format("got URL1=~p frag=~p~n", [URL1, Fragment]),
       parse_addr1(URL1, S#hackney_url{raw_path = raw_fragment(Fragment),
                                       path = <<>>,
                                       fragment = Fragment});
