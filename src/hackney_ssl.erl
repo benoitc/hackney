@@ -17,29 +17,10 @@
   shutdown/2,
   sockname/1]).
 
-%% from https://wiki.mozilla.org/Security/Server_Side_TLS
--define(DEFAULT_CIPHERS,
-  ["ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384",
-    "ECDHE-ECDSA-AES256-SHA384","ECDHE-RSA-AES256-SHA384", "ECDHE-ECDSA-DES-CBC3-SHA",
-    "ECDH-ECDSA-AES256-GCM-SHA384","ECDH-RSA-AES256-GCM-SHA384","ECDH-ECDSA-AES256-SHA384",
-    "ECDH-RSA-AES256-SHA384","DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
-    "AES256-GCM-SHA384","AES256-SHA256","ECDHE-ECDSA-AES128-GCM-SHA256",
-    "ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES128-SHA256","ECDHE-RSA-AES128-SHA256",
-    "ECDH-ECDSA-AES128-GCM-SHA256","ECDH-RSA-AES128-GCM-SHA256","ECDH-ECDSA-AES128-SHA256",
-    "ECDH-RSA-AES128-SHA256","DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
-    "AES128-GCM-SHA256","AES128-SHA256","ECDHE-ECDSA-AES256-SHA",
-    "ECDHE-RSA-AES256-SHA","DHE-DSS-AES256-SHA","ECDH-ECDSA-AES256-SHA",
-    "ECDH-RSA-AES256-SHA","AES256-SHA","ECDHE-ECDSA-AES128-SHA",
-    "ECDHE-RSA-AES128-SHA","DHE-DSS-AES128-SHA","ECDH-ECDSA-AES128-SHA",
-    "ECDH-RSA-AES128-SHA","AES128-SHA"]).
-
--define(WITHOUT_ECC_CIPHERS,
-  ["DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
-    "AES256-GCM-SHA384","AES256-SHA256", "DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
-    "AES128-GCM-SHA256","AES128-SHA256", "DHE-DSS-AES256-SHA", "AES256-SHA",
-    "DHE-DSS-AES128-SHA", "AES128-SHA"]).
+-export([check_hostname_opts/1]).
 
 
+-include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -56,30 +37,94 @@ parse_address(Host) when is_list(Host) ->
   end.
 
 
+check_hostname_opts(Host0) ->
+  Host1 = string_compat:strip(Host0, right, $.),
+  VerifyFun = {
+    fun ssl_verify_hostname:verify_fun/3,
+    [{check_hostname, Host1}]
+   },
+  SslOpts = [{verify, verify_peer},
+             {depth, 100},
+             {cacerts, certifi:cacerts()},
+             {partial_chain, fun partial_chain/1},
+             {verify_fun, VerifyFun}],
+
+  check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts)).
+
+
+-ifdef(no_customize_hostname_check).
+check_hostname_opt(_Host, Opts) ->
+  Opts.
+-else.
+check_hostname_opt(_Host, Opts) ->
+  MatchFun = public_key:pkix_verify_hostname_match_fun(https),
+  [{customize_hostname_check, [{match_fun, MatchFun}]} | Opts].
+-endif.
+
+
+-ifdef(no_proxy_sni_support).
+server_name_indication_opt(_Host, Opts) -> Opts.
+-else.
+server_name_indication_opt(Host, Opts) ->
+  [{server_name_indication, Host} | Opts].
+-endif.
+
+%% code from rebar3 undert BSD license
+partial_chain(Certs) ->
+  Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
+                          Cert <- Certs]),
+  case find(fun({_, Cert}) ->
+                check_cert(decoded_cacerts(), Cert)
+            end, Certs1) of
+    {ok, Trusted} ->
+      {trusted_ca, element(1, Trusted)};
+    _ ->
+      unknown_ca
+  end.
+
+
+%% instead of parsing every time, compile this list at runtime
+decoded_cacerts() ->
+  ct_expand:term(
+    lists:foldl(fun(Cert, Acc) ->
+                    Dec = public_key:pkix_decode_cert(Cert, otp),
+                    [extract_public_key_info(Dec) | Acc]
+                end, [], certifi:cacerts())
+   ).
+
+
+extract_public_key_info(Cert) ->
+  ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
+
+check_cert(CACerts, Cert) ->
+  lists:member(extract_public_key_info(Cert), CACerts).
+
+
+-spec find(fun(), list()) -> {ok, term()} | error.
+find(Fun, [Head|Tail]) when is_function(Fun) ->
+  case Fun(Head) of
+    true ->
+      {ok, Head};
+    false ->
+      find(Fun, Tail)
+  end;
+find(_Fun, []) ->
+  error.
+
+
 connect(Host, Port, Opts) ->
   connect(Host, Port, Opts, infinity).
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
-
   BaseOpts = [binary, {active, false}, {packet, raw},
               {secure_renegotiate, true},
-              {reuse_sessions, true},
-              {versions, ['tlsv1.2', 'tlsv1.1', tlsv1]},
-              {ciphers, ciphers()}],
+              {reuse_sessions, true}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
-
   %% connect
   ssl:connect(parse_address(Host), Port, Opts1, Timeout).
 
 
-ciphers() ->
-  case lists:keymember(ecdh_rsa, 1, ssl:cipher_suites()) of
-    true -> ?DEFAULT_CIPHERS;
-    false ->
-      error_logger:warning_msg("hackney_ssl: ECC not enabled"),
-      ?WITHOUT_ECC_CIPHERS
-  end.
 
 recv(Socket, Length) ->
   recv(Socket, Length, infinity).
