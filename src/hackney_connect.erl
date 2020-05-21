@@ -328,41 +328,26 @@ ssl_opts_1(Host0, Options) ->
       [{verify, verify_none}];
     false ->
       Host1 = string_compat:strip(Host0, right, $.),
+      VerifyFun = {
+        fun ssl_verify_hostname:verify_fun/3,
+        [{check_hostname, Host1}]
+       },
       SslOpts = [{verify, verify_peer},
                  {depth, 99},
                  {cacertfile, certifi:cacertfile()},
-                 {partial_chain, fun partial_chain/1}],
+                 {partial_chain, fun partial_chain/1},
+                 {verify_fun, VerifyFun}],
       check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts))
   end.
 
 
 -ifdef(no_customize_hostname_check).
-check_hostname_opt(Host, Opts) ->
-  VerifyFun = {
-        fun ssl_verify_hostname:verify_fun/3,
-        [{check_hostname, Host}]
-       },
-
-  [{verify_fun, VerifyFun}|Opts].
+check_hostname_opt(_Host, Opts) ->
+  Opts.
 -else.
 check_hostname_opt(_Host, Opts) ->
-  [{customize_hostname_check, [{match_fun, fun match_fun/2}]} | Opts].
-
-
-match_fun({dns_id, Ref}, {dNSName, [$*, $. | Host]}) ->
-  case fqdn(Ref) of
-    [] ->
-      default;
-    Domain ->
-      string_compat:equal(Domain, Host, true)
-  end;
-match_fun(_, _) ->
-  default.
-
-
-fqdn([]) -> [];
-fqdn([$. | Domain]) -> Domain;
-fqdn([_ | Rest]) -> fqdn(Rest).
+  MatchFun = public_key:pkix_verify_hostname_match_fun(https),
+  [{customize_hostname_check, [{match_fun, MatchFun}]} | Opts].
 -endif.
 
 
@@ -370,8 +355,10 @@ fqdn([_ | Rest]) -> fqdn(Rest).
 server_name_indication_opt(_Host, Opts) -> Opts.
 -else.
 server_name_indication_opt(Host, Opts) ->
+  io:format("host=~p", [Host]),
   [{server_name_indication, Host} | Opts].
 -endif.
+
 
 
 %% code from rebar3 undert BSD license
