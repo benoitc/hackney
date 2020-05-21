@@ -19,28 +19,6 @@
 
 -export([check_hostname_opts/1]).
 
-%% from https://wiki.mozilla.org/Security/Server_Side_TLS
--define(DEFAULT_CIPHERS,
-  ["ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384",
-    "ECDHE-ECDSA-AES256-SHA384","ECDHE-RSA-AES256-SHA384", "ECDHE-ECDSA-DES-CBC3-SHA",
-    "ECDH-ECDSA-AES256-GCM-SHA384","ECDH-RSA-AES256-GCM-SHA384","ECDH-ECDSA-AES256-SHA384",
-    "ECDH-RSA-AES256-SHA384","DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
-    "AES256-GCM-SHA384","AES256-SHA256","ECDHE-ECDSA-AES128-GCM-SHA256",
-    "ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES128-SHA256","ECDHE-RSA-AES128-SHA256",
-    "ECDH-ECDSA-AES128-GCM-SHA256","ECDH-RSA-AES128-GCM-SHA256","ECDH-ECDSA-AES128-SHA256",
-    "ECDH-RSA-AES128-SHA256","DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
-    "AES128-GCM-SHA256","AES128-SHA256","ECDHE-ECDSA-AES256-SHA",
-    "ECDHE-RSA-AES256-SHA","DHE-DSS-AES256-SHA","ECDH-ECDSA-AES256-SHA",
-    "ECDH-RSA-AES256-SHA","AES256-SHA","ECDHE-ECDSA-AES128-SHA",
-    "ECDHE-RSA-AES128-SHA","DHE-DSS-AES128-SHA","ECDH-ECDSA-AES128-SHA",
-    "ECDH-RSA-AES128-SHA","AES128-SHA"]).
-
--define(WITHOUT_ECC_CIPHERS,
-  ["DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
-    "AES256-GCM-SHA384","AES256-SHA256", "DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
-    "AES128-GCM-SHA256","AES128-SHA256", "DHE-DSS-AES256-SHA", "AES256-SHA",
-    "DHE-DSS-AES128-SHA", "AES128-SHA"]).
-
 
 -include_lib("public_key/include/OTP-PUB-KEY.hrl").
 
@@ -139,25 +117,14 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
-
   BaseOpts = [binary, {active, false}, {packet, raw},
               {secure_renegotiate, true},
-              {reuse_sessions, true},
-              {versions, ['tlsv1.2', 'tlsv1.1', tlsv1]},
-              {ciphers, ciphers()}],
+              {reuse_sessions, true}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
-
   %% connect
   ssl:connect(parse_address(Host), Port, Opts1, Timeout).
 
 
-ciphers() ->
-  case lists:keymember(ecdh_rsa, 1, ssl:cipher_suites()) of
-    true -> ?DEFAULT_CIPHERS;
-    false ->
-      error_logger:warning_msg("hackney_ssl: ECC not enabled"),
-      ?WITHOUT_ECC_CIPHERS
-  end.
 
 recv(Socket, Length) ->
   recv(Socket, Length, infinity).
