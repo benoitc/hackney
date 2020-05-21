@@ -17,11 +17,9 @@
          close/1,
          is_pool/1]).
 
--export([partial_chain/1]).
-
 -include("hackney.hrl").
 -include_lib("hackney_internal.hrl").
--include_lib("public_key/include/OTP-PUB-KEY.hrl").
+
 
 connect(Transport, Host, Port) ->
   connect(Transport, Host, Port, []).
@@ -321,80 +319,11 @@ ssl_opts(Host, Options) ->
       SSLOpts
   end.
 
-ssl_opts_1(Host0, Options) ->
+ssl_opts_1(Host, Options) ->
   Insecure =  proplists:get_value(insecure, Options, false),
   case Insecure of
     true ->
       [{verify, verify_none}];
     false ->
-      Host1 = string_compat:strip(Host0, right, $.),
-      VerifyFun = {
-        fun ssl_verify_hostname:verify_fun/3,
-        [{check_hostname, Host1}]
-       },
-      SslOpts = [{verify, verify_peer},
-                 {depth, 99},
-                 {cacertfile, certifi:cacertfile()},
-                 {partial_chain, fun partial_chain/1},
-                 {verify_fun, VerifyFun}],
-      check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts))
+      hackney_ssl:check_hostname_opts(Host)
   end.
-
-
--ifdef(no_customize_hostname_check).
-check_hostname_opt(_Host, Opts) ->
-  Opts.
--else.
-check_hostname_opt(_Host, Opts) ->
-  MatchFun = public_key:pkix_verify_hostname_match_fun(https),
-  [{customize_hostname_check, [{match_fun, MatchFun}]} | Opts].
--endif.
-
-
--ifdef(no_proxy_sni_support).
-server_name_indication_opt(_Host, Opts) -> Opts.
--else.
-server_name_indication_opt(Host, Opts) ->
-  [{server_name_indication, Host} | Opts].
--endif.
-
-%% code from rebar3 undert BSD license
-partial_chain(Certs) ->
-  Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
-                          Cert <- Certs]),
-  case find(fun({_, Cert}) ->
-                check_cert(decoded_cacerts(), Cert)
-            end, Certs1) of
-    {ok, Trusted} ->
-      {trusted_ca, element(1, Trusted)};
-    _ ->
-      unknown_ca
-  end.
-
-
-%% instead of parsing every time, compile this list at runtime
-decoded_cacerts() ->
-  ct_expand:term(
-    lists:foldl(fun(Cert, Acc) ->
-                    Dec = public_key:pkix_decode_cert(Cert, otp),
-                    [extract_public_key_info(Dec) | Acc]
-                end, [], certifi:cacerts())
-   ).
-
-
-extract_public_key_info(Cert) ->
-  ((Cert#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo).
-
-check_cert(CACerts, Cert) ->
-  lists:member(extract_public_key_info(Cert), CACerts).
-
--spec find(fun(), list()) -> {ok, term()} | error.
-find(Fun, [Head|Tail]) when is_function(Fun) ->
-  case Fun(Head) of
-    true ->
-      {ok, Head};
-    false ->
-      find(Fun, Tail)
-  end;
-find(_Fun, []) ->
-  error.
