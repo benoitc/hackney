@@ -3,7 +3,7 @@
  scheme           :: atom(),
  netloc   = <<>>  :: binary(),
  raw_path         :: binary() | undefined,
- path             :: binary() | undefined | nil,
+ path = <<>>      :: binary() | undefined | nil,
  qs = <<>>        :: binary(),
  fragment = <<>>  :: binary(),
  host = ""        :: string(),

@@ -19,6 +19,19 @@ parse_and_unparse_url_test_() ->
                           user = <<"">>,
                           password = <<"">>}
             },
+            {<<"http://www.example.com">>,
+             #hackney_url{transport =hackney_tcp,
+                          scheme = http,
+                          netloc = <<"www.example.com">>,
+                          raw_path = <<"">>,
+                          path = <<>>,
+                          qs = <<"">>,
+                          fragment = <<"">>,
+                          host = "www.example.com",
+                          port = 80,
+                          user = <<"">>,
+                          password = <<"">>}
+            },
             {<<"http://www.example.com/">>,
              #hackney_url{transport =hackney_tcp,
                           scheme = http,
@@ -148,6 +161,19 @@ parse_and_unparse_url_test_() ->
                           port = 0,
                           user = <<"user">>,
                           password = <<"">>}
+            },
+            {<<"http://example.com#-@127.2.2.2/232d40">>,
+             #hackney_url{transport =hackney_tcp,
+                          scheme = http,
+                          netloc = <<"example.com">>,
+                          raw_path = <<"#-@127.2.2.2/232d40">>,
+                          path = <<>>,
+                          qs = <<"">>,
+                          fragment = <<"-@127.2.2.2/232d40">>,
+                          host = "example.com",
+                          port = 80,
+                          user = <<"">>,
+                          password = <<"">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests] ++
@@ -187,7 +213,7 @@ parse_url_test_() ->
                           scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"">>,
-                          path = <<"/">>,
+                          path = <<>>,
                           qs = <<"">>,
                           fragment = <<"">>,
                           host = "www.example.com",
@@ -200,7 +226,7 @@ parse_url_test_() ->
                           scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"?q=123">>,
-                          path = <<"/">>,
+                          path = <<>>,
                           qs = <<"q=123">>,
                           fragment = <<"">>,
                           host = "www.example.com",
@@ -213,7 +239,7 @@ parse_url_test_() ->
                           scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"">>,
-                          path = <<"/">>,
+                          path = <<>>,
                           qs = <<"">>,
                           fragment = <<"">>,
                           host = "www.example.com",
@@ -226,7 +252,7 @@ parse_url_test_() ->
                           scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"">>,
-                          path = <<"/">>,
+                          path = <<>>,
                           qs = <<"">>,
                           fragment = <<"">>,
                           host = "www.example.com",
@@ -240,13 +266,26 @@ parse_url_test_() ->
                           scheme = http,
                           netloc = <<"www.example.com">>,
                           raw_path = <<"">>,
-                          path = <<"/">>,
+                          path = <<>>,
                           qs = <<"">>,
                           fragment = <<"">>,
                           host = "www.example.com",
                           port = 80,
                           user = <<"Aladdin">>,
                           password = <<"open sesame">>}
+            },
+            {<<"http://example.com#-@127.2.2.2/232d40">>,
+             #hackney_url{transport =hackney_tcp,
+                          scheme = http,
+                          netloc = <<"example.com">>,
+                          raw_path = <<"#-@127.2.2.2/232d40">>,
+                          path = <<>>,
+                          qs = <<"">>,
+                          fragment = <<"-@127.2.2.2/232d40">>,
+                          host = "example.com",
+                          port = 80,
+                          user = <<"">>,
+                          password = <<"">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
@@ -356,7 +395,7 @@ normalize_test_() ->
          "%E3%81%AA%E3%81%8C%E3%81%8F%E3%81%97%E3%81%AA%E3%81%84%E3%81%A8%E3" ++
          "%81%9F%E3%82%8A%E3%81%AA%E3%81%84.w3.mag.keio.ac.jp",
          << "http://www.xn--n8jaaaaai5bhf7as8fsfk3jnknefdde3f",
-           "g11amb5gzdb4wi9bya3kc6lra.w3.mag.keio.ac.jp/" >>}],
+           "g11amb5gzdb4wi9bya3kc6lra.w3.mag.keio.ac.jp" >>}],
     [{V, fun() -> R = hackney_url:unparse_url(hackney_url:normalize(V))
             end} || {V, R} <- Tests].
 
