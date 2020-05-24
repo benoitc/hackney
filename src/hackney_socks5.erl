@@ -32,7 +32,7 @@ ssl_opts(Host, Opts) ->
 -else.
 
 ssl_opts(Host, Opts) ->
-  [{server_name_indication, Host} | hackney_connect:ssl_opts(Host,Opts)].
+  [{server_name_indication, Host} | hackney_connection:ssl_opts(Host,Opts)].
 
 -endif.
 

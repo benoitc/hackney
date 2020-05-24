@@ -27,12 +27,12 @@
 -ifdef(no_proxy_sni_support).
 
 ssl_opts(Host, Opts) ->
-  hackney_connect:ssl_opts(Host, Opts).
+  hackney_connection:ssl_opts(Host, Opts).
 
 -else.
 
 ssl_opts(Host, Opts) ->
-  [{server_name_indication, Host} | hackney_connect:ssl_opts(Host,Opts)].
+  [{server_name_indication, Host} | hackney_connection:ssl_opts(Host,Opts)].
 
 -endif.
 
@@ -49,19 +49,19 @@ connect(ProxyHost, ProxyPort, Opts) ->
 connect(ProxyHost, ProxyPort, Opts, Timeout)
   when is_list(ProxyHost), is_integer(ProxyPort),
        (Timeout =:= infinity orelse is_integer(Timeout)) ->
-  
+
   %% get the  host and port to connect from the options
   Host = proplists:get_value(connect_host, Opts),
   Port = proplists:get_value(connect_port, Opts),
   Transport = proplists:get_value(connect_transport, Opts),
-  
+
   %% filter connection options
   AcceptedOpts =  [linger, nodelay, send_timeout,
     send_timeout_close, raw, inet6],
   BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
     {nodelay, true}],
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
-  
+
   %% connnect to the proxy, and upgrade the socket if needed.
   case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts) of
     {ok, Socket} ->
@@ -153,7 +153,7 @@ do_handshake(Socket, Host, Port, Options) ->
   ProxyUser = proplists:get_value(connect_user, Options),
   ProxyPass = proplists:get_value(connect_pass, Options, <<>>),
   ProxyPort = proplists:get_value(connect_port, Options),
-  
+
   %% set defaults headers
   HostHdr = case ProxyPort of
               80 ->
@@ -164,7 +164,7 @@ do_handshake(Socket, Host, Port, Options) ->
   UA =  hackney_request:default_ua(),
   Headers0 = [<<"Host: ", HostHdr/binary>>,
     <<"User-Agent: ", UA/binary >>],
-  
+
   Headers = case ProxyUser of
               undefined ->
                 Headers0;
@@ -174,7 +174,7 @@ do_handshake(Socket, Host, Port, Options) ->
                 Headers0 ++ [<< "Proxy-Authorization: Basic ", Credentials/binary >>]
             end,
   Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
-  
+
   Payload = [<< "CONNECT ", Path/binary, " HTTP/1.1", "\r\n" >>,
     hackney_bstr:join(lists:reverse(Headers), <<"\r\n">>),
     <<"\r\n\r\n">>],

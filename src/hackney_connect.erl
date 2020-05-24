@@ -10,7 +10,6 @@
          maybe_connect/1,
          reconnect/4,
          set_sockopts/2,
-         ssl_opts/2,
          check_or_close/1,
          peername/1,
          sockname/1,
@@ -231,6 +230,9 @@ socket_from_pool(Host, Port, Transport, Client0) ->
 
       do_connect(Host, Port, Transport, Client1, pool);
     Error ->
+      ?report_trace("connect error", []),
+      _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
+
       Error
   end.
 
@@ -238,36 +240,12 @@ do_connect(Host, Port, Transport, Client) ->
   do_connect(Host, Port, Transport, Client, direct).
 
 
-connect_options(Transport, Host, #client{options=Opts}) ->
-  ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
-
-  %% handle ipv6
-  ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
-                      lists:member(inet6, ConnectOpts0) of
-                   true ->
-                     ConnectOpts0;
-                   false ->
-                     case hackney_util:is_ipv6(Host) of
-                       true ->
-                         [inet6 | ConnectOpts0];
-                       false ->
-                         ConnectOpts0
-                     end
-                 end,
-
-  case Transport of
-    hackney_ssl ->
-      ConnectOpts1 ++ ssl_opts(Host, Opts);
-    _ ->
-      ConnectOpts1
-  end.
-
-
 connect_timeout(#client{options=Opts}) ->
   proplists:get_value(connect_timeout, Opts, 8000).
 
 
-do_connect(Host, Port, Transport, #client{mod_metrics=Metrics}=Client0, Type) ->
+do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
+                                          options=ClientOptions}=Client0, Type) ->
   Begin = os:timestamp(),
   {_RequestRef, Client} = case Type of
                             pool ->
@@ -277,8 +255,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Metrics}=Client0, Type) ->
                           end,
 
   ConnectTimeout = connect_timeout(Client),
-  ConnectOpts = connect_options(Transport, Host, Client),
-
+  ConnectOpts = hackney_connection:connect_options(Transport, Host, ClientOptions),
 
   case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
     {ok, Skt} ->
@@ -317,24 +294,3 @@ check_mod_metrics(#client{mod_metrics=Mod}=State)
 check_mod_metrics(State) ->
   State#client{mod_metrics=hackney_metrics:get_engine()}.
 
-ssl_opts(Host, Options) ->
-  case proplists:get_value(ssl_options, Options) of
-    undefined ->
-      ssl_opts_1(Host, Options);
-    [] ->
-      ssl_opts_1(Host, Options);
-    SSLOpts ->
-      SSLOpts
-  end.
-
-ssl_opts_1(Host, Options) ->
-  Insecure =  proplists:get_value(insecure, Options, false),
-  case Insecure of
-    true ->
-      [{verify, verify_none} | ssl_opts_2()];
-    false ->
-      hackney_ssl:check_hostname_opts(Host) ++ ssl_opts_2()
-  end.
-
-ssl_opts_2() ->
-  hackney_ssl:cipher_opts().

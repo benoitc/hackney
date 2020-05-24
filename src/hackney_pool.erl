@@ -59,47 +59,68 @@ start() ->
   ok.
 
 %% @doc fetch a socket from the pool
-checkout(Host0, Port, Transport, #client{options=Opts}=Client) ->
-  Host = string:to_lower(Host0),
+checkout(Host, _Port, Transport, #client{options=Opts,
+                                          mod_metrics=Metrics}=Client) ->
+  Connection = hackney_connection:new(Client),
   Pid = self(),
   RequestRef = Client#client.request_ref,
-  Name = proplists:get_value(pool, Opts, default),
-  Pool = find_pool(Name, Opts),
+  PoolName = proplists:get_value(pool, Opts, default),
+  Pool = find_pool(PoolName, Opts),
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   %% Fall back to using connect_timeout if checkout_timeout is not set
   CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
-  case catch gen_server:call(Pool, {checkout, {Host, Port, Transport},
-                                    Pid, RequestRef}, CheckoutTimeout) of
+  case catch gen_server:call(Pool, {checkout, Connection, Pid, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
-      CheckinReference = {Host, Port, Transport},
-      {ok, {Name, RequestRef, CheckinReference, Owner, Transport}, Socket};
+
+      %% stats
+      ?report_debug("reuse a connection", [{pool, PoolName}]),
+      _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
+      _ = metrics:increment_counter(Metrics, [hackney_pool, Host, reuse_connection]),
+
+
+      {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
     {error, no_socket, Owner} ->
-      CheckinReference = {Host, Port, Transport},
-      {error, no_socket, {Name, RequestRef, CheckinReference, Owner,
-                          Transport}};
+      ?report_trace("no socket in the pool", [{pool, PoolName}]),
+      Begin = os:timestamp(),
+      case hackney_connection:connect(Connection, ConnectTimeout) of
+        {ok, Socket} ->
+
+          ?report_trace("new connection", []),
+          ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
+          _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
+          _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
+
+          {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
+        {error, timeout} ->
+          _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
+          {error, timeout};
+        Error ->
+          ?report_trace("connect error", []),
+          _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
+          Error
+      end;
     {error, Reason} ->
       {error, Reason};
     {'EXIT', {timeout, _}} ->
       % socket will still checkout so to avoid deadlock we send in a cancellation
-      gen_server:cast(Pool, {checkout_cancel, {Host, Port, Transport}, RequestRef}),
+      gen_server:cast(Pool, {checkout_cancel, Connection, RequestRef}),
       {error, checkout_timeout}
   end.
 
 %% @doc release a socket in the pool
-checkin({_Name, Ref, Dest, Owner, Transport}, Socket) ->
-  Transport:setopts(Socket, [{active, false}]),
-  case sync_socket(Transport, Socket) of
+checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
+  hackney_connection:setopts(Connection, Socket, [{active, false}]),
+  case hackney_connection:sync_socket(Connection, Socket) of
     true ->
-      case Transport:controlling_process(Socket, Owner) of
+      case hackney_connection:controlling_process(Connection, Socket, Owner) of
         ok ->
-          gen_server:call(Owner, {checkin, Ref, Dest, Socket, Transport},
-                          infinity);
+          gen_server:call(Owner, {checkin, Ref, Connection, Socket, Transport}, infinity);
         _Error ->
-          catch Transport:close(Socket),
+          catch hackney_connection:close(Connection,Socket),
           ok
       end;
     false ->
-      catch Transport:close(Socket),
+      catch hackney_connection:close(Connection, Socket),
       ok
   end.
 
@@ -385,18 +406,17 @@ dequeue(Dest, Ref, State) ->
       monitor_client(Dest, Ref2, State2)
   end.
 
-find_connection({_Host, _Port, Transport}=Dest, Pid,
-                #state{connections=Conns, sockets=Sockets}=State) ->
-  case dict:find(Dest, Conns) of
+find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=State) ->
+  case dict:find(Connection, Conns) of
     {ok, [S | Rest]} ->
-      Transport:setopts(S, [{active, false}]),
-      case sync_socket(Transport, S) of
+      hackney_connection:setopts(Connection, S, [{active, false}]),
+      case hackney_connection:sync_socket(Connection, S) of
         true ->
-          case Transport:controlling_process(S, Pid) of
+          case hackney_connection:controlling_process(Connection, S, Pid) of
             ok ->
               {_, Timer} = dict:fetch(S, Sockets),
               cancel_timer(S, Timer),
-              NewConns = update_connections(Rest, Dest, Conns),
+              NewConns = update_connections(Rest, Connection, Conns),
               NewSockets = dict:erase(S, Sockets),
               NewState = State#state{connections=NewConns, sockets=NewSockets},
               {{ok, S, self()}, NewState};
@@ -404,16 +424,15 @@ find_connection({_Host, _Port, Transport}=Dest, Pid,
               %% something happened here normally the PID died,
               %% but make sure we still have the control of the
               %% process
-              catch Transport:controlling_process(S, self()),
+              catch hackney_connection:controlling_process(Connection, S, self()),
               %% and then close it
-              find_connection(Dest, Pid,
-                              remove_socket(S,  State));
+              find_connection(Connection, Pid, remove_socket(S,  State));
             _Else ->
-              find_connection(Dest, Pid, remove_socket(S, State))
+              find_connection(Connection, Pid, remove_socket(S, State))
           end;
         false ->
           ?report_trace("checkout: socket unsynced~n", []),
-          find_connection(Dest, Pid, remove_socket(S, State))
+          find_connection(Connection, Pid, remove_socket(S, State))
       end;
     _Else ->
       {no_socket, State}
@@ -424,11 +443,11 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
                                [hackney, State#state.name, free_count],
                                dict:size(Sockets)),
   case dict:find(Socket, Sockets) of
-    {ok, {{_Host, _Port, Transport}=Key, Timer}} ->
+    {ok, {Connection, Timer}} ->
       cancel_timer(Socket, Timer),
-      catch Transport:close(Socket),
-      ConnSockets = lists:delete(Socket, dict:fetch(Key, Conns)),
-      NewConns = update_connections(ConnSockets, Key, Conns),
+      catch hackney_connection:close(Connection, Socket),
+      ConnSockets = lists:delete(Socket, dict:fetch(Connection, Conns)),
+      NewConns = update_connections(ConnSockets, Connection, Conns),
       NewSockets = dict:erase(Socket, Sockets),
       State#state{connections=NewConns, sockets=NewSockets};
     error ->
@@ -436,20 +455,19 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
   end.
 
 
-store_socket({_Host, _Port, Transport} = Dest, Socket,
-             #state{timeout=Timeout, connections=Conns,
-                    sockets=Sockets}=State) ->
+store_socket(Connection, Socket, #state{timeout=Timeout, connections=Conns,
+                                        sockets=Sockets}=State) ->
   Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
   %% make sure to close the socket if anything is received while we are in
   %% the pool.
-  Transport:setopts(Socket, [{active, once}, {packet, 0}]),
-  ConnSockets = case dict:find(Dest, Conns) of
+  hackney_connection:setopts(Connection, Socket, [{active, once}, {packet, 0}]),
+  ConnSockets = case dict:find(Connection, Conns) of
                   {ok, OldSockets} ->
                     [Socket | OldSockets];
                   error -> [Socket]
                 end,
-  State#state{connections = dict:store(Dest, ConnSockets, Conns),
-              sockets = dict:store(Socket, {Dest, Timer}, Sockets)}.
+  State#state{connections = dict:store(Connection, ConnSockets, Conns),
+              sockets = dict:store(Socket, {Connection, Timer}, Sockets)}.
 
 update_connections([], Key, Connections) ->
   dict:erase(Key, Connections);
@@ -470,19 +488,19 @@ cancel_timer(Socket, Timer) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-add_to_queue({_Host, _Port, _Transport} = Dest, From, Ref, Queues) ->
-  case dict:find(Dest, Queues) of
+add_to_queue(Connection, From, Ref, Queues) ->
+  case dict:find(Connection, Queues) of
     error ->
-      dict:store(Dest, queue:in({From, Ref}, queue:new()), Queues);
+      dict:store(Connection, queue:in({From, Ref}, queue:new()), Queues);
     {ok, Q} ->
-      dict:store(Dest, queue:in({From, Ref}, Q), Queues)
+      dict:store(Connection, queue:in({From, Ref}, Q), Queues)
   end.
 
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
-  case dict:find(Dest, Queues) of
+del_from_queue(Connection, Ref, Queues) ->
+  case dict:find(Connection, Queues) of
     error ->
       {Queues, false};
     {ok, Q} ->
@@ -490,9 +508,9 @@ del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
       Removed = queue:len(Q) =/= queue:len(Q2),
       Queues2 = case queue:is_empty(Q2) of
                   true ->
-                    dict:erase(Dest, Queues);
+                    dict:erase(Connection, Queues);
                   false ->
-                    dict:store(Dest, Q2, Queues)
+                    dict:store(Connection, Q2, Queues)
                 end,
       {Queues2, Removed}
   end.
@@ -500,8 +518,8 @@ del_from_queue({_Host, _Port, _Transport} = Dest, Ref, Queues) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
-  case dict:find(Dest, Queues) of
+queue_out(Connection, Queues) ->
+  case dict:find(Connection, Queues) of
     error ->
       empty;
     {ok, Q} ->
@@ -509,9 +527,9 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
         {{value, {From, Ref}}, Q2} ->
           Queues2 = case queue:is_empty(Q2) of
                       true ->
-                        dict:erase(Dest, Queues);
+                        dict:erase(Connection, Queues);
                       false ->
-                        dict:store(Dest, Q2, Queues)
+                        dict:store(Connection, Q2, Queues)
                     end,
           {ok, {From, Ref}, Queues2};
         {empty, _} ->
@@ -523,53 +541,43 @@ queue_out({_Host, _Port, _Transport} = Dest, Queues) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-deliver_socket(Socket, {_, _, Transport} = Dest, State) ->
+deliver_socket(Socket, Connection, State) ->
   #state{queues = Queues, pending=Pending} = State,
-  case queue_out(Dest, Queues) of
+  case queue_out(Connection, Queues) of
     empty ->
-      store_socket(Dest, Socket, State);
+      store_socket(Connection, Socket, State);
     {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
       Pending2 = del_pending(Ref, Pending),
       _ = metrics:update_histogram(
             State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
            ),
-      case Transport:controlling_process(Socket, PidWaiter) of
+      case hackney_connection:controlling_process(Connection, Socket, PidWaiter) of
         ok ->
           gen_server:reply(FromWaiter, {ok, Socket, self()}),
-          monitor_client(Dest, Ref, State#state{queues = Queues2, pending=Pending2});
+          monitor_client(Connection, Ref, State#state{queues = Queues2, pending=Pending2});
         _Error ->
           % Something wrong, close the socket
-          _ = (catch Transport:close(Socket)),
+          _ = (catch hackney_connection:close(Connection, Socket)),
           %% and let the waiter connect to a new one
           gen_server:reply(FromWaiter, {error, no_socket, self()}),
           State#state{queues = Queues2, pending = Pending2}
       end
   end.
 
-%% check that no events from the sockets is received after setting it to
-%% passive.
-sync_socket(Transport, Socket) ->
-  {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
-  receive
-    {Msg, Socket, _} -> false;
-    {MsgClosed, Socket} -> false;
-    {MsgError, Socket, _} -> false
-  after 0 ->
-          true
-  end.
 
+add_pending(Ref, From, Connection, Pending) ->
+  dict:store(Ref, {From, Connection}, Pending).
 
-add_pending(Ref, From, Dest, Pending) ->
-  dict:store(Ref, {From, Dest}, Pending).
 
 del_pending(Ref, Pending) ->
   dict:erase(Ref, Pending).
 
+
 remove_pending(Ref, #state{queues=Queues0, pending=Pending0} = State) ->
   case dict:find(Ref, Pending0) of
-    {ok, {From, Dest}} ->
+    {ok, {From, Connection}} ->
       Pending1 = dict:erase(Ref, Pending0),
-      Queues1 = case dict:find(Dest, Queues0) of
+      Queues1 = case dict:find(Connection, Queues0) of
                   {ok, Q0} ->
                     Q1 = queue:filter(
                            fun
@@ -578,7 +586,7 @@ remove_pending(Ref, #state{queues=Queues0, pending=Pending0} = State) ->
                            end,
                            Q0
                           ),
-                    dict:store(Dest, Q1, Queues0);
+                    dict:store(Connection, Q1, Queues0);
                   error ->
                     Queues0
                 end,
@@ -592,8 +600,8 @@ remove_pending(Ref, #state{queues=Queues0, pending=Pending0} = State) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-monitor_client(Dest, Ref, State) ->
-  Clients2 = dict:store(Ref, Dest, State#state.clients),
+monitor_client(Connection, Ref, State) ->
+  Clients2 = dict:store(Ref, Connection, State#state.clients),
   State#state{clients = Clients2}.
 
 

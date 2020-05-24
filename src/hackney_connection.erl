@@ -1,0 +1,136 @@
+-module(hackney_connection).
+
+
+-export([new/1,
+         get_property/2,
+         is_ssl/1]).
+
+
+%% helpers
+-export([controlling_process/3]).
+-export([setopts/3]).
+-export([sync_socket/2]).
+-export([connect/2]).
+-export([close/2]).
+
+-export([connect_options/3]).
+-export([ssl_opts/2]).
+
+-include("hackney.hrl").
+
+
+new(#client{transport=Transport,
+            host=Host0,
+            port=Port,
+            options=ClientOptions}) ->
+  Host1 = string_compat:to_lower(Host0),
+  ConnectOptions = connect_options(Transport, Host1, ClientOptions),
+  Tunnel = maybe_tunnel(Transport),
+  new_connection_r(Transport, Host1, Port, ConnectOptions, Tunnel).
+
+
+get_property(transport, #connection{transport=Transport}) -> Transport;
+get_property(host, #connection{host=Host}) -> Host;
+get_property(port, #connection{port=Port}) -> Port;
+get_property(options, #connection{options=Options}) -> Options;
+get_property(_, _) -> erlang:error(badarg).
+
+
+is_ssl(#connection{transport=hackney_ssl}) -> true;
+is_ssl(#connection{}) -> false;
+is_ssl(_) -> erlang:error(badarg).
+
+
+controlling_process(#connection{transport=Transport}, Socket, Owner) ->
+  Transport:controlling_process(Socket, Owner).
+
+
+setopts(#connection{transport=Transport}, Socket, Opts) ->
+  Transport:setopts(Socket, Opts).
+
+
+%% check that no events from the sockets is received after setting it to
+%% passive.
+sync_socket(#connection{transport=Transport}, Socket) ->
+  {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
+  receive
+    {Msg, Socket, _} -> false;
+    {MsgClosed, Socket} -> false;
+    {MsgError, Socket, _} -> false
+  after 0 ->
+          true
+  end.
+
+
+connect(#connection{transport=Transport,
+                    host=Host,
+                    port=Port,
+                    options=ConnectOptions}, Timeout) ->
+  Transport:connect(Host, Port, ConnectOptions, Timeout).
+
+
+close(#connection{transport=Transport}, Socket) ->
+  Transport:close(Socket).
+
+
+new_connection_r(Transport, Host, Port, Options, Tunnel) ->
+  #connection{transport=Transport,
+              host=Host,
+              port=Port,
+              options=Options,
+              tunnel=Tunnel}.
+
+
+connect_options(Transport, Host, ClientOptions) ->
+  ConnectOpts0 = proplists:get_value(connect_options, ClientOptions, []),
+
+  %% handle ipv6
+  ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
+                      lists:member(inet6, ConnectOpts0) of
+                   true ->
+                     ConnectOpts0;
+                   false ->
+                     case hackney_util:is_ipv6(Host) of
+                       true ->
+                         [inet6 | ConnectOpts0];
+                       false ->
+                         ConnectOpts0
+                     end
+                 end,
+
+  case Transport of
+    hackney_ssl ->
+      ConnectOpts1 ++ ssl_opts(Host, ClientOptions);
+    _ ->
+      ConnectOpts1
+  end.
+
+
+ssl_opts(Host, Options) ->
+  case proplists:get_value(ssl_options, Options) of
+    undefined ->
+      ssl_opts_1(Host, Options);
+    [] ->
+      ssl_opts_1(Host, Options);
+    SSLOpts ->
+      SSLOpts
+  end.
+
+ssl_opts_1(Host, Options) ->
+  Insecure =  proplists:get_value(insecure, Options, false),
+  case Insecure of
+    true ->
+      [{verify, verify_none} | ssl_opts_2()];
+    false ->
+      hackney_ssl:check_hostname_opts(Host) ++ ssl_opts_2()
+  end.
+
+ssl_opts_2() ->
+  hackney_ssl:cipher_opts().
+
+
+maybe_tunnel(hackney_http_connect) ->
+  true;
+maybe_tunnel(_) ->
+  false.
+

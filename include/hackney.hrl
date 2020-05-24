@@ -1,5 +1,12 @@
 -define(RECV_TIMEOUT, 5000).
 
+
+-record(connection, {transport,
+                     host,
+                     port,
+                     options,
+                     tunnel = false}).
+
 -record(client,  {
   start_time,
   mod_metrics = nil,
