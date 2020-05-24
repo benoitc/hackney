@@ -31,9 +31,9 @@ connect(Transport, Host, Port, Options, Dynamic) when is_binary(Host) ->
   connect(Transport, binary_to_list(Host), Port, Options, Dynamic);
 connect(Transport, Host, Port, Options, Dynamic) ->
   ?report_debug("connect", [{transport, Transport},
-    {host, Host},
-    {port, Port},
-    {dynamic, Dynamic}]),
+                            {host, Host},
+                            {port, Port},
+                            {dynamic, Dynamic}]),
 
   Host2 = case Transport of
             hackney_local_tcp ->
@@ -77,22 +77,22 @@ create_connection(Transport, Host, Port, Options, Dynamic)
 
   %% initial state
   InitialState = #client{mod_metrics=Engine,
-    transport=Transport,
-    host=Host,
-    port=Port,
-    netloc=Netloc,
-    options=Options,
-    dynamic=Dynamic,
-    recv_timeout=Timeout,
-    follow_redirect=FollowRedirect,
-    max_redirect=MaxRedirect,
-    retries=MaxRedirect,
-    force_redirect=ForceRedirect,
-    async=Async,
-    with_body=WithBody,
-    max_body=MaxBody,
-    stream_to=StreamTo,
-    buffer = <<>>},
+                         transport=Transport,
+                         host=Host,
+                         port=Port,
+                         netloc=Netloc,
+                         options=Options,
+                         dynamic=Dynamic,
+                         recv_timeout=Timeout,
+                         follow_redirect=FollowRedirect,
+                         max_redirect=MaxRedirect,
+                         retries=MaxRedirect,
+                         force_redirect=ForceRedirect,
+                         async=Async,
+                         with_body=WithBody,
+                         max_body=MaxBody,
+                         stream_to=StreamTo,
+                         buffer = <<>>},
 
   %% if we use a pool then checkout the connection from the pool, else
   %% connect the socket to the remote
@@ -105,15 +105,15 @@ create_connection(Transport, Host, Port, Options, Dynamic)
 maybe_connect(#client{state=closed, redirect=nil}=Client) ->
   %% the socket has been closed, reconnect it.
   #client{transport=Transport,
-    host=Host,
-    port=Port} = Client,
+          host=Host,
+          port=Port} = Client,
   reconnect(Host, Port, Transport, Client);
 maybe_connect(#client{state=closed, redirect=Redirect}=Client) ->
   %% connection closed after a redirection, reinit the options and
   %% reconnect it.
   {Transport, Host, Port, Options} = Redirect,
   Client1 = Client#client{options=Options,
-    redirect=nil},
+                          redirect=nil},
   reconnect(Host, Port, Transport, Client1);
 maybe_connect(#client{redirect=nil}=Client) ->
   {ok, check_mod_metrics(Client)};
@@ -121,7 +121,7 @@ maybe_connect(#client{redirect=Redirect}=Client) ->
   %% reinit the options and reconnect the client
   {Transport, Host, Port, Options} = Redirect,
   reconnect(Host, Port, Transport, Client#client{options=Options,
-    redirect=nil}).
+                                                 redirect=nil}).
 
 check_or_close(#client{socket=nil}=Client) ->
   Client;
@@ -218,9 +218,9 @@ socket_from_pool(Host, Port, Transport, Client0) ->
       _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
       _ = metrics:increment_counter(Metrics, [hackney_pool, Host, reuse_connection]),
       Client1 = Client#client{socket=Skt,
-        socket_ref=Ref,
-        pool_handler=PoolHandler,
-        state = connected},
+                              socket_ref=Ref,
+                              pool_handler=PoolHandler,
+                              state = connected},
 
       hackney_manager:update_state(Client1),
       {ok, Client1};
@@ -240,7 +240,7 @@ do_connect(Host, Port, Transport, Client) ->
 
 
 do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
-  options=Opts}=Client0, Type) ->
+                                          options=Opts}=Client0, Type) ->
   Begin = os:timestamp(),
   {_RequestRef, Client} = case Type of
                             pool ->
@@ -254,7 +254,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
 
   %% handle ipv6
   ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
-    lists:member(inet6, ConnectOpts0) of
+                      lists:member(inet6, ConnectOpts0) of
                    true ->
                      ConnectOpts0;
                    false ->
@@ -279,7 +279,7 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
       _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
       _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
       Client1 = Client#client{socket=Skt,
-        state = connected},
+                              state = connected},
       hackney_manager:update_state(Client1),
       {ok, Client1};
     {error, timeout} ->
@@ -329,4 +329,4 @@ ssl_opts_1(Host, Options) ->
   end.
 
 ssl_opts_2() ->
-    hackney_ssl:cipher_opts().
+  hackney_ssl:cipher_opts().
