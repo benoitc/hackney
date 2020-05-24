@@ -38,8 +38,16 @@ start_link() ->
 init([]) ->
   %% initialize the config table
   _ = ets:new(?CONFIG, [set, named_table, public]),
+
   %% initialize the metric engine
   hackney_metrics:init(),
-  Manager = ?CHILD(hackney_manager, worker),
-  {ok, { {one_for_one, 10000, 1}, [Manager]}}.
+
+  Specs = [
+           %% manager
+           ?CHILD(hackney_manager, worker),
+           %% connections manager
+           ?CHILD(hackney_connections, worker)
+          ],
+
+  {ok, { {one_for_one, 10000, 1}, Specs}}.
 

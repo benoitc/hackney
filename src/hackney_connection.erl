@@ -2,6 +2,7 @@
 
 
 -export([new/1,
+         release/1,
          get_property/2,
          is_ssl/1]).
 
@@ -10,7 +11,7 @@
 -export([controlling_process/3]).
 -export([setopts/3]).
 -export([sync_socket/2]).
--export([connect/2]).
+-export([connect/3]).
 -export([close/2]).
 
 -export([connect_options/3]).
@@ -26,13 +27,17 @@ new(#client{transport=Transport,
   Host1 = string_compat:to_lower(Host0),
   ConnectOptions = connect_options(Transport, Host1, ClientOptions),
   Tunnel = maybe_tunnel(Transport),
-  new_connection_r(Transport, Host1, Port, ConnectOptions, Tunnel).
+  Id = hackney_connections:new_connection_id(Transport, Host1, Port, ConnectOptions),
+  Connection = new_connection_r(Transport, Host1, Port, Id, Tunnel),
+  {Connection, ConnectOptions}.
 
+release(#connection{id=Id}) ->
+  hackney_connections:release_connection_id(Id).
 
 get_property(transport, #connection{transport=Transport}) -> Transport;
 get_property(host, #connection{host=Host}) -> Host;
 get_property(port, #connection{port=Port}) -> Port;
-get_property(options, #connection{options=Options}) -> Options;
+get_property(id, #connection{id=Id}) -> Id;
 get_property(_, _) -> erlang:error(badarg).
 
 
@@ -64,8 +69,7 @@ sync_socket(#connection{transport=Transport}, Socket) ->
 
 connect(#connection{transport=Transport,
                     host=Host,
-                    port=Port,
-                    options=ConnectOptions}, Timeout) ->
+                    port=Port}, ConnectOptions, Timeout) ->
   Transport:connect(Host, Port, ConnectOptions, Timeout).
 
 
@@ -73,11 +77,11 @@ close(#connection{transport=Transport}, Socket) ->
   Transport:close(Socket).
 
 
-new_connection_r(Transport, Host, Port, Options, Tunnel) ->
+new_connection_r(Transport, Host, Port, Id, Tunnel) ->
   #connection{transport=Transport,
               host=Host,
               port=Port,
-              options=Options,
+              id=Id,
               tunnel=Tunnel}.
 
 

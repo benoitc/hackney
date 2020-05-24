@@ -4,7 +4,7 @@
 -record(connection, {transport,
                      host,
                      port,
-                     options,
+                     id,
                      tunnel = false}).
 
 -record(client,  {
@@ -55,3 +55,5 @@
 
 
 -define(CONFIG, hackney_config).
+
+-define(CONNECTIONS, hackney_connections).
