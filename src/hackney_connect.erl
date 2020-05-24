@@ -238,19 +238,8 @@ do_connect(Host, Port, Transport, Client) ->
   do_connect(Host, Port, Transport, Client, direct).
 
 
-
-do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
-                                          options=Opts}=Client0, Type) ->
-  Begin = os:timestamp(),
-  {_RequestRef, Client} = case Type of
-                            pool ->
-                              {Client0#client.request_ref, Client0};
-                            direct ->
-                              hackney_manager:new_request(Client0)
-                          end,
-
+connect_options(Transport, Host, #client{options=Opts}) ->
   ConnectOpts0 = proplists:get_value(connect_options, Opts, []),
-  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
 
   %% handle ipv6
   ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
@@ -266,12 +255,31 @@ do_connect(Host, Port, Transport, #client{mod_metrics=Metrics,
                      end
                  end,
 
-  ConnectOpts = case Transport of
-                  hackney_ssl ->
-                    ConnectOpts1 ++ ssl_opts(Host, Opts);
-                  _ ->
-                    ConnectOpts1
-                end,
+  case Transport of
+    hackney_ssl ->
+      ConnectOpts1 ++ ssl_opts(Host, Opts);
+    _ ->
+      ConnectOpts1
+  end.
+
+
+connect_timeout(#client{options=Opts}) ->
+  proplists:get_value(connect_timeout, Opts, 8000).
+
+
+do_connect(Host, Port, Transport, #client{mod_metrics=Metrics}=Client0, Type) ->
+  Begin = os:timestamp(),
+  {_RequestRef, Client} = case Type of
+                            pool ->
+                              {Client0#client.request_ref, Client0};
+                            direct ->
+                              hackney_manager:new_request(Client0)
+                          end,
+
+  ConnectTimeout = connect_timeout(Client),
+  ConnectOpts = connect_options(Transport, Host, Client),
+
+
   case Transport:connect(Host, Port, ConnectOpts, ConnectTimeout) of
     {ok, Skt} ->
       ?report_trace("new connection", []),
