@@ -27,8 +27,12 @@
 
 -define(CHUNK_SIZE, 65536000). %% 64 MB is the default
 
-perform(Client0, {Method0, Path, Headers0, Body0}) ->
+perform(Client0, {Method0, Path0, Headers0, Body0}) ->
   Method = hackney_bstr:to_upper(hackney_bstr:to_binary(Method0)),
+  Path = case Path0 of
+           <<"">> -> <<"/">>;
+           _ -> Path0
+         end,
 
   #client{options=Options} = Client0,
 
