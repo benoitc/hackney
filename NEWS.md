@@ -5,7 +5,7 @@
 
 
 - pool: cache connection IDs
-- pool; make sure to reuse a connection if the options match the one given in the request. fix usage with proxy and ssl
+- pool: make sure to reuse a connection if the options match the one given in the request. fix usage with proxy and ssl
   connections
 - url: handle fragment correctly, a fragment is parsed first to not be mistaken with an URL
 - ssl: fix validation with Erlang 19 & Erlang 20
