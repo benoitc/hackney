@@ -34,7 +34,7 @@ release a socket in the pool
 
 ### checkout/4 ###
 
-`checkout(Host0, Port, Transport, Client) -> any()`
+`checkout(Host, Port, Transport, Client) -> any()`
 
 fetch a socket from the pool
 

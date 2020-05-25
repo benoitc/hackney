@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2020 Benoît Chesneau.
 
-__Version:__ 1.15.2
+__Version:__ 1.16.0
 
 # hackney
 
@@ -365,8 +365,7 @@ Options = [{timeout, 150000}, {max_connections, 100}],
 ok = hackney_pool:start_pool(PoolName, Options),
 ```
 
-`timeout` is the connection idle timeout. Connection will be closed and removed from the pool after this.
-
+`timeout` is the time we keep the connection alive in the pool,
 `max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
 automatically.
@@ -580,6 +579,8 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connection.md" class="module">hackney_connection</a></td></tr>
+<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connections.md" class="module">hackney_connections</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>

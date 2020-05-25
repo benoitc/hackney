@@ -1,13 +1,38 @@
 # NEWS
 
+1.16.0 - 2020-05-25
+-------------------
+
+
+- pool: cache connection IDs
+- pool; make sure to reuse a connection if the options match the one given in the request. fix usage with proxy and ssl
+  connections
+- url: handle fragment correctly, a fragment is parsed first to not be mistaken with an URL
+- ssl: fix validation with Erlang 19 & Erlang 20
+- ssl: handle tlsv1.3 on Erlang OTP 23
+- ssl: increase validation depth to match openssl default
+- ssl: optimiaz partial chain handling
+- ssl: fix hostname checking and correctly handle SNI
+- ssl: fix ciphers
+- request: fix regression with fully fqdn
+- ssl: fix usage with OTP 23
+- url: decode username/password for basic auth parameters
+- request: do not normalize when converting relative redirect to absolute
+- ssl: update to certifi 2.5.2
+- request: handle Connection: close response header for stteam
+- http: handle leading new lines in HTTP messages
+- http: handle trailers in persistent connection
+- pool: update pool timeout docummentation
+- url: fix urlencode
+
 1.15.2 - 2019-09-25
 -------------------
 
 - doc: fix tes run example in readme
-- fix: hackney stream, send `hackney_response` before calling `handle_error` 
+- fix: hackney stream, send `hackney_response` before calling `handle_error`
 - fix: error remove ssl `honor_cipher_order` option
 - doc: document self-signed certificate usage
-- bump `ssl_verify_fun` to 1.1.5 
+- bump `ssl_verify_fun` to 1.1.5
 - fix: don't use default pool if set to false
 - fix: `hackney_headers_new:store/3`  fix value appending to a list
 - fix: miscellaeous specs

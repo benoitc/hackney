@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2019 Benoît Chesneau.
+Copyright (c) 2012-2020 Benoît Chesneau.
 
-__Version:__ 1.15.2
+__Version:__ 1.16.0
 
 # hackney
 
@@ -579,6 +579,8 @@ $ kill `cat httpbin.pid`
 <tr><td><a href="hackney_app.md" class="module">hackney_app</a></td></tr>
 <tr><td><a href="hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
 <tr><td><a href="hackney_connect.md" class="module">hackney_connect</a></td></tr>
+<tr><td><a href="hackney_connection.md" class="module">hackney_connection</a></td></tr>
+<tr><td><a href="hackney_connections.md" class="module">hackney_connections</a></td></tr>
 <tr><td><a href="hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
 <tr><td><a href="hackney_date.md" class="module">hackney_date</a></td></tr>
 <tr><td><a href="hackney_headers.md" class="module">hackney_headers</a></td></tr>
