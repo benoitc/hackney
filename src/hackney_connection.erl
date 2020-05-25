@@ -2,7 +2,6 @@
 
 
 -export([new/1,
-         release/1,
          get_property/2,
          is_ssl/1]).
 
@@ -27,12 +26,9 @@ new(#client{transport=Transport,
   Host1 = string_compat:to_lower(Host0),
   ConnectOptions = connect_options(Transport, Host1, ClientOptions),
   Tunnel = maybe_tunnel(Transport),
-  Id = hackney_connections:new_connection_id(Transport, Host1, Port, ConnectOptions),
+  Id = new_connection_id(Transport, Host1, Port, ConnectOptions),
   Connection = new_connection_r(Transport, Host1, Port, Id, Tunnel),
   {Connection, ConnectOptions}.
-
-release(#connection{id=Id}) ->
-  hackney_connections:release_connection_id(Id).
 
 get_property(transport, #connection{transport=Transport}) -> Transport;
 get_property(host, #connection{host=Host}) -> Host;
@@ -44,7 +40,6 @@ get_property(_, _) -> erlang:error(badarg).
 is_ssl(#connection{transport=hackney_ssl}) -> true;
 is_ssl(#connection{}) -> false;
 is_ssl(_) -> erlang:error(badarg).
-
 
 controlling_process(#connection{transport=Transport}, Socket, Owner) ->
   Transport:controlling_process(Socket, Owner).
@@ -75,6 +70,18 @@ connect(#connection{transport=Transport,
 
 close(#connection{transport=Transport}, Socket) ->
   Transport:close(Socket).
+
+
+new_connection_id(Transport, Host, Port, ConnectionOptions) ->
+  Key = {Transport, Host, Port, ConnectionOptions},
+  case hackney_connections:lookup(Key) of
+    {ok, Id} ->
+      Id;
+    error ->
+      Id = erlang:phash2(Key),
+      hackney_connections:insert(Key, Id),
+      Id
+  end.
 
 
 new_connection_r(Transport, Host, Port, Id, Tunnel) ->

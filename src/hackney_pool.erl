@@ -91,20 +91,16 @@ checkout(Host, _Port, Transport, #client{options=Opts,
 
           {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
         {error, timeout} ->
-          hackney_connections:release_connection_id(Connection),
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
           {error, timeout};
         Error ->
           ?report_trace("connect error", []),
-          hackney_connections:release_connection_id(Connection),
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
           Error
       end;
     {error, Reason} ->
-      hackney_connections:release_connection_id(Connection),
       {error, Reason};
     {'EXIT', {timeout, _}} ->
-      hackney_connections:release_connection_id(Connection),
       % socket will still checkout so to avoid deadlock we send in a cancellation
       gen_server:cast(Pool, {checkout_cancel, Connection, RequestRef}),
       {error, checkout_timeout}
@@ -112,7 +108,6 @@ checkout(Host, _Port, Transport, #client{options=Opts,
 
 %% @doc release a socket in the pool
 checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
-  hackney_connection:release(Connection),
   hackney_connection:setopts(Connection, Socket, [{active, false}]),
   case hackney_connection:sync_socket(Connection, Socket) of
     true ->
@@ -401,7 +396,6 @@ dequeue(Dest, Ref, State) ->
     empty ->
       State#state{clients = Clients2};
     {ok, {From, Ref2}, Queues2} ->
-      hackney_connections:release_connection_id(Dest),
       Pending2 = del_pending(Ref, Pending),
       _ = metrics:update_histogram(
             State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
@@ -451,7 +445,6 @@ remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
     {ok, {Connection, Timer}} ->
       cancel_timer(Socket, Timer),
       catch hackney_connection:close(Connection, Socket),
-      hackney_connections:release_connection_id(Connection),
       ConnSockets = lists:delete(Socket, dict:fetch(Connection, Conns)),
       NewConns = update_connections(ConnSockets, Connection, Conns),
       NewSockets = dict:erase(Socket, Sockets),
@@ -562,7 +555,6 @@ deliver_socket(Socket, Connection, State) ->
           gen_server:reply(FromWaiter, {ok, Socket, self()}),
           monitor_client(Connection, Ref, State#state{queues = Queues2, pending=Pending2});
         _Error ->
-          hackney_connection:release(Connection),
           % Something wrong, close the socket
           _ = (catch hackney_connection:close(Connection, Socket)),
           %% and let the waiter connect to a new one
