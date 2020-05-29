@@ -46,6 +46,7 @@
   partial_headers = [],
   version,
   clen = nil,
+  ce = nil,
   te = nil,
   connection = nil,
   method = nil,

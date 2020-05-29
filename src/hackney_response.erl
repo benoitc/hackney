@@ -111,6 +111,25 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
                                [hackney, Client#client.host, response_time],
                                ResponseTime),
   HeadersList = hackney_headers_new:to_list(Headers),
+  CE = case proplists:get_value(compress, Client#client.options, false) of
+         true ->
+           case hackney_headers_new:get_value(<<"content-encoding">>, Headers, nil) of
+             nil -> nil;
+             C ->
+               Z = zlib:open(),
+               %% inflateInit2 (https://www.zlib.net/manual.html#Advanced)
+               WindowBits = 15 + if C == <<"gzip">> -> 16; true -> 0 end,
+               ok = zlib:inflateInit(Z, WindowBits),
+               ok = case erlang:function_exported(zlib, safeInflate, 2) of
+                 %% OTP-20.0.5 and later
+                 true -> ok;
+                 %% OTP-18.0 and later
+                 false -> zlib:setBufSize(Z, 512 * 1024)
+               end,
+               {zlib,Z}
+             end;
+           false -> nil
+  end,
   TE = hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, nil),
   CLen = case hackney_headers_new:lookup("content-length", Headers) of
            [] -> undefined;
@@ -122,6 +141,7 @@ wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
          end,
   Client2 = Client#client{parser=Parser,
                           headers=Headers,
+                          ce=CE,
                           te=TE,
                           clen=CLen},
   {ok, Status, HeadersList, Client2}.
@@ -147,17 +167,64 @@ stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) ->
 stream_body(Data, #client{parser=Parser}=Client) ->
   stream_body1(hackney_http:execute(Parser, Data), Client).
 
-stream_body1({more, Parser, Buffer}, Client) ->
+stream_body1({ok, Data, Parser}, Client = #client{ce={zlib,Z}}) ->
+  stream_body2(case stream_body_zlib(Z, Data) of
+    <<>> -> {more, Parser, <<>>};
+    D when is_binary(D) -> {ok, D, Parser};
+    E -> {error,E}
+  end, Client);
+stream_body1({done, _Rest}, Client = #client{ce={zlib,_Z}}) ->
+  stream_body1(done, Client);
+stream_body1(done, Client = #client{ce={zlib,Z}, parser=Parser}) ->
+  stream_body2(case stream_body_zlib(Z, <<>>) of
+    done -> done;
+    D when is_binary(D), size(D) > 0 -> {ok, D, Parser};
+    E -> {error,E}
+  end, Client);
+stream_body1(Result, Client) ->
+  stream_body2(Result, Client).
+
+stream_body_zlib(Z, Data) ->
+  case erlang:function_exported(zlib, safeInflate, 2) of
+    true ->
+      %% OTP-20.0.5 and later
+      case zlib:safeInflate(Z, Data) of
+        {continue, []} when Data == <<>> ->
+          data_error;
+        {finished, []} when Data == <<>> ->
+          case (catch zlib:inflateEnd(Z)) of
+            ok -> done;
+            _ -> data_error
+          end;
+        {_, Output} ->
+          iolist_to_binary(Output)
+      end;
+    false ->
+      %% OTP-18.0 and later
+      case zlib:inflateChunk(Z, Data) of
+        [] when Data == <<>> ->
+          case (catch zlib:inflateEnd(Z)) of
+            ok -> done;
+            _ -> data_error
+          end;
+        {more, Decompressed} ->
+          iolist_to_binary(Decompressed);
+        Decompressed ->
+          iolist_to_binary(Decompressed)
+      end
+  end.
+
+stream_body2({more, Parser, Buffer}, Client) ->
   stream_body_recv(Buffer, Client#client{parser=Parser});
-stream_body1({ok, Data, Parser}, Client) ->
+stream_body2({ok, Data, Parser}, Client) ->
   {ok, Data, Client#client{parser=Parser}};
-stream_body1({done, Rest}, Client) ->
+stream_body2({done, Rest}, Client) ->
   Client2 = end_stream_body(Rest, Client),
   {done, Client2};
-stream_body1(done, Client) ->
+stream_body2(done, Client) ->
   Client2 = end_stream_body(<<>>, Client),
   {done, Client2};
-stream_body1(Error, _Client) ->
+stream_body2(Error, _Client) ->
   Error.
 
 
@@ -277,6 +344,9 @@ skip_body(Client) ->
     {error, Reason} -> {error, Reason}
   end.
 
+end_stream_body(Rest, Client = #client{ce={zlib,Z}}) ->
+  catch zlib:close(Z),
+  end_stream_body(Rest, Client#client{ce=nil});
 end_stream_body(Rest, Client0) ->
   Client = Client0#client{response_state=done,
     body_state=done,
