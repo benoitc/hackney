@@ -28,21 +28,21 @@
 1.15.2 - 2019-09-25
 -------------------
 
-- doc: fix tes run example in readme
+- doc: fix test run example in readme
 - fix: hackney stream, send `hackney_response` before calling `handle_error`
 - fix: error remove ssl `honor_cipher_order` option
 - doc: document self-signed certificate usage
 - bump `ssl_verify_fun` to 1.1.5
 - fix: don't use default pool if set to false
 - fix: `hackney_headers_new:store/3`  fix value appending to a list
-- fix: miscellaeous specs
+- fix: miscellaneous specs
 - doc: miscellaneous improvements
 
 
 1.15.1 - 2019-02-26
 -------------------
 
-- fix: don't try to encode encode to IDN with full ASCII names.
+- fix: don't try to encode to IDN with full ASCII names.
 
 > this behaviour is similar to curl and fix errors some people had with docker
 > creating domain names containing a `_`
@@ -118,7 +118,7 @@
 - fix: change when hackney loads the hackney metric module (speed improvement)
 - fix: return value from the function `del_from_queue` in connection pool
 - fix: handle empty or invalid content-length
-- fix documentation on removed method
+- fix: documentation on removed method
 
 
 1.10.1 - 2017-10-20
