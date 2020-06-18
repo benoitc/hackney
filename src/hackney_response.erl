@@ -147,6 +147,8 @@ stream_body(Client=#client{parser=Parser, clen=CLen, te=TE}) ->
 stream_body(Data, #client{parser=Parser}=Client) ->
   stream_body1(hackney_http:execute(Parser, Data), Client).
 
+stream_body1({more, Parser}, Client) ->
+  stream_body_recv(<<>>, Client#client{parser=Parser});
 stream_body1({more, Parser, Buffer}, Client) ->
   stream_body_recv(Buffer, Client#client{parser=Parser});
 stream_body1({ok, Data, Parser}, Client) ->
