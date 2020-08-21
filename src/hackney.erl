@@ -345,7 +345,7 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
       Error
   end;
 request(Method, URL, Headers, Body, Options)
-  when is_binary(URL) orelse is_list(URL) ->
+  when is_binary(URL) orelse is_list(URL) orelse is_tuple(URL) ->
   request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
 
 
