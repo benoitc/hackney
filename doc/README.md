@@ -337,9 +337,10 @@ LoopFun(LoopFun, ClientRef).
 
 ### Use the default pool
 
-To reuse a connection globally in your application you can also use a
-socket pool. On startup, hackney launches a pool named default. To use it
-do the following:
+Hackney uses socket pools to reuse connections globally. By default,
+hackney uses a pool named `default`. You may want to use different
+pools in your application which allows you to maintain a group of
+connections. To use a different pool, do the following:
 
 ```erlang
 
@@ -347,16 +348,15 @@ Method = get,
 URL = <<"https://friendpaste.com">>,
 Headers = [],
 Payload = <<>>,
-Options = [{pool, default}],
+Options = [{pool, mypool}],
 {ok, StatusCode, RespHeaders, ClientRef} = hackney:request(Method, URL, Headers,
                                                         Payload, Options).
 ```
 
-By adding the tuple `{pool, default}` to the options, hackney will use
-the connections stored in that pool.
-
-You can also use different pools in your application which allows
-you to maintain a group of connections.
+By adding the tuple `{pool, mypool}` to the options, hackney will use
+the connections stored in that pool. The pool gets started automatically
+the first time it is used. You can also explicitly configure and start
+the pool like this:
 
 ```erlang
 
@@ -379,7 +379,11 @@ hackney_pool:stop_pool(PoolName).
 > Note: Sometimes you want to disable the default pool in your app
 > without having to set the client option each time. You can now do this
 > by setting the hackney application environment key `use_default_pool`
-> to false.
+> to false. This means that hackney will not use socket pools unless
+> specifically requested using the `pool` option as described above.
+>
+> To disable socket pools for a single request, specify the option
+> `{pool, false}`.
 
 ### Use a custom pool handler.
 
