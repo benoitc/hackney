@@ -47,8 +47,8 @@
                 max_connections,
                 timeout,
                 clients = dict:new(),
-                queues = dict:new(),  % Dest => queue of Froms,
-                pending = dict:new(),
+                queues = dict:new(),      % Dest => queue of {From, Ref, Requester}
+                pending = dict:new(),     % Ref  => {From, Dest, Requester}
                 connections = dict:new(),
                 sockets = dict:new()}).
 
@@ -59,17 +59,37 @@ start() ->
   ok.
 
 %% @doc fetch a socket from the pool
-checkout(Host, _Port, Transport, #client{options=Opts,
-                                          mod_metrics=Metrics}=Client) ->
-  {Connection, ConnectOptions} = hackney_connection:new(Client),
-  Pid = self(),
-  RequestRef = Client#client.request_ref,
-  PoolName = proplists:get_value(pool, Opts, default),
-  Pool = find_pool(PoolName, Opts),
+checkout(Host, Port, Transport, #client{options = Opts} = Client) ->
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   %% Fall back to using connect_timeout if checkout_timeout is not set
   CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
-  case catch gen_server:call(Pool, {checkout, Connection, Pid, RequestRef}, CheckoutTimeout) of
+  Requester = self(),
+  Ref = make_ref(),
+  Fun =
+    fun() ->
+      Result =
+        try
+          do_checkout(Requester, Host, Port, Transport, Client, ConnectTimeout, CheckoutTimeout)
+        catch _:_ ->
+          {error, checkout_failure}
+        end,
+      Requester ! {checkout, Ref, Result}
+    end,
+  _ = spawn(Fun),
+  receive
+    {checkout, Ref, Result} ->
+      Result
+  after CheckoutTimeout ->
+    {error, checkout_timeout}
+  end.
+
+do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
+  mod_metrics=Metrics}=Client, ConnectTimeout, CheckoutTimeout) ->
+  {Connection, ConnectOptions} = hackney_connection:new(Client),
+  RequestRef = Client#client.request_ref,
+  PoolName = proplists:get_value(pool, Opts, default),
+  Pool = find_pool(PoolName, Opts),
+  case catch gen_server:call(Pool, {checkout, Connection, Requester, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
 
       %% stats
@@ -84,12 +104,18 @@ checkout(Host, _Port, Transport, #client{options=Opts,
       Begin = os:timestamp(),
       case hackney_connection:connect(Connection, ConnectOptions, ConnectTimeout) of
         {ok, Socket} ->
-          ?report_trace("new connection", []),
-          ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
-          _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
-          _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
-
-          {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
+          case hackney_connection:controlling_process(Connection, Socket, Requester) of
+            ok ->
+              ?report_trace("new connection", []),
+              ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
+              _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
+              _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
+              {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
+            Error ->
+              catch hackney_connection:close(Connection, Socket),
+              _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
+              Error
+           end;
         {error, timeout} ->
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
           {error, timeout};
@@ -270,7 +296,7 @@ handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
   {reply, Timeout, State};
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
   {reply, MaxConn, State};
-handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
+handle_call({checkout, Dest, Requester, RequestRef}, From, State) ->
   #state{name=PoolName,
          metrics = Engine,
          max_connections=MaxConn,
@@ -278,7 +304,7 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
          queues = Queues,
          pending = Pending} = State,
 
-  {Reply, State2} = find_connection(Dest, Pid, State),
+  {Reply, State2} = find_connection(Dest, Requester, State),
   case Reply of
     {ok, _Socket, _Owner} ->
       State3 = monitor_client(Dest, RequestRef, State2),
@@ -287,8 +313,8 @@ handle_call({checkout, Dest, Pid, RequestRef}, From, State) ->
     no_socket ->
       case dict:size(Clients) >= MaxConn of
         true ->
-          Queues2 = add_to_queue(Dest, From, RequestRef, Queues),
-          Pending2 =add_pending(RequestRef, From, Dest, Pending),
+          Queues2 = add_to_queue(Dest, From, RequestRef, Requester, Queues),
+          Pending2 = add_pending(RequestRef, From, Dest, Requester, Pending),
           _ = metrics:update_histogram(
                 Engine, [hackney_pool, PoolName, queue_count], dict:size(Pending2)
                ),
@@ -395,7 +421,7 @@ dequeue(Dest, Ref, State) ->
   case queue_out(Dest, Queues) of
     empty ->
       State#state{clients = Clients2};
-    {ok, {From, Ref2}, Queues2} ->
+    {ok, {From, Ref2, _Requester}, Queues2} ->
       Pending2 = del_pending(Ref, Pending),
       _ = metrics:update_histogram(
             State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
@@ -487,12 +513,12 @@ cancel_timer(Socket, Timer) ->
 %------------------------------------------------------------------------------
 %% @private
 %%------------------------------------------------------------------------------
-add_to_queue(Connection, From, Ref, Queues) ->
+add_to_queue(Connection, From, Ref, Requester, Queues) ->
   case dict:find(Connection, Queues) of
     error ->
-      dict:store(Connection, queue:in({From, Ref}, queue:new()), Queues);
+      dict:store(Connection, queue:in({From, Ref, Requester}, queue:new()), Queues);
     {ok, Q} ->
-      dict:store(Connection, queue:in({From, Ref}, Q), Queues)
+      dict:store(Connection, queue:in({From, Ref, Requester}, Q), Queues)
   end.
 
 %------------------------------------------------------------------------------
@@ -503,7 +529,7 @@ del_from_queue(Connection, Ref, Queues) ->
     error ->
       {Queues, false};
     {ok, Q} ->
-      Q2 = queue:filter(fun({_, R}) -> R =/= Ref end, Q),
+      Q2 = queue:filter(fun({_, R, _}) -> R =/= Ref end, Q),
       Removed = queue:len(Q) =/= queue:len(Q2),
       Queues2 = case queue:is_empty(Q2) of
                   true ->
@@ -523,14 +549,14 @@ queue_out(Connection, Queues) ->
       empty;
     {ok, Q} ->
       case queue:out(Q) of
-        {{value, {From, Ref}}, Q2} ->
+        {{value, {From, Ref, Requester}}, Q2} ->
           Queues2 = case queue:is_empty(Q2) of
                       true ->
                         dict:erase(Connection, Queues);
                       false ->
                         dict:store(Connection, Q2, Queues)
                     end,
-          {ok, {From, Ref}, Queues2};
+          {ok, {From, Ref, Requester}, Queues2};
         {empty, _} ->
           %% fix race condition
           empty
@@ -545,7 +571,7 @@ deliver_socket(Socket, Connection, State) ->
   case queue_out(Connection, Queues) of
     empty ->
       store_socket(Connection, Socket, State);
-    {ok, {{PidWaiter, _} = FromWaiter, Ref}, Queues2} ->
+    {ok, {FromWaiter, Ref, PidWaiter}, Queues2} ->
       Pending2 = del_pending(Ref, Pending),
       _ = metrics:update_histogram(
             State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
@@ -564,8 +590,8 @@ deliver_socket(Socket, Connection, State) ->
   end.
 
 
-add_pending(Ref, From, Connection, Pending) ->
-  dict:store(Ref, {From, Connection}, Pending).
+add_pending(Ref, From, Connection, Requester, Pending) ->
+  dict:store(Ref, {From, Connection, Requester}, Pending).
 
 
 del_pending(Ref, Pending) ->
@@ -574,13 +600,13 @@ del_pending(Ref, Pending) ->
 
 remove_pending(Ref, #state{queues=Queues0, pending=Pending0} = State) ->
   case dict:find(Ref, Pending0) of
-    {ok, {From, Connection}} ->
+    {ok, {From, Connection, Requester}} ->
       Pending1 = dict:erase(Ref, Pending0),
       Queues1 = case dict:find(Connection, Queues0) of
                   {ok, Q0} ->
                     Q1 = queue:filter(
                            fun
-                             (PendingReq) when PendingReq =:= {From, Ref} -> false;
+                             (PendingReq) when PendingReq =:= {From, Ref, Requester} -> false;
                         (_) -> true
                            end,
                            Q0
