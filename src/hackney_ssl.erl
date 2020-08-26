@@ -21,6 +21,7 @@
 
 -export([check_hostname_opts/1]).
 -export([cipher_opts/0]).
+-export([ssl_opts/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -39,17 +40,20 @@ parse_address(Host) when is_list(Host) ->
 
 check_hostname_opts(Host0) ->
   Host1 = string_compat:strip(Host0, right, $.),
+  check_hostname_opt(Host1, server_name_indication_opt(Host1, ssl_opts(Host1))).
+
+%% @doc Default ssl opts
+ssl_opts(Host0) ->
+  Host1 = string_compat:strip(Host0, right, $.),
   VerifyFun = {
     fun ssl_verify_hostname:verify_fun/3,
     [{check_hostname, Host1}]
-   },
-  SslOpts = [{verify, verify_peer},
-             {depth, 100},
-             {cacerts, certifi:cacerts()},
-             {partial_chain, fun partial_chain/1},
-             {verify_fun, VerifyFun}],
-
-  check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts)).
+  },
+  [{verify, verify_peer},
+   {depth, 100},
+   {cacerts, certifi:cacerts()},
+   {partial_chain, fun partial_chain/1},
+   {verify_fun, VerifyFun}].
 
 -ifdef(buggy_chacha_ciphers).
 cipher_opts() ->
