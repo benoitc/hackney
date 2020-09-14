@@ -77,7 +77,7 @@ checkout(Host, Port, Transport, #client{options = Opts} = Client) ->
     end,
   _ = spawn(Fun),
   receive
-    {checkout, Ref, Result} ->
+    {checkout, _Ref, Result} ->
       Result
   after CheckoutTimeout ->
     {error, checkout_timeout}
@@ -113,22 +113,25 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
               {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
             Error ->
               catch hackney_connection:close(Connection, Socket),
+              cancel_checkout(Pool, Connection, RequestRef),
               _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
               Error
            end;
         {error, timeout} ->
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
+          cancel_checkout(Pool, Connection, RequestRef),
           {error, timeout};
         Error ->
           ?report_trace("connect error", []),
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
+          cancel_checkout(Pool, Connection, RequestRef),
           Error
       end;
     {error, Reason} ->
       {error, Reason};
     {'EXIT', {timeout, _}} ->
       % socket will still checkout so to avoid deadlock we send in a cancellation
-      gen_server:cast(Pool, {checkout_cancel, Connection, RequestRef}),
+      cancel_checkout(Pool, Connection, RequestRef),
       {error, checkout_timeout}
   end.
 
@@ -148,6 +151,9 @@ checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
       catch hackney_connection:close(Connection, Socket),
       ok
   end.
+
+cancel_checkout(Pool, Connection, RequestRef) ->
+  gen_server:cast(Pool, {checkout_cancel, Connection, RequestRef}).
 
 get_stats(Pool) ->
   gen_server:call(find_pool(Pool), stats).
@@ -451,7 +457,7 @@ find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=Stat
               %% process
               catch hackney_connection:controlling_process(Connection, S, self()),
               %% and then close it
-              find_connection(Connection, Pid, remove_socket(S,  State));
+              find_connection(Connection, Pid, remove_socket(S, State));
             _Else ->
               find_connection(Connection, Pid, remove_socket(S, State))
           end;
