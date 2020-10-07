@@ -528,13 +528,13 @@ been started.
 
 #### Metrics per Pool
 
-|Name                          |Type       | Description                                                        |
-|------------------------------|-----------|--------------------------------------------------------------------|
-|hackney.POOLNAME.take_rate    |meter    | meter recording rate at which a connection is retrieved from the pool|
-|hackney.POOLNAME.no_socket    |counter  | Count of new connections                                             |
-|hackney.POOLNAME.in_use_count |histogram| How many connections from the pool are used                          |
-|hackney.POOLNAME.free_count   |histogram| Number of free sockets in the pool                                   |
-|hackney.POOLNAME.queue_count  |histogram| queued clients                                                       |
+|Name                              |Type     | Description                                                          |
+|----------------------------------|---------|----------------------------------------------------------------------|
+|hackney_pool.POOLNAME.take_rate   |meter    | meter recording rate at which a connection is retrieved from the pool|
+|hackney_pool.POOLNAME.no_socket   |counter  | Count of new connections                                             |
+|hackney_pool.POOLNAME.in_use_count|histogram| How many connections from the pool are used                          |
+|hackney_pool.POOLNAME.free_count  |histogram| Number of free sockets in the pool                                   |
+|hackney_pool.POOLNAME.queue_count |histogram| queued clients                                                       |
 
 ## Contribute
 
