@@ -53,7 +53,10 @@ checkout_timeout() ->
         case hackney:request(post, URL, Headers, stream, Opts) of
             {ok, Ref} ->
                 {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
-                hackney:close(Ref),
-                ?assertEqual(Error, checkout_timeout)
+                ?assertEqual(Error, checkout_timeout),
+                ok = hackney:finish_send_body(Ref),
+                {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
+                ok = hackney:skip_body(Ref),
+                hackney:close(Ref)
         end
     end.
