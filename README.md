@@ -534,7 +534,7 @@ been started.
 |hackney.POOLNAME.no_socket    |counter  | Count of new connections                                             |
 |hackney.POOLNAME.in_use_count |histogram| How many connections from the pool are used                          |
 |hackney.POOLNAME.free_count   |histogram| Number of free sockets in the pool                                   |
-|hackney.POOLNAME.queue_counter|histogram| queued clients                                                       |
+|hackney.POOLNAME.queue_count  |histogram| queued clients                                                       |
 
 ## Contribute
 
