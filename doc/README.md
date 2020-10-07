@@ -517,14 +517,16 @@ been started.
 
 #### Metrics per Hosts
 
-|Name                        |Type     | Description                |
-|----------------------------|---------|----------------------------|
-|hackney.HOST.nb_requests    |counter  | Number of running requests |
-|hackney.HOST.request_time   |histogram| Request time               |
-|hackney.HOST.connect_time   |histogram| Connect time               |
-|hackney.HOST.response_time  |histogram| Response time              |
-|hackney.HOST.connect_timeout|counter  | Number of connect timeout  |
-|hackney.HOST.connect_error  |counter  | Number of timeout errors   |
+|Name                              |Type     | Description                               |
+|----------------------------------|---------|-------------------------------------------|
+|hackney.HOST.nb_requests          |counter  | Number of running requests                |
+|hackney.HOST.request_time         |histogram| Request time                              |
+|hackney.HOST.connect_time         |histogram| Connect time                              |
+|hackney.HOST.response_time        |histogram| Response time                             |
+|hackney.HOST.connect_timeout      |counter  | Number of connect timeout                 |
+|hackney.HOST.connect_error        |counter  | Number of timeout errors                  |
+|hackney_pool.HOST.new_connection  |counter  | Number of new pool connections per host   |
+|hackney_pool.HOST.reuse_connection|counter  | Number of reused pool connections per host|
 
 #### Metrics per Pool
 
