@@ -7,7 +7,7 @@ dummy_test() ->
     ?assertEqual(ok, ok).
 
 multipart_test_() ->
-    {setup, fun start/0, fun stop/1,
+    {foreach, fun start/0, fun stop/1,
       [{timeout, 120, queue_timeout()},
        {timeout, 120, checkout_timeout()}]}.
 
