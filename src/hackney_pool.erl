@@ -127,8 +127,7 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
     {error, Reason} ->
       {error, Reason};
     {'EXIT', {timeout, _}} ->
-      % socket will still checkout so to avoid deadlock we send in a cancellation
-      gen_server:cast(Pool, {checkout_cancel, Connection, RequestRef}),
+      %% checkout should be canceled by the caller via hackney_manager
       {error, checkout_timeout}
   end.
 
@@ -359,18 +358,6 @@ handle_cast({set_maxconn, MaxConn}, State) ->
   {noreply, State#state{max_connections=MaxConn}};
 handle_cast({set_timeout, NewTimeout}, State) ->
   {noreply, State#state{timeout=NewTimeout}};
-
-handle_cast({checkout_cancel, Dest, Ref}, State) ->
-  #state{queues=Queues, pending=Pending} = State,
-  {Queues2, Removed} = del_from_queue(Dest, Ref, Queues),
-  case Removed of
-    true ->
-      Pending2 = del_pending(Ref, Pending),
-      {noreply, State#state{queues=Queues2, pending=Pending2}};
-    false ->
-      % we leak the socket here but 'DOWN' will mop up for us when it times out
-      {noreply, dequeue(Dest, Ref, State)}
-  end;
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
@@ -519,25 +506,6 @@ add_to_queue(Connection, From, Ref, Requester, Queues) ->
       dict:store(Connection, queue:in({From, Ref, Requester}, queue:new()), Queues);
     {ok, Q} ->
       dict:store(Connection, queue:in({From, Ref, Requester}, Q), Queues)
-  end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-del_from_queue(Connection, Ref, Queues) ->
-  case dict:find(Connection, Queues) of
-    error ->
-      {Queues, false};
-    {ok, Q} ->
-      Q2 = queue:filter(fun({_, R, _}) -> R =/= Ref end, Q),
-      Removed = queue:len(Q) =/= queue:len(Q2),
-      Queues2 = case queue:is_empty(Q2) of
-                  true ->
-                    dict:erase(Connection, Queues);
-                  false ->
-                    dict:store(Connection, Q2, Queues)
-                end,
-      {Queues2, Removed}
   end.
 
 %------------------------------------------------------------------------------
