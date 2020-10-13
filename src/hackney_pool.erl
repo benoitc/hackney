@@ -422,7 +422,7 @@ dequeue(Dest, Ref, State) ->
     empty ->
       State#state{clients = Clients2};
     {ok, {From, Ref2, _Requester}, Queues2} ->
-      Pending2 = del_pending(Ref, Pending),
+      Pending2 = del_pending(Ref2, Pending),
       _ = metrics:update_histogram(
             State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
            ),
