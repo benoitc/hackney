@@ -10,3 +10,4 @@ mime.types
 .rebar
 *.plt
 .rebar
+*_plt
