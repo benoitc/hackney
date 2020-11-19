@@ -28,6 +28,7 @@ before_install:
   - sudo pip install -q gunicorn
 
 script:
+  - ./support/rebar3 xref
   - ./support/rebar3 eunit
   - ./support/rebar3 dialyzer
 

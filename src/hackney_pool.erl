@@ -262,15 +262,6 @@ start_link(Name, Options0) ->
   gen_server:start_link(?MODULE, [Name, Options], []).
 
 init([Name, Options]) ->
-  case lists:member({seed,1}, ssl:module_info(exports)) of
-    true ->
-      % Make sure that the ssl random number generator is seeded
-      % This was new in R13 (ssl-3.10.1 in R13B vs. ssl-3.10.0 in R12B-5)
-      apply(ssl, seed, [crypto:strong_rand_bytes(255)]);
-    false ->
-      ok
-  end,
-
   MaxConn = case proplists:get_value(pool_size, Options) of
               undefined ->
                 proplists:get_value(max_connections, Options);
