@@ -232,7 +232,7 @@ socket_from_pool(Host, Port, Transport, Client0) ->
     Error ->
       ?report_trace("connect error", []),
       _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
-
+      hackney_manager:cancel_request(Client),
       Error
   end.
 
