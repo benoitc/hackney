@@ -793,7 +793,8 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   RedirectUrl = hackney_url:parse_url(NewLocation),
   #hackney_url{transport=RedirectTransport,
                host=RedirectHost,
-               port=RedirectPort}=RedirectUrl,
+               port=RedirectPort,
+               netloc=RedirectNetloc}=RedirectUrl,
 
   #client{transport=Transport,
           host=Host,
@@ -822,6 +823,7 @@ redirect(Client0, {Method, NewLocation, Headers, Body}) ->
   Client2 = Client1#client{transport=RedirectTransport,
                            host=RedirectHost,
                            port=RedirectPort,
+                           netloc=RedirectNetloc,
                            options=Opts},
 
   %% send a request to the new location
