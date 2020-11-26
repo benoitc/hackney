@@ -61,30 +61,36 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
   %% add host eventually
   Headers2 = maybe_add_host(Headers1, Client0#client.netloc),
 
+  %% overwrite always as we control Accept-Encoding when 'compress' is set
+  Headers3 = case proplists:get_value(compress, Options, false) of
+    true -> hackney_headers_new:store(<<"Accept-Encoding">>, <<"gzip, deflate">>, Headers2);
+    false -> Headers2
+  end,
+
   %% get expect headers
-  Expect = expectation(Headers2),
+  Expect = expectation(Headers3),
 
   %% build headers with the body.
   {FinalHeaders, ReqType, Body, Client1} = case Body0 of
                                             stream ->
-                                               {Headers2, ReqType0, stream, Client0};
+                                               {Headers3, ReqType0, stream, Client0};
                                             stream_multipart ->
-                                              handle_multipart_body(Headers2, ReqType0, Client0);
+                                              handle_multipart_body(Headers3, ReqType0, Client0);
                                             {stream_multipart, Size} ->
-                                              handle_multipart_body(Headers2, ReqType0, Size, Client0);
+                                              handle_multipart_body(Headers3, ReqType0, Size, Client0);
                                             {stream_multipart, Size, Boundary} ->
-                                              handle_multipart_body(Headers2, ReqType0,
+                                              handle_multipart_body(Headers3, ReqType0,
                                                                     Size, Boundary, Client0);
                                             <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0);
+                                              handle_body(Headers3, ReqType0, Body0, Client0);
                                             [] when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0);
+                                              handle_body(Headers3, ReqType0, Body0, Client0);
                                             <<>> ->
-                                              {Headers2, ReqType0, Body0, Client0};
+                                              {Headers3, ReqType0, Body0, Client0};
                                             [] ->
-                                              {Headers2, ReqType0, Body0, Client0};
+                                              {Headers3, ReqType0, Body0, Client0};
                                             _ ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0)
+                                              handle_body(Headers3, ReqType0, Body0, Client0)
                                           end,
 
   %% build final client record
