@@ -44,7 +44,7 @@ stop(_) ->
   ok.
 
 wildcard_cert(_) ->
-    URL = <<"https://contacts.google.com">>,
+    URL = <<"https://friendpaste.com">>,
     Resp = case hackney:get(URL) of
              {ok, _, _, _} -> valid;
              _ -> error
