@@ -517,24 +517,26 @@ been started.
 
 #### Metrics per Hosts
 
-|Name                        |Type     | Description                |
-|----------------------------|---------|----------------------------|
-|hackney.HOST.nb_requests    |counter  | Number of running requests |
-|hackney.HOST.request_time   |histogram| Request time               |
-|hackney.HOST.connect_time   |histogram| Connect time               |
-|hackney.HOST.response_time  |histogram| Response time              |
-|hackney.HOST.connect_timeout|counter  | Number of connect timeout  |
-|hackney.HOST.connect_error  |counter  | Number of timeout errors   |
+|Name                              |Type     | Description                               |
+|----------------------------------|---------|-------------------------------------------|
+|hackney.HOST.nb_requests          |counter  | Number of running requests                |
+|hackney.HOST.request_time         |histogram| Request time                              |
+|hackney.HOST.connect_time         |histogram| Connect time                              |
+|hackney.HOST.response_time        |histogram| Response time                             |
+|hackney.HOST.connect_timeout      |counter  | Number of connect timeout                 |
+|hackney.HOST.connect_error        |counter  | Number of timeout errors                  |
+|hackney_pool.HOST.new_connection  |counter  | Number of new pool connections per host   |
+|hackney_pool.HOST.reuse_connection|counter  | Number of reused pool connections per host|
 
 #### Metrics per Pool
 
-|Name                          |Type       | Description                                                        |
-|------------------------------|-----------|--------------------------------------------------------------------|
-|hackney.POOLNAME.take_rate    |meter    | meter recording rate at which a connection is retrieved from the pool|
-|hackney.POOLNAME.no_socket    |counter  | Count of new connections                                             |
-|hackney.POOLNAME.in_use_count |histogram| How many connections from the pool are used                          |
-|hackney.POOLNAME.free_count   |histogram| Number of free sockets in the pool                                   |
-|hackney.POOLNAME.queue_counter|histogram| queued clients                                                       |
+|Name                              |Type     | Description                                                          |
+|----------------------------------|---------|----------------------------------------------------------------------|
+|hackney_pool.POOLNAME.take_rate   |meter    | meter recording rate at which a connection is retrieved from the pool|
+|hackney_pool.POOLNAME.no_socket   |counter  | Count of new connections                                             |
+|hackney_pool.POOLNAME.in_use_count|histogram| How many connections from the pool are used                          |
+|hackney_pool.POOLNAME.free_count  |histogram| Number of free sockets in the pool                                   |
+|hackney_pool.POOLNAME.queue_count |histogram| queued clients                                                       |
 
 ## Contribute
 
