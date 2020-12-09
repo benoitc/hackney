@@ -59,17 +59,14 @@ start() ->
   ok.
 
 %% @doc fetch a socket from the pool
-checkout(Host, Port, Transport, #client{options = Opts} = Client) ->
-  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
-  %% Fall back to using connect_timeout if checkout_timeout is not set
-  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
+checkout(Host, Port, Transport, Client) ->
   Requester = self(),
   Ref = make_ref(),
   Fun =
     fun() ->
       Result =
         try
-          do_checkout(Requester, Host, Port, Transport, Client, ConnectTimeout, CheckoutTimeout)
+          do_checkout(Requester, Host, Port, Transport, Client)
         catch _:_ ->
           {error, checkout_failure}
         end,
@@ -79,12 +76,13 @@ checkout(Host, Port, Transport, #client{options = Opts} = Client) ->
   receive
     {checkout, Ref, Result} ->
       Result
-  after CheckoutTimeout ->
-    {error, checkout_timeout}
   end.
 
 do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
-  mod_metrics=Metrics}=Client, ConnectTimeout, CheckoutTimeout) ->
+  mod_metrics=Metrics}=Client) ->
+  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+  %% Fall back to using connect_timeout if checkout_timeout is not set
+  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
   {Connection, ConnectOptions} = hackney_connection:new(Client),
   RequestRef = Client#client.request_ref,
   PoolName = proplists:get_value(pool, Opts, default),
