@@ -325,33 +325,33 @@ urlencode(Bin) ->
 
 %% @doc URL encode a string binary.
 %% The `noplus' option disables the default behaviour of quoting space
-%% characters, `\s', as `+'. The `upper' option overrides the default behaviour
-%% of writing hex numbers using lowecase letters to using uppercase letters
+%% characters, `\s', as `+'. The `lower' option overrides the default behaviour
+%% of writing hex numbers using uppercase letters to using lowercase letters
 %% instead.
 -spec urlencode(binary() | string(), [qs_opt()]) -> binary().
 urlencode(Bin, Opts) ->
   Plus = not proplists:get_value(noplus, Opts, false),
-  Upper = proplists:get_value(upper, Opts, false),
-  urlencode(hackney_bstr:to_binary(Bin), <<>>, Plus, Upper).
+  Lower = proplists:get_value(lower, Opts, false),
+  urlencode(hackney_bstr:to_binary(Bin), <<>>, Plus, Lower).
 
 -spec urlencode(binary(), binary(), boolean(), boolean()) -> binary().
-urlencode(<<C, Rest/binary>>, Acc, P=Plus, U=Upper) ->
-  if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-    C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
-    C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, U);
+urlencode(<<C, Rest/binary>>, Acc, P=Plus, Lower) ->
+  if	C >= $0, C =< $9 -> urlencode(Rest, <<Acc/binary, C>>, P, Lower);
+    C >= $A, C =< $Z -> urlencode(Rest, <<Acc/binary, C>>, P, Lower);
+    C >= $a, C =< $z -> urlencode(Rest, <<Acc/binary, C>>, P, Lower);
     C =:= $.; C =:= $-; C =:= $~; C =:= $_; C =:= $*; C =:= $@ ->
-      urlencode(Rest, <<Acc/binary, C>>, P, U);
+      urlencode(Rest, <<Acc/binary, C>>, P, Lower);
     C =:= $(; C =:= $); C =:= $!; C =:= $$ ->
-      urlencode(Rest, <<Acc/binary, C>>, P, U);
+      urlencode(Rest, <<Acc/binary, C>>, P, Lower);
     C =:= $ , Plus ->
-      urlencode(Rest, <<Acc/binary, $+>>, P, U);
+      urlencode(Rest, <<Acc/binary, $+>>, P, Lower);
     true ->
       H = C band 16#F0 bsr 4, L = C band 16#0F,
-      H1 = if Upper -> tohexu(H); true -> tohexl(H) end,
-      L1 = if Upper -> tohexu(L); true -> tohexl(L) end,
-      urlencode(Rest, <<Acc/binary, $%, H1, L1>>, P, U)
+      H1 = if Lower -> tohexl(H); true -> tohexu(H) end,
+      L1 = if Lower -> tohexl(L); true -> tohexu(L) end,
+      urlencode(Rest, <<Acc/binary, $%, H1, L1>>, P, Lower)
   end;
-urlencode(<<>>, Acc, _Plus, _Upper) ->
+urlencode(<<>>, Acc, _Plus, _Lower) ->
   Acc.
 
 -spec tohexu(byte()) -> byte().
@@ -479,22 +479,22 @@ partial_pathencode(<<C, Rest/binary>> = Bin, Acc) ->
           M = unhex(L),
           if	G =:= error; M =:= error ->
             H1 = C band 16#F0 bsr 4, L1 = C band 16#0F,
-            H2 = tohexl(H1),
-            L2 = tohexl(L1),
+            H2 = tohexu(H1),
+            L2 = tohexu(L1),
             partial_pathencode(Rest, <<Acc/binary, $%, H2, L2>>);
             true ->
               partial_pathencode(Rest1, <<Acc/binary, $%, H, L>>)
           end;
         _ ->
           H1 = C band 16#F0 bsr 4, L1 = C band 16#0F,
-          H2 = tohexl(H1),
-          L2 = tohexl(L1),
+          H2 = tohexu(H1),
+          L2 = tohexu(L1),
           partial_pathencode(Rest, <<Acc/binary, $%, H2, L2>>)
       end;
     true ->
       H = C band 16#F0 bsr 4, L = C band 16#0F,
-      H1 = tohexl(H),
-      L1 = tohexl(L),
+      H1 = tohexu(H),
+      L1 = tohexu(L),
       partial_pathencode(Rest, <<Acc/binary, $%, H1, L1>>)
   end;
 partial_pathencode(<<>>, Acc) ->
