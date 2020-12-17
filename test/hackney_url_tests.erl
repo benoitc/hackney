@@ -301,9 +301,9 @@ transport_scheme_test_() ->
 url_encode_and_decode_test_() ->
     %% {Value, Result}.
     Tests = [
-            {<<"HelloGünter">>, <<"HelloG%c3%bcnter">>},
+            {<<"HelloGünter">>, <<"HelloG%C3%BCnter">>},
             {<<"Hello.-~_">>, <<"Hello.-~_">>},
-            {<<"€£©®ÀÁÂÃÄÅ">>, <<"%e2%82%ac%c2%a3%c2%a9%c2%ae%c3%80%c3%81%c3%82%c3%83%c3%84%c3%85">>}
+            {<<"€£©®ÀÁÂÃÄÅ">>, <<"%E2%82%AC%C2%A3%C2%A9%C2%AE%C3%80%C3%81%C3%82%C3%83%C3%84%C3%85">>}
             ],
     [{V, fun() -> R = hackney_url:urlencode(V) end} || {V, R} <- Tests] ++
     [{R, fun() -> V = hackney_url:urldecode(R) end} || {V, R} <- Tests].
@@ -311,8 +311,8 @@ url_encode_and_decode_test_() ->
 url_encode_test_() ->
     %% {{Url, Options}, Result}.
     Tests = [
-            {{<<"HelloGünter">>, [upper]}, <<"HelloG%C3%BCnter">>},
-            {{<<"Hello+Günter">>, []}, <<"Hello%2bG%c3%bcnter">>},
+            {{<<"HelloGünter">>, [lower]}, <<"HelloG%c3%bcnter">>},
+            {{<<"Hello+Günter">>, []}, <<"Hello%2BG%C3%BCnter">>},
             {{<<"Hello ">>, []}, <<"Hello+">>},
             {{<<"Hello ">>, [noplus]}, <<"Hello%20">>}
             ],
