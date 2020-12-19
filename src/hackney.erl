@@ -94,17 +94,19 @@ cancel_request(Ref) ->
 
 %% @doc set client options.
 %% Options are:
-%% - `async': to fetch the response asynchronously
-%% - `{async, once}': to receive the response asynchronously one time.
-%% To receive the next message use the function `hackney:stream_next/1'.
-%% - `{stream_to, pid()}': to set the pid where the messages of an
-%% asynchronous response will be sent.
-%% - `{follow_redirect, bool()}' : if true a redirection will be
-%% followed when the response is received synchronously
-%% - `{force_redirect, bool()}' : if true a 301/302 redirection will be
-%% followed even on POST.
-%% - `{max_redirect, integer()}' the maximum number of redirections that
-%% will be followed
+%% <ul>
+%%  <li>`async': to fetch the response asynchronously</li>
+%%  <li>`{async, once}': to receive the response asynchronously one time.
+%%  To receive the next message use the function `hackney:stream_next/1'.</li>
+%%  <li>`{stream_to, pid()}': to set the pid where the messages of an
+%%  asynchronous response will be sent.</li>
+%%  <li>`{follow_redirect, bool()}' : if true a redirection will be
+%%  followed when the response is received synchronously</li>
+%%  <li>`{force_redirect, bool()}' : if true a 301/302 redirection will be
+%%  followed even on POST.</li>
+%%  <li>`{max_redirect, integer()}' the maximum number of redirections that
+%%  will be followed</li>
+%% </ul>
 -spec setopts(client_ref(), list()) -> ok.
 setopts(Ref, Options) ->
   hackney_manager:get_state(Ref, fun(State) ->
@@ -419,7 +421,7 @@ finish_send_body(Ref) ->
 %% <li>`{part, Name}': to start sending a part without length in a streaming
 %% fashion</li>
 %% <li>`{part, Name, ExtraHeader}': to start sending a part without
-%% lengthin a streaming  fashion</li>
+%% length in a streaming  fashion</li>
 %% <li>`{part_bin, Bin}': To send part of part</li>
 %% <li>`{part, eof}': To notify the end of the part </li>
 %% <li>`{mp_mixed, Name, MixedBoundary}': To notify we start a part with a a mixed
