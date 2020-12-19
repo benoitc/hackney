@@ -64,7 +64,7 @@ fashion</li>
 <li><code>{part, Name}</code>: to start sending a part without length in a streaming
 fashion</li>
 <li><code>{part, Name, ExtraHeader}</code>: to start sending a part without
-lengthin a streaming  fashion</li>
+length in a streaming  fashion</li>
 <li><code>{part_bin, Bin}</code>: To send part of part</li>
 <li><code>{part, eof}</code>: To notify the end of the part </li>
 <li><code>{mp_mixed, Name, MixedBoundary}</code>: To notify we start a part with a a mixed
@@ -487,7 +487,7 @@ fashion
 fashion
 
 * `{part, Name, ExtraHeader}`: to start sending a part without
-lengthin a streaming  fashion
+length in a streaming  fashion
 
 * `{part_bin, Bin}`: To send part of part
 
@@ -531,17 +531,24 @@ setopts(Ref::<a href="#type-client_ref">client_ref()</a>, Options::list()) -&gt;
 
 set client options.
 Options are:
-- `async`: to fetch the response asynchronously
-- `{async, once}`: to receive the response asynchronously one time.
+
+* `async`: to fetch the response asynchronously
+
+* `{async, once}`: to receive the response asynchronously one time.
 To receive the next message use the function `hackney:stream_next/1`.
-- `{stream_to, pid()}`: to set the pid where the messages of an
+
+* `{stream_to, pid()}`: to set the pid where the messages of an
 asynchronous response will be sent.
-- `{follow_redirect, bool()}` : if true a redirection will be
+
+* `{follow_redirect, bool()}` : if true a redirection will be
 followed when the response is received synchronously
-- `{force_redirect, bool()}` : if true a 301/302 redirection will be
+
+* `{force_redirect, bool()}` : if true a 301/302 redirection will be
 followed even on POST.
-- `{max_redirect, integer()}` the maximum number of redirections that
+
+* `{max_redirect, integer()}` the maximum number of redirections that
 will be followed
+
 
 <a name="skip_body-1"></a>
 

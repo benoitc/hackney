@@ -11,3 +11,4 @@ mime.types
 *.plt
 .rebar
 *_plt
+rebar3.crashdump

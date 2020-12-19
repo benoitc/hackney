@@ -29,31 +29,41 @@ you can process later with `hackney_http:execute/2` when
 `{more, ...}`  is returnned or `hackney_http:execute/1` in other
 cases:
 
-- `{response, http_version(), status(), http_reason(), parser()}`:
+* `{response, http_version(), status(), http_reason(), parser()}`:
 when the first line of a response is parsed
-- `{request, http_version(), http_method(), uri(), parser()}`:
+
+* `{request, http_version(), http_method(), uri(), parser()}`:
 when the first line of a request (on servers) is parsed
-- `{more, parser()}`: when the parser need more
+
+* `{more, parser()}`: when the parser need more
 data. The new data should be passed to `hackney_http:execute/2` with
 the new parser() state received.
-- `{header, {Name :: binary(), Value :: binary()}, parser()}`:
+
+* `{header, {Name :: binary(), Value :: binary()}, parser()}`:
 when an header has been parsed. To continue the parsing you must
 call the given `parser()` with `hackney_http:execute/1`.
-- `{headers_complete, parser()}` : when all headers have been parsed.
+
+* `{headers_complete, parser()}` : when all headers have been parsed.
 To continue the parsing you must call the given `parser()` state
 with `hackney_http:execute/1`.
-- `{more, parser(), binary()}`: on body, when
+
+* `{more, parser(), binary()}`: on body, when
 the parser need more data. The new data should be passed to
 `hackney_http:execute/2` (with `parser()` ) when received. The binary at the end of the
 tuple correspond to the actual buffer of the parser. It may be used
 for other purpose, like start to parse a new request on pipeline
 connections, for a proxy...
-- `{ok, binary(), parser()}`: on body, when a chunk has been
+
+* `{ok, binary(), parser()}`: on body, when a chunk has been
 parsed. To continue the parsing you must call
 `hackney_http:execute/1` with the given `parser()`.
-- `{done, binary()}`: when the parsing is done. The binary
+
+* `{done, binary()}`: when the parsing is done. The binary
 given correpond to the non parsed part of the internal buffer.
-- `{error, term{}}`: when an error happen
+
+* `{error, term{}}`: when an error happen
+
+
 <a name="types"></a>
 
 ## Data Types ##
@@ -213,14 +223,23 @@ get(Parser::<a href="#type-parser">parser()</a>, Props::atom() | [atom()]) -&gt;
 
 retrieve a parser property.
 Properties are:
-- `buffer`: internal buffer of the parser (non parsed)
-- `state`: the current state (on_status, on_header, on_body, done)
-- `version`: HTTP version
-- `content_length`: content length header if any
-- `transfer_encoding`: transfer encoding header if any
-- `content_type`: content type header if any
-- `location`: location header if any
-- `connection`: connection header if any.
+
+* `buffer`: internal buffer of the parser (non parsed)
+
+* `state`: the current state (on_status, on_header, on_body, done)
+
+* `version`: HTTP version
+
+* `content_length`: content length header if any
+
+* `transfer_encoding`: transfer encoding header if any
+
+* `content_type`: content type header if any
+
+* `location`: location header if any
+
+* `connection`: connection header if any.
+
 
 <a name="parse_response_version-2"></a>
 

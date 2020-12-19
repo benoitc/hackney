@@ -29,7 +29,7 @@ qs_opt() = noplus | upper
 
 
 <pre><code>
-qs_vals() = [{binary(), binary() | true}]
+qs_vals() = [{binary() | atom() | list() | integer(), binary() | true}]
 </code></pre>
 
 <a name="index"></a>
@@ -217,7 +217,7 @@ urlencode(Bin::binary() | string(), Opts::[<a href="#type-qs_opt">qs_opt()</a>])
 
 URL encode a string binary.
 The `noplus` option disables the default behaviour of quoting space
-characters, `\s`, as `+`. The `upper` option overrides the default behaviour
-of writing hex numbers using lowecase letters to using uppercase letters
+characters, `\s`, as `+`. The `lower` option overrides the default behaviour
+of writing hex numbers using uppercase letters to using lowercase letters
 instead.
 
