@@ -40,15 +40,17 @@
 
 %% @doc encode a list of parts a multipart form.
 %% Parts can be under the form:
-%%  - `{file, Path}' : to send a file
-%%  - `{file, Path, ExtraHeaders}' : to send a file with extra headers
-%%  - `{file, Path, Name, ExtraHeaders}': to send a file with DOM element name and extra headers
-%%  - `{mp_mixed, Name, Boundary}' to send a mixed multipart.
-%%  - `{mp_mixed_eof, Boundary}': to signal the end of the mixed
-%%  multipart boundary.
-%%  - `{Name, Data}': to send a custom content as a part
-%%  - `{Name, Data, ExtraHeaders}': the same as above but with extra
-%%  headers.
+%% <ul>
+%%  <li>`{file, Path}' : to send a file</li>
+%%  <li>`{file, Path, ExtraHeaders}' : to send a file with extra headers</li>
+%%  <li>`{file, Path, Name, ExtraHeaders}': to send a file with DOM element name and extra headers</li>
+%%  <li>`{mp_mixed, Name, Boundary}' to send a mixed multipart.</li>
+%%  <li>`{mp_mixed_eof, Boundary}': to signal the end of the mixed
+%%  multipart boundary.</li>
+%%  <li>`{Name, Data}': to send a custom content as a part</li>
+%%  <li>`{Name, Data, ExtraHeaders}': the same as above but with extra
+%%  headers.</li>
+%% </ul>
 encode_form(Parts) ->
     encode_form(Parts, boundary()).
 
@@ -141,7 +143,7 @@ mp_header(Headers, Boundary) ->
     BinHeaders = hackney_headers:to_binary(Headers),
     <<"--", Boundary/binary, "\r\n", BinHeaders/binary >>.
 
-%% @doc return the boundary ennding a multipart
+%% @doc return the boundary ending a multipart
 mp_eof(Boundary) ->
     <<"--",  Boundary/binary, "--\r\n">>.
 
@@ -156,14 +158,16 @@ part(Content, Headers, Boundary) ->
 %% transfer-encoding instead of chunked so any server can handle it.
 %%
 %% Calculated Parts can be under the form:
-%%  - `{file, Path}' : to send a file
-%%  - `{file, Path, ExtraHeaders}' : to send a file with extra headers
-%%  - `{file, Path, Name, ExtraHeaders}' : to send a file with DOM element name and extra headers
-%%  - `{mp_mixed, Name, Boundary}' to send a mixed multipart.
-%%  multipart boundary.
-%%  - `{Name, DataLen}': to send a custom content as a part
-%%  - `{Name, DataLen, ExtraHeaders}': the same as above but with extra
-%%  headers.
+%% <ul>
+%%  <li>`{file, Path}' : to send a file</li>
+%%  <li>`{file, Path, ExtraHeaders}' : to send a file with extra headers</li>
+%%  <li>`{file, Path, Name, ExtraHeaders}' : to send a file with DOM element name and extra headers</li>
+%%  <li>`{mp_mixed, Name, Boundary}' to send a mixed multipart.
+%%  multipart boundary.</li>
+%%  <li>`{Name, DataLen}': to send a custom content as a part</li>
+%%  <li>`{Name, DataLen, ExtraHeaders}': the same as above but with extra
+%%  headers.</li>
+%% </ul>
 len_mp_stream(Parts, Boundary) ->
     Size = lists:foldl(fun
                 ({file, Path}, AccSize) ->

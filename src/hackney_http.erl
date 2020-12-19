@@ -23,32 +23,33 @@
 %%% you can process later with `hackney_http:execute/2' when
 %%% `{more, ...}'  is returnned or `hackney_http:execute/1' in other
 %%% cases:
-%%%
-%%% - `{response, http_version(), status(), http_reason(), parser()}':
-%%% when the first line of a response is parsed
-%%% - `{request, http_version(), http_method(), uri(), parser()}':
-%%% when the first line of a request (on servers) is parsed
-%%% - `{more, parser()}': when the parser need more
+%%% <ul>
+%%%  <li>`{response, http_version(), status(), http_reason(), parser()}':
+%%% when the first line of a response is parsed</li>
+%%%  <li>`{request, http_version(), http_method(), uri(), parser()}':
+%%% when the first line of a request (on servers) is parsed</li>
+%%%  <li>`{more, parser()}': when the parser need more
 %%% data. The new data should be passed to `hackney_http:execute/2' with
-%%% the new parser() state received.
-%%% - `{header, {Name :: binary(), Value :: binary()}, parser()}':
+%%% the new parser() state received.</li>
+%%%  <li>`{header, {Name :: binary(), Value :: binary()}, parser()}':
 %%% when an header has been parsed. To continue the parsing you must
-%%% call the given `parser()' with `hackney_http:execute/1'.
-%%% - `{headers_complete, parser()}' : when all headers have been parsed.
+%%% call the given `parser()' with `hackney_http:execute/1'.</li>
+%%%  <li>`{headers_complete, parser()}' : when all headers have been parsed.
 %%% To continue the parsing you must call the given `parser()' state
-%%% with `hackney_http:execute/1'.
-%%% - `{more, parser(), binary()}': on body, when
+%%% with `hackney_http:execute/1'.</li>
+%%%  <li>`{more, parser(), binary()}': on body, when
 %%% the parser need more data. The new data should be passed to
 %%% `hackney_http:execute/2' (with `parser()' ) when received. The binary at the end of the
 %%% tuple correspond to the actual buffer of the parser. It may be used
 %%% for other purpose, like start to parse a new request on pipeline
-%%% connections, for a proxy...
-%%% - `{ok, binary(), parser()}': on body, when a chunk has been
+%%% connections, for a proxy...</li>
+%%%  <li>`{ok, binary(), parser()}': on body, when a chunk has been
 %%% parsed. To continue the parsing you must call
-%%% `hackney_http:execute/1' with the given `parser()'.
-%%% - `{done, binary()}': when the parsing is done. The binary
-%%% given correpond to the non parsed part of the internal buffer.
-%%% - `{error, term{}}': when an error happen
+%%% `hackney_http:execute/1' with the given `parser()'.</li>
+%%%  <li>`{done, binary()}': when the parsing is done. The binary
+%%% given correpond to the non parsed part of the internal buffer.</li>
+%%%  <li>`{error, term{}}': when an error happen</li>
+%%% </ul>
 
 -module(hackney_http).
 
@@ -102,14 +103,14 @@ parser() ->
 %%
 %% Available options:
 %% <ul>
-%%   <li>`auto' : autodetect if the binary parsed is a response or a
-%%   request (default).</li>
-%%   <li>`response': set the parser to parse a response</li>
-%%   <li>`request': set the parser to parse a request (server)</li>
-%%   <li>`{max_line_lenght, Max}': set the maximum size of a line parsed
-%%   before we give up.</li>
-%%   <li>`{max_lines_empty, Max}': the maximum number of empty line we
-%%   accept before the first line happen</li>
+%%  <li>`auto' : autodetect if the binary parsed is a response or a
+%%  request (default).</li>
+%%  <li>`response': set the parser to parse a response</li>
+%%  <li>`request': set the parser to parse a request (server)</li>
+%%  <li>`{max_line_lenght, Max}': set the maximum size of a line parsed
+%%  before we give up.</li>
+%%  <li>`{max_lines_empty, Max}': the maximum number of empty line we
+%%  accept before the first line happen</li>
 %% </ul>
 -spec parser(parser_options()) -> parser().
 parser(Options) ->
@@ -117,14 +118,16 @@ parser(Options) ->
 
 %% @doc retrieve a parser property.
 %% Properties are:
-%%  - `buffer': internal buffer of the parser (non parsed)
-%%  - `state': the current state (on_status, on_header, on_body, done)
-%%  - `version': HTTP version
-%%  - `content_length': content length header if any
-%%  - `transfer_encoding': transfer encoding header if any
-%%  - `content_type': content type header if any
-%%  - `location': location header if any
-%%  - `connection': connection header if any.
+%% <ul>
+%%  <li>`buffer': internal buffer of the parser (non parsed)</li>
+%%  <li>`state': the current state (on_status, on_header, on_body, done)</li>
+%%  <li>`version': HTTP version</li>
+%%  <li>`content_length': content length header if any</li>
+%%  <li>`transfer_encoding': transfer encoding header if any</li>
+%%  <li>`content_type': content type header if any</li>
+%%  <li>`location': location header if any</li>
+%%  <li>`connection': connection header if any.</li>
+%% </ul>
 -spec get(parser(), atom() | [atom()]) -> any().
 get(Parser, Props) when is_list(Props) ->
   [get_property(P, Parser) || P <- Props];
