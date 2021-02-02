@@ -72,7 +72,7 @@ checkout(Host, Port, Transport, Client) ->
         end,
       Requester ! {checkout, Ref, Result}
     end,
-  _ = spawn(Fun),
+  _ = spawn_link(Fun),
   receive
     {checkout, Ref, Result} ->
       Result
