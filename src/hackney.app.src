@@ -4,7 +4,7 @@
 {application, hackney,
   [
     {description, "simple HTTP client"},
-    {vsn, "1.17.0"},
+    {vsn, "1.17.1"},
     {registered, [hackney_pool]},
     {applications, [kernel,
       stdlib,

@@ -1,10 +1,16 @@
 # NEWS
 
+1.17.1 - 2021-03-15
+-------------------
+
+- fix: Avoid `parse_trans` warning when using hackney as a dependency
+- fix: Link checkout process to fix dangling aborted request
+
 1.17.0 - 2020-12-19
 -------------------
 
 - fix SSL compatibility with erlang OTP 23
-- handle empty trailers 
+- handle empty trailers
 - fix race condition in connection pool
 - fix memory leak in connection pool
 - IDNA update to unicode 13.0.0
@@ -15,14 +21,14 @@
 - miscellaneous fixes in documentation
 
 
-** possible breaking change **  
+** possible breaking change **
 
 - pool queue count metric is now named `queue_count`. You should update your dashboard to reflect it.
 
 - possible breacking changes when producing uppercase hexadecimal in urls
 
 This change the behaviour of urlencode and pathencode to produce
-uppercase hexadecimal to comply to the RFC3986 which may affect 
+uppercase hexadecimal to comply to the RFC3986 which may affect
 systems using URL as signature or in an hash.
 
 1.16.0 - 2020-05-25
