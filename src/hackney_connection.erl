@@ -20,6 +20,7 @@
 
 -export([connect_options/3]).
 -export([ssl_opts/2]).
+-export([merge_ssl_opts/2]).
 
 -include("hackney.hrl").
 
@@ -144,6 +145,18 @@ ssl_opts_1(Host, Options) ->
 ssl_opts_2() ->
   hackney_ssl:cipher_opts().
 
+merge_ssl_opts(Host, OverrideOpts) ->
+  DefaultOpts = ssl_opts_1(Host, OverrideOpts),
+  MergedOpts = orddict:merge(fun(_K, _V1, V) -> V end,
+                             orddict:from_list(DefaultOpts),
+                             orddict:from_list(OverrideOpts)),
+  %% If cacertfile was provided in override opts remove cacerts
+  case lists:keymember(cacertfile, 1, MergedOpts) of
+    true ->
+      lists:keydelete(cacerts, 1, MergedOpts);
+    false ->
+      MergedOpts
+  end.
 
 maybe_tunnel(hackney_http_connect) ->
   true;
