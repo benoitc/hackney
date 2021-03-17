@@ -1,5 +1,12 @@
 # NEWS
 
+1.17.2 - 2021-03-16
+-------------------
+
+- use parse_trans 3.3.1 only (fix compatibility with Erlang < 21)
+- bump certifi version
+- Allow merging of SSL opts
+
 1.17.1 - 2021-03-15
 -------------------
 
