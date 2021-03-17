@@ -70,9 +70,19 @@ checkout(Host, Port, Transport, Client) ->
         catch _:_ ->
           {error, checkout_failure}
         end,
-      Requester ! {checkout, Ref, Result}
+      case is_process_alive(Requester) of
+        true ->
+          Requester ! {checkout, Ref, Result};
+        false ->
+          case Result of
+            {ok, SocketRef, Socket} ->
+              checkin(SocketRef, Socket);
+            _Error ->
+              ok
+          end
+        end
     end,
-  _ = spawn_link(Fun),
+  _ = spawn(Fun),
   receive
     {checkout, Ref, Result} ->
       Result
