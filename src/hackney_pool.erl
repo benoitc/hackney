@@ -75,8 +75,8 @@ checkout(Host, Port, Transport, Client) ->
           Requester ! {checkout, Ref, Result};
         false ->
           case Result of
-            {ok, SocketRef, Socket} ->
-              checkin(SocketRef, Socket);
+            {ok, {_Name, ConnRef, Connection, Owner, Transport}, Socket} ->
+              gen_server:call(Owner, {checkin, ConnRef, Connection, Socket, Transport}, infinity);
             _Error ->
               ok
           end
