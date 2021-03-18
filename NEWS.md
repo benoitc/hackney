@@ -1,6 +1,6 @@
 # NEWS
 
-1.17.4 - 2021-03-17
+1.17.4 - 2021-03-18
 -------------------
 
 - fix checking when socket is put back in the pool when the requester died.
