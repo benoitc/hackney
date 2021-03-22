@@ -83,7 +83,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
             _ ->
               {ok, {Transport, Socket}}
           end;
-        Error ->
+        Error = {error, _} ->
           gen_tcp:close(Socket),
           Error
       end;
@@ -186,11 +186,30 @@ do_handshake(Socket, Host, Port, Options) ->
   end.
 
 check_response(Socket) ->
+  check_response(<<>>, Socket, 10).
+
+check_response(Buffer, Socket, N) ->
   case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
     {ok, Data} ->
-      check_status(Data);
+      NBuffer = << Data/binary, Buffer/binary >>,
+      parse_first_line(NBuffer, Socket, N);
     Error ->
       Error
+  end.
+
+parse_first_line(_Buffer, _Socket, 0) ->
+   {error, line_too_long};
+parse_first_line(Buffer, Socket, N) ->
+  case match_eol(Buffer, 0) of
+    nomatch when byte_size(Buffer) > 4096 ->
+      {error, line_too_long};
+    nomatch ->
+      check_response(Buffer, Socket, N);
+    1 ->
+      << _:16, Rest/binary >> = Buffer,
+      parse_first_line(Rest, Socket, N - 1);
+    _ ->
+      check_status(Buffer)
   end.
 
 check_status(<< "HTTP/1.1 200", _/bits >>) ->
@@ -204,3 +223,10 @@ check_status(<< "HTTP/1.0 201", _/bits >>) ->
 check_status(Else) ->
   error_logger:error_msg("proxy error: ~w~n", [Else]),
   {error, proxy_error}.
+
+match_eol(<< $\n, _/bits >>, N) ->
+  N;
+match_eol(<< _, Rest/bits >>, N) ->
+  match_eol(Rest, N + 1);
+match_eol(_, _) ->
+  nomatch.
