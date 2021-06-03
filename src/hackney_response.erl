@@ -351,4 +351,16 @@ close(#client{socket=nil}=Client) ->
   Client#client{state = closed};
 close(#client{transport=Transport, socket=Skt}=Client) ->
   Transport:close(Skt),
+  flush(Transport, Skt),
   Client#client{state = closed, socket=nil}.
+
+
+flush(Transport, Socket) ->
+  {Msg, MsgClosed, MsgError} = Transport:messages(Socket),
+  receive
+    {Msg, Socket, _} -> flush(Transport, Socket) ;
+    {MsgClosed, Socket} -> flush(Transport, Socket) ;
+    {MsgError, Socket, _} -> flush(Transport, Socket)
+  after 0 ->
+    ok
+  end.
