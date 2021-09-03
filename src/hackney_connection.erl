@@ -99,7 +99,8 @@ new_connection_r(Transport, Host, Port, Id, Tunnel) ->
 
 
 connect_options(hackney_local_tcp, _Host, ClientOptions) ->
-  ClientOptions;
+  proplists:get_value(connect_options, ClientOptions, []);
+
 connect_options(Transport, Host, ClientOptions) ->
   ConnectOpts0 = proplists:get_value(connect_options, ClientOptions, []),
 
