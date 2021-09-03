@@ -98,6 +98,8 @@ new_connection_r(Transport, Host, Port, Id, Tunnel) ->
               tunnel=Tunnel}.
 
 
+connect_options(hackney_local_tcp, _Host, ClientOptions) ->
+  ClientOptions;
 connect_options(Transport, Host, ClientOptions) ->
   ConnectOpts0 = proplists:get_value(connect_options, ClientOptions, []),
 
@@ -162,4 +164,3 @@ maybe_tunnel(hackney_http_connect) ->
   true;
 maybe_tunnel(_) ->
   false.
-
