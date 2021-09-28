@@ -108,7 +108,7 @@ length doesn't go over MaxLength.
 ### cancel_request/1 ###
 
 <pre><code>
-cancel_request(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, {atom(), <a href="inet.md#type-socket">inet:socket()</a>, binary(), <a href="hackney_response.md#type-response_state">hackney_response:response_state()</a>}} | {error, term()}
+cancel_request(Ref::<a href="#type-client_ref">client_ref()</a>) -&gt; {ok, {atom(), <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, binary(), <a href="/Users/benoitc/Projects/hackney/doc/hackney_response.md#type-response_state">hackney_response:response_state()</a>}} | {error, term()}
 </code></pre>
 <br />
 

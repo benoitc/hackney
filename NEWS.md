@@ -1,5 +1,11 @@
 # NEWS
 
+1.18.0 - 2021-09-28
+-------------------
+
+- security: update default CA bundle
+- fix pool: make checkout synchrounous (remove unwanted messages)
+
 1.17.4 - 2021-03-18
 -------------------
 

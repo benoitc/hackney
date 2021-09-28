@@ -16,7 +16,7 @@
 
 
 <pre><code>
-http_socket() = {atom(), <a href="inet.md#type-socket">inet:socket()</a>}
+http_socket() = {atom(), <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>}
 </code></pre>
 
 <a name="index"></a>
@@ -82,7 +82,7 @@ Atoms used to identify messages in {active, once | true} mode.
 ### peername/1 ###
 
 <pre><code>
-peername(X1::<a href="#type-http_socket">http_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+peername(X1::<a href="#type-http_socket">http_socket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 
@@ -153,7 +153,7 @@ __See also:__ [gen_tcp:shutdown/2](gen_tcp.md#shutdown-2).
 ### sockname/1 ###
 
 <pre><code>
-sockname(X1::<a href="#type-http_socket">http_socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+sockname(X1::<a href="#type-http_socket">http_socket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 

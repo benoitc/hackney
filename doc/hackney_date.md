@@ -32,7 +32,7 @@ Parse an asctime date.
 ### date_to_rfc2109/1 ###
 
 <pre><code>
-date_to_rfc2109(X1::<a href="calendar.md#type-datetime">calendar:datetime()</a>) -&gt; binary()
+date_to_rfc2109(X1::<a href="/Users/benoitc/Projects/stdlib/doc/calendar.md#type-datetime">calendar:datetime()</a>) -&gt; binary()
 </code></pre>
 <br />
 
