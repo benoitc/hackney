@@ -170,7 +170,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
                        socket=Socket,
                        method=Method,
                        follow_redirect=true}=Client) ->
-  case lists:member(StatusInt, [301, 302, 307]) of
+  case lists:member(StatusInt, [301, 302, 307, 308]) of
     true ->
       Transport:setopts(Socket, [{active, false}]),
       case parse(Client) of
