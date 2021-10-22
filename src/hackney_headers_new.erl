@@ -87,7 +87,7 @@ store(KVs, Headers) when is_list(KVs) ->
     KVs
    ).
 
-%% @doc only store a vakue if the key exist.
+%% @doc only store a value if the key exist.
 -spec store_new(key(), value(), headers()) -> {boolean(), headers()}.
 store_new(Key, Value, {_N, DictHeaders}=Headers) ->
   KL = ?kl(Key),
@@ -148,7 +148,7 @@ do_fold([{_, Key, Value} | Rest], Fun, Acc) ->
   do_fold(Rest, Fun, Fun(Key, Value, Acc));
 do_fold([], _Fun, Acc) -> Acc.
 
-%% @doc merge 2 headers objects. If a key is already exising in HEader1, it will be kept.
+%% @doc merge 2 headers objects. If a key is already existing in HEader1, it will be kept.
 -spec merge(headers(), headers()) -> headers().
 merge(Headers1, {_, DictHeaders2}) ->
   dict:fold(
@@ -178,7 +178,7 @@ to_list(Headers) ->
   ),
   lists:reverse(Result).
 
-%% @doc conver headers to an iolist. Useful to send them over the wire.
+%% @doc convert headers to an iolist. Useful to send them over the wire.
 -spec to_iolist(headers()) -> iolist().
 to_iolist(Headers) ->
   L = fold(
