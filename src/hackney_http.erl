@@ -152,7 +152,8 @@ execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
     on_first_line -> parse_first_line(NBuffer, St1, 0);
     on_header -> parse_headers(St1);
     on_body -> parse_body(St1);
-    on_trailers -> parse_trailers(St1)
+    on_trailers -> parse_trailers(St1);
+    on_junk -> skip_junks(St1)
   end.
 
 %% Empty lines must be using \r\n.
@@ -179,7 +180,13 @@ parse_first_line(Buffer, St=#hparser{type=Type,
         {error, bad_request} -> parse_response_line(St)
       end;
     _ when Type =:= response ->
-      parse_response_line(St);
+      case parse_response_line(St) of
+	  {error, bad_request} -> {error, bad_request};
+	  {response, Version, StatusInt, Reason, NState} when StatusInt >= 200 ->
+	      {response, Version, StatusInt, Reason, NState};
+	  {response, _Version, _StatusInt, _Reason, _NState} ->
+	      {more, St#hparser{empty_lines=Empty, state=on_junk}}
+      end;
     _ when Type =:= request ->
       parse_request_line(St)
   end.
@@ -318,6 +325,16 @@ parse_header(Line, St) ->
 
 parse_header_value(H) ->
   hackney_bstr:trim(H).
+
+skip_junks(#hparser{buffer=Buf}=St) ->
+  case binary:split(Buf, <<"\r\n">>) of
+    [<<>>, Rest] ->
+      {more, St#hparser{buffer=Rest, state=on_first_line}};
+    [_Line, Rest]->
+      skip_junks(St#hparser{buffer=Rest});
+    [Buf] ->
+      {more, St}
+  end.
 
 parse_trailers(St) ->
   case parse_trailers(St, []) of
