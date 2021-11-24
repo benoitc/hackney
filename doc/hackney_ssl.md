@@ -39,7 +39,7 @@
 ### close/1 ###
 
 <pre><code>
-close(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; ok
+close(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; ok
 </code></pre>
 <br />
 
@@ -64,7 +64,7 @@ __See also:__ [ssl:close/1](ssl.md#close-1).
 ### controlling_process/2 ###
 
 <pre><code>
-controlling_process(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
+controlling_process(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
 </code></pre>
 <br />
 
@@ -85,7 +85,7 @@ Atoms used to identify messages in {active, once | true} mode.
 ### peername/1 ###
 
 <pre><code>
-peername(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+peername(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 
@@ -104,7 +104,7 @@ __See also:__ [ssl:peername/1](ssl.md#peername-1).
 ### recv/3 ###
 
 <pre><code>
-recv(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
+recv(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
 </code></pre>
 <br />
 
@@ -117,7 +117,7 @@ __See also:__ [ssl:recv/3](ssl.md#recv-3).
 ### send/2 ###
 
 <pre><code>
-send(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
+send(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
 </code></pre>
 <br />
 
@@ -130,7 +130,7 @@ __See also:__ [ssl:send/2](ssl.md#send-2).
 ### setopts/2 ###
 
 <pre><code>
-setopts(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>, Opts::list()) -&gt; ok | {error, atom()}
+setopts(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, Opts::list()) -&gt; ok | {error, atom()}
 </code></pre>
 <br />
 
@@ -143,7 +143,7 @@ __See also:__ [ssl:setopts/2](ssl.md#setopts-2).
 ### shutdown/2 ###
 
 <pre><code>
-shutdown(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>, How::read | write | read_write) -&gt; ok | {error, any()}
+shutdown(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>, How::read | write | read_write) -&gt; ok | {error, any()}
 </code></pre>
 <br />
 
@@ -156,7 +156,7 @@ __See also:__ [ssl:shutdown/2](ssl.md#shutdown-2).
 ### sockname/1 ###
 
 <pre><code>
-sockname(Socket::<a href="/Users/benoitc/Projects/ssl/doc/ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+sockname(Socket::<a href="ssl.md#type-sslsocket">ssl:sslsocket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 

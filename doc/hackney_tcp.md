@@ -21,7 +21,7 @@
 ### close/1 ###
 
 <pre><code>
-close(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>) -&gt; ok
+close(Socket::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; ok
 </code></pre>
 <br />
 
@@ -46,7 +46,7 @@ __See also:__ [gen_tcp:close/1](gen_tcp.md#close-1).
 ### controlling_process/2 ###
 
 <pre><code>
-controlling_process(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
+controlling_process(Socket::<a href="inet.md#type-socket">inet:socket()</a>, Pid::pid()) -&gt; ok | {error, closed | not_owner | atom()}
 </code></pre>
 <br />
 
@@ -67,7 +67,7 @@ Atoms used to identify messages in {active, once | true} mode.
 ### peername/1 ###
 
 <pre><code>
-peername(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+peername(Socket::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 
@@ -86,7 +86,7 @@ __See also:__ [inet:peername/1](inet.md#peername-1).
 ### recv/3 ###
 
 <pre><code>
-recv(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
+recv(Socket::<a href="inet.md#type-socket">inet:socket()</a>, Length::non_neg_integer(), Timeout::timeout()) -&gt; {ok, any()} | {error, closed | atom()}
 </code></pre>
 <br />
 
@@ -99,7 +99,7 @@ __See also:__ [gen_tcp:recv/3](gen_tcp.md#recv-3).
 ### send/2 ###
 
 <pre><code>
-send(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
+send(Socket::<a href="inet.md#type-socket">inet:socket()</a>, Packet::iolist()) -&gt; ok | {error, atom()}
 </code></pre>
 <br />
 
@@ -112,7 +112,7 @@ __See also:__ [gen_tcp:send/2](gen_tcp.md#send-2).
 ### setopts/2 ###
 
 <pre><code>
-setopts(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
+setopts(Socket::<a href="inet.md#type-socket">inet:socket()</a>, Opts::list()) -&gt; ok | {error, atom()}
 </code></pre>
 <br />
 
@@ -125,7 +125,7 @@ __See also:__ [inet:setopts/2](inet.md#setopts-2).
 ### shutdown/2 ###
 
 <pre><code>
-shutdown(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>, How::read | write | read_write) -&gt; ok
+shutdown(Socket::<a href="inet.md#type-socket">inet:socket()</a>, How::read | write | read_write) -&gt; ok
 </code></pre>
 <br />
 
@@ -138,7 +138,7 @@ __See also:__ [gen_tcp:shutdown/2](gen_tcp.md#shutdown-2).
 ### sockname/1 ###
 
 <pre><code>
-sockname(Socket::<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-ip_address">inet:ip_address()</a>, <a href="/Users/benoitc/Projects/kernel/doc/inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
+sockname(Socket::<a href="inet.md#type-socket">inet:socket()</a>) -&gt; {ok, {<a href="inet.md#type-ip_address">inet:ip_address()</a>, <a href="inet.md#type-port_number">inet:port_number()</a>}} | {error, atom()}
 </code></pre>
 <br />
 
