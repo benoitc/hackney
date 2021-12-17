@@ -9,7 +9,8 @@ dummy_test() ->
 multipart_test_() ->
     {setup, fun start/0, fun stop/1,
       [{timeout, 120, queue_timeout()},
-       {timeout, 120, checkout_timeout()}]}.
+       {timeout, 120, checkout_timeout()},
+       {timeout, 120, connect_timeout()}]}.
 
 start() ->
     error_logger:tty(false),
@@ -55,5 +56,16 @@ checkout_timeout() ->
                 {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
                 hackney:close(Ref),
                 ?assertEqual(Error, checkout_timeout)
+        end
+    end.
+
+connect_timeout() ->
+    fun() ->
+        URL = <<"http://localhost:8123/pool">>,
+        Headers = [],
+        Opts = [{max_body, 2048}, {pool, pool_test}, {connect_timeout, 1}],
+        case hackney:request(post, URL, Headers, stream, Opts) of
+            {error, Error} ->
+                ?assertEqual(Error, connect_timeout)
         end
     end.
