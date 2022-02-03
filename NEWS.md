@@ -14,7 +14,7 @@
 1.17.3 - 2021-03-17
 -------------------
 
-- fix: ensure we release a socket in the pool when the requester died before beeing monitored.
+- fix: ensure we release a socket in the pool when the requester died before being monitored.
 
 1.17.2 - 2021-03-16
 -------------------
@@ -132,7 +132,7 @@ systems using URL as signature or in an hash.
 - bump to idna 0.6.0
 - fix support of rebar2
 - fix specs
-- add `hackney:sockname/1` adn `hackney:peername/1` functions
+- add `hackney:sockname/1` and `hackney:peername/1` functions
 - add new `checkout_timeout` option for clarity
 - improve `hackney_url:parse_qs/1` to trim leading and trailing empty values
 
@@ -444,7 +444,7 @@ systems using URL as signature or in an hash.
 ------------------
 
 - improvement: Do not wait to cancel a request
-- improvement: do not control the request premptively
+- improvement: do not control the request preemptively
 
 1.0.4 - 2014/12/8
 -----------------
@@ -537,7 +537,7 @@ supported release of hackney.
 ### Breaking change:
 
 When doing an HEAD request, the signature of the response when it
-succeded is now `{ok, Status, ResponseHeaders}` and do not contains a
+succeeded is now `{ok, Status, ResponseHeaders}` and do not contains a
 client reference any more.
 
 
@@ -684,7 +684,7 @@ service release with a new feature and some minor improvements
 
 - added the support for [socks5
   proxies](https://github.com/benoitc/hackney#socks5-proxy)
-- improvment: integer and atom can now be passed in url params or forms
+- improvement: integer and atom can now be passed in url params or forms
   values.
 - breaking change: differentiate connect/recv timeout, now connect
   timeout return `{error, connect_timeout}`
@@ -710,7 +710,7 @@ used for async response requests.
   process is killed.
 - fix: make sure we pass a `Transfer-Encoding: chunked` header when we
   send a body without content-length.
-- fix: make sure the client is correcly reconnected when we reuse a
+- fix: make sure the client is correctly reconnected when we reuse a
   reference.
 
 0.7.0 - 2013/11/22
@@ -768,7 +768,7 @@ fix: fix file upload content type
 0.4.2 - 2013/06/10
 ------------------
 
-- handle `identity` transfert encoding. When the connection close return
+- handle `identity` transfer encoding. When the connection close return
   latest buffer.
 
 0.4.1 - 2013/06/10
@@ -806,7 +806,7 @@ and maybe use the partial body.
 
 - Add Multipart support
 - Add HTTP Proxy tunneling support
-- Fix Chuncked Response decoding
+- Fix Chunked Response decoding
 
 0.2.0 - 2012/07/18
 ------------------

@@ -75,7 +75,7 @@ connect(Transport, Host, Port, Options) ->
 controlling_process(Ref, Pid) ->
   hackney_manager:controlling_process(Ref, Pid).
 
-%% @doc Extract raw informations from the client context
+%% @doc Extract raw information from the client context
 %% This feature can be useful when you want to create a simple proxy, rerouting
 %% on the headers and the status line and continue to forward the connection for example.
 %%

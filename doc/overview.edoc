@@ -180,7 +180,7 @@ read_body(MaxLength, Ref, Acc) when MaxLength > byte_size(Acc) ->
 > Note: you can also fetch a multipart response using the functions
 > `hackney:stream_multipart/1` and  `hackney:skip_multipart/1'.
 
-> Note 2: using the `with_body' option will return the body directy instead of a reference.
+> Note 2: using the `with_body' option will return the body directly instead of a reference.
 
 ### Reuse a connection
 
@@ -329,7 +329,7 @@ LoopFun(LoopFun, ClientRef).</pre>
 > example [test_async_once2](https://github.com/benoitc/hackney/blob/master/examples/test_async_once2.erl) for the usage.
 
 > **Note 4**:  When the option `{follow_redirect, true}' is passed to
-> the request, you will receive the folllowing messages on valid
+> the request, you will receive the following messages on valid
 > redirection:
 > - `{redirect, To, Headers}'
 > - `{see_other, To, Headers}' for status 303 and POST requests.

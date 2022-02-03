@@ -59,7 +59,7 @@ new_request(Client) ->
 init_request(InitialState) ->
   %% initialize the request
   Ref = make_ref(),
-  %% store the current state in the process dictionnary
+  %% store the current state in the process dictionary
   put(Ref, InitialState#client{request_ref=Ref}),
   %% supervise the process owner
   {ok, StartTime} = gen_server:call(?MODULE, {new_request, self(), Ref,
@@ -160,15 +160,15 @@ start_async_response(Ref) ->
       case gen_server:call(?MODULE, {start_async_response, Ref,
         StreamTo, Client}) of
         {ok, Pid} ->
-          %% store temporarely the socket in the the ets so it can
+          %% store temporarily the socket in the the ets so it can
           %% be used by the other process later
           true = ets:insert(?MODULE, {Ref, #request{ref=Ref,
             state=Client}}),
-          %% delete the current state from the process dictionnary
+          %% delete the current state from the process dictionary
           %% since it's not the owner
           erase(Ref),
 
-          %% transfert the control of the socket
+          %% transfer the control of the socket
           case Transport:controlling_process(Socket, Pid) of
             ok -> Pid ! controlling_process_done, ok;
             Else -> Else
@@ -470,7 +470,7 @@ handle_stream_exit(Pid, Ref, Reason, State) ->
     [{Ref, {Owner, Pid, #request_info{pool=Pool}=Info}}] ->
       %% untrack the owner
       Pids2 = untrack_owner(Owner, Ref, Pids1),
-      %% if anormal reason let the owner knows
+      %% if abnormal reason let the owner knows
       _ = case Reason of
             normal ->  ok;
             {owner_down, Owner, _} -> ok; %% we were streaming to
