@@ -1,5 +1,12 @@
 # NEWS
 
+1.18.1 - 2022-02-03
+-------------------
+
+- security: update default CA bundles
+- doc: fix typos
+
+
 1.18.0 - 2021-09-28
 -------------------
 
