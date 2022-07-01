@@ -229,6 +229,11 @@ socket_from_pool(Host, Port, Transport, Client0) ->
       Client1 = Client#client{socket_ref=Ref, pool_handler=PoolHandler},
 
       do_connect(Host, Port, Transport, Client1, pool);
+    {error, timeout} ->
+      ?report_trace("connect timeout", []),
+      _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
+      hackney_manager:cancel_request(Client),
+      {error, connect_timeout};
     Error ->
       ?report_trace("connect error", []),
       _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
