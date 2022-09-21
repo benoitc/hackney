@@ -28,7 +28,7 @@
       {maxr, 10},
       {maxt, 1}]},
 
-    {licenses, ["Apache 2.0"]},
+    {licenses, ["Apache-2.0"]},
     {links, [{"Github", "https://github.com/benoitc/hackney"}]},
     {files, [
       "src",
