@@ -9,6 +9,7 @@
 -module(hackney_response).
 
 -include("hackney.hrl").
+-include("hackney_lib.hrl").
 
 -type response_state() :: start | waiting | on_status | on_headers | on_body.
 -export_type([response_state/0]).
@@ -165,8 +166,8 @@ stream_body1(Error, _Client) ->
 
 -spec stream_body_recv(binary(), #client{})
     -> {ok, binary(), #client{}} | {error, term()}.
-stream_body_recv(Buffer, Client=#client{version=Version, clen=CLen}) ->
-  case recv(Client) of
+stream_body_recv(Buffer, Client=#client{version=Version, clen=CLen, parser=#hparser{body_state={stream, _, TransferState, _}}}) ->
+  case recv(Client, TransferState) of
     {ok, Data} ->
       stream_body(Data, Client);
     {error, Reason} ->
@@ -346,6 +347,11 @@ maybe_close(#client{version={Min,Maj}, headers=Headers, clen=CLen}) ->
 
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
   Transport:recv(Skt, 0, Timeout).
+
+recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {_BufSize, undefined}) ->
+  Transport:recv(Skt, 0, Timeout);
+recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {BufSize, ExpectedSize}) ->
+  Transport:recv(Skt, ExpectedSize - BufSize, Timeout).
 
 close(#client{socket=nil}=Client) ->
   Client#client{state = closed};
