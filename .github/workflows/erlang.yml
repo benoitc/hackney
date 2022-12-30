@@ -12,7 +12,14 @@ jobs:
     name: Run checks and tests over ${{matrix.otp_vsn}} and ${{matrix.os}}
     runs-on: ${{matrix.os}}
     container:
-      image: erlang:${{matrix.otp_vsn}}
+      image: erlang:${{matrix.otp_vsn}}-slim
+      env:
+        HTTPBIN_HOST: httpbin
+    services:
+      httpbin:
+        image: kennethreitz/httpbin
+        ports:
+          - 8000:80
     strategy:
       matrix:
         otp_vsn: ["19.0", "19.3",
@@ -22,14 +29,7 @@ jobs:
                   "23.0.2", "23.2"]
         os: [ubuntu-latest]
     steps:
-      - uses: actions/checkout@v2
-      - run: |
-          apt-get -q update
-          apt-get -y install python3
-          apt-get -y install python3-pip
-          pip3 install httpbin
-          pip3 install gunicorn
-          gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&
+      - uses: actions/checkout@v3
       - run: ./support/rebar3 xref
       - run: ./support/rebar3 eunit
       - run: ./support/rebar3 dialyzer

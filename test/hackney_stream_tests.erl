@@ -26,9 +26,14 @@ start() ->
 
 stop(ok) -> ok.
 
+httpbin_host() ->
+    os:getenv("HTTPBIN_HOST", "localhost").
+
+concat(L) ->
+    unicode:characters_to_binary(L).
 
 async_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
@@ -46,7 +51,7 @@ receive_response(Ref) ->
 
 checkout(_Host, _Port, _Transport, _Client) -> {error, no_socket, make_ref()}.
 handle_connection_close() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [async, {pool, false}],
 
     % Notice that ?MODULE has checkout/4 but not checkin, so if this test

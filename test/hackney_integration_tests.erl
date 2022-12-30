@@ -47,58 +47,64 @@ start() ->
 
 stop(ok) -> ok.
 
+httpbin_host() ->
+    os:getenv("HTTPBIN_HOST", "localhost").
+
+concat(L) ->
+    unicode:characters_to_binary(L).
+
 get_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
 
 request_with_body() ->
-    URL = <<"http://localhost:8000/robots.txt">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/robots.txt">>]),
     ExpectedBody = <<"User-agent: *\nDisallow: /deny\n">>,
     {ok, 200, _, Body} = hackney:request(get, URL, [], <<>>, [{with_body, true}]),
     ?_assertEqual(ExpectedBody, Body).
 
 head_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     {ok, StatusCode, _} = hackney:request(head, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
 
 no_content_response() ->
-    URL = <<"http://localhost:8000/status/204">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/status/204">>]),
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(204, StatusCode).
 
 not_modified_response() ->
-    URL = <<"http://localhost:8000/status/304">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/status/304">>]),
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(304, StatusCode).
 
 basic_auth_request() ->
-    URL = <<"http://localhost:8000/basic-auth/username/password">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/basic-auth/username/password">>]),
     Options = [{basic_auth, {<<"username">>, <<"password">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     ?_assertEqual(200, StatusCode).
 
 basic_auth_url_request() ->
-    URL = <<"http://username:pass%26word@localhost:8000/basic-auth/username/pass%26word">>,
+    URL = concat([<<"http://username,%26word@">>, httpbin_host(), <<":8000/basic-auth/username/pass%26word">>]),
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?_assertEqual(200, StatusCode).
 
 basic_auth_request_failed() ->
-    URL = <<"http://localhost:8000/basic-auth/username/password">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/basic-auth/username/password">>]),
     Options = [{basic_auth, {<<"wrong">>, <<"auth">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     ?_assertEqual(401, StatusCode).
 
 set_cookie_request() ->
-    URL = <<"http://localhost:8000/cookies/set?k1=v1">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/cookies/set?k1=v1">>]),
     {ok, _, Headers, _} = hackney:request(get, URL, [], <<>>, []),
     Cookies = hackney:cookies(Headers),
     ExpectedCookies = [{<<"k1">>, [{<<"k1">>,<<"v1">>},{<<"Path">>,<<"/">>}]}],
     ?_assertEqual(ExpectedCookies, Cookies).
 
 send_cookies_request() ->
-    URL = <<"http://localhost:8000/cookies">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/cookies">>]),
     Options = [{cookie, [{<<"SESSION">>, <<"123">>}]}],
     {ok, _, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     {ok, Body} = hackney:body(Client),
@@ -106,23 +112,23 @@ send_cookies_request() ->
     ?_assertMatch({match, _}, Match).
 
 absolute_redirect_request_no_follow() ->
-    URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/redirect-to?url=http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [{follow_redirect, false}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(302, StatusCode),
-     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+     ?_assertEqual(concat([<<"http://">>, httpbin_host(), <<":8000/get">>]), Location)].
 
 absolute_redirect_request_follow() ->
-    URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/redirect-to?url=http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [{follow_redirect, true}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(200, StatusCode),
-     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+     ?_assertEqual(concat([<<"http://">>, httpbin_host(), <<":8000/get">>]), Location)].
 
 relative_redirect_request_no_follow() ->
-    URL = <<"http://localhost:8000/relative-redirect/1">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/relative-redirect/1">>]),
     Options = [{follow_redirect, false}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
@@ -130,15 +136,15 @@ relative_redirect_request_no_follow() ->
      ?_assertEqual(<<"/get">>, Location)].
 
 relative_redirect_request_follow() ->
-    URL = <<"http://localhost:8000/redirect-to?url=/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/redirect-to?url=/get">>]),
     Options = [{follow_redirect, true}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
     [?_assertEqual(200, StatusCode),
-     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+     ?_assertEqual(concat([<<"http://">>, httpbin_host(), <<":8000/get">>]), Location)].
 
 async_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
@@ -146,7 +152,7 @@ async_request() ->
      ?_assertEqual([body, headers, status], Keys)].
 
 async_head_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     Options = [async],
     {ok, ClientRef} = hackney:head(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
@@ -154,7 +160,7 @@ async_head_request() ->
      ?_assertEqual([headers, status], Keys)].
 
 async_no_content_request() ->
-    URL = <<"http://localhost:8000/status/204">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/status/204">>]),
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
@@ -162,7 +168,7 @@ async_no_content_request() ->
      ?_assertEqual([headers, status], Keys)].
 
 test_duplicate_headers() ->
-  URL = <<"http://localhost:8000/post">>,
+  URL = concat([<<"http://">>, httpbin_host(), <<":8000/post">>]),
   Headers = [{<<"Content-Type">>, <<"application/json">>}],
   Body = <<"{\"test\": \"ok\" }">>,
   Options = [with_body],
@@ -172,7 +178,7 @@ test_duplicate_headers() ->
   ?_assertEqual(<<"application/json">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
 
 test_custom_host_headers() ->
-  URL = <<"http://localhost:8000/get">>,
+  URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
   Headers = [{<<"Host">>, <<"myhost.com">>}],
   Options = [with_body],
   {ok, 200, _H, JsonBody} = hackney:get(URL, Headers, <<>>, Options),
@@ -181,7 +187,7 @@ test_custom_host_headers() ->
   ?_assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
 
 test_frees_manager_ets_when_body_is_in_client() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     BeforeCount = ets:info(hackney_manager_refs, size),
     {ok, 200, _, Client} = hackney:get(URL),
     DuringCount = ets:info(hackney_manager_refs, size),
@@ -191,7 +197,7 @@ test_frees_manager_ets_when_body_is_in_client() ->
     ?_assertEqual(BeforeCount, AfterCount).
 
 test_frees_manager_ets_when_body_is_in_response() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = concat([<<"http://">>, httpbin_host(), <<":8000/get">>]),
     Headers = [],
     Options = [with_body],
     BeforeCount = ets:info(hackney_manager_refs, size),
