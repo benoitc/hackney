@@ -384,6 +384,8 @@ transfer_decode(Data, St=#hparser{
       {ok, Chunk, St#hparser{buffer=Rest}};
     more ->
       {more, St#hparser{buffer=Data}, Buf};
+    {more, TransferState2} ->
+      {more, St#hparser{buffer=Data, body_state={stream, TransferDecode, TransferState2, ContentDecode}}, Buf};
     {done, Rest} ->
       {done, Rest};
     {done, Data2, _Rest} ->
@@ -424,7 +426,7 @@ te_chunked(Data, _) ->
         {ok, Chunk, Rest1} ->
           {chunk_ok, Chunk, Rest1};
         eof ->
-          more
+          {more, {byte_size(Rest), Size}}
       end;
     eof ->
       more
