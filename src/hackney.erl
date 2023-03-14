@@ -725,7 +725,7 @@ maybe_redirect(
   case redirect_location(Headers) of
     undefined -> Resp;
     Location ->
-      IsRedirect = lists:member(S, [301, 302, 303, 307]),
+      IsRedirect = lists:member(S, [301, 302, 303, 307, 308]),
       case IsRedirect of
         false -> Resp;
         _ ->
@@ -734,7 +734,7 @@ maybe_redirect(
       end
   end;
 maybe_redirect({ok, S, _H, #client{follow_redirect=true}}=Resp, _Req) ->
-  case lists:member(S, [301, 302, 303, 307]) of
+  case lists:member(S, [301, 302, 303, 307, 308]) of
     true ->
       {error, {max_redirect_overflow, Resp}};
     false ->
@@ -746,7 +746,7 @@ maybe_redirect(Resp, _Req) ->
 
 maybe_redirect1(Location, {ok, S, H, #client{retries=Tries}=Client}=Resp, Req) ->
   {Method, _Path, Headers, Body} = Req,
-  case lists:member(S, [301, 302, 307]) of
+  case lists:member(S, [301, 302, 307, 308]) of
     true  ->
       ?report_debug("redirect request", [{location, Location},
                                          {req, Req},
