@@ -350,8 +350,10 @@ recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
 
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {_BufSize, undefined}) ->
   Transport:recv(Skt, 0, Timeout);
-recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {BufSize, ExpectedSize}) ->
-  Transport:recv(Skt, ExpectedSize - BufSize, Timeout).
+recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {BufSize, ExpectedSize}) when ExpectedSize >= BufSize ->
+  Transport:recv(Skt, ExpectedSize - BufSize, Timeout);
+recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {_BufSize, _ExpectedSize}) ->
+  Transport:recv(Skt, 0, Timeout).
 
 close(#client{socket=nil}=Client) ->
   Client#client{state = closed};
