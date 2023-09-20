@@ -620,21 +620,7 @@ maybe_proxy(Transport, Host, Port, Options)
   case proplists:get_value(proxy, Options) of
     Url when is_binary(Url) orelse is_list(Url) ->
       ?report_debug("HTTP proxy request", [{url, Url}]),
-      Url1 = hackney_url:parse_url(Url),
-      #hackney_url{transport = PTransport,
-                   host = ProxyHost,
-                   port = ProxyPort} = hackney_url:normalize(Url1),
-      ProxyAuth = proplists:get_value(proxy_auth, Options),
-      case {Transport, PTransport} of
-        {hackney_ssl, hackney_ssl} -> {error, invalid_proxy_transport};
-        {hackney_ssl, _} ->
-          do_connect(ProxyHost, ProxyPort, ProxyAuth,Transport, Host, Port, Options);
-        _ ->
-          case hackney_connect:connect(Transport, ProxyHost,ProxyPort, Options, true) of
-            {ok, Ref} -> {ok, Ref, true};
-            Error -> Error
-          end
-      end;
+      proxy_from_url(Url, Transport, Host, Port, Options);
     {ProxyHost, ProxyPort} ->
       ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost}, {proxy_port, ProxyPort}]),
       case Transport of
@@ -682,10 +668,46 @@ maybe_proxy(Transport, Host, Port, Options)
       %% connect using a socks5 proxy
       hackney_connect:connect(hackney_socks5, Host, Port, Options1, true);
     _ ->
+      maybe_proxy_from_env(Transport, Host, Port, Options)
+  end.
+
+maybe_proxy_from_env(Transport, Host, Port, Options) ->
+  case get_proxy_env() of
+    {ok, Url} ->
+      proxy_from_url(Url, Transport, Host, Port, Options);
+    false ->
       ?report_debug("request without proxy", []),
       hackney_connect:connect(Transport, Host, Port, Options, true)
   end.
 
+proxy_from_url(Url, Transport, Host, Port, Options) ->
+  ?report_debug("HTTP proxy request", [{url, Url}]),
+  Url1 = hackney_url:parse_url(Url),
+  #hackney_url{transport = PTransport,
+               host = ProxyHost,
+               port = ProxyPort} = hackney_url:normalize(Url1),
+  ProxyAuth = proplists:get_value(proxy_auth, Options),
+  case {Transport, PTransport} of
+    {hackney_ssl, hackney_ssl} -> {error, invalid_proxy_transport};
+    {hackney_ssl, _} ->
+      do_connect(ProxyHost, ProxyPort, ProxyAuth,Transport, Host, Port, Options);
+    _ ->
+      case hackney_connect:connect(Transport, ProxyHost,ProxyPort, Options, true) of
+        {ok, Ref} -> {ok, Ref, true};
+        Error -> Error
+      end
+  end.
+
+get_proxy_env() ->
+  get_proxy_env(?PROXY_ENV_VARS).
+
+get_proxy_env([Var | Rest]) ->
+  case os:getenv(Var) of
+    false -> get_proxy_env(Rest);
+    Url -> {ok, Url}
+  end;
+get_proxy_env([]) ->
+  false.
 
 do_connect(ProxyHost, ProxyPort, undefined, Transport, Host, Port, Options) ->
   do_connect(ProxyHost, ProxyPort, {undefined, <<>>}, Transport, Host, Port, Options);
