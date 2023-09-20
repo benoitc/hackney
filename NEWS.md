@@ -1,5 +1,10 @@
 # NEWS
 
+1.19.1 - 2023-09-21
+-------------------
+
+- feature: add `no_proxy_env` option to bypass proxy environment settings
+
 1.19.0 - 2023-09-20
 -------------------
 
