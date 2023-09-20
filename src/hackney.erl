@@ -668,10 +668,16 @@ maybe_proxy(Transport, Host, Port, Options)
       %% connect using a socks5 proxy
       hackney_connect:connect(hackney_socks5, Host, Port, Options1, true);
     _ ->
-      maybe_proxy_from_env(Transport, Host, Port, Options)
+      NoProxyEnv = proplists:get_value(
+                     no_proxy_env, Options, application:get_env(hackney, no_proxy_env, false)
+                    ),
+      maybe_proxy_from_env(Transport, Host, Port, Options, NoProxyEnv)
   end.
 
-maybe_proxy_from_env(Transport, Host, Port, Options) ->
+maybe_proxy_from_env(Transport, Host, Port, Options, true) ->
+  ?report_debug("request without proxy", []),
+  hackney_connect:connect(Transport, Host, Port, Options, true);
+maybe_proxy_from_env(Transport, Host, Port, Options, _) ->
   case get_proxy_env() of
     {ok, Url} ->
       proxy_from_url(Url, Transport, Host, Port, Options);
