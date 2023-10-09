@@ -166,28 +166,39 @@ stream_body1(Error, _Client) ->
 
 -spec stream_body_recv(binary(), #client{})
     -> {ok, binary(), #client{}} | {error, term()}.
-stream_body_recv(Buffer, Client=#client{version=Version, clen=CLen, parser=#hparser{body_state={stream, _, TransferState, _}}}) ->
+stream_body_recv(Buffer, Client=#client{parser=#hparser{body_state={stream, _, TransferState, _}}}) ->
   case recv(Client, TransferState) of
     {ok, Data} ->
       stream_body(Data, Client);
     {error, Reason} ->
-      Client2 = close(Client),
-      case Reason of
-        closed when (Version =:= {1, 0} orelse Version =:= {1, 1}) andalso (CLen =:= nil orelse CLen =:= undefined) ->
-          {ok, Buffer, Client2#client{response_state=done,
-            body_state=done,
-            buffer = <<>>,
-            parser=nil}};
-        closed when Client#client.te =:= <<"identity">> ->
-          {ok, Buffer, Client2#client{response_state=done,
-            body_state=done,
-            buffer = <<>>}};
-        closed ->
-          {error, {closed, Buffer}};
-        _Else ->
-          {error, Reason}
-      end
+      stream_body_recv_error(Reason, Buffer, Client)
+  end;
+stream_body_recv(Buffer, Client=#client{parser=#hparser{body_state=done}}) ->
+  case recv(Client) of
+    {ok, Data} ->
+      stream_body(Data, Client);
+    {error, Reason} ->
+      stream_body_recv_error(Reason, Buffer, Client)
   end.
+
+stream_body_recv_error(Reason, Buffer, Client=#client{version=Version, clen=CLen}) ->
+  Client2 = close(Client),
+  case Reason of
+    closed when (Version =:= {1, 0} orelse Version =:= {1, 1}) andalso (CLen =:= nil orelse CLen =:= undefined) ->
+      {ok, Buffer, Client2#client{response_state=done,
+                                  body_state=done,
+                                  buffer = <<>>,
+                                  parser=nil}};
+    closed when Client#client.te =:= <<"identity">> ->
+      {ok, Buffer, Client2#client{response_state=done,
+                                  body_state=done,
+                                  buffer = <<>>}};
+    closed ->
+      {error, {closed, Buffer}};
+    _Else ->
+      {error, Reason}
+  end.
+
 
 %% @doc stream a multipart response
 %%
