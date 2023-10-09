@@ -11,25 +11,50 @@ jobs:
   ci:
     name: Run checks and tests over ${{matrix.otp_vsn}} and ${{matrix.os}}
     runs-on: ${{matrix.os}}
-    container:
-      image: erlang:${{matrix.otp_vsn}}
     strategy:
       matrix:
-        otp_vsn: ["19.0", "19.3",
-                  "20.0", "20.1.7", "20.3.8.22",
-                  "21.0.9", "21.1.4", "21.2.7", "21.3.8.1",
-                  "22.0.7", "22.2.8", "22.3.4",
-                  "23.0.2", "23.2"]
-        os: [ubuntu-latest]
+        otp: ["25.3", "26.1"]
+        rebar3: ['3.22.1']
+        os: [ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          rebar3-version: ${{matrix.rebar3}}
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: python3 python3-httpbin python3-pip
+          version: 1.1
       - run: |
-          apt-get -q update
-          apt-get -y install python3
-          apt-get -y install python3-pip
-          pip3 install httpbin
           pip3 install gunicorn
           gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&
-      - run: ./support/rebar3 xref
-      - run: ./support/rebar3 eunit
-      - run: ./support/rebar3 dialyzer
+      - run: rebar3 xref
+      - run: rebar3 eunit
+      - run: rebar3 dialyzer
+  legacy:
+    name: Run checks and tests over ${{matrix.otp_vsn}} and ${{matrix.os}}
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        otp: ["22.3", "23.3", "24.3"]
+        rebar3: ['3.18.0']
+        os: [ubuntu-20.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          rebar3-version: ${{matrix.rebar3}}
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: python3 python3-httpbin python3-pip
+          version: 1.1
+      - run: |
+          pip3 install gunicorn
+          gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&
+      - run: rebar3 xref
+      - run: rebar3 eunit
+      - run: rebar3 dialyzer
+
+
