@@ -29,14 +29,8 @@ __Version:__ 1.20.0
 - Optional socket pool
 - REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
-**Supported versions** of Erlang are R16B03-1, 17.3.4 and above. It is
-reported to work with R14B04 and R15B03-1.
-
-**WARNING**: Erlang 17.3 and 17.3.1 have a broken SSL module which
-prevents the usage of SSL connection with some servers. You **must** upgrade
-in that case to Erlang
-[17.3.4](https://github.com/erlang/otp/commit/9417f044ee3c291c2ea343c203aebdcc40597226)
-or superior.
+**Supported versions** of Erlang are 22.3 and above. It is
+reported to work with version from 19.3 to 21.3.
 
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
