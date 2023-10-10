@@ -156,10 +156,12 @@ execute(#hparser{state=Status, buffer=Buffer}=St, Bin) ->
   end.
 
 %% Empty lines must be using \r\n.
-parse_first_line(<< $\n, _/binary >>, _St, _) ->
-  {error, badarg};
+parse_first_line(<< $\n, Buffer/binary >>, #hparser{empty_lines = Empty0} = St, Empty) ->
+  parse_first_line(Buffer, St#hparser{buffer = Buffer, empty_lines = Empty0 + 1}, Empty + 1);
 %% We limit the length of the first-line to MaxLength to avoid endlessly
 %% reading from the socket and eventually crashing.
+parse_first_line(_Buffer, #hparser{max_empty_lines=MaxEmpty}, Empty) when Empty >= MaxEmpty ->
+  {error, bad_request};
 parse_first_line(Buffer, St=#hparser{type=Type,
   max_line_length=MaxLength,
   max_empty_lines=MaxEmpty}, Empty) ->
@@ -192,12 +194,17 @@ match_eol(_, _) ->
   nomatch.
 
 %% @doc parse status
-parse_response_line(#hparser{buffer=Buf}=St) ->
-  case binary:split(Buf, <<"\r\n">>) of
+parse_response_line(#hparser{}=St) ->
+  parse_response_line([<<"\r\n">>, <<"\n">>], St).
+
+parse_response_line([], _St) ->
+  {error, bad_request};
+parse_response_line([Sep | SepRest], #hparser{buffer=Buf}=St) ->
+  case binary:split(Buf, Sep) of
     [Line, Rest] ->
       parse_response_version(Line, St#hparser{buffer=Rest});
-    _ ->
-      {error, bad_request}
+    _Other ->
+      parse_response_line(SepRest, #hparser{buffer=Buf}=St)
   end.
 
 
@@ -251,10 +258,15 @@ parse_uri_path(<< C, Rest/bits >>, St, Method, Acc) ->
     _ -> parse_uri_path(Rest, St, Method, << Acc/binary, C >>)
   end.
 
-parse_version(<< "HTTP/", High, ".", Low, $\r , $\n, Rest/binary >>, St, Method, URI)
+parse_version(<< "HTTP/", High, ".", Low, Rest0/binary >>, St, Method, URI)
   when High >= $0, High =< $9, Low >= $0, Low =< $9 ->
   Version = { High -$0, Low - $0},
-
+  Rest = case Rest0 of
+           <<"\r\n", Rest1/binary>> ->
+             Rest1;
+           <<"\n", Rest1/binary>> ->
+             Rest1
+         end,
   NState = St#hparser{type=request,
     version=Version,
     method=Method,
@@ -270,23 +282,35 @@ parse_headers(#hparser{}=St) ->
   parse_header(St).
 
 
-parse_header(#hparser{buffer=Buf}=St) ->
-  case binary:split(Buf, <<"\r\n">>) of
+parse_header(#hparser{}=St) ->
+  parse_header_sep([<<"\r\n">>, <<"\n">>], St).
+
+parse_header_sep([], St) ->
+  {more, St};
+parse_header_sep([Sep | SepRest], #hparser{buffer=Buf}=St) ->
+  case binary:split(Buf, Sep) of
+    [_, _] ->
+      parse_header_(Sep, St);
+    [Buf] ->
+      parse_header_sep(SepRest, St)
+  end.
+
+parse_header_(Sep, #hparser{buffer=Buf}=St) ->
+  case binary:split(Buf, Sep) of
     [<<>>, Rest] ->
       {headers_complete, St#hparser{buffer=Rest,
         state=on_body}};
     [Line, << " ", Rest/binary >> ] ->
       NewBuf = iolist_to_binary([Line, " ", Rest]),
-      parse_header(St#hparser{buffer=NewBuf});
+      parse_header_(Sep, St#hparser{buffer=NewBuf});
     [Line, << "\t", Rest/binary >> ] ->
       NewBuf = iolist_to_binary([Line, " ", Rest]),
-      parse_header(St#hparser{buffer=NewBuf});
+      parse_header_(Sep, St#hparser{buffer=NewBuf});
     [Line, Rest]->
       parse_header(Line, St#hparser{buffer=Rest});
     [Buf] ->
       {more, St}
   end.
-
 
 parse_header(Line, St) ->
   [Key, Value] = case binary:split(Line, <<":">>, [trim]) of
@@ -466,6 +490,9 @@ read_size(<<>>, _, _) ->
   eof;
 
 read_size(<<"\r\n", Rest/binary>>, Acc, _) ->
+  {ok, lists:reverse(Acc), Rest};
+
+read_size(<<"\n", Rest/binary>>, Acc, _) ->
   {ok, lists:reverse(Acc), Rest};
 
 read_size(<<$;, Rest/binary>>, Acc, _) ->
