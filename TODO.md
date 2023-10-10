@@ -1,10 +1,18 @@
 # TODO
 
-todo of hackney
+1.21.0
+------
 
-- Add Websockets support
-- Add SPDY support
-- Add HTTP pipelines support
-- Add support for custom authentication methods
-- Add support for oauth2 ?
-- Add support for HTTP digest auth
+- Improve pool
+- Improve proxying
+
+2.0.0
+-----
+- Support Websockets 
+- Support HTTP 2
+- Request / Response hooks
+- Dynamic response behaviour.
+
+2.1.0
+-----
+- Support HTTP 3
