@@ -382,7 +382,8 @@ pathencode_test_() ->
             {<<"/id/name:107/name2;p=1,3">>, <<"/id/name:107/name2;p=1,3">>},
             {<<"/@foobar">>, <<"/@foobar">>},
             {<<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>,
-             <<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>}
+             <<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>},
+            {<<"/1/indexes/*/queries">>, <<"/1/indexes/*/queries">>}
             ],
     [{V, fun() -> R = hackney_url:pathencode(V) end} || {V, R} <- Tests].
 
