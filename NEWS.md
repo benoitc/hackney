@@ -1,5 +1,14 @@
 # NEWS
 
+1.20.0 - 2023-10-10
+-------------------
+
+- handle `*` in path encoding
+- Support LF separators: since rfc7230-3.5 allows for LF-only
+- fix recv stream fix fetching trailers during streaming
+- fix CI
+- Improve documentation
+
 1.19.1 - 2023-09-21
 -------------------
 
