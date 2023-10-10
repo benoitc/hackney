@@ -4,7 +4,7 @@
 
 Copyright (c) 2012-2023 Benoît Chesneau.
 
-__Version:__ 1.19.0
+__Version:__ 1.20.0
 
 # hackney
 
@@ -368,7 +368,7 @@ ok = hackney_pool:start_pool(PoolName, Options),
 `timeout` is the time we keep the connection alive in the pool,
 `max_connections` is the number of connections maintained in the pool. Each
 connection in a pool is monitored and closed connections are removed
-automatically. The default timeout is `150000` ms and the default number of connections is `50`.
+automatically.
 
 To close a pool do:
 
