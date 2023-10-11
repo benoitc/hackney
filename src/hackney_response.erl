@@ -232,7 +232,7 @@ multipart_data(Client, Length, {mp_mixed, Cont}) ->
 multipart_data(Client, Length, {mp_mixed_eof, Cont}) ->
   {mp_mixed_eof, Client#client{multipart={Length, Cont}}};
 multipart_data(Client, Length, eof)
-  when Length =:= 0 orelse Length =:= nil ->
+  when Length =:= 0 orelse Length =:= nil orelse Length =:= undefined ->
   Client2 = end_stream_body(<<>>, Client),
   {eof, Client2#client{body_state=done, multipart=nil}};
 multipart_data(Client, _, eof) ->
@@ -240,9 +240,11 @@ multipart_data(Client, _, eof) ->
   {skip, Client2} = skip_body(Client),
   {eof, Client2#client{multipart=nil}};
 multipart_data(Client, Length, {more, Parser})
-  when Length > 0 orelse Length =:= nil->
+  when Length > 0 orelse Length =:= nil orelse Length =:= undefined ->
   case stream_body(Client) of
-    {ok, Data, Client2} when Length =:= nil ->
+    {ok, Data, Client2} when Length =:= nil  ->
+      multipart_data(Client2, Length, Parser(Data));
+    {ok, Data, Client2} when Length =:= undefined  ->
       multipart_data(Client2, Length, Parser(Data));
     {ok, << Data:Length/binary, Buffer/binary >>, Client2} ->
       multipart_data(Client2#client{buffer=Buffer}, 0,
