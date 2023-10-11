@@ -1,5 +1,10 @@
 # NEWS
 
+1.20.1 - 2013-10-11
+-------------------
+
+- fix multipart: handle case where Length is undefined
+
 1.20.0 - 2023-10-10
 -------------------
 
