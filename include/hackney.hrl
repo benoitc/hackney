@@ -57,5 +57,5 @@
 
 -define(CONNECTIONS, hackney_connections).
 
--define(HTTP_PROXY_ENV_VARS, ["http_proxy", "HTTP_PROXY"]).
--define(HTTPS_PROXY_ENV_VARS, ["https_proxy", "HTTPS_PROXY"]).
+-define(HTTP_PROXY_ENV_VARS, ["http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"]).
+-define(HTTPS_PROXY_ENV_VARS, ["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]).
