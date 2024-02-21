@@ -63,7 +63,8 @@ checkout(Host, Port, Transport, Client) ->
   Requester = self(),
   try
     do_checkout(Requester, Host, Port, Transport, Client)
-  catch _:_ ->
+  catch _:Error ->
+          io:format("error is ~p", [Error]),
     {error, checkout_failure}
   end.
 

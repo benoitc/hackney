@@ -28,7 +28,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
   BaseOpts = [binary, {active, false}, {packet, raw}],
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
   %% connect
-  gen_tcp:connect(Host, Port, Opts1, Timeout).
+ hackney_happy:connect(Host, Port, Opts1, Timeout).
 
 recv(Socket, Length) ->
   recv(Socket, Length, infinity).
