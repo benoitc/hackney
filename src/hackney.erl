@@ -320,7 +320,8 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
     host = Host,
     port = Port,
     user = User,
-    password = Password} = URL,
+    password = Password,
+    scheme = Scheme} = URL,
 
   Options = case User of
               <<>> ->
@@ -332,7 +333,7 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
 
   Headers1 = hackney_headers_new:new(Headers0),
 
-  case maybe_proxy(Transport, Host, Port, Options) of
+  case maybe_proxy(Transport, Scheme, Host, Port, Options) of
     {ok, Ref, AbsolutePath} ->
       Request = make_request(
                   Method, URL, Headers1, Body, Options, AbsolutePath
@@ -615,7 +616,7 @@ make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
   {Method, FinalPath, Headers1, Body}.
 
 
-maybe_proxy(Transport, Host, Port, Options)
+maybe_proxy(Transport, Scheme, Host, Port, Options)
   when is_list(Host), is_integer(Port), is_list(Options) ->
   case proplists:get_value(proxy, Options) of
     Url when is_binary(Url) orelse is_list(Url) ->
@@ -671,14 +672,14 @@ maybe_proxy(Transport, Host, Port, Options)
       NoProxyEnv = proplists:get_value(
                      no_proxy_env, Options, application:get_env(hackney, no_proxy_env, false)
                     ),
-      maybe_proxy_from_env(Transport, Host, Port, Options, NoProxyEnv)
+      maybe_proxy_from_env(Transport, Scheme, Host, Port, Options, NoProxyEnv)
   end.
 
-maybe_proxy_from_env(Transport, Host, Port, Options, true) ->
+maybe_proxy_from_env(Transport, _Scheme, Host, Port, Options, true) ->
   ?report_debug("request without proxy", []),
   hackney_connect:connect(Transport, Host, Port, Options, true);
-maybe_proxy_from_env(Transport, Host, Port, Options, _) ->
-  case get_proxy_env() of
+maybe_proxy_from_env(Transport, Scheme, Host, Port, Options, _) ->
+  case get_proxy_env(Scheme) of
     {ok, Url} ->
       proxy_from_url(Url, Transport, Host, Port, Options);
     false ->
@@ -704,8 +705,10 @@ proxy_from_url(Url, Transport, Host, Port, Options) ->
       end
   end.
 
-get_proxy_env() ->
-  get_proxy_env(?PROXY_ENV_VARS).
+get_proxy_env(https) ->
+  get_proxy_env(?HTTPS_PROXY_ENV_VARS);
+get_proxy_env(S) when S =:= http; S =:= http_unix ->
+  get_proxy_env(?HTTP_PROXY_ENV_VARS);
 
 get_proxy_env([Var | Rest]) ->
   case os:getenv(Var) of
