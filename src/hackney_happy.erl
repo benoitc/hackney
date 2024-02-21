@@ -19,9 +19,8 @@ connect(Hostname, Port, Opts, Timeout) ->
     false ->
       case hackney_cidr:is_ipv4(Hostname) of
         true ->
-           ?report_debug("connect using IPv4", [{hostname, Hostname}, {port, Port}]),
-
-         gen_tcp:connect(Hostname, Port, [inet | Opts], Timeout);
+          ?report_debug("connect using IPv4", [{hostname, Hostname}, {port, Port}]),
+          gen_tcp:connect(Hostname, Port, [inet | Opts], Timeout);
         false ->
           ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
           Self = self(),
@@ -35,8 +34,8 @@ connect(Hostname, Port, Opts, Timeout) ->
             {'DOWN', MRef, _Type, _Pid, _Info} ->
               {'error', 'connect_error'}
           after Timeout -> 
-            erlang:demonitor(MRef, [flush]),
-            {error, connect_timeout}
+                  erlang:demonitor(MRef, [flush]),
+                  {error, connect_timeout}
           end
       end
   end.
@@ -47,9 +46,15 @@ getaddrs(Hostname) ->
   IP6Addrs ++ IP4Addrs.
 
 getbyname(Hostname, Type) ->
-  case inet_res:getbyname(Hostname, Type) of
+  case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> hackney_cidr:usort_cidrs(AddrList);
-    {error, _Reason} -> []
+    {error, _Reason} -> [];
+    {'EXIT', Tb} ->
+      %% ERLANG 22 has an issue when g matching somee DNS server messages
+      ?report_debug("DNS error", [{hostname, Hostname}
+                                 ,{type, Type}
+                                 ,{tb, TB}]),
+      []
   end.
 
 try_connect([], _Port, _Opts, ServerPid) ->
