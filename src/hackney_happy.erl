@@ -25,14 +25,14 @@ connect(Hostname, Port, Opts, Timeout) ->
           ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
           Self = self(),
           Addrs = getaddrs(Hostname),
-          Pid = spawn_link( fun() -> try_connect(Addrs, Port, Opts, Self) end),
+          Pid = spawn_link( fun() -> try_connect(Addrs, Port, Opts, Self, {error, nxdomain}) end),
           MRef = erlang:monitor(process, Pid),
           receive
             {happy_connect, OK} ->
               erlang:demonitor(MRef, [flush]),
               OK;
-            {'DOWN', MRef, _Type, _Pid, _Info} ->
-              {'error', 'connect_error'}
+            {'DOWN', MRef, _Type, _Pid, Info} ->
+              {'error', {'connect_error', Info}}
           after Timeout -> 
                   erlang:demonitor(MRef, [flush]),
                   {error, connect_timeout}
@@ -57,16 +57,16 @@ getbyname(Hostname, Type) ->
       []
   end.
 
-try_connect([], _Port, _Opts, ServerPid) ->
-  ?report_trace("happy eyeball: failed to connect, error nxdomain", []),
-  ServerPid ! {hackney_happy, {error, nxdomain}};
-try_connect([{IP, Type} | Rest], Port, Opts, ServerPid) ->
+try_connect([], _Port, _Opts, ServerPid, LastError) ->
+  ?report_trace("happy eyeball: failed to connect", [{error, LastError}]),
+  ServerPid ! {hackney_happy, LastError};
+try_connect([{IP, Type} | Rest], Port, Opts, ServerPid, _LastError) ->
   ?report_trace("try to connect", [{ip, IP}, {type, Type}]),
   case gen_tcp:connect(IP, Port, [Type | Opts], ?TIMEOUT) of
     {ok, Socket} = OK ->
       ?report_trace("success to connect", [{ip, IP}, {type, Type}]),
       ok = gen_tcp:controlling_process(Socket, ServerPid),
       ServerPid ! {happy_connect, OK};
-    _Error ->
-      try_connect(Rest, Port, Opts, ServerPid) 
+    Error ->
+      try_connect(Rest, Port, Opts, ServerPid, Error)
   end.
