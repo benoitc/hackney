@@ -12,11 +12,11 @@ connect(Hostname, Port, Opts) ->
   connect(Hostname, Port, Opts, ?CONNECT_TIMEOUT).
 
 connect(Hostname, Port, Opts, Timeout) ->
-  case inet_cidr:is_ipv6(Hostname) of
+  case hackney_cidr:is_ipv6(Hostname) of
     true ->
       gen_tcp:connect(Hostname, Port, [inet6 | Opts], Timeout);
     false ->
-      case inet_cidr:is_ipv4(Hostname) of
+      case hackney_cidr:is_ipv4(Hostname) of
         true ->
          gen_tcp:connect(Hostname, Port, [inet | Opts], Timeout);
         false ->
@@ -44,7 +44,7 @@ getaddrs(Hostname) ->
 
 getbyname(Hostname, Type) ->
   case inet_res:getbyname(Hostname, Type) of
-    {'ok', #hostent{h_addr_list=AddrList}} -> inet_cidr:usort_cidrs(AddrList);
+    {'ok', #hostent{h_addr_list=AddrList}} -> hackney_cidr:usort_cidrs(AddrList);
     {error, _Reason} -> []
   end.
 
