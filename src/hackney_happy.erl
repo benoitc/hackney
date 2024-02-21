@@ -49,11 +49,11 @@ getbyname(Hostname, Type) ->
   case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> hackney_cidr:usort_cidrs(AddrList);
     {error, _Reason} -> [];
-    {'EXIT', Tb} ->
+    Else ->
       %% ERLANG 22 has an issue when g matching somee DNS server messages
       ?report_debug("DNS error", [{hostname, Hostname}
                                  ,{type, Type}
-                                 ,{tb, Tb}]),
+                                 ,{error, Else}]),
       []
   end.
 
