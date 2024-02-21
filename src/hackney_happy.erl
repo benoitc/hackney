@@ -47,7 +47,7 @@ getaddrs(Hostname) ->
 
 getbyname(Hostname, Type) ->
   case (catch inet_res:getbyname(Hostname, Type)) of
-    {'ok', #hostent{h_addr_list=AddrList}} -> hackney_cidr:usort_cidrs(AddrList);
+    {'ok', #hostent{h_addr_list=AddrList}} -> lists:usort(AddrList);
     {error, _Reason} -> [];
     Else ->
       %% ERLANG 22 has an issue when g matching somee DNS server messages
