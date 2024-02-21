@@ -14,12 +14,16 @@ connect(Hostname, Port, Opts) ->
 connect(Hostname, Port, Opts, Timeout) ->
   case hackney_cidr:is_ipv6(Hostname) of
     true ->
+      ?report_debug("connect using IPv6", [{hostname, Hostname}, {port, Port}]),
       gen_tcp:connect(Hostname, Port, [inet6 | Opts], Timeout);
     false ->
       case hackney_cidr:is_ipv4(Hostname) of
         true ->
+           ?report_debug("connect using IPv4", [{hostname, Hostname}, {port, Port}]),
+
          gen_tcp:connect(Hostname, Port, [inet | Opts], Timeout);
         false ->
+          ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
           Self = self(),
           Addrs = getaddrs(Hostname),
           Pid = spawn_link( fun() -> try_connect(Addrs, Port, Opts, Self) end),
@@ -49,10 +53,13 @@ getbyname(Hostname, Type) ->
   end.
 
 try_connect([], _Port, _Opts, ServerPid) ->
+  ?report_trace("happy eyeball: failed to connect, error nxdomain", []),
   ServerPid ! {hackney_happy, {error, nxdomain}};
 try_connect([{IP, Type} | Rest], Port, Opts, ServerPid) ->
+  ?report_trace("try to connect", [{ip, IP}, {type, Type}]),
   case gen_tcp:connect(IP, Port, [Type | Opts], ?TIMEOUT) of
     {ok, Socket} = OK ->
+      ?report_trace("success to connect", [{ip, IP}, {type, Type}]),
       ok = gen_tcp:controlling_process(Socket, ServerPid),
       ServerPid ! {happy_connect, OK};
     _Error ->

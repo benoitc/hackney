@@ -130,7 +130,6 @@ connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
   SSLOpts = [{secure_renegotiate, true}, proplists:get_value(ssl_options, Opts0)],
   BaseOpts = [binary, {active, false}, {packet, raw}],
   Opts1 = hackney_util:merge_opts(BaseOpts, proplists:delete(ssl_options, Opts0)),
-  io:format("host ~p, port ~p, options: ~p timeout ~p", [Host, Port, Opts1, Timeout]),
   case hackney_happy:connect(Host, Port, Opts1, Timeout) of
     {ok, Sock} ->
       ssl:connect(Sock, SSLOpts);
