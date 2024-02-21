@@ -53,7 +53,7 @@ getbyname(Hostname, Type) ->
       %% ERLANG 22 has an issue when g matching somee DNS server messages
       ?report_debug("DNS error", [{hostname, Hostname}
                                  ,{type, Type}
-                                 ,{tb, TB}]),
+                                 ,{tb, Tb}]),
       []
   end.
 
