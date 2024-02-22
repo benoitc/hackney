@@ -676,14 +676,22 @@ maybe_proxy(Transport, Scheme, Host, Port, Options)
   end.
 
 maybe_proxy_from_env(Transport, _Scheme, Host, Port, Options, true) ->
-  ?report_debug("request without proxy", []),
+  ?report_debug("no proxy env is forced, request without proxy", []),
   hackney_connect:connect(Transport, Host, Port, Options, true);
 maybe_proxy_from_env(Transport, Scheme, Host, Port, Options, _) ->
   case get_proxy_env(Scheme) of
     {ok, Url} ->
-      proxy_from_url(Url, Transport, Host, Port, Options);
+      NoProxyEnv = get_no_proxy_env(),
+      case match_no_proxy_env(NoProxyEnv, Host) of
+        false ->
+          ?report_debug("request with proxy", [{proxy, Url}, {host, Host}]),
+          proxy_from_url(Url, Transport, Host, Port, Options);
+        true ->
+         ?report_debug("request without proxy", []),
+         hackney_connect:connect(Transport, Host, Port, Options, true)
+      end;
     false ->
-      ?report_debug("request without proxy", []),
+      ?report_debug("no proxy env setup, request without proxy", []),
       hackney_connect:connect(Transport, Host, Port, Options, true)
   end.
 
@@ -705,17 +713,121 @@ proxy_from_url(Url, Transport, Host, Port, Options) ->
       end
   end.
 
-get_proxy_env(https) ->
-  get_proxy_env(?HTTPS_PROXY_ENV_VARS);
-get_proxy_env(S) when S =:= http; S =:= http_unix ->
-  get_proxy_env(?HTTP_PROXY_ENV_VARS);
+get_no_proxy_env() ->
+  case application:get_env(hackney, no_proxy) of
+    undefined ->
+      case get_no_proxy_env(?HTTP_NO_PROXY_ENV_VARS) of
+        false ->
+          application:set_env(hackney, no_proxy, false),
+          false;
+        NoProxyEnv ->
+          parse_no_proxy_env(NoProxyEnv, [])
+      end;
+    {ok, NoProxyEnv} ->
+      NoProxyEnv
+  end.
 
-get_proxy_env([Var | Rest]) ->
+get_no_proxy_env([Key | Rest]) ->
+  case os:getenv(Key) of
+    false -> get_no_proxy_env(Rest);
+    NoProxyStr ->
+      lists:usort(string:split(NoProxyStr, ","))
+  end;
+get_no_proxy_env([]) ->
+  false.
+
+parse_no_proxy_env(["*" | _], _Acc) ->
+  application:set_env(hackney, no_proxy, '*'),
+  '*';
+parse_no_proxy_env([S | Rest], Acc) ->
+  try
+    CIDR = hackney_cidr:parse(S),
+    parse_no_proxy_env(Rest, [{cidr, CIDR} | Acc])
+  catch
+    _:_ ->
+      Labels = string:tokens(S, "."),
+      parse_no_proxy_env(Rest, [{host, lists:reverse(Labels)}])
+  end;
+parse_no_proxy_env([], Acc) ->
+  NoProxy = lists:reverse(Acc),
+  application:set_env(hackney, no_proxy, NoProxy),
+  NoProxy.
+
+match_no_proxy_env(false, _Host) -> false;
+match_no_proxy_env('*', _Host) -> true;
+match_no_proxy_env(Patterns, Host) ->
+  do_match_no_proxy_env(Patterns, undefined, undefined, Host).
+
+do_match_no_proxy_env([{cidr, _CIDR} | _]=Patterns, undefined, Labels, Host) ->
+  Addrs = case inet:parse_address(Host) of
+            {ok, Addr} -> [Addr];
+            _ -> getaddrs(Host)
+          end,
+  do_match_no_proxy_env(Patterns, Addrs, Labels, Host);
+do_match_no_proxy_env([{cidr, CIDR} | Rest], Addrs, Labels, Host) ->
+  case test_host_cidr(Addrs, CIDR) of
+    true -> true;
+    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+  end;
+do_match_no_proxy_env([{host, _Labels} | _] = Patterns, Addrs, undefined, Host) ->
+  HostLabels = string:tokens(Host, "."),
+  do_match_no_proxy_env(Patterns, Addrs, lists:reverse(HostLabels), Host);
+do_match_no_proxy_env([{host, Labels} | Rest], Addrs, HostLabels, Host) ->
+  case test_host_labels(Labels, HostLabels) of
+    true -> true;
+    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+  end;
+do_match_no_proxy_env([], _, _, _) ->
+  false.
+
+test_host_labels(["*" | R1], [_ | R2]) -> test_host_labels(R1, R2);
+test_host_labels([ A | R1], [A | R2]) -> test_host_labels(R1, R2);
+test_host_labels([], _) -> true;
+test_host_labels(_, _) -> false.
+
+test_host_cidr([Addr, Rest], CIDR) ->
+  case hackney_cidr:contains(CIDR, Addr) of
+    true -> true;
+    false -> test_host_cidr(Rest, CIDR)
+  end;
+test_host_cidr([], _) ->
+  false.
+
+getaddrs(Host) ->
+  IP4Addrs = case inet:getaddrs(Host, inet) of
+               {ok, Addrs} -> Addrs;
+               {error, nxdomain} -> []
+             end,
+  case inet:getaddrs(Host, inet6) of
+    {ok, IP6Addrs} -> [IP6Addrs | IP4Addrs];
+    {error, nxdomain} -> IP4Addrs
+  end.
+
+get_proxy_env(https) ->
+  case application:get_env(hackney, https_proxy) of
+    undefined ->
+      ProxyEnv = do_get_proxy_env(?HTTPS_PROXY_ENV_VARS),
+      application:set_env(hackney, https_proxy, ProxyEnv),
+      ProxyEnv;
+    {ok, Cached} ->
+      Cached
+  end;
+get_proxy_env(S) when S =:= http; S =:= http_unix ->
+  case application:get_env(hackney, http_proxy) of
+    undefined ->
+      ProxyEnv = do_get_proxy_env(?HTTP_PROXY_ENV_VARS),
+      application:set_env(hackney, http_proxy, ProxyEnv),
+      ProxyEnv;
+    {ok, Cached} ->
+      Cached
+  end.
+
+do_get_proxy_env([Var | Rest]) ->
   case os:getenv(Var) of
-    false -> get_proxy_env(Rest);
+    false -> do_get_proxy_env(Rest);
     Url -> {ok, Url}
   end;
-get_proxy_env([]) ->
+do_get_proxy_env([]) ->
   false.
 
 do_connect(ProxyHost, ProxyPort, undefined, Transport, Host, Port, Options) ->

@@ -21,3 +21,6 @@ Copyright (c) 2009, Erlang Training and Consulting Ltd.
 Copyright (C) 1998 - 2014, Daniel Stenberg, <daniel@haxx.se>, et al.
 
 *) hackney_trace (C) 2015 under the Erlang Public LicensE
+
+*) hackney_cidr is based on inet_cidr 1.2.1. vendored for customer purpose.
+Copyright (c) 2024, Enki Multimedia , MIT License

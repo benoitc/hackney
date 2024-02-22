@@ -102,27 +102,13 @@ connect_options(hackney_local_tcp, _Host, ClientOptions) ->
   proplists:get_value(connect_options, ClientOptions, []);
 
 connect_options(Transport, Host, ClientOptions) ->
-  ConnectOpts0 = proplists:get_value(connect_options, ClientOptions, []),
-
-  %% handle ipv6
-  ConnectOpts1 = case lists:member(inet, ConnectOpts0) orelse
-                      lists:member(inet6, ConnectOpts0) of
-                   true ->
-                     ConnectOpts0;
-                   false ->
-                     case hackney_util:is_ipv6(Host) of
-                       true ->
-                         [inet6 | ConnectOpts0];
-                       false ->
-                         ConnectOpts0
-                     end
-                 end,
+  ConnectOpts = proplists:get_value(connect_options, ClientOptions, []),
 
   case Transport of
     hackney_ssl ->
-      ConnectOpts1 ++ ssl_opts(Host, ClientOptions);
+      [{ssl_options, ssl_opts(Host, ClientOptions)} | ConnectOpts];
     _ ->
-      ConnectOpts1
+      ConnectOpts
   end.
 
 
