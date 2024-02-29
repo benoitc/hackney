@@ -175,9 +175,33 @@ parse_and_unparse_url_test_() ->
                           user = <<"">>,
                           password = <<"">>}
             }
+
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests] ++
     [{V, fun() -> V = hackney_url:unparse_url(R) end} || {V, R} <- Tests].
+
+
+
+parse_unix_socket_test_() ->
+  Tests = [
+           {{<<"unix:/var/run/test.sock">>, <<"http:user@/path?key=value#Section%205">>},
+             #hackney_url{transport =hackney_local_tcp,
+                          scheme = http_unix,
+                          netloc = <<"%2Fvar%2Frun%2Ftest.sock">>,
+                          raw_path = <<"/path?key=value#Section%205">>,
+                          path = <<"/path">>,
+                          qs = <<"key=value">>,
+                          fragment = <<"Section%205">>,
+                          host = "/var/run/test.sock",
+                          port = 0,
+                          user = <<"user">>,
+                          password = <<"">>}
+           }
+          ],
+
+    [{V, fun() -> R = hackney_url:parse_url(V) end} || {_, {V, R}} <- Tests].
+
+
 
 parse_url_test_() ->
     %% {Value, Result}.

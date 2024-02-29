@@ -8,6 +8,8 @@
 %%%
 
 %% @doc module to manage URLs.
+%%
+%% TODO: add support of ssl on unix sockets
 
 -module(hackney_url).
 
@@ -32,7 +34,7 @@
 -type qs_opt() :: noplus | upper.
 
 %% @doc Parse an URL and return a #hackney_url record.
--spec parse_url(URL::binary()|list()) -> hackney_url().
+-spec parse_url(URL::binary()|list()|tuple()) -> hackney_url().
 parse_url(URL) when is_list(URL) ->
   case unicode:characters_to_binary(URL) of
     URL1 when is_binary(URL1) ->
@@ -48,8 +50,14 @@ parse_url(<<"https://", Rest/binary>>) ->
     scheme=https});
 parse_url(<<"http+unix://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_local_tcp, scheme=http_unix});
+parse_url({<<"unix:", SocketPath/binary>>, <<"http:/", Rest/binary >>}) ->
+  parse_unix_url(SocketPath, Rest, #hackney_url{transport=hackney_local_tcp, scheme=http_unix});
+
+parse_url(URL) when is_tuple(URL) ->
+  erlang:error({bad_url, URL});
 parse_url(URL) ->
   parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
+
 
 parse_url(URL, S) ->
   {URL1, Fragment} =  parse_fragment(URL),
@@ -70,6 +78,35 @@ parse_url(URL, S) ->
                                      path = Path1,
                                      qs = Query,
                                      fragment = Fragment})
+  end.
+
+
+parse_unix_url(SocketPath, URL, S) ->
+  {URL1, Fragment} =  parse_fragment(URL),
+  {Path, Query} = parse_path(URL1),
+
+  case binary:split(Path, <<"@">>) of
+    [Path1] ->
+      S#hackney_url{host=unicode:characters_to_list(urldecode(SocketPath)),
+                    port=0,
+                    raw_path = URL,
+                    path = Path1,
+                    qs = Query,
+                    fragment = Fragment};
+    [Credentials, Path1] ->
+      {User, Password}  = case binary:split(Credentials, <<":">>) of
+                             [User1, Password1] -> {User1, Password1};
+                             [User1] -> {User1, <<>>}
+                           end,
+      S#hackney_url{host=unicode:characters_to_list(urldecode(SocketPath)),
+                    port=0,
+                    raw_path = URL,
+                    path = Path1,
+                    qs = Query,
+                    fragment = Fragment,
+                    user=urldecode(User),
+                    password=urldecode(Password)}
+
   end.
 
 
