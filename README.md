@@ -233,9 +233,9 @@ the request body:
   - `{file, Path, Name, ExtraHeaders}` : to send a file with DOM element name and extra headers
   - `{Name, Content}`: to send a full part
   - `{Name, Content, ExtraHeaders}`: to send a full part
-  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a
+  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with 
     a mixed multipart content
-  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a a
+  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a
     mixed multipart content
 - `{file, File}` : To send a file
 - Bin: To send a binary or an iolist
@@ -389,7 +389,7 @@ behaviour.
 
 See for example the
 [hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
-Pool dispatcher based on dispcount].
+Pool dispatcher based on dispcount.
 
 > Note: for now you can`t force the pool handler / client.
 

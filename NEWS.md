@@ -1,6 +1,6 @@
 # NEWS
 
-1.20.1 - 2013-10-11
+1.20.1 - 2023-10-11
 -------------------
 
 - fix multipart: handle case where Length is undefined
@@ -42,7 +42,7 @@
 -------------------
 
 - security: update default CA bundle
-- fix pool: make checkout synchrounous (remove unwanted messages)
+- fix pool: make checkout synchronous (remove unwanted messages)
 
 1.17.4 - 2021-03-18
 -------------------
@@ -86,7 +86,7 @@
 
 - pool queue count metric is now named `queue_count`. You should update your dashboard to reflect it.
 
-- possible breacking changes when producing uppercase hexadecimal in urls
+- possible breaking changes when producing uppercase hexadecimal in urls
 
 This change the behaviour of urlencode and pathencode to produce
 uppercase hexadecimal to comply to the RFC3986 which may affect
@@ -114,7 +114,7 @@ systems using URL as signature or in an hash.
 - request: handle Connection: close response header for stteam
 - http: handle leading new lines in HTTP messages
 - http: handle trailers in persistent connection
-- pool: update pool timeout docummentation
+- pool: update pool timeout documentation
 - url: fix urlencode
 
 1.15.2 - 2019-09-25
@@ -262,7 +262,7 @@ systems using URL as signature or in an hash.
 
 - fix: race condition in controlling process (#407)
 - fix: spec of #hackney_url{} (#404)
-- fix: make sure to not lost a message during hiberntion in async request
+- fix: make sure to not lost a message during hibernation in async request
 - security: certifi 1.2.0
 - dependency: update idna  5.0.0
 
@@ -315,7 +315,7 @@ systems using URL as signature or in an hash.
 - add: new `socks5_resolver` function
 - fix: `hackney_util:merge_opts/2`
 - improvements: inet6 support in socks5 sockets
-- doc: miscenaleous docs fixes
+- doc: miscellaneous docs fixes
 - security: being more strict in ssl support
 - security: bump to certifi 0.7
 
@@ -348,7 +348,7 @@ systems using URL as signature or in an hash.
 - refactor: one flat source
 - replace hackney_metrics_* by [metrics](https://github.com/benoitc/erlang-metrics) library
 - fix: hackney_pool (#286)
-- security: bump to [erlang-certifi](https//github.com/certifi/erlang-certifi) 0.4.0
+- security: bump to [erlang-certifi](https://github.com/certifi/erlang-certifi) 0.4.0
 
 1.4.10 - 2016/02/27
 ------------------
@@ -408,7 +408,7 @@ systems using URL as signature or in an hash.
 - fix `connect_time metric` (#227)
 - fix redirection when `with_body`  is enabled (#228)
 - close half-closed socket to avoid leak (#231)
-- fix undexpected message in `hackney_stream` (#223)
+- fix unexpected message in `hackney_stream` (#223)
 - fix receive/error in hackney_manager (#232)
 
 1.3.1 - 2015/07/28
@@ -434,7 +434,7 @@ systems using URL as signature or in an hash.
 - new: updated root certificates
 - fix: ignore comma in set-cookie attributes (#193)
 - fix: status line parsing when reason phrase is missing entirely (#190)
-- fix: make sure sure the response is done during async streaming (#186)
+- fix: make sure the response is done during async streaming (#186)
 - fix metrics (#186)
 - new: bump latest version of `ssl_verify_hostname` (#175)
 - fix: parse server headers
@@ -575,8 +575,8 @@ supported release of hackney.
 ### Breaking change:
 
 When doing an HEAD request, the signature of the response when it
-succeeded is now `{ok, Status, ResponseHeaders}` and do not contains a
-client reference any more.
+succeeded is now `{ok, Status, ResponseHeaders}` and do not contain a
+client reference anymore.
 
 
 0.13.0 - 2014/07/08
@@ -603,7 +603,7 @@ client reference any more.
 - improvement: URI encoding is now fully normalized.
 - improvement: TCP_NODELAY is now available by default for all transports
 - improvements: IDNA parsing is only done during the normalization which
-  makes all the connections faster..
+  makes all the connections faster.
 - fix: connections options are now correctly passed to the transports.
 - fix: HTTP proxying. make sure we reuse the connection
 - fix: HTTP proxying, only resolve the proxy domain.
@@ -630,7 +630,7 @@ function `hackney_mimetypes:filename/1` .
 - make sure we finish a multipart stream
 - bump hackney_lib to 0.2.5
 - enable TCP_NODELAY by default. (To disable, pass the option
-  `{nodelay, false} to `connect_options`.
+  `{nodelay, false} to `connect_options`).
 
 0.11.1 - 2014/03/03
 -------------------
@@ -677,7 +677,7 @@ change fix it.
 - All messages from an async response are now under the
   format `{hackney_response, Ref, ... }` to distinct hackney messages
 from others in a process easily.
-- You can only make an async response at a time. Ie if you are are doing
+- You can only make an async response at a time. Ie if you are doing
   a persistent request (reusing the same reference) you will need to
 pass the async option again to the request. For that purpose the
 functions hackney:send_request/3 and hackney:setopts/2 have been
@@ -695,9 +695,9 @@ added.
 
 - add support for multipart responses
 - add support for cookies: There is now a `cookie`
-option that can be passed to the request. It can be a sinle cookie or a
+option that can be passed to the request. It can be a single cookie or a
 list of cookies. To parse cookies from the response a function `hackney:cookies/1` has
-been added. It return all the cookies as a list of [{Key, Value}].
+been added. It returns all the cookies as a list of [{Key, Value}].
 - breaking change: use [hackney_lib](http://github.com/benoitc/hackney_lib)  a web toolkit to handle the HTTP protocol and other manipulations.
 - optimization: send body and headers together when it is possible
 - fix release handling
@@ -742,7 +742,7 @@ used for async response requests.
   use `hackney:close/1` now.
 - breaking change: rename `hackney:raw/1` function to
   `hackney:cancel_request/1`.
-- breaking change: the hakney pool handler based on dispcount is now
+- breaking change: the hackney pool handler based on dispcount is now
   available in its [own repository](https://github.com/benoitc/hackney_disp) so hackney doe  not depends on dispcount.
 - fix: canceling and closing a request now make sure the async response
   process is killed.
@@ -786,7 +786,7 @@ used for async response requests.
 - fix: correct the path passed to a request
 - fix: multipart forms
 - fix: Make sure that the controller process of the socket is the pool process when the socket is in the pool
-- fix: auth header when when the user is not given
+- fix: auth header when the user is not given
 
 0.4.4 - 2013/08/25
 ------------------
