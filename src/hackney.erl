@@ -731,7 +731,7 @@ get_no_proxy_env([Key | Rest]) ->
   case os:getenv(Key) of
     false -> get_no_proxy_env(Rest);
     NoProxyStr ->
-      lists:usort(string:split(NoProxyStr, ","))
+      lists:usort(string:tokens(NoProxyStr, ","))
   end;
 get_no_proxy_env([]) ->
   false.
