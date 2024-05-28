@@ -311,17 +311,18 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   URL = hackney_url:normalize(URL0, PathEncodeFun),
 
   ?report_trace("request", [{method, Method},
-    {url, URL},
-    {headers, Headers0},
-    {body, Body},
-    {options, Options0}]),
+                            {url, URL},
+                            {headers, Headers0},
+                            {body, Body},
+                            {options, Options0}]),
 
   #hackney_url{transport=Transport,
-    host = Host,
-    port = Port,
-    user = User,
-    password = Password,
-    scheme = Scheme} = URL,
+               host = Host,
+               port = Port,
+               user = User,
+               password = Password,
+               scheme = Scheme} = URL,
+
 
   Options = case User of
               <<>> ->
