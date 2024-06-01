@@ -221,7 +221,6 @@ maybe_redirect_1(Parent, Owner, Ref, Reason,
 maybe_redirect_2(Parent, Owner, Ref, Reason,
                #client{transport=Transport,
                        socket=Socket}=Client) ->
-      io:format("In post", []),
       Transport:setopts(Socket, [{active, false}]),
       case parse(Client) of
         {loop, Client2} ->
