@@ -136,9 +136,23 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= infinity orelse is_integer(Timeout)) ->
-  BaseOpts = [binary, {active, false}, {packet, raw},
+  Protocol = proplists:get_value(protocol, Opts, tls),
+  AdditionalOptsNeeded = case Protocol of
+    tls ->
+      DefaultVersions = lists:map(fun tls_record:protocol_version/1, tls_record:supported_protocol_versions()),
+      Versions = proplists:get_value(versions, Opts, DefaultVersions),
+      lists:any(fun(Version) -> lists:member(Version, ['tlsv1','tlsv1.1','tlsv1.2']) end, Versions);
+    _ ->
+      true
+  end,
+  BaseOpts = [binary, {active, false}, {packet, raw}] ++
+    case AdditionalOptsNeeded of
+      true -> [
               {secure_renegotiate, true},
-              {reuse_sessions, true}],
+              {reuse_sessions, true}];
+      false ->
+        []
+    end,
   Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
   %% connect
   ssl:connect(parse_address(Host), Port, Opts1, Timeout).
