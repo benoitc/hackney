@@ -20,4 +20,4 @@ Copyright (c) 2009, Erlang Training and Consulting Ltd.
 *) mk-ca-bundle.pl from the curl project. under BSD license
 Copyright (C) 1998 - 2014, Daniel Stenberg, <daniel@haxx.se>, et al.
 
-*) hackney_trace (C) 2015 under the Erlang Public LicensE
+*) hackney_trace (C) 2015 under the Erlang Public License
