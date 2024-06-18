@@ -713,6 +713,7 @@ get_proxy_env(S) when S =:= http; S =:= http_unix ->
 get_proxy_env([Var | Rest]) ->
   case os:getenv(Var) of
     false -> get_proxy_env(Rest);
+    "" -> get_proxy_env(Rest);
     Url -> {ok, Url}
   end;
 get_proxy_env([]) ->
