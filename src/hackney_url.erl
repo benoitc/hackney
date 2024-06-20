@@ -52,7 +52,8 @@ parse_url(URL) ->
   parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
 
 parse_url(URL, S) ->
-  {URL1, Fragment} =  parse_fragment(URL),
+  URL0 = parse_protocol(URL),
+  {URL1, Fragment} =  parse_fragment(URL0),
   case binary:split(URL1, <<"/">>) of
     [URL1] ->
       parse_addr1(URL1, S#hackney_url{raw_path = raw_fragment(Fragment),
@@ -275,6 +276,14 @@ parse_fragment(S) ->
       {S, <<>>};
     [S1, F] ->
       {S1, F}
+  end.
+
+parse_protocol(S) ->
+  case binary:split(S, <<"://">>) of
+    [Url] ->
+      Url;
+    [_InvalidProtocol, Url] ->
+      Url
   end.
 
 
