@@ -51,7 +51,7 @@ getbyname(Hostname, Type) ->
     {error, nxdomain} = Error ->
       case inet:parse_address(Hostname) of
         {ok, IP} -> [IP];
-        _ -> Error
+        _ -> []
       end;
     {error, _Reason} -> [];
     Else ->
