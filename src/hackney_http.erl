@@ -400,33 +400,27 @@ parse_body(St) ->
 
 
 -spec transfer_decode(binary(), #hparser{})
-    -> {ok, binary(), #hparser{}} | {done, binary()} | {error, atom()}.
+    -> body_result() | {more, binary()} | {error, atom()}.
 transfer_decode(Data, St=#hparser{
   body_state={stream, TransferDecode,
-    TransferState, ContentDecode},
+    TransferState, ContentDecode}=BodyState,
   buffer=Buf}) ->
   case TransferDecode(Data, TransferState) of
     {ok, Data2, TransferState2} ->
       content_decode(ContentDecode, Data2,
-        St#hparser{body_state= {stream,
-          TransferDecode,
-          TransferState2,
-          ContentDecode}});
+        St#hparser{body_state=set_transfer_state(TransferState2, BodyState)});
     {ok, Data2, Rest, TransferState2} ->
       content_decode(ContentDecode, Data2,
         St#hparser{buffer=Rest,
-          body_state={stream,
-            TransferDecode,
-            TransferState2,
-            ContentDecode}});
+          body_state=set_transfer_state(TransferState2, BodyState)});
     {chunk_done, Rest} ->
       parse_trailers(St#hparser{buffer=Rest, state=on_trailers, body_state=done});
     {chunk_ok, Chunk, Rest} ->
-      {ok, Chunk, St#hparser{buffer=Rest}};
+      {ok, Chunk, St#hparser{buffer=Rest, body_state=reset_chunked_transfer_state(BodyState)}};
     more ->
-      {more, St#hparser{buffer=Data}, Buf};
+      {more, St#hparser{buffer=Data, body_state=reset_chunked_transfer_state(BodyState)}, Buf};
     {more, TransferState2} ->
-      {more, St#hparser{buffer=Data, body_state={stream, TransferDecode, TransferState2, ContentDecode}}, Buf};
+      {more, St#hparser{buffer=Data, body_state=set_transfer_state(TransferState2, BodyState)}, Buf};
     {done, Rest} ->
       {done, Rest};
     {done, Data2, _Rest} ->
@@ -450,14 +444,22 @@ content_decode(ContentDecode, Data, St) ->
     {error, Reason} -> {error, Reason}
   end.
 
+set_transfer_state(TransferState, {stream, TransferDecode, _, ContentDecode}) ->
+  {stream, TransferDecode, TransferState, ContentDecode}.
+
+%% @doc Reset the transfer state (BufSize, ExpectedSize) of a chunked body
+%% state. This must be done after each successful chunk. Otherwise, it is
+%% possible to attempt a recv for more bytes than will be delivered by the end
+%% of the response.
+reset_chunked_transfer_state(BodyState={stream, _, _, _}) ->
+  set_transfer_state({0, 0}, BodyState).
 
 %% @doc Decode a stream of chunks.
 -spec te_chunked(binary(), any())
-    -> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
-  | {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
-  | {done, non_neg_integer(), binary()} | {error, badarg}.
-te_chunked(<<>>, _) ->
-  done;
+    -> more
+  | {more, {non_neg_integer(), non_neg_integer()}}
+  | {chunk_ok, binary(), binary()}
+  | {chunk_done, binary()}.
 te_chunked(Data, _) ->
   case read_size(Data) of
     {ok, 0, Rest} ->

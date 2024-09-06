@@ -66,3 +66,35 @@ parse_chunked_response_trailers_test() ->
 	{_, P3} = hackney_http:execute(P2, <<"\r\n">>),
 	{more, P4} = hackney_http:execute(P3, <<"0\r\nFoo: ">>),
 	?assertEqual({done, <<>>}, hackney_http:execute(P4, <<"Bar\r\n\r\n">>)).
+
+
+%% Test that the transfer state of a chunked body state is properly reset.
+%% Verify the fix for an edge case when calling `hackney_response:stream_body/1'
+%% after receiving the last non-terminating chunk w/ specific buffer alignment.
+reset_chunked_transfer_state_test() ->
+	P0 = hackney_http:parser([response]),
+	{_, _, _, _, P1} = hackney_http:execute(P0, <<"HTTP/1.1 200 OK\r\n">>),
+	{_, _, P2} = hackney_http:execute(P1, <<"Transfer-Encoding: chunked\r\n">>),
+	{_, P3} = hackney_http:execute(P2, <<"\r\n">>),
+
+	%% Buffer doesn't have whole chunk, transfer state is set to {2, 16}
+	{more, P4, <<>>} = hackney_http:execute(P3, <<"10\r\naa">>),
+
+	%% Chunk is read, transfer state should be reset to {0, 0}
+	{ok, <<"aaaaaaaaaaaaaaaa">>, P5} = hackney_http:execute(P4, <<"aaaaaaaaaaaaaa\r\n">>),
+
+	%% Simulate what would happen if `hackney_response:stream_body/1' was called
+	%% (e.g. from `skip_body/1')
+	{more, #hparser{buffer = Buffer,
+					body_state = {stream, _, TransferState, _}
+					}, <<>>} = hackney_http:execute(P5),
+
+	%% This edge case only cropped up when the buffer was empty at this stage
+	?assertEqual(Buffer, <<>>),
+
+	%% If not {0, 0}, the subsequent `Transport:recv/3' call from within
+	%% `hackney_response:recv/2' would attempt to receive additional bytes that
+	%% may not arrive and will hang until timeout. For this example, this is
+	%% because we are at the end of the response (aside from the terminating
+	%% chunk and an empty trailer).
+	?assertEqual({0, 0}, TransferState).
