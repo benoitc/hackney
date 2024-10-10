@@ -15,6 +15,7 @@
 -export([to_binary/1]).
 -export([is_ipv4/1]).
 -export([is_ipv6/1]).
+-export([ip_gte/2, ip_lte/2]).
 
 -type cidr() :: {Start :: inet:ip4_address(), End :: inet:ip4_address(), MaskLen :: 0..32}
               | {Start :: inet:ip6_address(), End :: inet:ip6_address(), MaskLen :: 0..128}.
