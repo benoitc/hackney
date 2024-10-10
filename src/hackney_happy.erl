@@ -11,8 +11,10 @@
 connect(Hostname, Port, Opts) ->
   connect(Hostname, Port, Opts, ?CONNECT_TIMEOUT).
 
-connect(Hostname0, Port, Opts, Timeout) ->
-  Hostname = parse_address(Hostname0),
+connect(Hostname, Port, Opts, Timeout) ->
+  do_connect(parse_address(Hostname), Port, Opts, Timeout).
+
+do_connect(Hostname, Port, Opts, Timeout) when is_tuple(Hostname) ->
   case hackney_cidr:is_ipv6(Hostname) of
     true ->
       ?report_debug("connect using IPv6", [{hostname, Hostname}, {port, Port}]),
@@ -23,24 +25,27 @@ connect(Hostname0, Port, Opts, Timeout) ->
           ?report_debug("connect using IPv4", [{hostname, Hostname}, {port, Port}]),
           gen_tcp:connect(Hostname, Port, [inet | Opts], Timeout);
         false ->
-          ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
-          Self = self(),
-          Addrs = getaddrs(Hostname),
-          Pid = spawn_link( fun() -> try_connect(Addrs, Port, Opts, Self, {error, nxdomain}) end),
-          MRef = erlang:monitor(process, Pid),
-          receive
-            {happy_connect, OK} ->
-              erlang:demonitor(MRef, [flush]),
-              OK;
-            {'DOWN', MRef, _Type, _Pid, Info} ->
-              {'error', {'connect_error', Info}}
-          after Timeout -> 
-                  erlang:demonitor(MRef, [flush]),
-                  {error, connect_timeout}
-          end
+          {error, nxdomain}
       end
+  end;
+do_connect(Hostname, Port, Opts, Timeout) ->
+  ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
+  Self = self(),
+  Addrs = getaddrs(Hostname),
+  Pid = spawn_link( fun() -> try_connect(Addrs, Port, Opts, Self, {error, nxdomain}) end),
+  MRef = erlang:monitor(process, Pid),
+  receive
+    {happy_connect, OK} ->
+      erlang:demonitor(MRef, [flush]),
+      OK;
+    {'DOWN', MRef, _Type, _Pid, Info} ->
+      {'error', {'connect_error', Info}}
+  after Timeout -> 
+          erlang:demonitor(MRef, [flush]),
+          {error, connect_timeout}
   end.
 
+-spec parse_address(inet:ip_address() | binary() | string()) -> inet:ip_address() | string().
 parse_address(IPTuple) when is_tuple(IPTuple) -> IPTuple;
 parse_address(IPBin) when is_binary(IPBin) ->
   parse_address(binary_to_list(IPBin));
@@ -53,12 +58,12 @@ parse_address(IPString) ->
     {error, _} -> IPString
   end.
 
-
+-spec getaddrs(string()) -> [{inet:ip_address(), 'inet6' | 'inet'}].
 getaddrs("localhost") ->
   [{{0,0,0,0,0,0,0,1}, 'inet6'}, {{127,0,0,1}, 'inet'}];
-getaddrs(Hostname) ->
-  IP6Addrs = [{Addr, 'inet6'} || Addr <- getbyname(Hostname, 'aaaa')],
-  IP4Addrs = [{Addr, 'inet'} || Addr <- getbyname(Hostname, 'a')],
+getaddrs(Name) ->
+  IP6Addrs = [{Addr, 'inet6'} || Addr <- getbyname(Name, 'aaaa')],
+  IP4Addrs = [{Addr, 'inet'} || Addr <- getbyname(Name, 'a')],
   IP6Addrs ++ IP4Addrs.
 
 getbyname(Hostname, Type) ->

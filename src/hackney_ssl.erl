@@ -123,7 +123,7 @@ find(_Fun, []) ->
 
 
 connect(Host, Port, Opts) ->
-  connect(Host, Port, Opts, infinity).
+  connect(Host, Port, Opts, 30000).
 
 connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= 5000 orelse is_integer(Timeout)) ->
