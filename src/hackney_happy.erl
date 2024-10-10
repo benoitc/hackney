@@ -53,14 +53,14 @@ parse_address(IPString) ->
     {error, _} -> IPString
   end.
 
- 
+
+getaddrs("localhost") ->
+  [{{0,0,0,0,0,0,0,1}, 'inet6'}, {{127,0,0,1}, 'inet'}];
 getaddrs(Hostname) ->
   IP6Addrs = [{Addr, 'inet6'} || Addr <- getbyname(Hostname, 'aaaa')],
   IP4Addrs = [{Addr, 'inet'} || Addr <- getbyname(Hostname, 'a')],
   IP6Addrs ++ IP4Addrs.
 
-getbyname("localhost", 'aaaa') -> [{0,0,0,0,0,0,0,1}];
-getbyname("localhost", 'a') -> [{127,0,0,1}];
 getbyname(Hostname, Type) ->
   case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> lists:usort(AddrList);
