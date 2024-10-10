@@ -11,7 +11,8 @@
 connect(Hostname, Port, Opts) ->
   connect(Hostname, Port, Opts, ?CONNECT_TIMEOUT).
 
-connect(Hostname, Port, Opts, Timeout) ->
+connect(Hostname0, Port, Opts, Timeout) ->
+  Hostname = parse_address(Hostname0),
   case hackney_cidr:is_ipv6(Hostname) of
     true ->
       ?report_debug("connect using IPv6", [{hostname, Hostname}, {port, Port}]),
@@ -39,6 +40,19 @@ connect(Hostname, Port, Opts, Timeout) ->
           end
       end
   end.
+
+parse_address(IPTuple) when is_tuple(IPTuple) -> IPTuple;
+parse_address(IPBin) when is_binary(IPBin) ->
+  parse_address(binary_to_list(IPBin));
+%% IPv6 string with brackets
+parse_address("[" ++ IPString) ->
+  parse_address(lists:sublist(IPString, length(IPString) - 1));
+parse_address(IPString) ->
+  case inet:parse_address(IPString) of
+    {ok, IP} -> IP;
+    {error, _} -> IPString
+  end.
+
  
 getaddrs(Hostname) ->
   IP6Addrs = [{Addr, 'inet6'} || Addr <- getbyname(Hostname, 'aaaa')],
@@ -48,7 +62,7 @@ getaddrs(Hostname) ->
 getbyname(Hostname, Type) ->
   case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> lists:usort(AddrList);
-    {error, nxdomain} = Error ->
+    {error, nxdomain} ->
       case inet:parse_address(Hostname) of
         {ok, IP} -> [IP];
         _ -> []
