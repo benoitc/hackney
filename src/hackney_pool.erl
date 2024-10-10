@@ -63,12 +63,13 @@ checkout(Host, Port, Transport, Client) ->
   Requester = self(),
   try
     do_checkout(Requester, Host, Port, Transport, Client)
-  catch _:_ ->
+  catch _:Error ->
+    ?report_trace("pool: checkout failure", [{error, Error}]),
     {error, checkout_failure}
   end.
 
 do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
-  mod_metrics=Metrics}=Client) ->
+                                                       mod_metrics=Metrics}=Client) ->
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   %% Fall back to using connect_timeout if checkout_timeout is not set
   CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
@@ -78,7 +79,6 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
   Pool = find_pool(PoolName, Opts),
   case catch gen_server:call(Pool, {checkout, Connection, Requester, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
-
       %% stats
       ?report_debug("reuse a connection", [{pool, PoolName}]),
       _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
@@ -105,7 +105,7 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
           {error, timeout};
         Error ->
-          ?report_trace("connect error", []),
+          ?report_trace("connect error", [{pool, PoolName}, {error, Error}]),
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
           Error
       end;
