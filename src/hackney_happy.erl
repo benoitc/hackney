@@ -59,6 +59,8 @@ getaddrs(Hostname) ->
   IP4Addrs = [{Addr, 'inet'} || Addr <- getbyname(Hostname, 'a')],
   IP6Addrs ++ IP4Addrs.
 
+getbyname("localhost", 'aaaa') -> [{0,0,0,0,0,0,0,1}];
+getbyname("localhost", 'a') -> [{127,0,0,1}];
 getbyname(Hostname, Type) ->
   case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> lists:usort(AddrList);
