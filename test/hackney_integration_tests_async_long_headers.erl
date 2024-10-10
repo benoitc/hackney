@@ -34,7 +34,7 @@ start(#{status_code := StatusCode, method := Method}) ->
 stop(#{dummy_http_pid := Pid}, _Props) ->
   exit(Pid, normal),
   application:stop(hackney),
-  error_logger:tty(true),
+%  error_logger:tty(true),
   ok.
 
 
