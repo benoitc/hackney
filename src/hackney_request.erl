@@ -86,8 +86,14 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
   %% get expect headers
   Expect = expectation(Headers2),
 
+  %% convert iolist body to binary
+  Body1 = case is_list(Body0) of
+    true -> iolist_to_binary(Body0);
+    false -> Body0
+  end,
+
   %% build headers with the body.
-  {FinalHeaders, ReqType, Body, Client1} = case Body0 of
+  {FinalHeaders, ReqType, Body, Client1} = case Body1 of
                                             stream ->
                                                {Headers2, ReqType0, stream, Client0};
                                             stream_multipart ->
@@ -98,15 +104,11 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                                               handle_multipart_body(Headers2, ReqType0,
                                                                     Size, Boundary, Client0);
                                             <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0);
-                                            [] when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0);
+                                              handle_body(Headers2, ReqType0, Body1, Client0);
                                             <<>> ->
-                                              {Headers2, ReqType0, Body0, Client0};
-                                            [] ->
-                                              {Headers2, ReqType0, Body0, Client0};
+                                              {Headers2, ReqType0, Body1, Client0};
                                             _ ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0)
+                                              handle_body(Headers2, ReqType0, Body1, Client0)
                                           end,
 
   %% build final client record
@@ -370,13 +372,6 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                             S = hackney_headers_new:get_value(<<"content-length">>, Headers),
                             {S, CT, Body0};
 
-                          _ when is_list(Body0) -> % iolist case
-                            Body1 = iolist_to_binary(Body0),
-                            S = erlang:byte_size(Body1),
-                            CT = hackney_headers_new:get_value(
-                                   <<"content-type">>, Headers, <<"application/octet-stream">>
-                                  ),
-                            {S, CT, Body1};
                           _ when is_binary(Body0) ->
                             S = erlang:byte_size(Body0),
                             CT = hackney_headers_new:get_value(

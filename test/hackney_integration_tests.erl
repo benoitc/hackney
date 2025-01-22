@@ -20,6 +20,10 @@ all_tests() ->
   % fun relative_redirect_request_no_follow/0,
    fun relative_redirect_request_follow/0,
    fun test_duplicate_headers/0,
+   fun test_post_includes_content_headers_with_body/0,
+   fun test_post_includes_content_headers_with_empty_body/0,
+   fun test_get_includes_content_headers_with_body/0,
+   fun test_get_excludes_content_headers_with_empty_body/0,
    fun test_custom_host_headers/0,
    fun async_request/0,
    fun async_head_request/0,
@@ -185,6 +189,48 @@ test_custom_host_headers() ->
   Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
   ReqHeaders = proplists:get_value(<<"headers">>, Obj),
   ?assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
+
+test_post_includes_content_headers_with_body() ->
+    URL = <<"http://localhost:8000/post">>,
+    Body = <<"{\"test\": \"ok\" }">>,
+    Options = [with_body],
+    {ok, 200, _H, JsonBody} = hackney:post(URL, [], Body, Options),
+    Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+    ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+    ?assertEqual(<<"15">>, proplists:get_value(<<"Content-Length">>, ReqHeaders)),
+    ?assertEqual(<<"application/octet-stream">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
+
+test_post_includes_content_headers_with_empty_body() ->
+    URL = <<"http://localhost:8000/post">>,
+    Body = <<>>,
+    Options = [with_body],
+    {ok, 200, _H, JsonBody} = hackney:post(URL, [], Body, Options),
+    Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+    ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+    ?assertEqual(<<"0">>, proplists:get_value(<<"Content-Length">>, ReqHeaders)),
+    ?assertEqual(<<"application/octet-stream">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
+
+test_get_includes_content_headers_with_body() ->
+    URL = <<"http://localhost:8000/get">>,
+    Body = <<"{\"test\": \"ok\" }">>,
+    Options = [with_body],
+    {ok, 200, _H, JsonBody} = hackney:get(URL, [], Body, Options),
+    Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+    ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+    ?assertEqual(<<"15">>, proplists:get_value(<<"Content-Length">>, ReqHeaders)),
+    ?assertEqual(<<"application/octet-stream">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
+
+test_get_excludes_content_headers_with_empty_body() ->
+    URL = <<"http://localhost:8000/get">>,
+    EmptyBodies = [<<>>, [], [<<>>]],
+    Options = [with_body],
+    lists:foreach(fun(Body) ->
+        {ok, 200, _H, JsonBody} = hackney:get(URL, [], Body, Options),
+        Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
+        ReqHeaders = proplists:get_value(<<"headers">>, Obj),
+        ?assertEqual(undefined, proplists:get_value(<<"Content-Type">>, ReqHeaders)),
+        ?assertEqual(undefined, proplists:get_value(<<"Content-Length">>, ReqHeaders))
+    end, EmptyBodies).
 
 test_frees_manager_ets_when_body_is_in_client() ->
     URL = <<"http://localhost:8000/get">>,
