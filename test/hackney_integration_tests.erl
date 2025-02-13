@@ -4,27 +4,27 @@
 
 
 all_tests() ->
-  [get_request(),
-   request_with_body(),
-   head_request(),
-   no_content_response(),
-   not_modified_response(),
-   basic_auth_request_failed(),
-   basic_auth_request(),
-   basic_auth_url_request(),
-   set_cookie_request(),
-   send_cookies_request(),
-   absolute_redirect_request_no_follow(),
-   absolute_redirect_request_follow(),
-%   relative_redirect_request_no_follow(),
-   relative_redirect_request_follow(),
-   test_duplicate_headers(),
-   test_custom_host_headers(),
-   async_request(),
-   async_head_request(),
-   async_no_content_request(),
-   test_frees_manager_ets_when_body_is_in_client(),
-   test_frees_manager_ets_when_body_is_in_response()].
+  [fun get_request/0,
+   fun request_with_body/0,
+   fun head_request/0,
+   fun no_content_response/0,
+   fun not_modified_response/0,
+   fun basic_auth_request_failed/0,
+   fun basic_auth_request/0,
+   fun basic_auth_url_request/0,
+   fun set_cookie_request/0,
+   fun send_cookies_request/0,
+   fun absolute_redirect_request_no_follow/0,
+   fun absolute_redirect_request_follow/0,
+  % fun relative_redirect_request_no_follow/0,
+   fun relative_redirect_request_follow/0,
+   fun test_duplicate_headers/0,
+   fun test_custom_host_headers/0,
+   fun async_request/0,
+   fun async_head_request/0,
+   fun async_no_content_request/0,
+   fun test_frees_manager_ets_when_body_is_in_client/0,
+   fun test_frees_manager_ets_when_body_is_in_response/0].
 
 %%all_tests() ->
 %%    case has_unix_socket() of
@@ -38,7 +38,7 @@ http_requests_test_() ->
      fun start/0,
      fun stop/1,
      fun(ok) ->
-         {inparallel, all_tests()}
+         {inorder, all_tests()}
      end}.
 
 start() ->
@@ -50,52 +50,52 @@ stop(ok) -> ok.
 get_request() ->
     URL = <<"http://localhost:8000/get">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(200, StatusCode).
+    ?assertEqual(200, StatusCode).
 
 request_with_body() ->
     URL = <<"http://localhost:8000/robots.txt">>,
     ExpectedBody = <<"User-agent: *\nDisallow: /deny\n">>,
     {ok, 200, _, Body} = hackney:request(get, URL, [], <<>>, [{with_body, true}]),
-    ?_assertEqual(ExpectedBody, Body).
+    ?assertEqual(ExpectedBody, Body).
 
 head_request() ->
     URL = <<"http://localhost:8000/get">>,
     {ok, StatusCode, _} = hackney:request(head, URL, [], <<>>, []),
-    ?_assertEqual(200, StatusCode).
+    ?assertEqual(200, StatusCode).
 
 no_content_response() ->
     URL = <<"http://localhost:8000/status/204">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(204, StatusCode).
+    ?assertEqual(204, StatusCode).
 
 not_modified_response() ->
     URL = <<"http://localhost:8000/status/304">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(304, StatusCode).
+    ?assertEqual(304, StatusCode).
 
 basic_auth_request() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
     Options = [{basic_auth, {<<"username">>, <<"password">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
-    ?_assertEqual(200, StatusCode).
+    ?assertEqual(200, StatusCode).
 
 basic_auth_url_request() ->
     URL = <<"http://username:pass%26word@localhost:8000/basic-auth/username/pass%26word">>,
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-    ?_assertEqual(200, StatusCode).
+    ?assertEqual(200, StatusCode).
 
 basic_auth_request_failed() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
     Options = [{basic_auth, {<<"wrong">>, <<"auth">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
-    ?_assertEqual(401, StatusCode).
+    ?assertEqual(401, StatusCode).
 
 set_cookie_request() ->
     URL = <<"http://localhost:8000/cookies/set?k1=v1">>,
     {ok, _, Headers, _} = hackney:request(get, URL, [], <<>>, []),
     Cookies = hackney:cookies(Headers),
     ExpectedCookies = [{<<"k1">>, [{<<"k1">>,<<"v1">>},{<<"Path">>,<<"/">>}]}],
-    ?_assertEqual(ExpectedCookies, Cookies).
+    ?assertEqual(ExpectedCookies, Cookies).
 
 send_cookies_request() ->
     URL = <<"http://localhost:8000/cookies">>,
@@ -103,63 +103,63 @@ send_cookies_request() ->
     {ok, _, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     {ok, Body} = hackney:body(Client),
     Match = re:run(Body, <<".*\"SESSION\".*\"123\".*">>),
-    ?_assertMatch({match, _}, Match).
+    ?assertMatch({match, _}, Match).
 
 absolute_redirect_request_no_follow() ->
     URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
     Options = [{follow_redirect, false}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
-    [?_assertEqual(302, StatusCode),
-     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+    ?assertEqual(302, StatusCode),
+    ?assertEqual(<<"http://localhost:8000/get">>, Location).
 
 absolute_redirect_request_follow() ->
     URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get">>,
     Options = [{follow_redirect, true}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
-    [?_assertEqual(200, StatusCode),
-     ?_assertEqual(<<"http://localhost:8000/get">>, Location)].
+    ?assertEqual(200, StatusCode),
+    ?assertEqual(<<"http://localhost:8000/get">>, Location).
 
 %relative_redirect_request_no_follow() ->
 %    URL = <<"http://localhost:8000/relative-redirect/1">>,
 %    Options = [{follow_redirect, false}],
 %    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
 %    Location = hackney:location(Client),
-%    [?_assertEqual(302, StatusCode),
-%     ?_assertEqual(Location, <<"/get">>)].
+%    [?assertEqual(302, StatusCode),
+%     ?assertEqual(Location, <<"/get">>)].
 
 relative_redirect_request_follow() ->
     URL = <<"http://localhost:8000/redirect-to?url=/get">>,
     Options = [{follow_redirect, true}],
     {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
     Location = hackney:location(Client),
-    [?_assertEqual(200, StatusCode),
-     ?_assertEqual(Location, <<"http://localhost:8000/get">>)].
+    ?assertEqual(200, StatusCode),
+    ?assertEqual(Location, <<"http://localhost:8000/get">>).
 
 async_request() ->
     URL = <<"http://localhost:8000/get">>,
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
-    [?_assertEqual(200, StatusCode),
-     ?_assertEqual([body, headers, status], Keys)].
+    ?assertEqual(200, StatusCode),
+    ?assertEqual([body, headers, status], Keys).
 
 async_head_request() ->
     URL = <<"http://localhost:8000/get">>,
     Options = [async],
     {ok, ClientRef} = hackney:head(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
-    [?_assertEqual(200, StatusCode),
-     ?_assertEqual([headers, status], Keys)].
+    ?assertEqual(200, StatusCode),
+    ?assertEqual([headers, status], Keys).
 
 async_no_content_request() ->
     URL = <<"http://localhost:8000/status/204">>,
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
-    [?_assertEqual(204, StatusCode),
-     ?_assertEqual([headers, status], Keys)].
+    ?assertEqual(204, StatusCode),
+    ?assertEqual([headers, status], Keys).
 
 test_duplicate_headers() ->
   URL = <<"http://localhost:8000/post">>,
@@ -169,7 +169,7 @@ test_duplicate_headers() ->
   {ok, 200, _H, JsonBody} = hackney:post(URL, Headers, Body, Options),
   Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
   ReqHeaders = proplists:get_value(<<"headers">>, Obj),
-  ?_assertEqual(<<"application/json">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
+  ?assertEqual(<<"application/json">>, proplists:get_value(<<"Content-Type">>, ReqHeaders)).
 
 test_custom_host_headers() ->
   URL = <<"http://localhost:8000/get">>,
@@ -178,7 +178,7 @@ test_custom_host_headers() ->
   {ok, 200, _H, JsonBody} = hackney:get(URL, Headers, <<>>, Options),
   Obj = jsone:decode(JsonBody, [{object_format, proplist}]),
   ReqHeaders = proplists:get_value(<<"headers">>, Obj),
-  ?_assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
+  ?assertEqual(<<"myhost.com">>, proplists:get_value(<<"Host">>, ReqHeaders)).
 
 test_frees_manager_ets_when_body_is_in_client() ->
     URL = <<"http://localhost:8000/get">>,
@@ -186,9 +186,10 @@ test_frees_manager_ets_when_body_is_in_client() ->
     {ok, 200, _, Client} = hackney:get(URL),
     DuringCount = ets:info(hackney_manager_refs, size),
     {ok, _unusedBody} = hackney:body(Client),
+    timer:sleep(10),
     AfterCount = ets:info(hackney_manager_refs, size),
-    ?_assertEqual(DuringCount, BeforeCount + 1),
-    ?_assertEqual(BeforeCount, AfterCount).
+    ?assertEqual(DuringCount, BeforeCount + 1),
+    ?assertEqual(BeforeCount, AfterCount).
 
 test_frees_manager_ets_when_body_is_in_response() ->
     URL = <<"http://localhost:8000/get">>,
@@ -196,14 +197,15 @@ test_frees_manager_ets_when_body_is_in_response() ->
     Options = [with_body],
     BeforeCount = ets:info(hackney_manager_refs, size),
     {ok, 200, _, _} = hackney:get(URL, Headers, <<>>, Options),
+    timer:sleep(10),
     AfterCount = ets:info(hackney_manager_refs, size),
-    ?_assertEqual(BeforeCount, AfterCount).
+    ?assertEqual(BeforeCount, AfterCount).
 
 
 %%local_socket_request() ->
 %%    URL = <<"http+unix://httpbin.sock/get">>,
 %%    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
-%%    ?_assertEqual(200, StatusCode).
+%%    ?assertEqual(200, StatusCode).
 
 
 %% Helpers
