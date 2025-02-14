@@ -52,22 +52,24 @@ parse_url(URL) ->
   parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
 
 parse_url(URL, S) ->
-  {URL1, Fragment} =  parse_fragment(URL),
-  case binary:split(URL1, <<"/">>) of
-    [URL1] ->
-      parse_addr1(URL1, S#hackney_url{raw_path = raw_fragment(Fragment),
+  {URL1, Fragment} = cut_fragment(URL),
+  {URL2, Query} = cut_query(URL1),
+  RawPath = << (raw_query(Query))/binary, (raw_fragment(Fragment))/binary >>,
+  case binary:split(URL2, <<"/">>) of
+    [URL2] ->
+      parse_addr1(URL2, S#hackney_url{raw_path = RawPath,
                                       path = <<>>,
+                                      qs = Query,
                                       fragment = Fragment});
     [Addr] ->
       Path = <<"/">>,
-      parse_addr1(Addr, S#hackney_url{raw_path = << Path/binary, (raw_fragment(Fragment))/binary >>,
+      parse_addr1(Addr, S#hackney_url{raw_path = << Path/binary, RawPath/binary >>,
                                       path = Path,
+                                      qs = Query,
                                       fragment = Fragment});
     [Addr, Path] ->
-      RawPath =  <<"/", Path/binary, (raw_fragment(Fragment))/binary >>,
-      {Path1, Query} = parse_path( << "/", Path/binary >>),
-      parse_addr(Addr, S#hackney_url{raw_path = RawPath,
-                                     path = Path1,
+      parse_addr(Addr, S#hackney_url{raw_path = <<"/", Path/binary, RawPath/binary >>,
+                                     path = <<"/", Path/binary >>,
                                      qs = Query,
                                      fragment = Fragment})
   end.
@@ -76,6 +78,8 @@ parse_url(URL, S) ->
 raw_fragment(<<"">>) -> <<"">>;
 raw_fragment(Fragment) -> <<"#", Fragment/binary>>.
 
+raw_query(<<>>) -> <<>>;
+raw_query(Query) -> <<"?", Query/binary>>.
 
 property(transport, URL) -> URL#hackney_url.transport;
 property(scheme, URL) -> URL#hackney_url.scheme;
@@ -261,7 +265,7 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
   end.
 
 
-parse_path(Path) ->
+cut_query(Path) ->
   case binary:split(Path, <<"?">>) of
     [_Path] ->
       {Path, <<>>};
@@ -269,7 +273,7 @@ parse_path(Path) ->
       {Path1, Query}
   end.
 
-parse_fragment(S) ->
+cut_fragment(S) ->
   case binary:split(S, <<"#">>) of
     [_S] ->
       {S, <<>>};
