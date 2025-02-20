@@ -1,6 +1,21 @@
 # NEWS
+1.21.0 - 2025-02-20
+-------------------
 
-1.20.1 - 2013-10-11
+- fix: remove SSL options incompatible with tls 1.3
+- fix: url parsing handle "/" path correctly
+- fix: simplify integration test suite
+- fix: handle chunked response in redirect responses
+- fix: handle http & https proxies separately
+- fix: skip junk lines in 1.xx response
+
+** security fixes ***
+
+- fix URL parsing to prevent SSRF . (related to CVE-2025-1211)
+- use latest SSL certificate bundle
+
+
+1.20.1 - 2023-10-11
 -------------------
 
 - fix multipart: handle case where Length is undefined
