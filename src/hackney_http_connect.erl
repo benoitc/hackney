@@ -63,7 +63,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
   %% connect to the proxy, and upgrade the socket if needed.
-  case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts) of
+  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts) of
     {ok, Socket} ->
       case do_handshake(Socket, Host, Port, Opts) of
         ok ->
