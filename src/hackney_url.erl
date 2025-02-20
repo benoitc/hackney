@@ -61,7 +61,7 @@ parse_url(URL, S) ->
                                       path = <<>>,
                                       qs = Query,
                                       fragment = Fragment});
-    [Addr] ->
+    [Addr, <<>>] ->
       Path = <<"/">>,
       parse_addr1(Addr, S#hackney_url{raw_path = << Path/binary, RawPath/binary >>,
                                       path = Path,
