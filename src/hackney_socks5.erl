@@ -62,7 +62,7 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
   %% connect to the socks 5 proxy
-  case gen_tcp:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
+  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, Socket} ->
       case do_handshake(Socket, Host, Port, Opts) of
         ok ->
