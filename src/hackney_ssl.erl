@@ -25,16 +25,7 @@
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
 
-%% @doc The ssl:connect/4 (and related) doesn't work with textual representation
-%% of IP addresses. It accepts either a string with a DNS-resolvable name or a
-%% tuple with parts of an IP as numbers. This function attempts to parse given
-%% string and either returns such tuple, or the string if it's impossible to
-%% parse.
-parse_address(Host) when is_list(Host) ->
-  case inet:parse_address(Host) of
-    {ok, Address} -> Address;
-    {error, _} -> Host
-  end.
+
 
 
 check_hostname_opts(Host0) ->
@@ -132,16 +123,19 @@ find(_Fun, []) ->
 
 
 connect(Host, Port, Opts) ->
-  connect(Host, Port, Opts, infinity).
+  connect(Host, Port, Opts, 30000).
 
-connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
-                                        (Timeout =:= infinity orelse is_integer(Timeout)) ->
+connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
+                                        (Timeout =:= 5000 orelse is_integer(Timeout)) ->
+  SSLOpts = proplists:get_value(ssl_options, Opts0),
   BaseOpts = [binary, {active, false}, {packet, raw}],
-  Opts1 = hackney_util:merge_opts(BaseOpts, Opts),
-  %% connect
-  ssl:connect(parse_address(Host), Port, Opts1, Timeout).
-
-
+  Opts1 = hackney_util:merge_opts(BaseOpts, proplists:delete(ssl_options, Opts0)),
+  case hackney_happy:connect(Host, Port, Opts1, Timeout) of
+    {ok, Sock} ->
+      ssl:connect(Sock, SSLOpts);
+    Error ->
+      Error
+  end.
 
 recv(Socket, Length) ->
   recv(Socket, Length, infinity).
