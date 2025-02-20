@@ -9,6 +9,5 @@ erl_crash.dump
 mime.types
 .rebar
 *.plt
-.rebar
 *_plt
 rebar3.crashdump
