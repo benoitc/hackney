@@ -166,45 +166,70 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
 %% - {redirect, To, Headers}
 %% - {see_other, To, Headers} for status 303 and POST requests.
 maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
-               #client{transport=Transport,
-                       socket=Socket,
-                       method=Method,
-                       follow_redirect=true}=Client) ->
+               #client{method=Method, follow_redirect=true}=Client) ->
   case lists:member(StatusInt, [301, 302, 307, 308]) of
     true ->
-      Transport:setopts(Socket, [{active, false}]),
-      case parse(Client) of
-        {loop, Client2} ->
-          maybe_redirect(Parent, Owner, Ref, StatusInt,
-            Reason, Client2);
-        {ok, {headers, Headers}, Client2} ->
-          Location = hackney:redirect_location(Headers),
-          case {Location, lists:member(Method, [get, head])} of
-            {undefined, _} ->
+      maybe_redirect_1(Parent, Owner, Ref, Reason, Client);
+   false when StatusInt =:= 303, Method =:= <<"POST">> ->
+      maybe_redirect_2(Parent, Owner, Ref, Reason, Client);
+    _ ->
+      Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
+      maybe_continue(Parent, Owner, Ref, Client)
+  end;
+maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
+  Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
+  maybe_continue(Parent, Owner, Ref, Client).
+
+%% The first case for redirections are status codes 301, 302, 307 and 308.
+%% In this case {redirect, Location, Headers} is sent to the owner if
+%% the request is valid.
+maybe_redirect_1(Parent, Owner, Ref, Reason,
+               #client{transport=Transport, socket=Socket}=Client) ->
+  Transport:setopts(Socket, [{active, false}]),
+  case parse(Client) of
+    {loop, Client2} ->
+      maybe_redirect_1(Parent, Owner, Ref, Reason, Client2);
+    {more, Client2, Rest} ->
+      Continuation = fun(Client3) ->
+                         maybe_redirect_1(Parent, Owner, Ref, Reason, Client3)
+                     end,
+          async_recv(Parent, Owner, Ref, Client2, Rest, Continuation);
+    {ok, {headers, Headers}, Client2} ->
+      Location = hackney:redirect_location(Headers),
+      case Location of
+        undefined ->
+          Owner ! {hackney_response, Ref, {error,invalid_redirection}},
+          hackney_manager:handle_error(Client2);
+        _ ->
+          case hackney_response:skip_body(Client2) of
+            {skip, Client3} ->
+              hackney_manager:store_state(Client3),
               Owner ! {hackney_response, Ref,
-                {error,invalid_redirection}},
-              hackney_manager:handle_error(Client2);
-            {_, _} ->
-              case hackney_response:skip_body(Client2) of
-                {skip, Client3} ->
-                  hackney_manager:store_state(Client3),
-                  Owner ! {hackney_response, Ref,
-                    {redirect, Location, Headers}};
-                Error ->
-                  Owner ! {hackney_response, Ref, Error},
-                  hackney_manager:handle_error(Client2)
+                       {redirect, Location, Headers}};
+            Error ->
+              Owner ! {hackney_response, Ref, Error},
+              hackney_manager:handle_error(Client2)
               end
           end;
-        {error, Error} ->
-          Owner ! {hackney_response, Ref, {error, Error}},
-          hackney_manager:handle_error(Client)
-      end;
-    false when StatusInt =:= 303, Method =:= post ->
+    {error, Error} ->
+      Owner ! {hackney_response, Ref, {error, Error}},
+      hackney_manager:handle_error(Client)
+  end.
+
+%% The second case is for status code 303 and POST requests.
+%% This results in sending {see_other, Location, Headers} to the owner.
+maybe_redirect_2(Parent, Owner, Ref, Reason,
+               #client{transport=Transport,
+                       socket=Socket}=Client) ->
       Transport:setopts(Socket, [{active, false}]),
       case parse(Client) of
         {loop, Client2} ->
-          maybe_redirect(Parent, Owner, Ref, StatusInt,
-            Reason, Client2);
+          maybe_redirect_2(Parent, Owner, Ref, Reason, Client2);
+        {more, Client2, Rest} ->
+          Continuation = fun(Client3) ->
+                           maybe_redirect_2(Parent, Owner, Ref, Reason, Client3)
+                       end,
+          async_recv(Parent, Owner, Ref, Client2, Rest, Continuation);
         {ok, {headers, Headers}, Client2} ->
           case hackney:redirect_location(Headers) of
             undefined ->
@@ -225,21 +250,19 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason,
         {error, Error} ->
           Owner ! {hackney_response, Ref, {error, Error}},
           hackney_manager:handle_error(Client)
-      end;
-    _ ->
-      Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
-      maybe_continue(Parent, Owner, Ref, Client)
-  end;
-maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
-  Owner ! {hackney_response, Ref, {status, StatusInt, Reason}},
-  maybe_continue(Parent, Owner, Ref, Client).
+      end.
 
+
+async_recv(Parent, Owner, Ref, Client, Buffer) ->
+  Continuation = fun(Client2) ->
+    stream_loop(Parent, Owner, Ref, Client2)
+  end,
+  async_recv(Parent, Owner, Ref, Client, Buffer, Continuation).
 
 async_recv(Parent, Owner, Ref,
            #client{transport=Transport,
                    socket=TSock,
-                   recv_timeout=Timeout}=Client, Buffer) ->
-
+                   recv_timeout=Timeout}=Client, Buffer, Continuation) ->
   {OK, Closed, Error} = Transport:messages(TSock),
   Sock = raw_sock(TSock),
   Transport:setopts(TSock, [{active, once}]),
@@ -263,7 +286,7 @@ async_recv(Parent, Owner, Ref,
       Transport:controlling_process(TSock, From),
       From ! {Ref, ok};
     {OK, Sock, Data} ->
-      stream_loop(Parent, Owner, Ref, Client#client{buffer=Data});
+      Continuation(Client#client{buffer=Data});
     {Closed, Sock} ->
       case Client#client.response_state of
         on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
