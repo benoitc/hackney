@@ -1,4 +1,13 @@
 # NEWS
+
+1.22.0 - 2025-02-20
+-------------------
+
+- feature: prefer to connect using IPv6. happy eyeball strategy
+- improvement: fully support no_proxy environment variable
+- doc: migrated to ex_doc
+
+
 1.21.0 - 2025-02-20
 -------------------
 
