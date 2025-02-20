@@ -64,7 +64,7 @@ do_connect_1({Pid4, MRef4}, {Pid6, MRef6}, Timeout) ->
       ?report_trace("happy_connect ~p", [OK]),
       connect_gc(Pid4, MRef4),
       OK;
-    {'DOWN', MRef6, _Type, Pid, _Info} ->
+    {'DOWN', MRef6, _Type, _Pid, _Info} ->
       do_connect_2(Pid4, MRef4, Timeout)
   after Timeout ->
           connect_gc(Pid4, MRef4),
