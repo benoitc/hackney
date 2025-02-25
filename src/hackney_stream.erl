@@ -120,11 +120,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       exit({owner_down, Owner, Reason});
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
-        {stream_loop, Parent, Owner, Ref, Client});
-    Else ->
-      ?report_trace("stream: unexpected message", [{message, Else}]),
-      error_logger:error_msg("Unexpected message: ~w~n", [Else])
-
+        {stream_loop, Parent, Owner, Ref, Client})
   after 0 ->
     stream_loop(Parent, Owner, Ref, Client)
   end;
@@ -146,10 +142,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
     {system, From, Request} ->
       sys:handle_system_msg(Request, From, Parent, ?MODULE, [],
         {maybe_continue, Parent, Owner, Ref,
-          Client});
-    Else ->
-      ?report_trace("stream: unexpected message", [{message, Else}]),
-      error_logger:error_msg("Unexpected message: ~w~n", [Else])
+          Client})
   after 5000 ->
     Transport:setopts(Socket, [{active, false}]),
     proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
