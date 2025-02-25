@@ -91,7 +91,7 @@ do_connect_2(Pid, MRef, Timeout) ->
       ?report_trace("happy_connect ~p", [OK]),
       OK;
     {'DOWN', MRef, _Type, _Pid, Info} ->
-      {connect_error, Info}
+      Info
   after Timeout ->
           connect_gc(Pid, MRef),
           {error, connect_timeout}
