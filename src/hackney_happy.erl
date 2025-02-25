@@ -29,41 +29,54 @@ do_connect(Hostname, Port, Opts, Timeout) when is_tuple(Hostname) ->
       end
   end;
 do_connect(Hostname, Port, Opts, Timeout) ->
-  ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}]),
+  ?report_debug("happy eyeballs, try to connect using IPv6",  [{hostname, Hostname}, {port, Port}, {timeout, Timeout}]),
   Self = self(),
-  {Ipv6Addrs, IPv4Addrs} = getaddrs(Hostname),
-  {Pid6, MRef6} = spawn_monitor(fun() -> try_connect(Ipv6Addrs, Port, Opts, Self) end),
-  TRef = erlang:start_timer(?TIMEOUT, self(), try_ipv4),
-  receive
-    {'DOWN', MRef6, _Type, _Pid, {happy_connect, OK}} ->
-      _ = erlang:cancel_timer(TRef, []),
-      OK;
-    {'DOWN', MRef6, _Type, _Pid, _Info} ->
-      _ = erlang:cancel_timer(TRef, []),
-      {Pid4, MRef4} = spawn_monitor(fun() -> try_connect(IPv4Addrs, Port, Opts, Self) end),
+  case getaddrs(Hostname) of
+    {[], []} -> {error, nxdomain};
+    {[], IPv4Addrs} ->
+      ?report_trace("happy connect: try IPv4 only", []),
+      {Pid4, MRef4} = spawn_monitor(fun() -> try_connect(IPv4Addrs, Port, Opts, Timeout, Self) end),
       do_connect_2(Pid4, MRef4, Timeout);
-    {timeout, TRef, try_ipv4} ->
-      PidRef4 = spawn_monitor(fun() -> try_connect(IPv4Addrs, Port, Opts, Self) end),
-      do_connect_1(PidRef4, {Pid6, MRef6}, Timeout)
-  after Timeout -> 
+    {Ipv6Addrs, []} ->
+      ?report_trace("happy connect: try IPv6 only", []),
+      {Pid6, MRef6} = spawn_monitor(fun() -> try_connect(Ipv6Addrs, Port, Opts, Timeout, Self) end),
+      do_connect_2(Pid6, MRef6, Timeout);
+    {Ipv6Addrs, IPv4Addrs} ->
+      {Pid6, MRef6} = spawn_monitor(fun() -> try_connect(Ipv6Addrs, Port, Opts, Timeout, Self) end),
+      TRef = erlang:start_timer(?TIMEOUT, self(), try_ipv4),
+      receive
+        {'DOWN', MRef6, _Type, _Pid, {happy_connect, OK}} ->
           _ = erlang:cancel_timer(TRef, []),
-          erlang:demonitor(MRef6, [flush]),
-          {error, connect_timeout}
+          OK;
+        {'DOWN', MRef6, _Type, _Pid, _Info} ->
+          _ = erlang:cancel_timer(TRef, []),
+          {Pid4, MRef4} = spawn_monitor(fun() -> try_connect(IPv4Addrs, Port, Opts, Timeout, Self) end),
+          do_connect_2(Pid4, MRef4, Timeout);
+        {timeout, TRef, try_ipv4} ->
+          ?report_trace("happy connect: try IPv4", []),
+          PidRef4 = spawn_monitor(fun() -> try_connect(IPv4Addrs, Port, Opts, Timeout, Self) end),
+          do_connect_1(PidRef4, {Pid6, MRef6}, Timeout)
+      after Timeout ->
+              ?report_trace("happy, connect timeout", []),
+              _ = erlang:cancel_timer(TRef, []),
+              erlang:demonitor(MRef6, [flush]),
+              {error, connect_timeout}
+      end
   end.
 
 
 do_connect_1({Pid4, MRef4}, {Pid6, MRef6}, Timeout) ->
   receive
     {'DOWN', MRef4, _Type, _Pid, {happy_connect, OK}} ->
-      ?report_trace("happy_connect ~p", [OK]),
+      ?report_trace("happy_connect: ~p", [OK]),
       connect_gc(Pid6, MRef6),
       OK;
-    {'DOWN', MRef4, _Type, _Pid, _Info} ->
-      do_connect_2(Pid6, MRef6, Timeout);
-    {'DOWN', MRef6, _Type, _Pid, {happy_connect, OK}} ->
+     {'DOWN', MRef6, _Type, _Pid, {happy_connect, OK}} ->
       ?report_trace("happy_connect ~p", [OK]),
       connect_gc(Pid4, MRef4),
       OK;
+    {'DOWN', MRef4, _Type, _Pid, _Info} ->
+      do_connect_2(Pid6, MRef6, Timeout);
     {'DOWN', MRef6, _Type, _Pid, _Info} ->
       do_connect_2(Pid4, MRef4, Timeout)
   after Timeout ->
@@ -122,19 +135,19 @@ getbyname(Hostname, Type) ->
       []
   end.
 
-try_connect(Ipv6Addrs, Port, Opts, Self) ->
-  try_connect(Ipv6Addrs, Port, Opts, Self, {error, nxdomain}).
+try_connect(Ipv6Addrs, Port, Opts, Timeout, Self) ->
+  try_connect(Ipv6Addrs, Port, Opts, Timeout, Self, {error, nxdomain}).
 
-try_connect([], _Port, _Opts, _ServerPid, LastError) ->
+try_connect([], _Port, _Opts, _Timeout, _ServerPid, LastError) ->
   ?report_trace("happy eyeball: failed to connect", [{error, LastError}]),
   exit(LastError);
-try_connect([{IP, Type} | Rest], Port, Opts, ServerPid, _LastError) ->
+try_connect([{IP, Type} | Rest], Port, Opts, Timeout, ServerPid, _LastError) ->
   ?report_trace("try to connect", [{ip, IP}, {type, Type}]),
-  case gen_tcp:connect(IP, Port, [Type | Opts], ?TIMEOUT) of
+  case gen_tcp:connect(IP, Port, [Type | Opts], Timeout) of
     {ok, Socket} = OK ->
       ?report_trace("success to connect", [{ip, IP}, {type, Type}]),
       ok = gen_tcp:controlling_process(Socket, ServerPid),
       exit({happy_connect, OK});
     Error ->
-      try_connect(Rest, Port, Opts, ServerPid, Error)
+      try_connect(Rest, Port, Opts, Timeout, ServerPid, Error)
   end.
