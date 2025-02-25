@@ -1,5 +1,12 @@
 # NEWS
 
+1.23.0 - 2025-02-25
+-------------------
+
+- fix: happy eyeball use correct timeout during connectino
+- fix: don't wrap conection error
+- improvement: eyeballonly spawn ipv6 worker when needed
+
 1.22.0 - 2025-02-20
 -------------------
 
