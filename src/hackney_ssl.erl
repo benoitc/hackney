@@ -127,9 +127,20 @@ connect(Host, Port, Opts) ->
 
 connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
                                         (Timeout =:= 5000 orelse is_integer(Timeout)) ->
-  SSLOpts = proplists:get_value(ssl_options, Opts0),
+  BaseSSLOpts = case inet:parse_address(Host) of
+                  {ok, _} -> [{reuse_sessions, true}];
+                  _ ->
+                    [{reuse_sessions, true},
+                     {server_name_indication, Host}]
+                end,
+  SSLOpts = hackney_util:merge_opts(
+              BaseSSLOpts,
+              proplists:get_value(ssl_options, Opts0)
+             ),
   BaseOpts = [binary, {active, false}, {packet, raw}],
-  Opts1 = hackney_util:merge_opts(BaseOpts, proplists:delete(ssl_options, Opts0)),
+  Opts1 = hackney_util:merge_opts(
+            BaseOpts, proplists:delete(ssl_options, Opts0)
+           ),
   case hackney_happy:connect(Host, Port, Opts1, Timeout) of
     {ok, Sock} ->
       ssl:connect(Sock, SSLOpts);
