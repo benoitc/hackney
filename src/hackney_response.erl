@@ -71,7 +71,7 @@ expect_response(Client) ->
   end.
 
 
-wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
+wait_status(#client{buffer=Buf, parser=Parser, mod_metrics=Metrics}=Client) ->
   case hackney_http:execute(Parser, Buf) of
     {more, NParser} ->
       case recv(Client) of
@@ -82,6 +82,7 @@ wait_status(#client{buffer=Buf, parser=Parser}=Client) ->
           Error
       end;
     {response, Version, Status, _Reason, NParser} ->
+      _ = metrics:update_histogram(Metrics, [hackney, Client#client.host, status_code], Status),
       wait_headers(Client#client{parser=NParser,
         buffer = <<>>,
         version=Version}, Status);
