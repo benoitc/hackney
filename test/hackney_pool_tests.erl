@@ -33,7 +33,7 @@ queue_timeout() ->
     fun() ->
         URL = <<"http://localhost:8123/pool">>,
         Headers = [],
-        Opts = [{pool, pool_test}, {connect_timeout, 100}],
+        Opts = [{pool, pool_test}, {connect_timeout, 100}, {checkout_timeout, 5000}],
         case hackney:request(post, URL, Headers, stream, Opts) of
             {ok, Ref} ->
                 {error, _} = hackney:request(post, URL, Headers, stream, Opts),

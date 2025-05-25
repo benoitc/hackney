@@ -117,7 +117,18 @@ close_request(#client{}=Client) ->
   ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
 
   case Status of
-    done -> ok;
+    done when Socket /= nil ->
+      %% Connection completed successfully, return to pool if using one
+      case Client#client.socket_ref of
+        nil ->
+          %% Not using pool, close the socket
+          catch Transport:close(Socket);
+        SocketRef ->
+          %% Return to pool
+          Handler = Client#client.pool_handler,
+          catch Handler:checkin(SocketRef, Socket)
+      end,
+      ok;
     _ when Socket /= nil ->
         catch Transport:controlling_process(Socket, self()),
         catch Transport:close(Socket),
