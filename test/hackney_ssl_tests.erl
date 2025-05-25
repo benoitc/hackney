@@ -27,7 +27,8 @@ empty_clen_test_() ->
         foreach,
         fun setup/0, fun teardown/1,
         [
-          fun wildcard_cert/1
+          fun wildcard_cert/1,
+          fun custom_ssl_opts_hostname_verification/1
         ]
       }
     }
@@ -46,6 +47,17 @@ stop(_) ->
 wildcard_cert(_) ->
     URL = <<"https://friendpaste.com">>,
     Resp = case hackney:get(URL) of
+             {ok, _, _, _} -> valid;
+             _ -> error
+           end,
+    ?_assertEqual(Resp, valid).
+
+custom_ssl_opts_hostname_verification(_) ->
+    URL = <<"https://www.googleapis.com">>,
+    %% Test with custom ssl_options that should not override hostname verification
+    CustomSSLOpts = [{versions, ['tlsv1.2', 'tlsv1.3']}, {ciphers, []}],
+    Opts = [{ssl_options, CustomSSLOpts}],
+    Resp = case hackney:get(URL, [], <<>>, Opts) of
              {ok, _, _, _} -> valid;
              _ -> error
            end,

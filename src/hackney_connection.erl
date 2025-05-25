@@ -119,7 +119,7 @@ ssl_opts(Host, Options) ->
     [] ->
       ssl_opts_1(Host, Options);
     SSLOpts ->
-      SSLOpts
+      merge_ssl_opts(Host, SSLOpts)
   end.
 
 ssl_opts_1(Host, Options) ->
