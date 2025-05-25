@@ -42,14 +42,35 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                      undefined ->
                       maybe_add_cookies(Cookies, [{<<"User-Agent">>, default_ua()}]);
                      {User, Pwd} ->
-                       User1 = hackney_bstr:to_binary(User),
-                       Pwd1 = hackney_bstr:to_binary(Pwd),
-                       Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
-                       maybe_add_cookies(
-                         Cookies,
-                         [{<<"User-Agent">>, default_ua()},
-                          {<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
-                        )
+                       %% Security: Check if basic auth over HTTP is allowed
+                       AllowInsecureAuth = proplists:get_value(insecure_basic_auth, Options, false),
+                       case {Client0#client.transport, AllowInsecureAuth} of
+                         {hackney_ssl, _} ->
+                           %% HTTPS connection - always safe
+                           User1 = hackney_bstr:to_binary(User),
+                           Pwd1 = hackney_bstr:to_binary(Pwd),
+                           Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
+                           maybe_add_cookies(
+                             Cookies,
+                             [{<<"User-Agent">>, default_ua()},
+                              {<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
+                            );
+                         {_, true} ->
+                           %% HTTP connection with explicit bypass - allow but warn
+                           User1 = hackney_bstr:to_binary(User),
+                           Pwd1 = hackney_bstr:to_binary(Pwd),
+                           Credentials = base64:encode(<< User1/binary, ":", Pwd1/binary >>),
+                           maybe_add_cookies(
+                             Cookies,
+                             [{<<"User-Agent">>, default_ua()},
+                              {<<"Authorization">>, <<"Basic ", Credentials/binary>>}]
+                            );
+                         {_, false} ->
+                           %% HTTP connection without bypass - reject
+                           erlang:error({insecure_basic_auth, 
+                                        "Basic authentication over HTTP is insecure. "
+                                        "Use HTTPS or add {insecure_basic_auth, true} option to bypass this check."})
+                       end
                    end,
 
   %% detect the request type: normal or chunked

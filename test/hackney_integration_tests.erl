@@ -75,18 +75,19 @@ not_modified_response() ->
 
 basic_auth_request() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
-    Options = [{basic_auth, {<<"username">>, <<"password">>}}],
+    Options = [{basic_auth, {<<"username">>, <<"password">>}}, {insecure_basic_auth, true}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     ?assertEqual(200, StatusCode).
 
 basic_auth_url_request() ->
     URL = <<"http://username:pass%26word@localhost:8000/basic-auth/username/pass%26word">>,
-    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
+    Options = [{insecure_basic_auth, true}],
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     ?assertEqual(200, StatusCode).
 
 basic_auth_request_failed() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
-    Options = [{basic_auth, {<<"wrong">>, <<"auth">>}}],
+    Options = [{basic_auth, {<<"wrong">>, <<"auth">>}}, {insecure_basic_auth, true}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     ?assertEqual(401, StatusCode).
 
