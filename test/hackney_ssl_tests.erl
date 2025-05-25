@@ -28,7 +28,8 @@ empty_clen_test_() ->
         fun setup/0, fun teardown/1,
         [
           fun wildcard_cert/1,
-          fun custom_ssl_opts_hostname_verification/1
+          fun custom_ssl_opts_hostname_verification/1,
+          fun googleapis_ssl_opts_test/1
         ]
       }
     }
@@ -62,4 +63,27 @@ custom_ssl_opts_hostname_verification(_) ->
              _ -> error
            end,
     ?_assertEqual(Resp, valid).
+
+googleapis_ssl_opts_test(_) ->
+    %% Erlang translation of the Elixir test that failed in 1.22.0
+    URL = "https://www.googleapis.com/oauth2/v1/certs",
+    SSLOpts = [
+        {versions, ['tlsv1.2']},
+        {verify, verify_peer},
+        {cacertfile, certifi:cacertfile()},
+        {depth, 10},
+        {customize_hostname_check, [
+            {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
+        ]}
+    ],
+    Opts = [
+        {ssl_options, SSLOpts},
+        {recv_timeout, 500},
+        {with_body, true}
+    ],
+    Resp = case hackney:request(get, URL, [], "", Opts) of
+             {ok, 200, _Headers, _Body} -> success;
+             _ -> error
+           end,
+    ?_assertEqual(Resp, success).
 
