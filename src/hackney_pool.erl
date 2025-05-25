@@ -97,7 +97,8 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
               _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
               {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
             Error ->
-              catch hackney_connection:close(Connection, Socket),
+              %% Ensure socket is properly closed on controlling_process error
+              _ = catch hackney_connection:close(Connection, Socket),
               _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
               Error
            end;
@@ -125,7 +126,8 @@ checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
         ok ->
           gen_server:call(Owner, {checkin, Ref, Connection, Socket, Transport}, infinity);
         _Error ->
-          catch hackney_connection:close(Connection,Socket),
+          %% Ensure socket is properly closed on controlling_process error
+          _ = catch hackney_connection:close(Connection, Socket),
           ok
       end;
     false ->
@@ -465,12 +467,22 @@ update_connections(Sockets, Key, Connections) ->
 cancel_timer(Socket, Timer) ->
   case erlang:cancel_timer(Timer) of
     false ->
+      %% Timer already fired, must drain the timeout message
       receive
         {timeout, Socket} -> ok
       after
-        0 -> ok
+        100 -> 
+          %% Safety timeout - if message doesn't arrive, continue anyway
+          ok
       end;
-    _ -> ok
+    _ -> 
+      %% Timer was successfully cancelled, but there might still be a message in transit
+      %% Drain it with a short timeout to avoid memory leaks
+      receive
+        {timeout, Socket} -> ok
+      after
+        100 -> ok
+      end
   end.
 
 %------------------------------------------------------------------------------
