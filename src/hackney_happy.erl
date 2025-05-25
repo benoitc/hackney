@@ -146,8 +146,14 @@ try_connect([{IP, Type} | Rest], Port, Opts, Timeout, ServerPid, _LastError) ->
   case gen_tcp:connect(IP, Port, [Type | Opts], Timeout) of
     {ok, Socket} = OK ->
       ?report_trace("success to connect", [{ip, IP}, {type, Type}]),
-      ok = gen_tcp:controlling_process(Socket, ServerPid),
-      exit({happy_connect, OK});
+      case gen_tcp:controlling_process(Socket, ServerPid) of
+        ok ->
+          exit({happy_connect, OK});
+        {error, Reason} ->
+          ?report_trace("controlling_process failed", [{error, Reason}]),
+          _ = gen_tcp:close(Socket),
+          try_connect(Rest, Port, Opts, Timeout, ServerPid, {error, Reason})
+      end;
     Error ->
       try_connect(Rest, Port, Opts, Timeout, ServerPid, Error)
   end.
