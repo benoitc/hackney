@@ -338,14 +338,14 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
       %% there is no async request to handle, just return
       {reply, {ok, Ref}, State};
     [{Ref, {Owner, Stream, Info}}] ->
+      %% Monitor the stream process to avoid race conditions
+      MonitorRef = erlang:monitor(process, Stream),
       %% tell to the stream to stop
       Stream ! {Ref, stop_async, self()},
       receive
         {Ref, ok} ->
-          %% if the stream return, we unlink it and update the
-          %% state. if we stop the async request and want to use it
-          %% in another process, make sure to unlink the old owner
-          %% and link the new one.
+          %% Clean shutdown received
+          erlang:demonitor(MonitorRef, [flush]),
           unlink(Stream),
           ets:insert(?REFS, {Ref, {To, nil, Info}}),
           Pids1 = dict:erase(Stream, State#mstate.pids),
@@ -355,9 +355,29 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
                     _ ->
                       track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
                   end,
+          {reply, {ok, Ref}, State#mstate{pids=Pids2}};
+        {'DOWN', MonitorRef, process, Stream, _Reason} ->
+          %% Stream died before responding, clean up and continue
+          ets:insert(?REFS, {Ref, {To, nil, Info}}),
+          Pids1 = dict:erase(Stream, State#mstate.pids),
+          Pids2 = case To of
+                    Owner -> Pids1;
+                    _ ->
+                      track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
+                  end,
           {reply, {ok, Ref}, State#mstate{pids=Pids2}}
       after 5000 ->
-        {reply, {error, timeout}, State}
+        %% Timeout - force cleanup
+        erlang:demonitor(MonitorRef, [flush]),
+        catch unlink(Stream),
+        ets:insert(?REFS, {Ref, {To, nil, Info}}),
+        Pids1 = dict:erase(Stream, State#mstate.pids),
+        Pids2 = case To of
+                  Owner -> Pids1;
+                  _ ->
+                    track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
+                end,
+        {reply, {error, timeout}, State#mstate{pids=Pids2}}
       end
   end;
 
@@ -537,28 +557,25 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
 clean_requests([], _Pid, _Reason, _PoolHandler, State) ->
   State.
 
-monitor_child(Pid) ->
-  erlang:monitor(process, Pid),
-  unlink(Pid),
-  receive
-    {'EXIT', Pid, _} ->
-      true
-  after 0 ->
-    true
-  end.
-
 terminate_async_response(StreamPid) ->
   terminate_async_response(StreamPid, shutdown).
 
 terminate_async_response(StreamPid, Reason) ->
-  _ = monitor_child(StreamPid),
+  MonitorRef = erlang:monitor(process, StreamPid),
+  unlink(StreamPid),
   exit(StreamPid, Reason),
-  wait_async_response(StreamPid).
-
-wait_async_response(Stream) ->
   receive
-    {'DOWN', _MRef, process, Stream, _Reason} ->
+    {'DOWN', MonitorRef, process, StreamPid, _} ->
       ok
+  after 5000 ->
+      %% Force kill if not terminated
+      exit(StreamPid, kill),
+      receive
+        {'DOWN', MonitorRef, process, StreamPid, _} ->
+          ok
+      after 1000 ->
+          ok  %% Give up if still not dead
+      end
   end.
 
 
