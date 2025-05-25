@@ -43,7 +43,7 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                       maybe_add_cookies(Cookies, [{<<"User-Agent">>, default_ua()}]);
                      {User, Pwd} ->
                        %% Security: Check if basic auth over HTTP is allowed
-                       AllowInsecureAuth = proplists:get_value(insecure_basic_auth, Options, false),
+                       AllowInsecureAuth = proplists:get_value(insecure_basic_auth, Options, hackney_app:get_app_env(insecure_basic_auth, false)),
                        case {Client0#client.transport, AllowInsecureAuth} of
                          {hackney_ssl, _} ->
                            %% HTTPS connection - always safe
@@ -69,7 +69,8 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                            %% HTTP connection without bypass - reject
                            erlang:error({insecure_basic_auth, 
                                         "Basic authentication over HTTP is insecure. "
-                                        "Use HTTPS or add {insecure_basic_auth, true} option to bypass this check."})
+                                        "Use HTTPS, add {insecure_basic_auth, true} option, or set "
+                                        "application:set_env(hackney, insecure_basic_auth, true) to bypass this check."})
                        end
                    end,
 

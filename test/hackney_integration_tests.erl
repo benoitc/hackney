@@ -12,6 +12,7 @@ all_tests() ->
    fun basic_auth_request_failed/0,
    fun basic_auth_request/0,
    fun basic_auth_url_request/0,
+   fun basic_auth_app_variable_test/0,
    fun set_cookie_request/0,
    fun send_cookies_request/0,
    fun absolute_redirect_request_no_follow/0,
@@ -75,8 +76,11 @@ not_modified_response() ->
 
 basic_auth_request() ->
     URL = <<"http://localhost:8000/basic-auth/username/password">>,
-    Options = [{basic_auth, {<<"username">>, <<"password">>}}, {insecure_basic_auth, true}],
+    %% Use application variable instead of per-request option
+    application:set_env(hackney, insecure_basic_auth, true),
+    Options = [{basic_auth, {<<"username">>, <<"password">>}}],
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
+    application:unset_env(hackney, insecure_basic_auth),
     ?assertEqual(200, StatusCode).
 
 basic_auth_url_request() ->
@@ -244,3 +248,12 @@ receive_response(Ref, Dict0) ->
             Dict1 = orddict:append(body, Bin, Dict0),
             receive_response(Ref, Dict1)
     end.
+
+basic_auth_app_variable_test() ->
+    URL = <<"http://localhost:8000/basic-auth/username/password">>,
+    %% Test application variable for global insecure basic auth setting
+    application:set_env(hackney, insecure_basic_auth, true),
+    Options = [{basic_auth, {<<"username">>, <<"password">>}}],
+    {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
+    application:unset_env(hackney, insecure_basic_auth),
+    ?assertEqual(200, StatusCode).
