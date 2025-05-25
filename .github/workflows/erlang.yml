@@ -39,7 +39,7 @@ jobs:
       matrix:
         otp: ["22.3", "23.3", "24.3"]
         rebar3: ['3.18.0']
-        os: [ubuntu-20.04]
+        os: [ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
