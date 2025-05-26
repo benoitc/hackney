@@ -414,9 +414,15 @@ find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=Stat
               %% something happened here normally the PID died,
               %% but make sure we still have the control of the
               %% process
-              catch hackney_connection:controlling_process(Connection, S, self()),
-              %% and then close it
-              find_connection(Connection, Pid, remove_socket(S,  State));
+              case catch hackney_connection:controlling_process(Connection, S, self()) of
+                ok ->
+                  %% Successfully regained control, now remove the socket
+                  find_connection(Connection, Pid, remove_socket(S, State));
+                _ ->
+                  %% Failed to regain control, force close and remove
+                  _ = catch hackney_connection:close(Connection, S),
+                  find_connection(Connection, Pid, remove_socket(S, State))
+              end;
             _Else ->
               find_connection(Connection, Pid, remove_socket(S, State))
           end;
