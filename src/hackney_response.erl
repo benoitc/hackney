@@ -294,28 +294,30 @@ skip_body(Client) ->
   end.
 
 end_stream_body(Rest, Client0) ->
-  Client = Client0#client{response_state=done,
+  %% Prepare new client state atomically
+  BaseClient = Client0#client{response_state=done,
     body_state=done,
     parser=nil,
     buffer=Rest,
     stream_to=false,
     async=false},
 
-  Pool = hackney_connect:is_pool(Client),
+  Pool = hackney_connect:is_pool(BaseClient),
 
-  case maybe_close(Client) of
+  case maybe_close(BaseClient) of
     true ->
-      close(Client);
+      close(BaseClient);
     false when Pool /= false ->
       #client{socket=Socket,
         socket_ref=Ref,
-        pool_handler=Handler}=Client,
+        pool_handler=Handler}=BaseClient,
 
       Handler:checkin(Ref, Socket),
-      Client#client{state=closed, socket=nil, socket_ref=nil,
+      %% Complete state update atomically
+      BaseClient#client{state=closed, socket=nil, socket_ref=nil,
         buffer = <<>>};
     false ->
-      Client
+      BaseClient
   end.
 
 
