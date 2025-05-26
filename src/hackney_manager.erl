@@ -577,14 +577,18 @@ terminate_async_response(StreamPid, Reason) ->
   exit(StreamPid, Reason),
   receive
     {'DOWN', MonitorRef, process, StreamPid, _} ->
+      erlang:demonitor(MonitorRef, [flush]),
       ok
   after 5000 ->
       %% Force kill if not terminated
       exit(StreamPid, kill),
       receive
         {'DOWN', MonitorRef, process, StreamPid, _} ->
+          erlang:demonitor(MonitorRef, [flush]),
           ok
       after 1000 ->
+          %% Process should be dead now, clean up monitor
+          erlang:demonitor(MonitorRef, [flush]),
           ok  %% Give up if still not dead
       end
   end.
