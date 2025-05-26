@@ -111,7 +111,7 @@ close_request(#client{}=Client) ->
 
   %% remove the request
   erase(Ref),
-  ets:delete(?MODULE, Ref),
+  catch ets:delete(?MODULE, Ref),
 
   %% stop to monitor the request
   ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
@@ -224,7 +224,7 @@ get_state(Ref) ->
           %% owner can handle it.
           put(Ref, State),
           %% delete the state, from ets
-          ets:delete(?MODULE, Ref),
+          catch ets:delete(?MODULE, Ref),
           State
       end;
     State ->
@@ -252,7 +252,7 @@ store_state(Ref, NState) ->
 
 take_control(Ref, NState) ->
   %% maybe delete the state from ets
-  ets:delete(?MODULE, Ref),
+  catch ets:delete(?MODULE, Ref),
   %% add the state to the current context
   put(Ref, NState),
   gen_server:call(?MODULE, {take_control, Ref, NState}, infinity).
@@ -413,7 +413,7 @@ handle_cast({cancel_request, Ref}, State) ->
     [{Ref, {Owner, nil, #request_info{pool=Pool}=Info}}] ->
       %% no stream just cancel the request and untrack the owner.
       Pids2 = untrack_owner(Owner, Ref, State#mstate.pids),
-      ets:delete(?REFS, Ref),
+      catch ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
@@ -423,7 +423,7 @@ handle_cast({cancel_request, Ref}, State) ->
       %% unlink the stream and untrack the owner
       unlink(Stream),
       Pids2 = dict:erase(Stream, untrack_owner(Owner, Ref, State#mstate.pids)),
-      ets:delete(?REFS, Ref),
+      catch ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       _ = PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
@@ -540,8 +540,8 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% cleanup socket
       ok = cleanup_socket(Ref),
       %% remove the reference
-      ets:delete(?REFS, Ref),
-      ets:delete(?MODULE, Ref),
+      catch ets:delete(?REFS, Ref),
+      catch ets:delete(?MODULE, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
@@ -556,8 +556,8 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% cleanup socket
       ok = cleanup_socket(Ref),
       %% remove the reference
-      ets:delete(?REFS, Ref),
-      ets:delete(?MODULE, Ref),
+      catch ets:delete(?REFS, Ref),
+      catch ets:delete(?MODULE, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
