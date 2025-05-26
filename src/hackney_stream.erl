@@ -106,12 +106,12 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
     {Ref, resume} ->
       stream_loop(Parent, Owner, Ref, Client);
     {Ref, pause} ->
-      Transport:setopts(Socket, [{active, false}]),
+      _ = Transport:setopts(Socket, [{active, false}]),
       proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
         Client]);
     {Ref, stop_async, From} ->
       hackney_manager:store_state(Client#client{async=false}),
-      Transport:setopts(Socket, [{active, false}]),
+      _ = Transport:setopts(Socket, [{active, false}]),
       Transport:controlling_process(Socket, From),
       From ! {Ref, ok};
     {Ref, close} ->
@@ -136,7 +136,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       stream_loop(Parent, Owner, Ref, Client);
     {Ref, stop_async, From} ->
       hackney_manager:store_state(Client),
-      Transport:setopts(Socket, [{active, false}]),
+      _ = Transport:setopts(Socket, [{active, false}]),
       Transport:controlling_process(Socket, From),
       From ! {Ref, ok};
     {Ref, close} ->
@@ -151,7 +151,7 @@ maybe_continue(Parent, Owner, Ref, #client{transport=Transport,
       ?report_trace("stream: unexpected message", [{message, Else}]),
       error_logger:error_msg("Unexpected message: ~w~n", [Else])
   after 5000 ->
-    Transport:setopts(Socket, [{active, false}]),
+    _ = Transport:setopts(Socket, [{active, false}]),
     proc_lib:hibernate(?MODULE, maybe_continue, [Parent, Owner, Ref,
       Client])
 
@@ -185,7 +185,7 @@ maybe_redirect(Parent, Owner, Ref, StatusInt, Reason, Client) ->
 %% the request is valid.
 maybe_redirect_1(Parent, Owner, Ref, Reason,
                #client{transport=Transport, socket=Socket}=Client) ->
-  Transport:setopts(Socket, [{active, false}]),
+  _ = Transport:setopts(Socket, [{active, false}]),
   case parse(Client) of
     {loop, Client2} ->
       maybe_redirect_1(Parent, Owner, Ref, Reason, Client2);
@@ -221,7 +221,7 @@ maybe_redirect_1(Parent, Owner, Ref, Reason,
 maybe_redirect_2(Parent, Owner, Ref, Reason,
                #client{transport=Transport,
                        socket=Socket}=Client) ->
-      Transport:setopts(Socket, [{active, false}]),
+      _ = Transport:setopts(Socket, [{active, false}]),
       case parse(Client) of
         {loop, Client2} ->
           maybe_redirect_2(Parent, Owner, Ref, Reason, Client2);
@@ -275,14 +275,14 @@ async_recv(Parent, Owner, Ref,
       async_recv(Parent, Owner, Ref, Client, Buffer);
     {Ref, pause} ->
       %% make sure that the process won't be awoken by a tcp msg
-      Transport:setopts(TSock, [{active, false}]),
+      _ = Transport:setopts(TSock, [{active, false}]),
       proc_lib:hibernate(?MODULE, async_recv, [Parent, Owner, Ref,
         Client, Buffer]);
     {Ref, close} ->
       Transport:close(TSock);
     {Ref, stop_async, From} ->
       hackney_manager:store_state(Client#client{async=false}),
-      Transport:setopts(TSock, [{active, false}]),
+      _ = Transport:setopts(TSock, [{active, false}]),
       Transport:controlling_process(TSock, From),
       From ! {Ref, ok};
     {OK, Sock, Data} ->
