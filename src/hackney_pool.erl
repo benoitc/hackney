@@ -476,13 +476,9 @@ cancel_timer(Socket, Timer) ->
           ok
       end;
     _ -> 
-      %% Timer was successfully cancelled, but there might still be a message in transit
-      %% Drain it with a short timeout to avoid memory leaks
-      receive
-        {timeout, Socket} -> ok
-      after
-        100 -> ok
-      end
+      %% Timer was successfully cancelled, no message should exist
+      %% Don't drain messages to avoid consuming legitimate timeout messages
+      ok
   end.
 
 %------------------------------------------------------------------------------
