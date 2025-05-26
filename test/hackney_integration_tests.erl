@@ -25,7 +25,8 @@ all_tests() ->
    fun async_head_request/0,
    fun async_no_content_request/0,
    fun test_frees_manager_ets_when_body_is_in_client/0,
-   fun test_frees_manager_ets_when_body_is_in_response/0].
+   fun test_frees_manager_ets_when_body_is_in_response/0,
+   fun test_307_redirect_pool_cleanup/0].
 
 %%all_tests() ->
 %%    case has_unix_socket() of
@@ -205,6 +206,83 @@ test_frees_manager_ets_when_body_is_in_response() ->
     timer:sleep(10),
     AfterCount = ets:info(hackney_manager_refs, size),
     ?assertEqual(BeforeCount, AfterCount).
+
+%% Test for issue #307: Pool connections not freed when response code is 307
+%% Tests that POST requests with 307 redirects properly clean up pool connections
+test_307_redirect_pool_cleanup() ->
+    %% Create a small test pool to monitor connection usage
+    PoolName = test_pool_307_cleanup,
+    PoolOpts = [{pool_size, 2}, {timeout, 5000}],
+    ok = hackney_pool:start_pool(PoolName, PoolOpts),
+    
+    %% URL that returns a 307 redirect (httpbin supports this)
+    URL = <<"http://localhost:8000/redirect-to?url=http://localhost:8000/get&status_code=307">>,
+    RequestOpts = [{pool, PoolName}, {follow_redirect, false}],
+    
+    %% Get initial pool stats
+    InitialStats = hackney_pool:get_stats(PoolName),
+    InitialInUse = proplists:get_value(in_use_count, InitialStats),
+    
+    %% Make a GET request that should get a 307 redirect (similar to existing test)
+    %% With follow_redirect=false, this should return the redirect response directly
+    Result1 = hackney:request(get, URL, [], <<"">>, RequestOpts),
+    
+    %% Handle response - the fourth element might be a reference or client
+    case Result1 of
+        {ok, {maybe_redirect, 307, _Headers1, Client1}} ->
+            {skip, _} = hackney:skip_body(Client1),
+            ok;
+        {ok, Status1, _Headers1, ClientOrRef1} when Status1 >= 300, Status1 < 400 ->
+            %% If it's a reference, we can't call skip_body - the connection handling is different
+            if is_reference(ClientOrRef1) ->
+                ok;  %% Connection handling is managed internally for pooled requests
+            true ->
+                {skip, _} = hackney:skip_body(ClientOrRef1),
+                ok
+            end;
+        {ok, Status1, _Headers1, Client1} when Status1 >= 200, Status1 < 400 ->
+            {ok, _Body} = hackney:body(Client1),
+            ok;
+        Other ->
+            ?debugFmt("Unexpected response: ~p~n", [Other])
+    end,
+    
+    %% Make a second request to verify pool connections are available
+    Result2 = hackney:request(get, URL, [], <<"">>, RequestOpts),
+    
+    case Result2 of
+        {ok, {maybe_redirect, 307, _Headers2, Client2}} ->
+            {skip, _} = hackney:skip_body(Client2),
+            ok;
+        {ok, Status2, _Headers2, ClientOrRef2} when Status2 >= 300, Status2 < 400 ->
+            if is_reference(ClientOrRef2) ->
+                ok;  %% Connection handling is managed internally for pooled requests
+            true ->
+                {skip, _} = hackney:skip_body(ClientOrRef2),
+                ok
+            end;
+        {ok, Status2, _Headers2, Client2} when Status2 >= 200, Status2 < 400 ->
+            {ok, _Body2} = hackney:body(Client2),
+            ok;
+        {error, checkout_timeout} ->
+            %% This would indicate the pool connection was not returned
+            ?assert(false);
+        Other2 ->
+            ?debugFmt("Unexpected second response: ~p~n", [Other2])
+    end,
+    
+    %% Allow time for async cleanup to complete
+    timer:sleep(10),
+    
+    %% Check final pool stats - connections should be returned
+    FinalStats = hackney_pool:get_stats(PoolName),
+    FinalInUse = proplists:get_value(in_use_count, FinalStats),
+    
+    %% The key test: in_use_count should return to initial value
+    ?assertEqual(InitialInUse, FinalInUse),
+    
+    %% Clean up test pool
+    hackney_pool:stop_pool(PoolName).
 
 
 %%local_socket_request() ->

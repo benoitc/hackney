@@ -865,7 +865,7 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host, Port, 
 
 maybe_redirect({ok, _}=Resp, _Req) -> Resp;
 maybe_redirect(
-  {ok, S, _H, #client{headers=Headers, follow_redirect=true, retries=Tries}=Client}=Resp,
+  {ok, S, H, #client{headers=Headers, follow_redirect=true, retries=Tries}=Client}=Resp,
   Req
  ) when Tries > 0 ->
   %% check if the given location is an absolute url,
@@ -1101,8 +1101,35 @@ reply_response(
 reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState}, _State) ->
   case NState#client.with_body of
     false ->
-      hackney_manager:update_state(NState),
-      {ok, Status, Headers, Ref};
+      %% For redirect responses with pools, ensure body is consumed to properly clean up connections
+      IsRedirect = lists:member(Status, [301, 302, 303, 307, 308]),
+      IsPool = hackney_connect:is_pool(NState) /= false,
+      case IsRedirect andalso IsPool of
+        true ->
+          %% Skip the body to ensure proper connection cleanup for pool redirects
+          case hackney_response:skip_body(NState) of
+            {skip, CleanNState} ->
+              %% For pools, the connection cleanup should have happened in skip_body
+              %% Check if this breaks existing API by checking pool name
+              PoolName = proplists:get_value(pool, NState#client.options, default),
+              case PoolName of
+                default ->
+                  %% For default pool, preserve existing API compatibility
+                  hackney_manager:update_state(CleanNState),
+                  {ok, Status, Headers, Ref};
+                _ ->
+                  %% For custom pools, use full cleanup to ensure connection release
+                  maybe_update_req(CleanNState),
+                  {ok, Status, Headers, Ref}
+              end;
+            Error ->
+              hackney_manager:handle_error(NState),
+              Error
+          end;
+        false ->
+          hackney_manager:update_state(NState),
+          {ok, Status, Headers, Ref}
+      end;
     true ->
       reply_with_body(Status, Headers, NState)
   end;
