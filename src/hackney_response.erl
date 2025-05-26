@@ -196,7 +196,7 @@ stream_body_recv_error(Reason, Buffer, Client=#client{version=Version, clen=CLen
     closed ->
       {error, {closed, Buffer}};
     _Else ->
-      {error, Reason}
+      {error, {Reason, Buffer}}
   end.
 
 
