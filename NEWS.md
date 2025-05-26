@@ -6,6 +6,7 @@
 - security: fix basic auth credential exposure vulnerability
 - security: add application variable support for insecure_basic_auth
 - fix: NXDOMAIN error in Docker Compose environments (issue #764)
+- fix: stream_body timeout after first chunk (issue #762)
 - fix: SSL hostname verification with custom ssl_options and SSL message leak in async streaming
 - fix: pool connections not freed on 307 redirects and multiple pool/timer race conditions
 - fix: socket leaks, process deadlocks, ETS memory leaks, and infinite gen_server calls
