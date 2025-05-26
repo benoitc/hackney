@@ -1,5 +1,10 @@
 # NEWS
 
+1.24.1 - 2025-05-26
+-------------------
+
+- fix: remove unused variable warning in hackney.erl
+
 1.24.0 - 2025-05-26
 -------------------
 

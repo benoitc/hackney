@@ -865,7 +865,7 @@ do_connect(ProxyHost, ProxyPort, {ProxyUser, ProxyPass}, Transport, Host, Port, 
 
 maybe_redirect({ok, _}=Resp, _Req) -> Resp;
 maybe_redirect(
-  {ok, S, H, #client{headers=Headers, follow_redirect=true, retries=Tries}=Client}=Resp,
+  {ok, S, _H, #client{headers=Headers, follow_redirect=true, retries=Tries}=Client}=Resp,
   Req
  ) when Tries > 0 ->
   %% check if the given location is an absolute url,
