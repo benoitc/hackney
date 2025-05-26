@@ -309,6 +309,30 @@ async_recv(Parent, Owner, Ref,
     {Error, Sock, Reason} ->
       Owner ! {hackney_response, Ref, {error, Reason}},
       Transport:close(TSock);
+    {ssl_closed, Sock} ->
+      %% Handle SSL close messages same as regular close
+      case Client#client.response_state of
+        on_body when (Version =:= {1, 0} orelse Version =:= {1, 1})
+                       andalso (CLen =:= undefined orelse CLen =:= nil) ->
+          Owner ! {hackney_response, Ref, Buffer},
+          Owner ! {hackney_response, Ref, done},
+          ok;
+        on_body when TE =:= <<"identity">> ->
+          Owner ! {hackney_response, Ref, Buffer},
+          Owner ! {hackney_response, Ref, done},
+          ok;
+        on_body ->
+          Owner ! {hackney_response, Ref, {error, {closed, Buffer}}},
+          ok;
+        _ ->
+          Owner ! {hackney_response, Ref, {error, closed}},
+          ok
+      end,
+      Transport:close(TSock);
+    {ssl_error, Sock, Reason} ->
+      %% Handle SSL errors same as regular errors
+      Owner ! {hackney_response, Ref, {error, Reason}},
+      Transport:close(TSock);
     {'DOWN', _MRef, process, Owner, Reason} ->
       exit({owner_down, Owner, Reason});
     {system, From, Request} ->
