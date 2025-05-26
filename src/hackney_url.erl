@@ -436,7 +436,6 @@ fix_path(Path) ->
   end.
 
 %% @doc Encode an URL path.
-%% @equiv pathencode(Bin, [])
 -spec pathencode(binary() | list()) -> binary().
 pathencode(Path) when is_list(Path) ->
   pathencode(list_to_binary(Path));

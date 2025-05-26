@@ -665,8 +665,8 @@ the [mimetypes](https://github.com/spawngrid/mimetypes) has been
 replaced by the
 [hackney_mimetypes](https://github.com/benoitc/hackney_lib/blob/master/doc/hackney_mimetypes.md)
 module. It makes content-type detection a little more efficient. In the
-process the functions `hackney_util:content_type/1` and
-`hackney_bstr:content_type/1` has been removed. You should now use the
+process the functions hackney_util:content_type/1 and
+hackney_bstr:content_type/1 have been removed. You should now use the
 function `hackney_mimetypes:filename/1` .
 
 
@@ -680,7 +680,7 @@ function `hackney_mimetypes:filename/1` .
 - make sure we finish a multipart stream
 - bump hackney_lib to 0.2.5
 - enable TCP_NODELAY by default. (To disable, pass the option
-  `{nodelay, false} to `connect_options`).
+  `{nodelay, false}` to `connect_options`).
 
 0.11.1 - 2014/03/03
 -------------------
@@ -872,7 +872,7 @@ fix: fix file upload content type
 - Add support for partial file uploads
 - Return received buffer when no content length is given (http 1.0)
 - Instead of returning `{error, closed}`, return `{error, {closed,
-  Buffer}}` when you receive the body, so you can figure what happened
+  Buffer}}`  when you receive the body, so you can figure what happened
 and maybe use the partial body.
 
 0.4.0 - 2012/10/26

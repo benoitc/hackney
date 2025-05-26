@@ -10,6 +10,8 @@
 -type host() :: binary() | string().
 -type client() :: #client{}.
 
+-export_type([host/0, client/0]).
+
 -ifdef(no_callback_support).
 
 -export([behaviour_info/1]).

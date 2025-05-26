@@ -390,7 +390,7 @@ See for example the
 [hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
 Pool dispatcher based on dispcount.
 
-> Note: for now you can`t force the pool handler / client.
+> Note: for now you can't force the pool handler / client.
 
 ### Automatically follow a redirection
 
