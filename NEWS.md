@@ -1,5 +1,22 @@
 # NEWS
 
+1.24.0 - 2025-05-26
+-------------------
+
+- security: fix basic auth credential exposure vulnerability
+- security: add application variable support for insecure_basic_auth
+- fix: SSL hostname verification with custom ssl_options and SSL message leak in async streaming
+- fix: pool connections not freed on 307 redirects and multiple pool/timer race conditions
+- fix: socket leaks, process deadlocks, ETS memory leaks, and infinite gen_server calls
+- fix: controlling_process error handling in happy eyeballs and connection pool return
+- improvement: update GitHub Actions to ubuntu-22.04 and bump certifi/mimerl dependencies
+
+** Breaking Change **
+
+The new `insecure_basic_auth` application variable defaults to `false` for security.
+If your application relies on insecure basic auth over HTTP, you must explicitly set 
+`application:set_env(hackney, insecure_basic_auth, true)` to maintain previous behavior.
+
 1.23.0 - 2025-02-25
 -------------------
 
