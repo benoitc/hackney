@@ -99,12 +99,18 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                                                                     Size, Boundary, Client0);
                                             <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
                                               handle_body(Headers2, ReqType0, Body0, Client0);
-                                            [] when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
-                                              handle_body(Headers2, ReqType0, Body0, Client0);
                                             <<>> ->
                                               {Headers2, ReqType0, Body0, Client0};
-                                            [] ->
-                                              {Headers2, ReqType0, Body0, Client0};
+                                            _ when is_list(Body0) ->
+                                              Body1 = iolist_to_binary(Body0),
+                                              case Body1 of
+                                                <<>> when Method =:= <<"POST">> orelse Method =:= <<"PUT">> ->
+                                                  handle_body(Headers2, ReqType0, Body1, Client0);
+                                                <<>> ->
+                                                  {Headers2, ReqType0, Body1, Client0};
+                                                _ ->
+                                                  handle_body(Headers2, ReqType0, Body1, Client0)
+                                              end;
                                             _ ->
                                               handle_body(Headers2, ReqType0, Body0, Client0)
                                           end,
@@ -370,13 +376,6 @@ handle_body(Headers, ReqType0, Body0, Client) ->
                             S = hackney_headers_new:get_value(<<"content-length">>, Headers),
                             {S, CT, Body0};
 
-                          _ when is_list(Body0) -> % iolist case
-                            Body1 = iolist_to_binary(Body0),
-                            S = erlang:byte_size(Body1),
-                            CT = hackney_headers_new:get_value(
-                                   <<"content-type">>, Headers, <<"application/octet-stream">>
-                                  ),
-                            {S, CT, Body1};
                           _ when is_binary(Body0) ->
                             S = erlang:byte_size(Body0),
                             CT = hackney_headers_new:get_value(
