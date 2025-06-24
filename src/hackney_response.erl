@@ -285,7 +285,7 @@ body(Client) ->
 body(MaxLength, Client) ->
   read_body(MaxLength, Client, <<>>).
 
--spec skip_body(#client{}) -> {ok, #client{}} | {skip, #client{}} | {error, atom()}.
+-spec skip_body(#client{}) -> {skip, #client{}} | {error, atom()}.
 skip_body(Client) ->
   case stream_body(Client) of
     {ok, _, Client2} -> skip_body(Client2);
