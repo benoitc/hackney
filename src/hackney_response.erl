@@ -23,6 +23,10 @@
   close/1,
   expect_response/1]).
 
+% The Erlang VM port forbids receiving TCP packets larger than 64MB
+% https://github.com/erlang/otp/blob/359e254aba76c1986b671b45fd320c6cc6720ca8/erts/emulator/drivers/common/inet_drv.c#L1297
+-define(MAX_PACKET_SIZE, 64 * 1024 * 1024).
+
 %% internal
 %% @doc Start the response It parse the request lines and headers.
 start_response(#client{response_state=stream, mp_boundary=nil} = Client) ->
@@ -366,7 +370,7 @@ recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}) ->
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {_BufSize, undefined}) ->
   Transport:recv(Skt, 0, Timeout);
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {BufSize, ExpectedSize}) when ExpectedSize >= BufSize ->
-  Transport:recv(Skt, ExpectedSize - BufSize, Timeout);
+  Transport:recv(Skt, min(ExpectedSize - BufSize, ?MAX_PACKET_SIZE), Timeout);
 recv(#client{transport=Transport, socket=Skt, recv_timeout=Timeout}, {_BufSize, _ExpectedSize}) ->
   Transport:recv(Skt, 0, Timeout).
 
