@@ -135,7 +135,11 @@ ssl_opts_2() ->
   hackney_ssl:cipher_opts().
 
 merge_ssl_opts(Host, OverrideOpts) ->
-  DefaultOpts = ssl_opts_1(Host, OverrideOpts),
+  VerifyHost = case proplists:get_value(server_name_indication, OverrideOpts, disable) of
+    disable -> Host;
+    SNI -> SNI
+  end,
+  DefaultOpts = ssl_opts_1(VerifyHost, OverrideOpts),
   MergedOpts = orddict:merge(fun(_K, _V1, V) -> V end,
                              orddict:from_list(DefaultOpts),
                              orddict:from_list(OverrideOpts)),
