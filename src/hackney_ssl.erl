@@ -130,9 +130,16 @@ connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
   SSLOpts = proplists:get_value(ssl_options, Opts0),
   BaseOpts = [binary, {active, false}, {packet, raw}],
   Opts1 = hackney_util:merge_opts(BaseOpts, proplists:delete(ssl_options, Opts0)),
+  Now = erlang:monotonic_time(millisecond),
   case hackney_happy:connect(Host, Port, Opts1, Timeout) of
     {ok, Sock} ->
-      ssl:connect(Sock, SSLOpts);
+      Elapsed = erlang:monotonic_time(millisecond) - Now,
+      case Timeout - Elapsed of
+        TimeoutLeft when TimeoutLeft > 0 ->
+          ssl:connect(Sock, SSLOpts, TimeoutLeft);
+        _ ->
+          {error, timeout}
+      end;
     Error ->
       Error
   end.
