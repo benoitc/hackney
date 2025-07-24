@@ -33,6 +33,10 @@
          pause_stream/1,
          resume_stream/1]).
 
+-ifdef(TEST).
+-export([get_proxy_env/1, do_get_proxy_env/1]).
+-endif.
+
 -define(METHOD_TPL(Method),
   -export([Method/1, Method/2, Method/3, Method/4])).
 -include("hackney_methods.hrl").
@@ -830,7 +834,14 @@ get_proxy_env(S) when S =:= http; S =:= http_unix ->
 do_get_proxy_env([Var | Rest]) ->
   case os:getenv(Var) of
     false -> do_get_proxy_env(Rest);
-    Url -> {ok, Url}
+    "" -> do_get_proxy_env(Rest);
+    Url ->
+      %% Trim all whitespace (spaces, tabs, newlines, etc.)
+      TrimmedUrl = re:replace(Url, "^\\s+|\\s+$", "", [global, {return, list}]),
+      case TrimmedUrl of
+        "" -> do_get_proxy_env(Rest);
+        _ -> {ok, TrimmedUrl}
+      end
   end;
 do_get_proxy_env([]) ->
   false.
