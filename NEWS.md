@@ -1,5 +1,17 @@
 # NEWS
 
+1.25.0 - 2025-07-24
+-------------------
+
+** IMPORTANT CHANGE **
+
+- change: `insecure_basic_auth` now defaults to `true` instead of `false`
+  
+  This restores backward compatibility with pre-1.24.0 behavior where basic auth 
+  was allowed over HTTP connections. If you need strict HTTPS-only basic auth:
+  - Set globally: `application:set_env(hackney, insecure_basic_auth, false)`
+  - Or per-request: `{insecure_basic_auth, false}` in options
+
 1.24.1 - 2025-05-26
 -------------------
 
@@ -17,12 +29,6 @@
 - fix: socket leaks, process deadlocks, ETS memory leaks, and infinite gen_server calls
 - fix: controlling_process error handling in happy eyeballs and connection pool return
 - improvement: update GitHub Actions to ubuntu-22.04 and bump certifi/mimerl dependencies
-
-** Breaking Change **
-
-The new `insecure_basic_auth` application variable defaults to `false` for security.
-If your application relies on insecure basic auth over HTTP, you must explicitly set 
-`application:set_env(hackney, insecure_basic_auth, true)` to maintain previous behavior.
 
 1.23.0 - 2025-02-25
 -------------------

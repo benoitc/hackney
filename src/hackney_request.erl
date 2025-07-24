@@ -43,7 +43,7 @@ perform(Client0, {Method0, Path0, Headers0, Body0}) ->
                       maybe_add_cookies(Cookies, [{<<"User-Agent">>, default_ua()}]);
                      {User, Pwd} ->
                        %% Security: Check if basic auth over HTTP is allowed
-                       AllowInsecureAuth = proplists:get_value(insecure_basic_auth, Options, hackney_app:get_app_env(insecure_basic_auth, false)),
+                       AllowInsecureAuth = proplists:get_value(insecure_basic_auth, Options, hackney_app:get_app_env(insecure_basic_auth, true)),
                        case {Client0#client.transport, AllowInsecureAuth} of
                          {hackney_ssl, _} ->
                            %% HTTPS connection - always safe

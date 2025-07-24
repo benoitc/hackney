@@ -239,9 +239,9 @@ request(Method, URL, Headers, Body) ->
 %%          redirection even on POST</li>
 %%          <li>`{basic_auth, {binary, binary}}`: HTTP basic auth username and password. 
 %%          Only allowed over HTTPS unless {insecure_basic_auth, true} is also set.</li>
-%%          <li>`{insecure_basic_auth, boolean}': false by default. When true, allows 
+%%          <li>`{insecure_basic_auth, boolean}': true by default. When true, allows 
 %%          basic auth over unencrypted HTTP connections (security risk). 
-%%          Can also be set globally via application:set_env(hackney, insecure_basic_auth, true).</li>
+%%          Can also be set globally via application:set_env(hackney, insecure_basic_auth, false).</li>
 %%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
