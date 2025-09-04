@@ -794,7 +794,7 @@ test_host_labels([ A | R1], [A | R2]) -> test_host_labels(R1, R2);
 test_host_labels([], _) -> true;
 test_host_labels(_, _) -> false.
 
-test_host_cidr([Addr, Rest], CIDR) ->
+test_host_cidr([Addr | Rest], CIDR) ->
   case hackney_cidr:contains(CIDR, Addr) of
     true -> true;
     false -> test_host_cidr(Rest, CIDR)
