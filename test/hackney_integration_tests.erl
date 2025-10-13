@@ -232,14 +232,8 @@ test_307_redirect_pool_cleanup() ->
         {ok, {maybe_redirect, 307, _Headers1, Client1}} ->
             {skip, _} = hackney:skip_body(Client1),
             ok;
-        {ok, Status1, _Headers1, ClientOrRef1} when Status1 >= 300, Status1 < 400 ->
-            %% If it's a reference, we can't call skip_body - the connection handling is different
-            if is_reference(ClientOrRef1) ->
-                ok;  %% Connection handling is managed internally for pooled requests
-            true ->
-                {skip, _} = hackney:skip_body(ClientOrRef1),
-                ok
-            end;
+        {ok, Status1, _Headers1} when Status1 >= 300, Status1 < 400 ->
+            ok;
         {ok, Status1, _Headers1, Client1} when Status1 >= 200, Status1 < 400 ->
             {ok, _Body} = hackney:body(Client1),
             ok;
@@ -254,13 +248,8 @@ test_307_redirect_pool_cleanup() ->
         {ok, {maybe_redirect, 307, _Headers2, Client2}} ->
             {skip, _} = hackney:skip_body(Client2),
             ok;
-        {ok, Status2, _Headers2, ClientOrRef2} when Status2 >= 300, Status2 < 400 ->
-            if is_reference(ClientOrRef2) ->
-                ok;  %% Connection handling is managed internally for pooled requests
-            true ->
-                {skip, _} = hackney:skip_body(ClientOrRef2),
-                ok
-            end;
+        {ok, Status2, _Headers2} when Status2 >= 300, Status2 < 400 ->
+            ok;
         {ok, Status2, _Headers2, Client2} when Status2 >= 200, Status2 < 400 ->
             {ok, _Body2} = hackney:body(Client2),
             ok;

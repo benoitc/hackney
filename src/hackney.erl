@@ -1131,7 +1131,8 @@ reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState}, _State) -
                 _ ->
                   %% For custom pools, use full cleanup to ensure connection release
                   maybe_update_req(CleanNState),
-                  {ok, Status, Headers, Ref}
+                  %% Dont return client ref as connection is already cleaned up
+                  {ok, Status, Headers}
               end;
             Error ->
               hackney_manager:handle_error(NState),
