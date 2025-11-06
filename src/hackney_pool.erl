@@ -340,7 +340,7 @@ handle_cast(_Msg, State) ->
   {noreply, State}.
 
 handle_info({timeout, Socket}, State) ->
-  {noreply, remove_socket(Socket, State)};
+  {noreply, remove_socket(Socket, State, false)};
 handle_info({tcp, Socket, _}, State) ->
   {noreply, remove_socket(Socket, State)};
 handle_info({tcp_closed, Socket}, State) ->
@@ -434,13 +434,19 @@ find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=Stat
       {no_socket, State}
   end.
 
-remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
+remove_socket(Socket, State) ->
+  remove_socket(Socket, State, true).
+
+remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State, CancelTimer) ->
   _ = metrics:update_histogram(State#state.metrics,
                                [hackney, State#state.name, free_count],
                                dict:size(Sockets)),
   case dict:find(Socket, Sockets) of
     {ok, {Connection, Timer}} ->
-      cancel_timer(Socket, Timer),
+      case CancelTimer of
+        true -> cancel_timer(Socket, Timer);
+        false -> ok
+      end,
       catch hackney_connection:close(Connection, Socket),
       ConnSockets = lists:delete(Socket, dict:fetch(Connection, Conns)),
       NewConns = update_connections(ConnSockets, Connection, Conns),
@@ -477,11 +483,11 @@ cancel_timer(Socket, Timer) ->
       receive
         {timeout, Socket} -> ok
       after
-        100 -> 
+        100 ->
           %% Safety timeout - if message doesn't arrive, continue anyway
           ok
       end;
-    _ -> 
+    _ ->
       %% Timer was successfully cancelled, no message should exist
       %% Don't drain messages to avoid consuming legitimate timeout messages
       ok
