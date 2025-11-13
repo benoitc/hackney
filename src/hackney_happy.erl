@@ -127,7 +127,7 @@ getbyname(Hostname, Type) ->
   %% First try DNS resolution using inet_res:getbyname
   case (catch inet_res:getbyname(Hostname, Type)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> 
-      lists:usort(AddrList);
+      AddrList;
     {error, _Reason} -> 
       %% DNS failed, try fallback to /etc/hosts using inet:gethostbyname
       %% This fixes NXDOMAIN errors in Docker Compose environments where
@@ -150,7 +150,7 @@ fallback_hosts_lookup(Hostname, Type) ->
   end,
   case (catch inet:gethostbyname(Hostname, InetType)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> 
-      lists:usort(AddrList);
+      AddrList;
     _ -> 
       []
   end.
