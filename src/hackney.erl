@@ -784,7 +784,7 @@ do_match_no_proxy_env([{host, _Labels} | _] = Patterns, Addrs, undefined, Host)
 do_match_no_proxy_env([{host, Labels} | Rest], Addrs, HostLabels, Host) ->
   case test_host_labels(Labels, HostLabels) of
     true -> true;
-    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+    false -> do_match_no_proxy_env(Rest, Addrs, HostLabels, Host)
   end;
 do_match_no_proxy_env([], _, _, _) ->
   false.
