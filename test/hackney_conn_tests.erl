@@ -40,7 +40,10 @@ hackney_conn_integration_test_() ->
       {"POST request with body", {timeout, 30, fun test_post_request/0}},
       {"stream body", {timeout, 30, fun test_stream_body/0}},
       {"HEAD request", {timeout, 30, fun test_head_request/0}},
-      {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}}
+      {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}},
+      %% Async tests
+      {"async request continuous", {timeout, 30, fun test_async_continuous/0}},
+      {"async request once mode", {timeout, 30, fun test_async_once/0}}
      ]}.
 
 setup() ->
@@ -356,8 +359,123 @@ test_request_state_cycle() ->
     end.
 
 %%====================================================================
+%% Async Tests
+%%====================================================================
+
+test_async_continuous() ->
+    %% Test async mode with continuous streaming
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Send async request
+            {ok, Ref} = hackney_conn:request_async(
+                Pid, <<"GET">>, <<"/">>, [], <<>>, true
+            ),
+            ?assert(is_reference(Ref)),
+
+            %% Receive messages
+            Messages = receive_all_async(Ref, []),
+            ?assert(length(Messages) >= 2), %% At least status, headers, done
+
+            %% Should have status message
+            ?assert(lists:any(fun({status, S, _}) -> S >= 200; (_) -> false end, Messages)),
+            %% Should have headers message
+            ?assert(lists:any(fun({headers, _}) -> true; (_) -> false end, Messages)),
+            %% Should have done message
+            ?assert(lists:member(done, Messages)),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_async_continuous - no server on localhost:8000"),
+            ok
+    end.
+
+test_async_once() ->
+    %% Test async once mode with stream_next
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Send async request in once mode
+            {ok, Ref} = hackney_conn:request_async(
+                Pid, <<"GET">>, <<"/">>, [], <<>>, once
+            ),
+            ?assert(is_reference(Ref)),
+
+            %% Should receive status
+            receive
+                {hackney_response, Ref, {status, Status, _Reason}} ->
+                    ?assert(Status >= 200 andalso Status < 400)
+            after 5000 ->
+                ?assert(false)
+            end,
+
+            %% Should receive headers
+            receive
+                {hackney_response, Ref, {headers, Headers}} ->
+                    ?assert(is_list(Headers))
+            after 5000 ->
+                ?assert(false)
+            end,
+
+            %% Now we need to call stream_next to get body chunks
+            hackney_conn:stream_next(Pid),
+
+            %% Collect remaining messages
+            Messages = receive_all_async_with_next(Ref, Pid, []),
+            ?assert(lists:member(done, Messages)),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_async_once - no server on localhost:8000"),
+            ok
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
+
+receive_all_async(Ref, Acc) ->
+    receive
+        {hackney_response, Ref, done} ->
+            lists:reverse([done | Acc]);
+        {hackney_response, Ref, {error, _} = Error} ->
+            lists:reverse([Error | Acc]);
+        {hackney_response, Ref, Msg} ->
+            receive_all_async(Ref, [Msg | Acc])
+    after 5000 ->
+        lists:reverse(Acc)
+    end.
+
+receive_all_async_with_next(Ref, Pid, Acc) ->
+    receive
+        {hackney_response, Ref, done} ->
+            lists:reverse([done | Acc]);
+        {hackney_response, Ref, {error, _} = Error} ->
+            lists:reverse([Error | Acc]);
+        {hackney_response, Ref, Msg} ->
+            hackney_conn:stream_next(Pid),
+            receive_all_async_with_next(Ref, Pid, [Msg | Acc])
+    after 5000 ->
+        lists:reverse(Acc)
+    end.
 
 check_local_server() ->
     case gen_tcp:connect("127.0.0.1", 8000, [], 1000) of

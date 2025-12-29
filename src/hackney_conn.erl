@@ -29,12 +29,19 @@
     connect/1,
     connect/2,
     get_state/1,
-    %% Request/Response
+    %% Request/Response (sync)
     request/5,
     request/6,
     body/1,
     body/2,
-    stream_body/1
+    stream_body/1,
+    %% Async streaming
+    request_async/6,
+    request_async/7,
+    stream_next/1,
+    stop_async/1,
+    pause_stream/1,
+    resume_stream/1
 ]).
 
 %% gen_statem callbacks
@@ -52,6 +59,8 @@
     connected/3,
     sending/3,
     receiving/3,
+    streaming/3,
+    streaming_once/3,
     closed/3
 ]).
 
@@ -100,8 +109,9 @@
     parser :: #hparser{} | undefined,
 
     %% Async mode
-    async = false :: boolean() | once,
-    stream_to :: pid() | undefined
+    async = false :: false | true | once | paused,
+    stream_to :: pid() | undefined,
+    async_ref :: reference() | undefined
 }).
 
 %%====================================================================
@@ -168,6 +178,44 @@ body(Pid, Timeout) ->
 -spec stream_body(pid()) -> {ok, binary()} | done | {error, term()}.
 stream_body(Pid) ->
     gen_statem:call(Pid, stream_body).
+
+%% @doc Send an HTTP request asynchronously.
+%% Returns {ok, Ref} immediately. Response is sent as messages:
+%%   - {hackney_response, Ref, {status, Status, Reason}}
+%%   - {hackney_response, Ref, {headers, Headers}}
+%%   - {hackney_response, Ref, Data} (body chunks)
+%%   - {hackney_response, Ref, done}
+%%   - {hackney_response, Ref, {error, Reason}}
+%% AsyncMode: true (continuous) or once (one message at a time, use stream_next/1)
+-spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once) ->
+    {ok, reference()} | {error, term()}.
+request_async(Pid, Method, Path, Headers, Body, AsyncMode) ->
+    request_async(Pid, Method, Path, Headers, Body, AsyncMode, self()).
+
+-spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid()) ->
+    {ok, reference()} | {error, term()}.
+request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
+    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}).
+
+%% @doc Request the next message in {async, once} mode.
+-spec stream_next(pid()) -> ok | {error, term()}.
+stream_next(Pid) ->
+    gen_statem:cast(Pid, stream_next).
+
+%% @doc Stop async mode and return to sync mode.
+-spec stop_async(pid()) -> ok | {error, term()}.
+stop_async(Pid) ->
+    gen_statem:call(Pid, stop_async).
+
+%% @doc Pause async streaming (hibernate the stream).
+-spec pause_stream(pid()) -> ok | {error, term()}.
+pause_stream(Pid) ->
+    gen_statem:cast(Pid, pause_stream).
+
+%% @doc Resume paused async streaming.
+-spec resume_stream(pid()) -> ok | {error, term()}.
+resume_stream(Pid) ->
+    gen_statem:cast(Pid, resume_stream).
 
 %%====================================================================
 %% gen_statem callbacks
@@ -293,7 +341,7 @@ connected({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, connected}}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
-    %% Start a new request
+    %% Start a new sync request
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -303,9 +351,31 @@ connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
         status = undefined,
         reason = undefined,
         response_headers = undefined,
-        buffer = <<>>
+        buffer = <<>>,
+        async = false,
+        async_ref = undefined,
+        stream_to = undefined
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, Data) ->
+    %% Start a new async request
+    Ref = make_ref(),
+    NewData = Data#conn_data{
+        request_from = From,
+        method = Method,
+        path = Path,
+        parser = undefined,
+        version = undefined,
+        status = undefined,
+        reason = undefined,
+        response_headers = undefined,
+        buffer = <<>>,
+        async = AsyncMode,
+        async_ref = Ref,
+        stream_to = StreamTo
+    },
+    {next_state, sending, NewData, [{next_event, internal, {send_request_async, Method, Path, Headers, Body}}]};
 
 connected(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
@@ -333,36 +403,24 @@ sending(enter, connected, _Data) ->
     keep_state_and_data;
 
 sending(internal, {send_request, Method, Path, Headers, Body}, Data) ->
-    #conn_data{
-        transport = Transport,
-        socket = Socket,
-        netloc = Netloc
-    } = Data,
-
-    %% Build request headers
-    FinalHeaders = build_headers(Method, Headers, Body, Netloc),
-
-    %% Build request line and headers
-    Path1 = case Path of
-        <<>> -> <<"/">>;
-        _ -> Path
-    end,
-    RequestLine = <<Method/binary, " ", Path1/binary, " HTTP/1.1\r\n">>,
-    HeadersBin = headers_to_binary(FinalHeaders),
-    RequestData = <<RequestLine/binary, HeadersBin/binary, "\r\n">>,
-
-    %% Send request
-    case Transport:send(Socket, RequestData) of
-        ok ->
-            %% Send body if present
-            case send_body(Transport, Socket, Body) of
-                ok ->
-                    {next_state, receiving, Data, [{next_event, internal, do_recv_response}]};
-                {error, Reason} ->
-                    {next_state, closed, Data, [{reply, Data#conn_data.request_from, {error, Reason}}]}
-            end;
+    case do_send_request(Method, Path, Headers, Body, Data) of
+        {ok, NewData} ->
+            {next_state, receiving, NewData, [{next_event, internal, do_recv_response}]};
         {error, Reason} ->
             {next_state, closed, Data, [{reply, Data#conn_data.request_from, {error, Reason}}]}
+    end;
+
+sending(internal, {send_request_async, Method, Path, Headers, Body}, Data) ->
+    case do_send_request(Method, Path, Headers, Body, Data) of
+        {ok, NewData} ->
+            %% Reply with ref immediately, then start async receiving
+            From = NewData#conn_data.request_from,
+            Ref = NewData#conn_data.async_ref,
+            {next_state, receiving, NewData#conn_data{request_from = undefined},
+             [{reply, From, {ok, Ref}}, {next_event, internal, do_recv_response_async}]};
+        {error, Reason} ->
+            From = Data#conn_data.request_from,
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
 sending({call, From}, get_state, _Data) ->
@@ -393,7 +451,7 @@ receiving(enter, receiving, _Data) ->
     keep_state_and_data;
 
 receiving(internal, do_recv_response, Data) ->
-    %% Receive and parse response status and headers
+    %% Receive and parse response status and headers (sync mode)
     Parser = hackney_http:parser([response]),
     DataWithParser = Data#conn_data{parser = Parser},
     case recv_status_and_headers(DataWithParser) of
@@ -408,6 +466,28 @@ receiving(internal, do_recv_response, Data) ->
         {error, Reason} ->
             From = Data#conn_data.request_from,
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+receiving(internal, do_recv_response_async, Data) ->
+    %% Receive and parse response status and headers (async mode)
+    Parser = hackney_http:parser([response]),
+    DataWithParser = Data#conn_data{parser = Parser},
+    #conn_data{async_ref = Ref, stream_to = StreamTo, async = AsyncMode} = Data,
+    case recv_status_and_headers(DataWithParser) of
+        {ok, Status, Headers, NewData} ->
+            %% Send status message to stream_to
+            HeadersList = hackney_headers_new:to_list(Headers),
+            StreamTo ! {hackney_response, Ref, {status, Status, NewData#conn_data.reason}},
+            StreamTo ! {hackney_response, Ref, {headers, HeadersList}},
+            %% Transition to appropriate streaming state based on mode
+            NextState = case AsyncMode of
+                true -> streaming;
+                once -> streaming_once
+            end,
+            {next_state, NextState, NewData#conn_data{response_headers = Headers}};
+        {error, Reason} ->
+            StreamTo ! {hackney_response, Ref, {error, Reason}},
+            {next_state, closed, Data}
     end;
 
 receiving({call, From}, body, Data) ->
@@ -451,6 +531,122 @@ receiving(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Re
 
 receiving(EventType, Event, Data) ->
     handle_common(EventType, Event, receiving, Data).
+
+%%====================================================================
+%% State: streaming - Continuous async body streaming (async=true)
+%%====================================================================
+
+streaming(enter, receiving, Data) ->
+    %% Start streaming immediately by sending self a cast
+    gen_statem:cast(self(), do_stream),
+    {keep_state, Data};
+
+streaming(enter, streaming, _Data) ->
+    keep_state_and_data;
+
+streaming(cast, do_stream, Data) ->
+    %% Stream body chunks continuously
+    #conn_data{async_ref = Ref, stream_to = StreamTo} = Data,
+    case stream_body_chunk(Data) of
+        {ok, Chunk, NewData} ->
+            StreamTo ! {hackney_response, Ref, Chunk},
+            %% Continue streaming
+            gen_statem:cast(self(), do_stream),
+            {keep_state, NewData};
+        {done, NewData} ->
+            StreamTo ! {hackney_response, Ref, done},
+            {next_state, connected, reset_async(NewData)};
+        {error, Reason} ->
+            StreamTo ! {hackney_response, Ref, {error, Reason}},
+            {next_state, closed, Data}
+    end;
+
+streaming(cast, pause_stream, Data) ->
+    %% Pause - transition to streaming_once which waits for explicit next
+    {next_state, streaming_once, Data};
+
+streaming({call, From}, stop_async, Data) ->
+    {next_state, receiving, reset_async(Data), [{reply, From, ok}]};
+
+streaming({call, From}, get_state, _Data) ->
+    {keep_state_and_data, [{reply, From, {ok, streaming}}]};
+
+streaming(info, {tcp_closed, Socket}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, closed}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming(info, {ssl_closed, Socket}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, closed}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming(info, {tcp_error, Socket, Reason}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, Reason}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming(info, {ssl_error, Socket, Reason}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, Reason}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
+    {stop, normal, Data};
+
+streaming(EventType, Event, Data) ->
+    handle_common(EventType, Event, streaming, Data).
+
+%%====================================================================
+%% State: streaming_once - On-demand async streaming (async=once)
+%%====================================================================
+
+streaming_once(enter, _OldState, _Data) ->
+    %% Wait for stream_next
+    keep_state_and_data;
+
+streaming_once(cast, stream_next, Data) ->
+    %% Stream one chunk
+    #conn_data{async_ref = Ref, stream_to = StreamTo} = Data,
+    case stream_body_chunk(Data) of
+        {ok, Chunk, NewData} ->
+            StreamTo ! {hackney_response, Ref, Chunk},
+            {keep_state, NewData};
+        {done, NewData} ->
+            StreamTo ! {hackney_response, Ref, done},
+            {next_state, connected, reset_async(NewData)};
+        {error, Reason} ->
+            StreamTo ! {hackney_response, Ref, {error, Reason}},
+            {next_state, closed, Data}
+    end;
+
+streaming_once(cast, resume_stream, Data) ->
+    %% Switch to continuous mode
+    {next_state, streaming, Data#conn_data{async = true}};
+
+streaming_once({call, From}, stop_async, Data) ->
+    {next_state, receiving, reset_async(Data), [{reply, From, ok}]};
+
+streaming_once({call, From}, get_state, _Data) ->
+    {keep_state_and_data, [{reply, From, {ok, streaming_once}}]};
+
+streaming_once(info, {tcp_closed, Socket}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, closed}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_once(info, {ssl_closed, Socket}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, closed}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_once(info, {tcp_error, Socket, Reason}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, Reason}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_once(info, {ssl_error, Socket, Reason}, #conn_data{socket = Socket, async_ref = Ref, stream_to = StreamTo} = Data) ->
+    StreamTo ! {hackney_response, Ref, {error, Reason}},
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_once(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
+    {stop, normal, Data};
+
+streaming_once(EventType, Event, Data) ->
+    handle_common(EventType, Event, streaming_once, Data).
 
 %%====================================================================
 %% State: closed - Connection terminated
@@ -521,6 +717,48 @@ reply_and_stop(undefined, _Reply, Data) ->
     {stop, normal, Data};
 reply_and_stop(From, Reply, _Data) ->
     {stop_and_reply, normal, [{reply, From, Reply}]}.
+
+%% @private Reset async state
+reset_async(Data) ->
+    Data#conn_data{
+        async = false,
+        async_ref = undefined,
+        stream_to = undefined
+    }.
+
+%% @private Send HTTP request (shared by sync and async)
+do_send_request(Method, Path, Headers, Body, Data) ->
+    #conn_data{
+        transport = Transport,
+        socket = Socket,
+        netloc = Netloc
+    } = Data,
+
+    %% Build request headers
+    FinalHeaders = build_headers(Method, Headers, Body, Netloc),
+
+    %% Build request line and headers
+    Path1 = case Path of
+        <<>> -> <<"/">>;
+        _ -> Path
+    end,
+    RequestLine = <<Method/binary, " ", Path1/binary, " HTTP/1.1\r\n">>,
+    HeadersBin = headers_to_binary(FinalHeaders),
+    RequestData = <<RequestLine/binary, HeadersBin/binary, "\r\n">>,
+
+    %% Send request
+    case Transport:send(Socket, RequestData) of
+        ok ->
+            %% Send body if present
+            case send_body(Transport, Socket, Body) of
+                ok ->
+                    {ok, Data};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %% @private Compute netloc for Host header
 compute_netloc(Host, Port, Transport) ->
