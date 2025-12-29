@@ -15,6 +15,7 @@
 %% Test fixtures
 %%====================================================================
 
+%% Unit tests - no network required
 hackney_conn_test_() ->
     {setup,
      fun setup/0,
@@ -22,11 +23,24 @@ hackney_conn_test_() ->
      [
       {"start and stop", fun test_start_stop/0},
       {"initial state is idle", fun test_initial_state/0},
-      {"connect to server", fun test_connect/0},
       {"connect timeout", fun test_connect_timeout/0},
       {"connect to invalid host", fun test_connect_invalid/0},
-      {"reconnect after close", fun test_reconnect/0},
       {"owner death stops connection", fun test_owner_death/0}
+     ]}.
+
+%% Integration tests - require server on localhost:8000
+hackney_conn_integration_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     [
+      {"connect to server", fun test_connect/0},
+      {"reconnect after close", fun test_reconnect/0},
+      {"simple GET request", {timeout, 30, fun test_get_request/0}},
+      {"POST request with body", {timeout, 30, fun test_post_request/0}},
+      {"stream body", {timeout, 30, fun test_stream_body/0}},
+      {"HEAD request", {timeout, 30, fun test_head_request/0}},
+      {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}}
      ]}.
 
 setup() ->
@@ -178,3 +192,186 @@ test_owner_death() ->
 
     %% Connection should have stopped
     ?assertNot(is_process_alive(Pid)).
+
+%%====================================================================
+%% Request/Response Tests
+%%====================================================================
+
+test_get_request() ->
+    %% Test against local server
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Send GET request
+            {ok, Status, Headers} = hackney_conn:request(
+                Pid, <<"GET">>, <<"/">>, [], <<>>
+            ),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(is_list(Headers)),
+
+            %% Read body
+            {ok, Body} = hackney_conn:body(Pid),
+            ?assert(is_binary(Body)),
+            ?assert(byte_size(Body) > 0),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_get_request - no server on localhost:8000"),
+            ok
+    end.
+
+test_post_request() ->
+    %% This test validates POST request mechanics
+    %% The local server may not support POST (405), but we verify request/response cycle works
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Send POST request with body
+            ReqBody = <<"test data">>,
+            ReqHeaders = [{<<"Content-Type">>, <<"text/plain">>}],
+            {ok, Status, _Headers} = hackney_conn:request(
+                Pid, <<"POST">>, <<"/">>, ReqHeaders, ReqBody
+            ),
+            %% Accept any valid HTTP response (server may return 405 for unsupported method)
+            ?assert(Status >= 100 andalso Status < 600),
+
+            %% Read body (may be error page)
+            {ok, Body} = hackney_conn:body(Pid),
+            ?assert(is_binary(Body)),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_post_request - no server on localhost:8000"),
+            ok
+    end.
+
+test_stream_body() ->
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Request root
+            {ok, Status, _Headers} = hackney_conn:request(
+                Pid, <<"GET">>, <<"/">>, [], <<>>
+            ),
+            ?assert(Status >= 200 andalso Status < 400),
+
+            %% Stream body
+            Body = stream_all(Pid, <<>>),
+            ?assert(is_binary(Body)),
+            ?assert(byte_size(Body) > 0),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_stream_body - no server on localhost:8000"),
+            ok
+    end.
+
+test_head_request() ->
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+
+            %% Send HEAD request
+            {ok, Status, Headers} = hackney_conn:request(
+                Pid, <<"HEAD">>, <<"/">>, [], <<>>
+            ),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(is_list(Headers)),
+
+            %% Body should be empty for HEAD
+            {ok, Body} = hackney_conn:body(Pid),
+            ?assertEqual(<<>>, Body),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_head_request - no server on localhost:8000"),
+            ok
+    end.
+
+test_request_state_cycle() ->
+    %% Tests that connection returns to connected state after request/response
+    %% Note: If server sends Connection: close, connection will transition to closed
+    case check_local_server() of
+        ok ->
+            Opts = #{
+                host => "127.0.0.1",
+                port => 8000,
+                transport => hackney_tcp,
+                connect_timeout => 5000,
+                recv_timeout => 5000
+            },
+            {ok, Pid} = hackney_conn:start_link(Opts),
+            ok = hackney_conn:connect(Pid),
+            ?assertEqual({ok, connected}, hackney_conn:get_state(Pid)),
+
+            %% First request
+            {ok, Status1, _} = hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>),
+            ?assert(Status1 >= 200 andalso Status1 < 400),
+            ?assertEqual({ok, receiving}, hackney_conn:get_state(Pid)),
+
+            {ok, _Body1} = hackney_conn:body(Pid),
+            %% After body, should be connected (or closed if server sent Connection: close)
+            {ok, State1} = hackney_conn:get_state(Pid),
+            ?assert(State1 =:= connected orelse State1 =:= closed),
+
+            hackney_conn:stop(Pid);
+        skip ->
+            ?debugMsg("Skipping test_request_state_cycle - no server on localhost:8000"),
+            ok
+    end.
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+check_local_server() ->
+    case gen_tcp:connect("127.0.0.1", 8000, [], 1000) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            ok;
+        {error, _} ->
+            skip
+    end.
+
+stream_all(Pid, Acc) ->
+    case hackney_conn:stream_body(Pid) of
+        {ok, Chunk} ->
+            stream_all(Pid, <<Acc/binary, Chunk/binary>>);
+        done ->
+            Acc
+    end.
