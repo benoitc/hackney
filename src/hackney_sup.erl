@@ -46,7 +46,9 @@ init([]) ->
            %% manager
            ?CHILD(hackney_manager, worker),
            %% connections manager
-           ?CHILD(hackney_connections, worker)
+           ?CHILD(hackney_connections, worker),
+           %% connection process supervisor
+           ?CHILD(hackney_conn_sup, supervisor)
           ],
 
   {ok, { {one_for_one, 10000, 1}, Specs}}.
