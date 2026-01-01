@@ -1,70 +1,230 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of hackney released under the Apache 2 license.
+%%% See the NOTICE for more information.
+%%%
+%%% Copyright (c) 2024 Benoit Chesneau
+%%%
+%%% @doc Tests for hackney_pool implementation.
+
 -module(hackney_pool_tests).
+
 -include_lib("eunit/include/eunit.hrl").
--include("hackney_lib.hrl").
+-include("hackney.hrl").
 
-%% This seems necessary to list the tests including the generator
-dummy_test() ->
-    ?assertEqual(ok, ok).
+-define(PORT, 8123).
 
-multipart_test_() ->
-    {setup, fun start/0, fun stop/1,
-      [{timeout, 120, queue_timeout()},
-       {timeout, 120, checkout_timeout()}]}.
+%%====================================================================
+%% Test fixtures
+%%====================================================================
 
-start() ->
+%% Unit tests - no server required
+hackney_pool_unit_test_() ->
+    {setup,
+     fun setup_unit/0,
+     fun teardown_unit/1,
+     [
+      {"pool starts with default", fun test_default_pool/0},
+      {"start custom pool", fun test_custom_pool/0},
+      {"pool stats", fun test_pool_stats/0},
+      {"max connections setting", fun test_max_connections/0},
+      {"timeout setting", fun test_timeout_setting/0}
+     ]}.
+
+%% Integration tests - require server
+hackney_pool_integration_test_() ->
+    {setup,
+     fun setup_integration/0,
+     fun teardown_integration/1,
+     [
+      {"checkout creates connection", fun test_checkout_creates/0},
+      {"checkin returns connection", fun test_checkin_returns/0},
+      {"connection reuse", fun test_connection_reuse/0},
+      {"connection death cleanup", fun test_connection_death/0},
+      {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
+      {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}}
+     ]}.
+
+setup_unit() ->
+    application:ensure_all_started(hackney),
+    ok.
+
+teardown_unit(_) ->
+    ok.
+
+setup_integration() ->
     error_logger:tty(false),
-    {ok, _} = application:ensure_all_started(cowboy),
-    {ok, _} = application:ensure_all_started(hackney),
-    hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
+    {ok, _} = application:ensure_all_started(cowboy),
+    {ok, _} = application:ensure_all_started(hackney),
     Host = '_',
-    Resource = {"/pool", pool_resource, []},
-    Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-    cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
+    Routes = [
+        {"/pool", pool_resource, []},
+        {"/[...]", test_http_resource, []}
+    ],
+    Dispatch = cowboy_router:compile([{Host, Routes}]),
+    {ok, _} = cowboy:start_clear(pool_test_server, [{port, ?PORT}], #{env => #{dispatch => Dispatch}}),
+    ok.
 
-stop({ok, _Pid}) ->
-    cowboy:stop_listener(test_server),
+teardown_integration(_) ->
+    cowboy:stop_listener(pool_test_server),
     application:stop(cowboy),
-    hackney_pool:stop_pool(pool_test),
     application:stop(hackney),
     error_logger:tty(true),
     ok.
 
-queue_timeout() ->
-    fun() ->
-        URL = <<"http://localhost:8123/pool">>,
-        Headers = [],
-        Opts = [{pool, pool_test}, {connect_timeout, 100}, {checkout_timeout, 5000}],
-        case hackney:request(post, URL, Headers, stream, Opts) of
-            {ok, Ref} ->
-                {error, _} = hackney:request(post, URL, Headers, stream, Opts),
-                ok = hackney:finish_send_body(Ref),
-                {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
-                ok = hackney:skip_body(Ref),
-                {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),
-                hackney:close(Ref2)
-        end
-    end.
+%%====================================================================
+%% Unit Tests
+%%====================================================================
 
-checkout_timeout() ->
-    fun() ->
-        URL = <<"http://localhost:8123/pool">>,
-        Headers = [],
-        Opts = [{max_body, 2048}, {pool, pool_test}, {connect_timeout, 1000}, {checkout_timeout, 100}],
-        case hackney:request(post, URL, Headers, stream, Opts) of
-            {ok, Ref} ->
-                {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
-                hackney:close(Ref),
-                ?assertEqual(Error, checkout_timeout)
-        end
-    end.
+test_default_pool() ->
+    ?assertEqual(undefined, hackney_pool:find_pool(nonexistent_pool)),
+    ok = hackney_pool:start_pool(test_pool_1, []),
+    ?assert(is_pid(hackney_pool:find_pool(test_pool_1))),
+    ok = hackney_pool:stop_pool(test_pool_1).
 
-%connect_timeout() ->
-%    fun() ->
-%        URL = <<"http://localhost:8123/pool">>,
-%        Headers = [],
-%        Opts = [{max_body, 2048}, {pool, pool_test}, {connect_timeout, 1}],
-%        case hackney:request(post, URL, Headers, stream, Opts) of
-%            {error, Error} ->
-%                ?assertEqual(Error, connect_timeout)
-%        end
-%    end.
+test_custom_pool() ->
+    Options = [{pool_size, 10}, {timeout, 60000}],
+    ok = hackney_pool:start_pool(test_pool_2, Options),
+    Pool = hackney_pool:find_pool(test_pool_2),
+    ?assert(is_pid(Pool)),
+    ?assertEqual(10, hackney_pool:max_connections(test_pool_2)),
+    ?assertEqual(60000, hackney_pool:timeout(test_pool_2)),
+    ok = hackney_pool:stop_pool(test_pool_2).
+
+test_pool_stats() ->
+    ok = hackney_pool:start_pool(test_pool_3, []),
+    Stats = hackney_pool:get_stats(test_pool_3),
+    ?assertEqual(test_pool_3, proplists:get_value(name, Stats)),
+    ?assert(is_integer(proplists:get_value(max, Stats))),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(0, proplists:get_value(free_count, Stats)),
+    ?assertEqual(0, proplists:get_value(queue_count, Stats)),
+    ok = hackney_pool:stop_pool(test_pool_3).
+
+test_max_connections() ->
+    ok = hackney_pool:start_pool(test_pool_4, [{pool_size, 5}]),
+    ?assertEqual(5, hackney_pool:max_connections(test_pool_4)),
+    hackney_pool:set_max_connections(test_pool_4, 10),
+    timer:sleep(10),
+    ?assertEqual(10, hackney_pool:max_connections(test_pool_4)),
+    ok = hackney_pool:stop_pool(test_pool_4).
+
+test_timeout_setting() ->
+    ok = hackney_pool:start_pool(test_pool_5, [{timeout, 5000}]),
+    ?assertEqual(5000, hackney_pool:timeout(test_pool_5)),
+    hackney_pool:set_timeout(test_pool_5, 10000),
+    timer:sleep(10),
+    ?assertEqual(10000, hackney_pool:timeout(test_pool_5)),
+    ok = hackney_pool:stop_pool(test_pool_5).
+
+%%====================================================================
+%% Connection Tests
+%%====================================================================
+
+test_checkout_creates() ->
+    ok = hackney_pool:start_pool(test_pool_conn_1, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_conn_1}],
+
+    %% Checkout should create a new connection
+    {ok, PoolInfo, Pid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    ?assertMatch({test_pool_conn_1, _, _, _}, PoolInfo),
+
+    %% Stats should show 1 in use
+    Stats = hackney_pool:get_stats(test_pool_conn_1),
+    ?assertEqual(1, proplists:get_value(in_use_count, Stats)),
+
+    %% Clean up
+    hackney_conn:stop(Pid),
+    ok = hackney_pool:stop_pool(test_pool_conn_1).
+
+test_checkin_returns() ->
+    ok = hackney_pool:start_pool(test_pool_conn_2, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_conn_2}],
+
+    %% Checkout a connection
+    {ok, PoolInfo, Pid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+
+    %% Checkin the connection
+    ok = hackney_pool:checkin(PoolInfo, Pid),
+    timer:sleep(10),
+
+    %% Stats should show 1 free, 0 in use
+    Stats = hackney_pool:get_stats(test_pool_conn_2),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(1, proplists:get_value(free_count, Stats)),
+
+    ok = hackney_pool:stop_pool(test_pool_conn_2).
+
+test_connection_reuse() ->
+    ok = hackney_pool:start_pool(test_pool_conn_3, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_conn_3}],
+
+    %% Checkout and checkin
+    {ok, PoolInfo, Pid1} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ok = hackney_pool:checkin(PoolInfo, Pid1),
+    timer:sleep(10),
+
+    %% Second checkout should reuse the same connection
+    {ok, _, Pid2} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assertEqual(Pid1, Pid2),
+
+    hackney_conn:stop(Pid2),
+    ok = hackney_pool:stop_pool(test_pool_conn_3).
+
+test_connection_death() ->
+    ok = hackney_pool:start_pool(test_pool_conn_4, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_conn_4}],
+
+    %% Checkout and checkin
+    {ok, PoolInfo, Pid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ok = hackney_pool:checkin(PoolInfo, Pid),
+    timer:sleep(10),
+
+    %% Verify it's in the pool
+    Stats1 = hackney_pool:get_stats(test_pool_conn_4),
+    ?assertEqual(1, proplists:get_value(free_count, Stats1)),
+
+    %% Kill the connection
+    exit(Pid, kill),
+    timer:sleep(50),
+
+    %% Should be removed from pool
+    Stats2 = hackney_pool:get_stats(test_pool_conn_4),
+    ?assertEqual(0, proplists:get_value(free_count, Stats2)),
+
+    ok = hackney_pool:stop_pool(test_pool_conn_4).
+
+%%====================================================================
+%% Timeout Tests
+%%====================================================================
+
+test_queue_timeout() ->
+    URL = <<"http://localhost:8123/pool">>,
+    Headers = [],
+    hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
+    Opts = [{pool, pool_test}, {connect_timeout, 100}, {checkout_timeout, 5000}],
+    case hackney:request(post, URL, Headers, stream, Opts) of
+        {ok, Ref} ->
+            {error, _} = hackney:request(post, URL, Headers, stream, Opts),
+            ok = hackney:finish_send_body(Ref),
+            {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
+            ok = hackney:skip_body(Ref),
+            {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),
+            hackney:close(Ref2)
+    end,
+    hackney_pool:stop_pool(pool_test).
+
+test_checkout_timeout() ->
+    URL = <<"http://localhost:8123/pool">>,
+    Headers = [],
+    hackney_pool:start_pool(pool_test_timeout, [{pool_size, 1}]),
+    Opts = [{max_body, 2048}, {pool, pool_test_timeout}, {connect_timeout, 1000}, {checkout_timeout, 100}],
+    case hackney:request(post, URL, Headers, stream, Opts) of
+        {ok, Ref} ->
+            {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
+            hackney:close(Ref),
+            ?assertEqual(Error, checkout_timeout)
+    end,
+    hackney_pool:stop_pool(pool_test_timeout).
