@@ -17,7 +17,7 @@ start() ->
     Host = '_',
     Resource = {"/mp", upload_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-    cowboy:start_http(test_server, 10, [{port, 8123}], [{env, [{dispatch, Dispatch}]}]).
+    cowboy:start_clear(test_server, [{port, 8123}], #{env => #{dispatch => Dispatch}}).
 
 stop({ok, _Pid}) ->
     cowboy:stop_listener(test_server),
