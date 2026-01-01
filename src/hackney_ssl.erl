@@ -21,9 +21,48 @@
 
 -export([check_hostname_opts/1]).
 -export([cipher_opts/0]).
+-export([ssl_opts/2]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
+
+%% @doc Build SSL options for a connection.
+%% Used by proxy modules for SSL upgrade after tunnel establishment.
+ssl_opts(Host, Options) ->
+  case proplists:get_value(ssl_options, Options) of
+    undefined ->
+      ssl_opts_1(Host, Options);
+    [] ->
+      ssl_opts_1(Host, Options);
+    SSLOpts ->
+      merge_ssl_opts(Host, SSLOpts)
+  end.
+
+ssl_opts_1(Host, Options) ->
+  Insecure = proplists:get_value(insecure, Options, false),
+  case Insecure of
+    true ->
+      [{verify, verify_none} | cipher_opts()];
+    false ->
+      check_hostname_opts(Host) ++ cipher_opts()
+  end.
+
+merge_ssl_opts(Host, OverrideOpts) ->
+  VerifyHost = case proplists:get_value(server_name_indication, OverrideOpts, disable) of
+    disable -> Host;
+    SNI -> SNI
+  end,
+  DefaultOpts = ssl_opts_1(VerifyHost, OverrideOpts),
+  MergedOpts = orddict:merge(fun(_K, _V1, V) -> V end,
+                             orddict:from_list(DefaultOpts),
+                             orddict:from_list(OverrideOpts)),
+  %% If cacertfile was provided in override opts remove cacerts
+  case lists:keymember(cacertfile, 1, MergedOpts) of
+    true ->
+      lists:keydelete(cacerts, 1, MergedOpts);
+    false ->
+      MergedOpts
+  end.
 
 
 
