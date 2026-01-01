@@ -16,6 +16,7 @@
   options = [],
   socket = nil,
   socket_ref = nil,
+  conn_pid = nil,  %% hackney_conn process pid (new architecture)
   request_ref = nil,
   dynamic = true,
   pool_handler = hackney_pool,
