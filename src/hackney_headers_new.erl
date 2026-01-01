@@ -32,7 +32,7 @@
 
 -type headers() ::term().
 -type key() :: binary() | string().
--type value() :: binary() | {binary() | list({binary(), binary()} | binary())}.
+-type value() :: binary() | {binary(), list({binary(), binary()} | binary())}.
 -type headers_list() :: [{key(), value()}].
 
 -export_types([headers/0, key/0, value/0]).

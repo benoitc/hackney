@@ -45,8 +45,6 @@ init([]) ->
   Specs = [
            %% manager
            ?CHILD(hackney_manager, worker),
-           %% connections manager
-           ?CHILD(hackney_connections, worker),
            %% connection process supervisor
            ?CHILD(hackney_conn_sup, supervisor)
           ],

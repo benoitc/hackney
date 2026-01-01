@@ -140,7 +140,8 @@ boundary() ->
 
 %% @doc create a generic multipart header
 mp_header(Headers, Boundary) ->
-    BinHeaders = hackney_headers:to_binary(Headers),
+    HeadersObj = hackney_headers_new:from_list(Headers),
+    BinHeaders = hackney_headers_new:to_binary(HeadersObj),
     <<"--", Boundary/binary, "\r\n", BinHeaders/binary >>.
 
 %% @doc return the boundary ending a multipart
@@ -149,7 +150,8 @@ mp_eof(Boundary) ->
 
 %% @doc create a part
 part(Content, Headers, Boundary) ->
-    BinHeaders = hackney_headers:to_binary(Headers),
+    HeadersObj = hackney_headers_new:from_list(Headers),
+    BinHeaders = hackney_headers_new:to_binary(HeadersObj),
     <<"--", Boundary/binary, "\r\n", BinHeaders/binary, Content/binary,
       "\r\n" >>.
 
@@ -222,10 +224,11 @@ len_mp_stream(Parts, Boundary) ->
 -spec mp_mixed_header({Name :: binary(), MixedBoundary :: binary()}, Boundary :: binary())  ->
     {binary(), 0}.
 mp_mixed_header({Name, MixedBoundary}, Boundary) ->
-    Headers = [{<<"Content-Disposition">>, <<"form-data">>,
-                [{<<"name">>, <<"\"", Name/binary, "\"">>}]},
-               {<<"Content-Type">>, <<"multipart/mixed">>,
-                [{<<"boundary">>, MixedBoundary}]}],
+    %% Use 2-tuple format: {Key, {Value, Params}}
+    Headers = [{<<"Content-Disposition">>, {<<"form-data">>,
+                [{<<"name">>, <<"\"", Name/binary, "\"">>}]}},
+               {<<"Content-Type">>, {<<"multipart/mixed">>,
+                [{<<"boundary">>, MixedBoundary}]}}],
     {mp_header(Headers, Boundary), 0}.
 
 
@@ -259,7 +262,7 @@ mp_file_header({file, Path, {Disposition, Params}, ExtraHeaders}, Boundary) ->
     ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
     Headers = mp_filter_header([{<<"content-type">>, CType},
                                 {<<"content-length">>, Len}],
-                               [{<<"content-disposition">>, Disposition, Params} | ExtraHeaders0]),
+                               [{<<"content-disposition">>, {Disposition, Params}} | ExtraHeaders0]),
     BinHeader = mp_header(Headers, Boundary),
     {BinHeader, Len}.
 
@@ -283,7 +286,7 @@ mp_data_header({Name, Len, {Disposition, Params}, ExtraHeaders}, Boundary) ->
     ExtraHeaders0 = lists:map(fun ({K, V}) -> {hackney_bstr:to_lower(K), V} end, ExtraHeaders),
     Headers = mp_filter_header([{<<"content-type">>, CType},
                                 {<<"content-length">>, Len}],
-                               [{<<"content-disposition">>, Disposition, Params} | ExtraHeaders0]),
+                               [{<<"content-disposition">>, {Disposition, Params}} | ExtraHeaders0]),
     BinHeader = mp_header(Headers, Boundary),
     {BinHeader, Len}.
 
@@ -443,15 +446,23 @@ parse_headers(Bin, Pattern, Acc) ->
             parse_headers(Rest, Pattern, [{Name2, Value} | Acc]);
         {ok, http_eoh, Rest} ->
             Headers = lists:reverse(Acc),
-            case hackney_headers:parse(<<"content-type">>, Headers) of
-                {<<"multipart">>, _, Params} ->
-                    {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
-                    Parser = hackney_multipart:parser(Boundary),
-                    Wrapper = fun() -> Parser(Rest) end,
-                    {mp_mixed, fun() -> mp_parse_mixed(Pattern, Wrapper) end};
-                _ ->
-                    Fun =  fun () -> parse_body(Rest, Pattern) end,
-                    {headers, Headers, Fun}
+            HeadersObj = hackney_headers_new:from_list(Headers),
+            ContentType = hackney_headers_new:get_value(<<"content-type">>, HeadersObj),
+            case ContentType of
+                undefined ->
+                    Fun = fun () -> parse_body(Rest, Pattern) end,
+                    {headers, Headers, Fun};
+                CT ->
+                    case hackney_headers_new:parse_content_type(CT) of
+                        {<<"multipart">>, _, Params} ->
+                            {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
+                            Parser = hackney_multipart:parser(Boundary),
+                            Wrapper = fun() -> Parser(Rest) end,
+                            {mp_mixed, fun() -> mp_parse_mixed(Pattern, Wrapper) end};
+                        _ ->
+                            Fun = fun () -> parse_body(Rest, Pattern) end,
+                            {headers, Headers, Fun}
+                    end
             end;
         {ok, {http_error, _}, _} ->
             % Skip malformed parts.

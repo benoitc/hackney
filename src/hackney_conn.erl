@@ -35,13 +35,36 @@
     body/1,
     body/2,
     stream_body/1,
+    %% Streaming body (request body)
+    send_request_headers/4,
+    send_body_chunk/2,
+    finish_send_body/1,
+    start_response/1,
     %% Async streaming
     request_async/6,
     request_async/7,
+    request_async/8,
     stream_next/1,
     stop_async/1,
     pause_stream/1,
-    resume_stream/1
+    resume_stream/1,
+    %% Socket operations
+    setopts/2,
+    peername/1,
+    sockname/1,
+    %% Low-level socket operations (for hackney_request/hackney_response)
+    send/2,
+    recv/2,
+    recv/3,
+    close/1,
+    %% Response info
+    response_headers/1,
+    get_location/1,
+    set_location/2,
+    %% Pool management
+    release_to_pool/1,
+    verify_socket/1,
+    is_ready/1
 ]).
 
 %% gen_statem callbacks
@@ -58,6 +81,7 @@
     connecting/3,
     connected/3,
     sending/3,
+    streaming_body/3,
     receiving/3,
     streaming/3,
     streaming_once/3,
@@ -93,6 +117,9 @@
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
 
+    %% Pool integration
+    pool_pid :: pid() | undefined,  %% If set, connection is from a pool
+
     %% Request tracking
     request_ref :: reference() | undefined,
     request_from :: {pid(), reference()} | undefined,
@@ -104,6 +131,7 @@
     status :: integer() | undefined,
     reason :: binary() | undefined,
     response_headers :: term() | undefined,
+    location :: binary() | undefined,  %% Stores the final URL after redirects
 
     %% Parser state
     parser :: #hparser{} | undefined,
@@ -111,7 +139,8 @@
     %% Async mode
     async = false :: false | true | once | paused,
     stream_to :: pid() | undefined,
-    async_ref :: reference() | undefined
+    async_ref :: pid() | undefined,  %% Connection PID used as message correlation ref
+    follow_redirect = false :: boolean()
 }).
 
 %%====================================================================
@@ -164,6 +193,28 @@ request(Pid, Method, Path, Headers, Body) ->
 request(Pid, Method, Path, Headers, Body, Timeout) ->
     gen_statem:call(Pid, {request, Method, Path, Headers, Body}, Timeout).
 
+%% @doc Send only the request headers (for streaming body mode).
+%% After this, use send_body_chunk/2 and finish_send_body/1 to send the body,
+%% then start_response/1 to receive the response.
+-spec send_request_headers(pid(), binary(), binary(), list()) -> ok | {error, term()}.
+send_request_headers(Pid, Method, Path, Headers) ->
+    gen_statem:call(Pid, {send_headers, Method, Path, Headers}, infinity).
+
+%% @doc Send a chunk of the request body.
+-spec send_body_chunk(pid(), iodata()) -> ok | {error, term()}.
+send_body_chunk(Pid, Data) ->
+    gen_statem:call(Pid, {send_body_chunk, Data}, infinity).
+
+%% @doc Finish sending the request body.
+-spec finish_send_body(pid()) -> ok | {error, term()}.
+finish_send_body(Pid) ->
+    gen_statem:call(Pid, finish_send_body, infinity).
+
+%% @doc Start receiving the response after sending the full body.
+-spec start_response(pid()) -> {ok, integer(), list(), pid()} | {error, term()}.
+start_response(Pid) ->
+    gen_statem:call(Pid, start_response, infinity).
+
 %% @doc Get the full response body.
 -spec body(pid()) -> {ok, binary()} | {error, term()}.
 body(Pid) ->
@@ -186,16 +237,24 @@ stream_body(Pid) ->
 %%   - {hackney_response, Ref, Data} (body chunks)
 %%   - {hackney_response, Ref, done}
 %%   - {hackney_response, Ref, {error, Reason}}
+%% When follow_redirect is true and response is a redirect:
+%%   - {hackney_response, Ref, {redirect, Location, Headers}} for 301,302,307,308
+%%   - {hackney_response, Ref, {see_other, Location, Headers}} for 303 with POST
 %% AsyncMode: true (continuous) or once (one message at a time, use stream_next/1)
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once) ->
     {ok, reference()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode) ->
-    request_async(Pid, Method, Path, Headers, Body, AsyncMode, self()).
+    request_async(Pid, Method, Path, Headers, Body, AsyncMode, self(), false).
 
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid()) ->
     {ok, reference()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
-    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}).
+    request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, false).
+
+-spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean()) ->
+    {ok, reference()} | {error, term()}.
+request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
+    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}).
 
 %% @doc Request the next message in {async, once} mode.
 -spec stream_next(pid()) -> ok | {error, term()}.
@@ -216,6 +275,78 @@ pause_stream(Pid) ->
 -spec resume_stream(pid()) -> ok | {error, term()}.
 resume_stream(Pid) ->
     gen_statem:cast(Pid, resume_stream).
+
+%% @doc Set socket options on the underlying socket.
+-spec setopts(pid(), list()) -> ok | {error, term()}.
+setopts(Pid, Opts) ->
+    gen_statem:call(Pid, {setopts, Opts}).
+
+%% @doc Get the remote address and port.
+-spec peername(pid()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+peername(Pid) ->
+    gen_statem:call(Pid, peername).
+
+%% @doc Get the local address and port.
+-spec sockname(pid()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+sockname(Pid) ->
+    gen_statem:call(Pid, sockname).
+
+%% @doc Get the last response headers.
+-spec response_headers(pid()) -> list() | undefined.
+response_headers(Pid) ->
+    gen_statem:call(Pid, response_headers).
+
+%% @doc Get the stored location (final URL after redirects).
+-spec get_location(pid()) -> binary() | undefined.
+get_location(Pid) ->
+    gen_statem:call(Pid, get_location).
+
+%% @doc Set the location (used after following redirects).
+-spec set_location(pid(), binary()) -> ok.
+set_location(Pid, Location) ->
+    gen_statem:call(Pid, {set_location, Location}).
+
+%% @doc Send data through the connection process.
+%% This is a low-level function used by hackney_request.
+-spec send(pid(), iodata()) -> ok | {error, term()}.
+send(Pid, Data) ->
+    gen_statem:call(Pid, {send, Data}).
+
+%% @doc Receive data from the connection process.
+%% This is a low-level function used by hackney_response.
+-spec recv(pid(), timeout()) -> {ok, binary()} | {error, term()}.
+recv(Pid, Timeout) ->
+    recv(Pid, 0, Timeout).
+
+-spec recv(pid(), non_neg_integer(), timeout()) -> {ok, binary()} | {error, term()}.
+recv(Pid, Length, Timeout) ->
+    gen_statem:call(Pid, {recv, Length, Timeout}, Timeout + 5000).
+
+%% @doc Close the connection.
+%% This is a low-level function that closes the socket but keeps the process.
+-spec close(pid()) -> ok.
+close(Pid) ->
+    gen_statem:call(Pid, close_socket).
+
+%% @doc Release the connection back to the pool.
+%% This notifies the pool that the connection is available for reuse.
+%% Uses a synchronous call to ensure the pool has processed the checkin.
+-spec release_to_pool(pid()) -> ok.
+release_to_pool(Pid) ->
+    gen_statem:call(Pid, release_to_pool, 5000).
+
+%% @doc Check if the connection's socket is still healthy.
+%% Returns ok if socket is open, {error, closed} otherwise.
+-spec verify_socket(pid()) -> ok | {error, closed | term()}.
+verify_socket(Pid) ->
+    gen_statem:call(Pid, verify_socket).
+
+%% @doc Check if the connection is ready for a new request.
+%% Returns {ok, connected} if ready, or error/closed status.
+%% This combines state check and socket verification in one call.
+-spec is_ready(pid()) -> {ok, connected} | {ok, closed} | {error, term()}.
+is_ready(Pid) ->
+    gen_statem:call(Pid, is_ready).
 
 %%====================================================================
 %% gen_statem callbacks
@@ -245,7 +376,8 @@ init([Owner, Opts]) ->
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
-        ssl_options = maps:get(ssl_options, Opts, [])
+        ssl_options = maps:get(ssl_options, Opts, []),
+        pool_pid = maps:get(pool_pid, Opts, undefined)
     },
     {ok, idle, Data}.
 
@@ -274,12 +406,18 @@ idle({call, From}, connect, Data) ->
         transport = Transport,
         connect_timeout = Timeout,
         connect_options = ConnectOpts,
-        ssl_options = SslOpts
+        ssl_options = SslOpts0
     } = Data,
 
     %% Build connection options
     Opts = case Transport of
-        hackney_ssl -> ConnectOpts ++ SslOpts;
+        hackney_ssl ->
+            %% Get default SSL options with hostname verification
+            DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
+            %% Merge user-provided SSL options (they override defaults)
+            MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
+            %% Pass SSL options under ssl_options key as expected by hackney_ssl
+            ConnectOpts ++ [{ssl_options, MergedSslOpts}];
         _ -> ConnectOpts
     end,
 
@@ -333,12 +471,38 @@ connected(enter, _OldState, #conn_data{idle_timeout = Timeout} = Data) ->
         _ -> {keep_state, Data, [{state_timeout, Timeout, idle_timeout}]}
     end;
 
+connected({call, From}, release_to_pool, Data) ->
+    %% Notify pool that connection is available for reuse (sync)
+    notify_pool_available_sync(Data),
+    {keep_state_and_data, [{reply, From, ok}]};
+
 connected(state_timeout, idle_timeout, Data) ->
     %% Idle timeout - close connection
     {next_state, closed, Data};
 
 connected({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, connected}}]};
+
+connected({call, From}, verify_socket, #conn_data{socket = undefined} = Data) ->
+    %% Socket not connected
+    {next_state, closed, Data, [{reply, From, {error, closed}}]};
+connected({call, From}, verify_socket, #conn_data{transport = Transport, socket = Socket} = Data) ->
+    %% Check if socket has any pending data or close messages
+    case check_socket_health(Transport, Socket) of
+        ok -> {keep_state_and_data, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data#conn_data{socket = undefined}, [{reply, From, {error, Reason}}]}
+    end;
+
+connected({call, From}, is_ready, #conn_data{socket = undefined} = Data) ->
+    %% Socket not connected
+    {next_state, closed, Data, [{reply, From, {ok, closed}}]};
+connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Socket}) ->
+    %% Combined state and socket check
+    case check_socket_health(Transport, Socket) of
+        ok -> {keep_state_and_data, [{reply, From, {ok, connected}}]};
+        {error, _} -> {keep_state_and_data, [{reply, From, {ok, closed}}]}
+    end;
 
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
     %% Start a new sync request
@@ -359,8 +523,15 @@ connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, Data) ->
-    %% Start a new async request
-    Ref = make_ref(),
+    %% Start a new async request (no redirect following)
+    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false, Data);
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}, Data) ->
+    %% Start a new async request with redirect option
+    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data);
+
+connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
+    %% Send only headers for streaming body mode
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -371,11 +542,12 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
         reason = undefined,
         response_headers = undefined,
         buffer = <<>>,
-        async = AsyncMode,
-        async_ref = Ref,
-        stream_to = StreamTo
+        async = false,
+        async_ref = undefined,
+        stream_to = undefined
     },
-    {next_state, sending, NewData, [{next_event, internal, {send_request_async, Method, Path, Headers, Body}}]};
+    %% Transition to streaming_body state
+    {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
 
 connected(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
@@ -439,6 +611,78 @@ sending(EventType, Event, Data) ->
     handle_common(EventType, Event, sending, Data).
 
 %%====================================================================
+%% State: streaming_body - Streaming request body
+%%====================================================================
+
+streaming_body(enter, connected, _Data) ->
+    keep_state_and_data;
+
+streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
+    %% Send only headers, then return ok and wait for body chunks
+    #conn_data{host = Host, port = Port, transport = Transport, socket = Socket} = Data,
+    %% Build request line and headers (with Transfer-Encoding: chunked for streaming)
+    HeadersObj = hackney_headers_new:from_list(Headers),
+    %% Add Transfer-Encoding: chunked if not present
+    HeadersWithTE = case hackney_headers_new:get_value(<<"transfer-encoding">>, HeadersObj) of
+        undefined -> hackney_headers_new:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
+        _ -> HeadersObj
+    end,
+    HeadersList = hackney_headers_new:to_list(HeadersWithTE),
+    RequestLine = build_request_line(Method, Path),
+    HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- HeadersList],
+    HeadersData = [RequestLine, HeaderLines, <<"\r\n">>],
+    case Transport:send(Socket, HeadersData) of
+        ok ->
+            From = Data#conn_data.request_from,
+            {keep_state, Data#conn_data{request_from = undefined}, [{reply, From, ok}]};
+        {error, Reason} ->
+            From = Data#conn_data.request_from,
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
+    #conn_data{transport = Transport, socket = Socket} = Data,
+    %% Send as chunked encoding
+    ChunkData = encode_chunk(BodyData),
+    case Transport:send(Socket, ChunkData) of
+        ok ->
+            {keep_state_and_data, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+streaming_body({call, From}, finish_send_body, Data) ->
+    #conn_data{transport = Transport, socket = Socket} = Data,
+    %% Send final chunk marker
+    case Transport:send(Socket, <<"0\r\n\r\n">>) of
+        ok ->
+            {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+streaming_body({call, From}, start_response, Data) ->
+    %% Transition to receiving state and get response
+    %% Use {do_recv_response, include_pid} to include pid in response
+    NewData = Data#conn_data{request_from = From},
+    {next_state, receiving, NewData, [{next_event, internal, {do_recv_response, include_pid}}]};
+
+streaming_body({call, From}, get_state, _Data) ->
+    {keep_state_and_data, [{reply, From, {ok, streaming_body}}]};
+
+streaming_body(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) ->
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_body(info, {ssl_closed, Socket}, #conn_data{socket = Socket} = Data) ->
+    {next_state, closed, Data#conn_data{socket = undefined}};
+
+streaming_body(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
+    {stop, normal, Data};
+
+streaming_body(EventType, Event, Data) ->
+    handle_common(EventType, Event, streaming_body, Data).
+
+%%====================================================================
 %% State: receiving - Awaiting/streaming response
 %%====================================================================
 
@@ -446,45 +690,56 @@ receiving(enter, sending, _Data) ->
     %% Just enter state, request handling happens in internal event
     keep_state_and_data;
 
+receiving(enter, streaming_body, _Data) ->
+    %% Coming from streaming body state
+    keep_state_and_data;
+
 receiving(enter, receiving, _Data) ->
     %% Re-entering after body streaming
     keep_state_and_data;
 
 receiving(internal, do_recv_response, Data) ->
-    %% Receive and parse response status and headers (sync mode)
-    Parser = hackney_http:parser([response]),
-    DataWithParser = Data#conn_data{parser = Parser},
-    case recv_status_and_headers(DataWithParser) of
-        {ok, Status, Headers, NewData} ->
-            %% Reply with status and headers, keep connection in receiving state
-            From = NewData#conn_data.request_from,
-            HeadersList = hackney_headers_new:to_list(Headers),
-            {keep_state, NewData#conn_data{
-                request_from = undefined,
-                response_headers = Headers
-            }, [{reply, From, {ok, Status, HeadersList}}]};
-        {error, Reason} ->
-            From = Data#conn_data.request_from,
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
-    end;
+    %% Receive and parse response status and headers (sync mode, no pid in response)
+    do_recv_response_impl(Data, false);
+
+receiving(internal, {do_recv_response, include_pid}, Data) ->
+    %% Receive and parse response status and headers (sync mode, include pid in response)
+    do_recv_response_impl(Data, true);
 
 receiving(internal, do_recv_response_async, Data) ->
     %% Receive and parse response status and headers (async mode)
     Parser = hackney_http:parser([response]),
     DataWithParser = Data#conn_data{parser = Parser},
-    #conn_data{async_ref = Ref, stream_to = StreamTo, async = AsyncMode} = Data,
+    #conn_data{async_ref = Ref, stream_to = StreamTo, async = AsyncMode,
+               follow_redirect = FollowRedirect, method = Method} = Data,
     case recv_status_and_headers(DataWithParser) of
         {ok, Status, Headers, NewData} ->
-            %% Send status message to stream_to
             HeadersList = hackney_headers_new:to_list(Headers),
-            StreamTo ! {hackney_response, Ref, {status, Status, NewData#conn_data.reason}},
-            StreamTo ! {hackney_response, Ref, {headers, HeadersList}},
-            %% Transition to appropriate streaming state based on mode
-            NextState = case AsyncMode of
-                true -> streaming;
-                once -> streaming_once
-            end,
-            {next_state, NextState, NewData#conn_data{response_headers = Headers}};
+            %% Check if this is a redirect and we should handle it
+            case maybe_handle_async_redirect(Status, Method, Headers, FollowRedirect) of
+                {redirect, Location} ->
+                    %% Skip body and send redirect message
+                    _ = skip_response_body(NewData),
+                    StreamTo ! {hackney_response, Ref, {redirect, Location, HeadersList}},
+                    notify_pool_available(NewData),
+                    {next_state, connected, NewData#conn_data{response_headers = Headers}};
+                {see_other, Location} ->
+                    %% Skip body and send see_other message
+                    _ = skip_response_body(NewData),
+                    StreamTo ! {hackney_response, Ref, {see_other, Location, HeadersList}},
+                    notify_pool_available(NewData),
+                    {next_state, connected, NewData#conn_data{response_headers = Headers}};
+                no_redirect ->
+                    %% Normal response - send status and headers
+                    StreamTo ! {hackney_response, Ref, {status, Status, NewData#conn_data.reason}},
+                    StreamTo ! {hackney_response, Ref, {headers, HeadersList}},
+                    %% Transition to appropriate streaming state based on mode
+                    NextState = case AsyncMode of
+                        true -> streaming;
+                        once -> streaming_once
+                    end,
+                    {next_state, NextState, NewData#conn_data{response_headers = Headers}}
+            end;
         {error, Reason} ->
             StreamTo ! {hackney_response, Ref, {error, Reason}},
             {next_state, closed, Data}
@@ -555,7 +810,8 @@ streaming(cast, do_stream, Data) ->
             {keep_state, NewData};
         {done, NewData} ->
             StreamTo ! {hackney_response, Ref, done},
-            {next_state, connected, reset_async(NewData)};
+            %% Check Connection: close header and pool status
+            finish_async_streaming(NewData);
         {error, Reason} ->
             StreamTo ! {hackney_response, Ref, {error, Reason}},
             {next_state, closed, Data}
@@ -610,7 +866,8 @@ streaming_once(cast, stream_next, Data) ->
             {keep_state, NewData};
         {done, NewData} ->
             StreamTo ! {hackney_response, Ref, done},
-            {next_state, connected, reset_async(NewData)};
+            %% Check Connection: close header and pool status
+            finish_async_streaming(NewData);
         {error, Reason} ->
             StreamTo ! {hackney_response, Ref, {error, Reason}},
             {next_state, closed, Data}
@@ -706,6 +963,67 @@ closed(EventType, Event, Data) ->
 handle_common(cast, _Msg, _State, _Data) ->
     keep_state_and_data;
 
+%% Socket operations - available in any state with a socket
+handle_common({call, From}, {setopts, Opts}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = Transport:setopts(Socket, Opts),
+    {keep_state_and_data, [{reply, From, Result}]};
+
+handle_common({call, From}, peername, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = Transport:peername(Socket),
+    {keep_state_and_data, [{reply, From, Result}]};
+
+handle_common({call, From}, sockname, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = Transport:sockname(Socket),
+    {keep_state_and_data, [{reply, From, Result}]};
+
+%% Low-level send operation
+handle_common({call, From}, {send, Data}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = Transport:send(Socket, Data),
+    {keep_state_and_data, [{reply, From, Result}]};
+
+%% Low-level recv operation
+handle_common({call, From}, {recv, Length, Timeout}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = Transport:recv(Socket, Length, Timeout),
+    {keep_state_and_data, [{reply, From, Result}]};
+
+%% Close socket but keep process
+handle_common({call, From}, close_socket, _State, #conn_data{transport = Transport, socket = Socket} = Data)
+  when Socket =/= undefined ->
+    Transport:close(Socket),
+    {next_state, closed, Data#conn_data{socket = undefined}, [{reply, From, ok}]};
+
+handle_common({call, From}, close_socket, _State, Data) ->
+    {next_state, closed, Data, [{reply, From, ok}]};
+
+handle_common({call, From}, {send, _SendData}, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, {recv, _Length, _Timeout}, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, {setopts, _Opts}, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, peername, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, sockname, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, response_headers, _State, #conn_data{response_headers = Headers}) ->
+    {keep_state_and_data, [{reply, From, Headers}]};
+
+handle_common({call, From}, get_location, _State, #conn_data{location = Location}) ->
+    {keep_state_and_data, [{reply, From, Location}]};
+
+handle_common({call, From}, {set_location, Location}, _State, Data) ->
+    {keep_state, Data#conn_data{location = Location}, [{reply, From, ok}]};
+
 handle_common({call, From}, _, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, invalid_state}}]};
 
@@ -725,6 +1043,60 @@ reset_async(Data) ->
         async_ref = undefined,
         stream_to = undefined
     }.
+
+%% @private Check if connection should be closed based on response headers
+should_close_connection(#conn_data{response_headers = undefined}) ->
+    false;
+should_close_connection(#conn_data{response_headers = Headers}) ->
+    case hackney_headers_new:get_value(<<"connection">>, Headers) of
+        undefined -> false;
+        Value -> hackney_bstr:to_lower(Value) =:= <<"close">>
+    end.
+
+%% @private Finish async streaming - close or return to connected based on Connection header
+finish_async_streaming(Data) ->
+    #conn_data{transport = Transport, socket = Socket, pool_pid = PoolPid} = Data,
+    case should_close_connection(Data) of
+        true ->
+            %% Connection: close - close socket and stop process
+            case Socket of
+                undefined -> ok;
+                _ -> Transport:close(Socket)
+            end,
+            {stop, normal, reset_async(Data#conn_data{socket = undefined})};
+        false when PoolPid =:= undefined ->
+            %% No pool and no Connection: close - still stop since no reuse
+            case Socket of
+                undefined -> ok;
+                _ -> Transport:close(Socket)
+            end,
+            {stop, normal, reset_async(Data#conn_data{socket = undefined})};
+        false ->
+            %% Has pool or keep-alive - return to connected for reuse
+            {next_state, connected, reset_async(Data)}
+    end.
+
+%% @private Handle receiving response status and headers
+%% IncludePid determines whether to include pid in the response
+do_recv_response_impl(Data, IncludePid) ->
+    Parser = hackney_http:parser([response]),
+    DataWithParser = Data#conn_data{parser = Parser},
+    case recv_status_and_headers(DataWithParser) of
+        {ok, Status, Headers, NewData} ->
+            From = NewData#conn_data.request_from,
+            HeadersList = hackney_headers_new:to_list(Headers),
+            Reply = case IncludePid of
+                true -> {ok, Status, HeadersList, self()};
+                false -> {ok, Status, HeadersList}
+            end,
+            {keep_state, NewData#conn_data{
+                request_from = undefined,
+                response_headers = Headers
+            }, [{reply, From, Reply}]};
+        {error, Reason} ->
+            From = Data#conn_data.request_from,
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end.
 
 %% @private Send HTTP request (shared by sync and async)
 do_send_request(Method, Path, Headers, Body, Data) ->
@@ -809,6 +1181,20 @@ build_headers(_Method, Headers0, Body, Netloc) ->
 headers_to_binary(Headers) ->
     hackney_headers_new:to_binary(Headers).
 
+%% @private Build request line
+build_request_line(Method, Path) ->
+    [Method, <<" ">>, Path, <<" HTTP/1.1\r\n">>].
+
+%% @private Encode a chunk for chunked transfer encoding
+encode_chunk(Data) when is_binary(Data) ->
+    Size = byte_size(Data),
+    SizeHex = integer_to_binary(Size, 16),
+    [SizeHex, <<"\r\n">>, Data, <<"\r\n">>];
+encode_chunk(Data) when is_list(Data) ->
+    Size = iolist_size(Data),
+    SizeHex = integer_to_binary(Size, 16),
+    [SizeHex, <<"\r\n">>, Data, <<"\r\n">>].
+
 %% @private Get default User-Agent
 default_ua() ->
     Version = case application:get_key(hackney, vsn) of
@@ -823,6 +1209,9 @@ default_ua() ->
 send_body(_Transport, _Socket, <<>>) ->
     ok;
 send_body(_Transport, _Socket, []) ->
+    ok;
+send_body(_Transport, _Socket, stream) ->
+    %% Stream body mode - body will be sent separately
     ok;
 send_body(Transport, Socket, Body) when is_binary(Body); is_list(Body) ->
     Transport:send(Socket, Body).
@@ -947,3 +1336,82 @@ stream_body_chunk_result({error, Reason}, _Data) ->
 %% @private Receive data from socket
 recv_data(#conn_data{transport = Transport, socket = Socket, recv_timeout = Timeout}) ->
     Transport:recv(Socket, 0, Timeout).
+
+%% @private Check if socket is healthy (not closed by peer)
+check_socket_health(Transport, Socket) ->
+    %% Use a non-blocking recv with 0 timeout to check for pending close
+    case Transport:recv(Socket, 0, 0) of
+        {error, timeout} ->
+            %% No data pending, socket is healthy
+            ok;
+        {error, closed} ->
+            %% Socket is closed
+            {error, closed};
+        {error, Reason} ->
+            %% Some other error
+            {error, Reason};
+        {ok, _ExtraData} ->
+            %% Unexpected data - could be server closing with data
+            %% Treat as ok for now - the next request will handle it
+            ok
+    end.
+
+%% @private Notify pool that connection is available for reuse (async)
+notify_pool_available(#conn_data{pool_pid = undefined}) ->
+    %% Not from a pool, nothing to do
+    ok;
+notify_pool_available(#conn_data{pool_pid = PoolPid}) ->
+    %% Tell the pool this connection is available
+    gen_server:cast(PoolPid, {checkin, nil, self()}).
+
+%% @private Notify pool that connection is available for reuse (sync)
+%% This ensures the pool has processed the checkin before returning.
+notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
+    ok;
+notify_pool_available_sync(#conn_data{pool_pid = PoolPid}) ->
+    gen_server:call(PoolPid, {checkin_sync, self()}, 5000).
+
+%% @private Start an async request
+do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->
+    %% Use self() (connection PID) as the async ref for message correlation
+    Ref = self(),
+    NewData = Data#conn_data{
+        request_from = From,
+        method = Method,
+        path = Path,
+        parser = undefined,
+        version = undefined,
+        status = undefined,
+        reason = undefined,
+        response_headers = undefined,
+        buffer = <<>>,
+        async = AsyncMode,
+        async_ref = Ref,
+        stream_to = StreamTo,
+        follow_redirect = FollowRedirect
+    },
+    {next_state, sending, NewData, [{next_event, internal, {send_request_async, Method, Path, Headers, Body}}]}.
+
+%% @private Check if response is a redirect that should be handled
+maybe_handle_async_redirect(Status, Method, Headers, true) when
+        Status =:= 301; Status =:= 302; Status =:= 307; Status =:= 308 ->
+    %% Redirect status - get location
+    case hackney_headers_new:get_value(<<"location">>, Headers) of
+        undefined -> no_redirect;
+        Location -> {redirect, Location}
+    end;
+maybe_handle_async_redirect(303, <<"POST">>, Headers, true) ->
+    %% 303 See Other for POST - should redirect as GET
+    case hackney_headers_new:get_value(<<"location">>, Headers) of
+        undefined -> no_redirect;
+        Location -> {see_other, Location}
+    end;
+maybe_handle_async_redirect(_, _, _, _) ->
+    no_redirect.
+
+%% @private Skip the response body
+skip_response_body(Data) ->
+    case read_full_body(Data, <<>>) of
+        {ok, _, NewData} -> NewData;
+        {error, _} -> Data
+    end.
