@@ -177,10 +177,23 @@ do_handshake(Socket, Host, Port, Options) ->
       Error
   end.
 
+%% Read the full HTTP response (until \r\n\r\n) before returning.
+%% This fixes issue #536 where partial reads cause SSL handshake failures.
 check_response(Socket) ->
+  check_response(Socket, <<>>).
+
+check_response(Socket, Buffer) ->
   case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
     {ok, Data} ->
-      check_status(Data);
+      NewBuffer = <<Buffer/binary, Data/binary>>,
+      case binary:match(NewBuffer, <<"\r\n\r\n">>) of
+        {_Pos, 4} ->
+          %% Found end of headers, now check the status
+          check_status(NewBuffer);
+        nomatch ->
+          %% Keep reading until we get the full response headers
+          check_response(Socket, NewBuffer)
+      end;
     Error ->
       Error
   end.
