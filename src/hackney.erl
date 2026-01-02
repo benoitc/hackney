@@ -31,6 +31,8 @@
          pause_stream/1,
          resume_stream/1]).
 
+-export([parse_proxy_url/1]).
+
 -ifdef(TEST).
 -export([get_proxy_env/1, do_get_proxy_env/1]).
 -endif.
@@ -734,3 +736,42 @@ do_get_proxy_env([Var | Rest]) when is_list(Var) ->
 do_get_proxy_env([]) ->
   false.
 -endif.
+
+%% @doc Parse a proxy URL and extract host, port, and optional credentials.
+%% Supports URLs like:
+%% - "http://proxy.example.com:8080"
+%% - "http://user:pass@proxy.example.com:8080"
+%% - "https://admin:secret@secure-proxy.example.com:443"
+%% - "socks5://socks.example.com:1080"
+%% - "socks5://user:pass@socks.example.com:1080"
+%%
+%% Returns a map with keys: scheme, host, port, user, password
+%% Fixes issue #741: Extract proxy basic auth from URL
+-spec parse_proxy_url(binary() | string()) ->
+  {ok, #{scheme := atom(),
+         host := string(),
+         port := inet:port_number(),
+         user := binary() | undefined,
+         password := binary() | undefined}} |
+  {error, invalid_proxy_url}.
+parse_proxy_url(Url) when is_list(Url) ->
+  parse_proxy_url(list_to_binary(Url));
+parse_proxy_url(Url) when is_binary(Url) ->
+  try
+    #hackney_url{
+      scheme = Scheme,
+      host = Host,
+      port = Port,
+      user = User,
+      password = Password
+    } = hackney_url:parse_url(Url),
+    {ok, #{
+      scheme => Scheme,
+      host => Host,
+      port => Port,
+      user => case User of <<>> -> undefined; _ -> User end,
+      password => case Password of <<>> -> undefined; _ -> Password end
+    }}
+  catch
+    _:_ -> {error, invalid_proxy_url}
+  end.

@@ -48,6 +48,8 @@ parse_url(<<"https://", Rest/binary>>) ->
     scheme=https});
 parse_url(<<"http+unix://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_local_tcp, scheme=http_unix});
+parse_url(<<"socks5://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_socks5, scheme=socks5});
 parse_url(URL) ->
   parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
 
@@ -241,6 +243,8 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
       S#hackney_url{host=binary_to_list(Host), port=80};
     [Host] when Transport =:= hackney_ssl ->
       S#hackney_url{host=binary_to_list(Host), port=443};
+    [Host] when Transport =:= hackney_socks5 ->
+      S#hackney_url{host=binary_to_list(Host), port=1080};
     [Host, <<":", Port/binary>>] when Port /= <<>> ->
       S#hackney_url{host=binary_to_list(Host),
                     port=list_to_integer(binary_to_list(Port))};
@@ -259,6 +263,9 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
     [Host] when Transport =:= hackney_local_tcp ->
       S#hackney_url{host=unicode:characters_to_list(urldecode(Host)),
                     port=0};
+    [Host] when Transport =:= hackney_socks5 ->
+      S#hackney_url{host=unicode:characters_to_list(Host),
+                    port=1080};
     [Host, Port] ->
       S#hackney_url{host=unicode:characters_to_list(Host),
                     port=list_to_integer(binary_to_list(Port))}

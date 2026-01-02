@@ -106,7 +106,7 @@ test_valid_proxy_with_spaces(Var, _State) ->
 %% Direct tests for do_get_proxy_env function
 do_get_proxy_env_test_() ->
     [
-     {"Empty list returns false", 
+     {"Empty list returns false",
       fun() -> ?assertEqual(false, hackney:do_get_proxy_env([])) end},
      {"All empty values returns false",
       fun() ->
@@ -129,6 +129,92 @@ do_get_proxy_env_test_() ->
           os:unsetenv("TEST_PROXY1"),
           os:unsetenv("TEST_PROXY2"),
           os:unsetenv("TEST_PROXY3")
+      end}
+    ].
+
+%% Tests for parse_proxy_url/1 (issue #741)
+parse_proxy_url_test_() ->
+    [
+     {"Parse simple HTTP proxy URL",
+      fun() ->
+          Result = hackney:parse_proxy_url("http://proxy.example.com:8080"),
+          ?assertEqual({ok, #{scheme => http,
+                              host => "proxy.example.com",
+                              port => 8080,
+                              user => undefined,
+                              password => undefined}}, Result)
+      end},
+     {"Parse HTTP proxy URL with credentials",
+      fun() ->
+          Result = hackney:parse_proxy_url("http://user:pass@proxy.example.com:8080"),
+          ?assertEqual({ok, #{scheme => http,
+                              host => "proxy.example.com",
+                              port => 8080,
+                              user => <<"user">>,
+                              password => <<"pass">>}}, Result)
+      end},
+     {"Parse HTTPS proxy URL with credentials",
+      fun() ->
+          Result = hackney:parse_proxy_url("https://admin:secret@secure-proxy.example.com:443"),
+          ?assertEqual({ok, #{scheme => https,
+                              host => "secure-proxy.example.com",
+                              port => 443,
+                              user => <<"admin">>,
+                              password => <<"secret">>}}, Result)
+      end},
+     {"Parse SOCKS5 proxy URL",
+      fun() ->
+          Result = hackney:parse_proxy_url("socks5://socks.example.com:1080"),
+          ?assertEqual({ok, #{scheme => socks5,
+                              host => "socks.example.com",
+                              port => 1080,
+                              user => undefined,
+                              password => undefined}}, Result)
+      end},
+     {"Parse SOCKS5 proxy URL with credentials",
+      fun() ->
+          Result = hackney:parse_proxy_url("socks5://user:pass@socks.example.com:1080"),
+          ?assertEqual({ok, #{scheme => socks5,
+                              host => "socks.example.com",
+                              port => 1080,
+                              user => <<"user">>,
+                              password => <<"pass">>}}, Result)
+      end},
+     {"Parse proxy URL with URL-encoded credentials",
+      fun() ->
+          Result = hackney:parse_proxy_url("http://user%40domain:p%40ss@proxy.example.com:8080"),
+          ?assertEqual({ok, #{scheme => http,
+                              host => "proxy.example.com",
+                              port => 8080,
+                              user => <<"user@domain">>,
+                              password => <<"p@ss">>}}, Result)
+      end},
+     {"Parse proxy URL with binary input",
+      fun() ->
+          Result = hackney:parse_proxy_url(<<"http://proxy.example.com:8080">>),
+          ?assertEqual({ok, #{scheme => http,
+                              host => "proxy.example.com",
+                              port => 8080,
+                              user => undefined,
+                              password => undefined}}, Result)
+      end},
+     {"Parse proxy URL with default HTTP port",
+      fun() ->
+          Result = hackney:parse_proxy_url("http://proxy.example.com"),
+          ?assertEqual({ok, #{scheme => http,
+                              host => "proxy.example.com",
+                              port => 80,
+                              user => undefined,
+                              password => undefined}}, Result)
+      end},
+     {"Parse proxy URL with default HTTPS port",
+      fun() ->
+          Result = hackney:parse_proxy_url("https://proxy.example.com"),
+          ?assertEqual({ok, #{scheme => https,
+                              host => "proxy.example.com",
+                              port => 443,
+                              user => undefined,
+                              password => undefined}}, Result)
       end}
     ].
 
