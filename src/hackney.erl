@@ -35,6 +35,7 @@
 
 -ifdef(TEST).
 -export([get_proxy_env/1, do_get_proxy_env/1]).
+-export([get_proxy_config/2]).
 -endif.
 
 -define(METHOD_TPL(Method),
@@ -675,17 +676,75 @@ use_pool(Options) ->
     PoolName -> PoolName
   end.
 
-maybe_proxy(Transport, _Scheme, Host, Port, Options) ->
-  case proplists:get_value(proxy, Options) of
-    undefined ->
+maybe_proxy(Transport, Scheme, Host, Port, Options) ->
+  case get_proxy_config(Scheme, Options) of
+    false ->
       %% No proxy configured, direct connection
       connect(Transport, Host, Port, Options);
-    Proxy ->
+    _ProxyConfig ->
       %% Proxy configured - for now just connect directly
       %% TODO: Implement full proxy support
-      ?report_debug("proxy configured but not fully implemented", [{proxy, Proxy}]),
+      ?report_debug("proxy configured but not fully implemented", []),
       connect(Transport, Host, Port, Options)
   end.
+
+%% @doc Extract proxy configuration from options.
+%% Returns: false | {Type, Host, Port, Auth}
+%% Type: http | connect | socks5
+%% Auth: undefined | {User, Pass}
+-spec get_proxy_config(atom(), list()) ->
+  false | {http | connect | socks5, string(), inet:port_number(),
+           undefined | {binary(), binary()}}.
+get_proxy_config(Scheme, Options) ->
+  case proplists:get_value(proxy, Options) of
+    undefined ->
+      false;
+    false ->
+      false;
+    ProxyUrl when is_binary(ProxyUrl); is_list(ProxyUrl) ->
+      parse_proxy_option(ProxyUrl, Scheme, Options);
+    {ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+      %% Simple tuple: use HTTP proxy for http, CONNECT for https
+      ProxyAuth = proplists:get_value(proxy_auth, Options),
+      {proxy_type_for_scheme(Scheme), ProxyHost, ProxyPort, ProxyAuth};
+    {connect, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+      %% Explicit CONNECT tunnel
+      ProxyAuth = proplists:get_value(proxy_auth, Options),
+      {connect, ProxyHost, ProxyPort, ProxyAuth};
+    {socks5, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+      %% SOCKS5 proxy
+      User = proplists:get_value(socks5_user, Options),
+      Pass = proplists:get_value(socks5_pass, Options, <<>>),
+      Auth = case User of
+        undefined -> undefined;
+        _ -> {User, Pass}
+      end,
+      {socks5, ProxyHost, ProxyPort, Auth};
+    _ ->
+      false
+  end.
+
+%% Parse proxy URL and determine type based on target scheme
+parse_proxy_option(ProxyUrl, Scheme, Options) ->
+  case parse_proxy_url(ProxyUrl) of
+    {ok, #{scheme := ProxyScheme, host := ProxyHost, port := ProxyPort,
+           user := User, password := Pass}} ->
+      Auth = case User of
+        undefined -> proplists:get_value(proxy_auth, Options);
+        _ -> {User, Pass}
+      end,
+      Type = case ProxyScheme of
+        socks5 -> socks5;
+        _ -> proxy_type_for_scheme(Scheme)
+      end,
+      {Type, ProxyHost, ProxyPort, Auth};
+    {error, _} ->
+      false
+  end.
+
+%% Determine proxy type based on target scheme
+proxy_type_for_scheme(https) -> connect;
+proxy_type_for_scheme(_) -> http.
 
 %% HTTP method helpers
 -define(METHOD_TPL(Method),
