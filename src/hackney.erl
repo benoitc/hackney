@@ -128,7 +128,7 @@ close(ConnPid) when is_pid(ConnPid) ->
 -spec start_conn_with_socket(string(), inet:port_number(), module(),
                               inet:socket() | {module(), inet:socket()}, list()) ->
   {ok, conn()} | {error, term()}.
-start_conn_with_socket(Host, Port, Transport, {SocketTransport, Socket}, Options) ->
+start_conn_with_socket(Host, Port, _Transport, {SocketTransport, Socket}, Options) ->
   %% Handle {Transport, Socket} tuple from proxy modules
   %% Use the socket's transport for operations
   ActualTransport = normalize_transport(SocketTransport),
@@ -958,6 +958,8 @@ get_no_proxy() ->
 %% @doc Check if a host matches any NO_PROXY entry.
 %% Supports exact match, suffix match (with leading dot), and wildcard (*).
 %% Returns true if proxy should be bypassed for this host.
+%% Note: binary clause is for API flexibility (used in tests).
+-dialyzer({nowarn_function, check_no_proxy/2}).
 check_no_proxy(_Host, []) ->
   false;
 check_no_proxy(Host, NoProxyList) when is_binary(Host) ->
