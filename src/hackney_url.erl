@@ -46,6 +46,12 @@ parse_url(<<"http://", Rest/binary>>) ->
 parse_url(<<"https://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_ssl,
     scheme=https});
+parse_url(<<"ws://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_tcp,
+    scheme=ws});
+parse_url(<<"wss://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_ssl,
+    scheme=wss});
 parse_url(<<"http+unix://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_local_tcp, scheme=http_unix});
 parse_url(<<"socks5://", Rest/binary>>) ->
@@ -137,6 +143,8 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                        Netloc1 = case {Scheme, Port} of
                                    {http, 80} -> list_to_binary(Host2);
                                    {https, 443} -> list_to_binary(Host2);
+                                   {ws, 80} -> list_to_binary(Host2);
+                                   {wss, 443} -> list_to_binary(Host2);
                                    {http_unix, _} -> list_to_binary(Host2);
                                    _ ->
                                      iolist_to_binary([Host2, ":", integer_to_list(Port)])
@@ -176,6 +184,8 @@ unparse_url(#hackney_url{}=Url) ->
   Scheme1 = case Scheme of
               http -> <<"http://">>;
               https -> <<"https://">>;
+              ws -> <<"ws://">>;
+              wss -> <<"wss://">>;
               http_unix -> <<"http+unix://">>
             end,
 
