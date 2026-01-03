@@ -451,12 +451,18 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
   case hackney_ws:start_link(WsOpts) of
     {ok, WsPid} ->
       Timeout = maps:get(connect_timeout, WsOpts),
-      case hackney_ws:connect(WsPid, Timeout) of
+      try hackney_ws:connect(WsPid, Timeout) of
         ok ->
           {ok, WsPid};
         {error, Reason} ->
           catch exit(WsPid, shutdown),
           {error, Reason}
+      catch
+        exit:{timeout, _} ->
+          catch exit(WsPid, shutdown),
+          {error, connect_timeout};
+        exit:{noproc, _} ->
+          {error, {ws_process_died, noproc}}
       end;
     {error, Reason} ->
       {error, Reason}
