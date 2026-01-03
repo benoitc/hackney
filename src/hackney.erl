@@ -35,7 +35,8 @@
 
 -ifdef(TEST).
 -export([get_proxy_env/1, do_get_proxy_env/1]).
--export([get_proxy_config/2]).
+-export([get_proxy_config/3]).
+-export([check_no_proxy/2]).
 -export([start_conn_with_socket/5]).
 -endif.
 
@@ -725,7 +726,7 @@ use_pool(Options) ->
   end.
 
 maybe_proxy(Transport, Scheme, Host, Port, Options) ->
-  case get_proxy_config(Scheme, Options) of
+  case get_proxy_config(Scheme, Host, Options) of
     false ->
       %% No proxy configured, direct connection
       connect(Transport, Host, Port, Options);
@@ -846,13 +847,15 @@ add_proxy_auth_header(Headers, {User, Pass}) ->
 %% Returns: false | {Type, Host, Port, Auth}
 %% Type: http | connect | socks5
 %% Auth: undefined | {User, Pass}
--spec get_proxy_config(atom(), list()) ->
+%% TargetHost is used to check NO_PROXY for environment variable proxies.
+-spec get_proxy_config(atom(), string() | binary(), list()) ->
   false | {http | connect | socks5, string(), inet:port_number(),
            undefined | {binary(), binary()}}.
-get_proxy_config(Scheme, Options) ->
+get_proxy_config(Scheme, TargetHost, Options) ->
   case proplists:get_value(proxy, Options) of
     undefined ->
-      false;
+      %% No explicit proxy option, check environment variables
+      get_proxy_from_env(Scheme, TargetHost, Options);
     false ->
       false;
     ProxyUrl when is_binary(ProxyUrl); is_list(ProxyUrl) ->
@@ -896,33 +899,25 @@ parse_proxy_option(ProxyUrl, Scheme, Options) ->
       false
   end.
 
-%% Determine proxy type based on target scheme
-proxy_type_for_scheme(https) -> connect;
-proxy_type_for_scheme(_) -> http.
+%% @doc Get proxy configuration from environment variables.
+%% Checks HTTP_PROXY, HTTPS_PROXY, ALL_PROXY based on scheme.
+%% Returns false if NO_PROXY matches the target host.
+get_proxy_from_env(Scheme, TargetHost, Options) ->
+  case get_proxy_env(Scheme) of
+    false ->
+      false;
+    {ok, ProxyUrl} ->
+      %% Check if target host is in NO_PROXY list
+      case check_no_proxy(TargetHost, get_no_proxy()) of
+        true ->
+          %% Host is in NO_PROXY, don't use proxy
+          false;
+        false ->
+          parse_proxy_option(ProxyUrl, Scheme, Options)
+      end
+  end.
 
-%% HTTP method helpers
--define(METHOD_TPL(Method),
-  Method(URL) ->
-  hackney:request(Method, URL)).
--include("hackney_methods.hrl").
-
--define(METHOD_TPL(Method),
-  Method(URL, Headers) ->
-  hackney:request(Method, URL, Headers)).
--include("hackney_methods.hrl").
-
--define(METHOD_TPL(Method),
-  Method(URL, Headers, Body) ->
-  hackney:request(Method, URL, Headers, Body)).
--include("hackney_methods.hrl").
-
--define(METHOD_TPL(Method),
-  Method(URL, Headers, Body, Options) ->
-  hackney:request(Method, URL, Headers, Body, Options)).
--include("hackney_methods.hrl").
-
-%% Test exports
--ifdef(TEST).
+%% @doc Get proxy URL from environment variables.
 get_proxy_env(Scheme) ->
   case Scheme of
     https -> get_proxy_env_https();
@@ -948,7 +943,70 @@ do_get_proxy_env([Var | Rest]) when is_list(Var) ->
   end;
 do_get_proxy_env([]) ->
   false.
--endif.
+
+%% @doc Get NO_PROXY list from environment variables.
+%% Returns list of hosts/domains to bypass proxy.
+get_no_proxy() ->
+  case do_get_proxy_env(?HTTP_NO_PROXY_ENV_VARS) of
+    false -> [];
+    {ok, NoProxyStr} ->
+      %% Split by comma and trim each entry
+      Entries = string:split(NoProxyStr, ",", all),
+      [string:trim(E) || E <- Entries, string:trim(E) =/= ""]
+  end.
+
+%% @doc Check if a host matches any NO_PROXY entry.
+%% Supports exact match, suffix match (with leading dot), and wildcard (*).
+%% Returns true if proxy should be bypassed for this host.
+check_no_proxy(_Host, []) ->
+  false;
+check_no_proxy(Host, NoProxyList) when is_binary(Host) ->
+  check_no_proxy(binary_to_list(Host), NoProxyList);
+check_no_proxy(Host, NoProxyList) ->
+  LowerHost = string:lowercase(Host),
+  lists:any(fun(Entry) -> matches_no_proxy(LowerHost, Entry) end, NoProxyList).
+
+%% Check if host matches a single NO_PROXY entry
+matches_no_proxy(_Host, "*") ->
+  %% Wildcard matches everything
+  true;
+matches_no_proxy(Host, Entry) ->
+  LowerEntry = string:lowercase(Entry),
+  case LowerEntry of
+    [$. | Domain] ->
+      %% Leading dot: match any subdomain
+      string:find(Host, Domain, trailing) =:= Domain;
+    _ ->
+      %% Exact match or suffix match
+      Host =:= LowerEntry orelse
+        lists:suffix("." ++ LowerEntry, Host)
+  end.
+
+%% Determine proxy type based on target scheme
+proxy_type_for_scheme(https) -> connect;
+proxy_type_for_scheme(_) -> http.
+
+%% HTTP method helpers
+-define(METHOD_TPL(Method),
+  Method(URL) ->
+  hackney:request(Method, URL)).
+-include("hackney_methods.hrl").
+
+-define(METHOD_TPL(Method),
+  Method(URL, Headers) ->
+  hackney:request(Method, URL, Headers)).
+-include("hackney_methods.hrl").
+
+-define(METHOD_TPL(Method),
+  Method(URL, Headers, Body) ->
+  hackney:request(Method, URL, Headers, Body)).
+-include("hackney_methods.hrl").
+
+-define(METHOD_TPL(Method),
+  Method(URL, Headers, Body, Options) ->
+  hackney:request(Method, URL, Headers, Body, Options)).
+-include("hackney_methods.hrl").
+
 
 %% @doc Parse a proxy URL and extract host, port, and optional credentials.
 %% Supports URLs like:

@@ -218,40 +218,40 @@ parse_proxy_url_test_() ->
       end}
     ].
 
-%% Tests for get_proxy_config/2
+%% Tests for get_proxy_config/3
 get_proxy_config_test_() ->
     [
      {"No proxy option returns false",
       fun() ->
-          ?assertEqual(false, hackney:get_proxy_config(http, []))
+          ?assertEqual(false, hackney:get_proxy_config(http, "example.com", []))
       end},
      {"Proxy option set to false returns false",
       fun() ->
-          ?assertEqual(false, hackney:get_proxy_config(http, [{proxy, false}]))
+          ?assertEqual(false, hackney:get_proxy_config(http, "example.com", [{proxy, false}]))
       end},
      {"Simple tuple proxy for HTTP scheme returns http type",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, {"proxy.local", 8080}}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {"proxy.local", 8080}}]),
           ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
       end},
      {"Simple tuple proxy for HTTPS scheme returns connect type",
       fun() ->
-          Result = hackney:get_proxy_config(https, [{proxy, {"proxy.local", 8080}}]),
+          Result = hackney:get_proxy_config(https, "example.com", [{proxy, {"proxy.local", 8080}}]),
           ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
       end},
      {"Explicit connect tuple returns connect type",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, {connect, "proxy.local", 8080}}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {connect, "proxy.local", 8080}}]),
           ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
       end},
      {"SOCKS5 tuple returns socks5 type",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, {socks5, "socks.local", 1080}}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {socks5, "socks.local", 1080}}]),
           ?assertEqual({socks5, "socks.local", 1080, undefined}, Result)
       end},
      {"SOCKS5 tuple with auth",
       fun() ->
-          Result = hackney:get_proxy_config(http, [
+          Result = hackney:get_proxy_config(http, "example.com", [
               {proxy, {socks5, "socks.local", 1080}},
               {socks5_user, <<"user">>},
               {socks5_pass, <<"pass">>}
@@ -260,27 +260,27 @@ get_proxy_config_test_() ->
       end},
      {"HTTP URL proxy for HTTP scheme returns http type",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, "http://proxy.local:8080"}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, "http://proxy.local:8080"}]),
           ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
       end},
      {"HTTP URL proxy for HTTPS scheme returns connect type",
       fun() ->
-          Result = hackney:get_proxy_config(https, [{proxy, "http://proxy.local:8080"}]),
+          Result = hackney:get_proxy_config(https, "example.com", [{proxy, "http://proxy.local:8080"}]),
           ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
       end},
      {"SOCKS5 URL proxy returns socks5 type",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, "socks5://socks.local:1080"}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, "socks5://socks.local:1080"}]),
           ?assertEqual({socks5, "socks.local", 1080, undefined}, Result)
       end},
      {"Proxy URL with credentials",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, "http://user:pass@proxy.local:8080"}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, "http://user:pass@proxy.local:8080"}]),
           ?assertEqual({http, "proxy.local", 8080, {<<"user">>, <<"pass">>}}, Result)
       end},
      {"Proxy auth option used when URL has no credentials",
       fun() ->
-          Result = hackney:get_proxy_config(http, [
+          Result = hackney:get_proxy_config(http, "example.com", [
               {proxy, "http://proxy.local:8080"},
               {proxy_auth, {<<"admin">>, <<"secret">>}}
           ]),
@@ -288,7 +288,7 @@ get_proxy_config_test_() ->
       end},
      {"URL credentials override proxy_auth option",
       fun() ->
-          Result = hackney:get_proxy_config(http, [
+          Result = hackney:get_proxy_config(http, "example.com", [
               {proxy, "http://urluser:urlpass@proxy.local:8080"},
               {proxy_auth, {<<"admin">>, <<"secret">>}}
           ]),
@@ -296,8 +296,56 @@ get_proxy_config_test_() ->
       end},
      {"Binary proxy URL works",
       fun() ->
-          Result = hackney:get_proxy_config(http, [{proxy, <<"http://proxy.local:8080">>}]),
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, <<"http://proxy.local:8080">>}]),
           ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
+      end}
+    ].
+
+%% Tests for check_no_proxy/2
+check_no_proxy_test_() ->
+    [
+     {"Empty NO_PROXY list matches nothing",
+      fun() ->
+          ?assertEqual(false, hackney:check_no_proxy("example.com", []))
+      end},
+     {"Exact match",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy("example.com", ["example.com"]))
+      end},
+     {"Exact match is case-insensitive",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy("Example.COM", ["example.com"])),
+          ?assertEqual(true, hackney:check_no_proxy("example.com", ["EXAMPLE.COM"]))
+      end},
+     {"Binary host is converted",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy(<<"example.com">>, ["example.com"]))
+      end},
+     {"No match",
+      fun() ->
+          ?assertEqual(false, hackney:check_no_proxy("other.com", ["example.com"]))
+      end},
+     {"Suffix match (without leading dot)",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy("www.example.com", ["example.com"])),
+          ?assertEqual(true, hackney:check_no_proxy("sub.domain.example.com", ["example.com"]))
+      end},
+     {"Leading dot matches any subdomain",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy("www.example.com", [".example.com"])),
+          ?assertEqual(true, hackney:check_no_proxy("sub.domain.example.com", [".example.com"]))
+      end},
+     {"Wildcard matches all",
+      fun() ->
+          ?assertEqual(true, hackney:check_no_proxy("any.host.com", ["*"])),
+          ?assertEqual(true, hackney:check_no_proxy("localhost", ["*"]))
+      end},
+     {"Multiple entries in list",
+      fun() ->
+          NoProxyList = ["localhost", "internal.corp", "*.local"],
+          ?assertEqual(true, hackney:check_no_proxy("localhost", NoProxyList)),
+          ?assertEqual(true, hackney:check_no_proxy("api.internal.corp", NoProxyList)),
+          ?assertEqual(false, hackney:check_no_proxy("external.com", NoProxyList))
       end}
     ].
 
@@ -518,5 +566,86 @@ test_http_proxy(#{http_proxy := {_, ProxyPort}}) ->
         {error, Reason} ->
             ct:pal("HTTP proxy failed: ~p~n", [Reason]),
             error({http_proxy_failed, Reason})
+    end.
+
+%% Test proxy via environment variable
+env_var_proxy_test_() ->
+    {setup,
+     fun() ->
+         error_logger:tty(false),
+         {ok, _} = application:ensure_all_started(cowboy),
+         {ok, _} = application:ensure_all_started(hackney),
+         %% Start test HTTP server
+         Host = '_',
+         Routes = [{"/[...]", test_http_resource, []}],
+         Dispatch = cowboy_router:compile([{Host, Routes}]),
+         {ok, _} = cowboy:start_clear(env_proxy_test_server, [{port, 8127}],
+                                       #{env => #{dispatch => Dispatch}}),
+         %% Start mock HTTP proxy
+         {ok, HttpPid, HttpPort} = mock_proxy_server:start_http_proxy(),
+         %% Save existing env vars
+         SavedEnv = os:getenv("http_proxy"),
+         %% Set proxy env var
+         os:putenv("http_proxy", "http://127.0.0.1:" ++ integer_to_list(HttpPort)),
+         #{http_proxy => {HttpPid, HttpPort}, saved_env => SavedEnv}
+     end,
+     fun(#{http_proxy := {HttpPid, _}, saved_env := SavedEnv}) ->
+         mock_proxy_server:stop(HttpPid),
+         cowboy:stop_listener(env_proxy_test_server),
+         %% Restore env var
+         case SavedEnv of
+             false -> os:unsetenv("http_proxy");
+             Val -> os:putenv("http_proxy", Val)
+         end,
+         error_logger:tty(true),
+         ok
+     end,
+     fun(_State) ->
+         [
+          {"Request uses http_proxy env var", {timeout, 30, fun test_env_var_proxy/0}},
+          {"NO_PROXY bypasses proxy", {timeout, 30, fun test_no_proxy_bypass/0}}
+         ]
+     end}.
+
+test_env_var_proxy() ->
+    %% Request without explicit proxy option should use http_proxy env var
+    Url = <<"http://127.0.0.1:8127/get">>,
+    %% No proxy option - should use env var
+    case hackney:request(get, Url, [], <<>>, [{recv_timeout, 10000}]) of
+        {ok, Status, _Headers, ConnPid} ->
+            {ok, Body} = hackney:body(ConnPid),
+            hackney:close(ConnPid),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(byte_size(Body) > 0);
+        {error, Reason} ->
+            ct:pal("Env var proxy failed: ~p~n", [Reason]),
+            error({env_var_proxy_failed, Reason})
+    end.
+
+test_no_proxy_bypass() ->
+    %% Set NO_PROXY to bypass 127.0.0.1
+    OldNoProxy = os:getenv("no_proxy"),
+    os:putenv("no_proxy", "127.0.0.1, localhost"),
+    try
+        %% Request should go directly, not through proxy
+        %% The http_proxy env var points to a fake proxy (19888) that would fail
+        %% If NO_PROXY works, this should connect directly to the test server (8127)
+        Url = <<"http://127.0.0.1:8127/get">>,
+        case hackney:request(get, Url, [], <<>>, [{recv_timeout, 10000}]) of
+            {ok, Status, _Headers, ConnPid} ->
+                {ok, Body} = hackney:body(ConnPid),
+                hackney:close(ConnPid),
+                ?assert(Status >= 200 andalso Status < 400),
+                ?assert(byte_size(Body) > 0);
+            {error, Reason} ->
+                %% This should NOT happen if NO_PROXY works
+                error({no_proxy_failed, Reason})
+        end
+    after
+        %% Restore original NO_PROXY
+        case OldNoProxy of
+            false -> os:unsetenv("no_proxy");
+            _ -> os:putenv("no_proxy", OldNoProxy)
+        end
     end.
 
