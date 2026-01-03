@@ -1127,7 +1127,7 @@ do_send_request(Method, Path, Headers, Body, Data) ->
     end,
     RequestLine = <<Method/binary, " ", Path1/binary, " HTTP/1.1\r\n">>,
     HeadersBin = headers_to_binary(FinalHeaders),
-    RequestData = <<RequestLine/binary, HeadersBin/binary, "\r\n">>,
+    RequestData = <<RequestLine/binary, HeadersBin/binary>>,
 
     %% Send request
     case Transport:send(Socket, RequestData) of
