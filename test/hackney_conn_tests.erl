@@ -25,6 +25,7 @@ hackney_conn_test_() ->
      [
       {"start and stop", fun test_start_stop/0},
       {"initial state is idle", fun test_initial_state/0},
+      {"pre-established socket starts connected", fun test_preestablished_socket/0},
       {"connect timeout", fun test_connect_timeout/0},
       {"connect to invalid host", fun test_connect_invalid/0},
       {"owner death stops connection", fun test_owner_death/0}
@@ -100,6 +101,31 @@ test_initial_state() ->
     {ok, State} = hackney_conn:get_state(Pid),
     ?assertEqual(idle, State),
     hackney_conn:stop(Pid).
+
+test_preestablished_socket() ->
+    %% Create a mock socket (we just need any port for the test)
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}]),
+    {ok, Port} = inet:port(ListenSock),
+
+    %% Connect to ourselves to get a real socket
+    {ok, ClientSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}]),
+    {ok, _ServerSock} = gen_tcp:accept(ListenSock, 1000),
+
+    %% Start hackney_conn with pre-established socket
+    Opts = #{
+        host => "127.0.0.1",
+        port => Port,
+        transport => hackney_tcp,
+        socket => ClientSock
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+
+    %% Should start in connected state, not idle
+    {ok, State} = hackney_conn:get_state(Pid),
+    ?assertEqual(connected, State),
+
+    hackney_conn:stop(Pid),
+    gen_tcp:close(ListenSock).
 
 test_connect() ->
     Opts = #{

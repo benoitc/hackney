@@ -365,6 +365,9 @@ init([Owner, Opts]) ->
     %% Compute netloc for Host header
     Netloc = compute_netloc(Host, Port, Transport),
 
+    %% Check if a pre-established socket is provided (e.g., from proxy)
+    Socket = maps:get(socket, Opts, undefined),
+
     Data = #conn_data{
         owner = Owner,
         owner_mon = OwnerMon,
@@ -372,6 +375,7 @@ init([Owner, Opts]) ->
         port = Port,
         netloc = Netloc,
         transport = Transport,
+        socket = Socket,
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
@@ -379,7 +383,14 @@ init([Owner, Opts]) ->
         ssl_options = maps:get(ssl_options, Opts, []),
         pool_pid = maps:get(pool_pid, Opts, undefined)
     },
-    {ok, idle, Data}.
+
+    %% If socket is provided, start in connected state; otherwise start in idle
+    case Socket of
+        undefined ->
+            {ok, idle, Data};
+        _ ->
+            {ok, connected, Data}
+    end.
 
 terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport}) ->
     case Socket of
