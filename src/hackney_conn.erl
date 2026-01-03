@@ -162,9 +162,17 @@ start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, [self(), Opts], []).
 
 %% @doc Stop the connection process.
+%% Returns ok even if the process has already terminated.
 -spec stop(pid()) -> ok.
 stop(Pid) ->
-    gen_statem:stop(Pid).
+    try
+        gen_statem:stop(Pid)
+    catch
+        exit:noproc -> ok;
+        exit:{noproc, _} -> ok;
+        exit:normal -> ok;
+        exit:{normal, _} -> ok
+    end.
 
 %% @doc Connect to the target host. Blocks until connected or timeout.
 -spec connect(pid()) -> ok | {error, term()}.

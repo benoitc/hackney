@@ -177,7 +177,7 @@ test_duplicate_headers() ->
   %% Use pool=false to prevent this connection from polluting the pool
   Options = [with_body, {pool, false}],
   {ok, 200, _H, JsonBody} = hackney:post(URL, Headers, Body, Options),
-  Obj = json:decode(JsonBody),
+  Obj = jsx:decode(JsonBody, [return_maps]),
   ReqHeaders = maps:get(<<"headers">>, Obj),
   ?assertEqual(<<"text/plain">>, maps:get(<<"content-type">>, ReqHeaders)).
 
@@ -186,7 +186,7 @@ test_custom_host_headers() ->
   Headers = [{<<"Host">>, <<"myhost.com">>}],
   Options = [with_body],
   {ok, 200, _H, JsonBody} = hackney:get(URL, Headers, <<>>, Options),
-  Obj = json:decode(JsonBody),
+  Obj = jsx:decode(JsonBody, [return_maps]),
   ReqHeaders = maps:get(<<"headers">>, Obj),
   ?assertEqual(<<"myhost.com">>, maps:get(<<"host">>, ReqHeaders)).
 
