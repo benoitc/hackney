@@ -136,7 +136,7 @@ request_info(Req) ->
 
 %% Helper: reply with JSON (accepts map)
 reply_json(Status, Data, Req, State) when is_map(Data) ->
-    Body = json:encode(Data),
+    Body = jsx:encode(Data),
     Req2 = cowboy_req:reply(Status, #{
         <<"content-type">> => <<"application/json">>
     }, Body, Req),
