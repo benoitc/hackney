@@ -264,6 +264,11 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   case maybe_proxy(Transport, URL#hackney_url.scheme, Host, Port, Options) of
     {ok, ConnPid} ->
       do_request(ConnPid, Method, FinalPath, Headers0, Body, Options, URL, Host);
+    {ok, ConnPid, {http_proxy, TargetScheme, TargetHost, TargetPort, ProxyAuth}} ->
+      %% HTTP proxy mode - use absolute URLs
+      AbsolutePath = build_absolute_url(TargetScheme, TargetHost, TargetPort, FinalPath),
+      Headers1 = add_proxy_auth_header(Headers0, ProxyAuth),
+      do_request(ConnPid, Method, AbsolutePath, Headers1, Body, Options, URL, Host);
     Error ->
       Error
   end;
@@ -730,10 +735,9 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
     {socks5, ProxyHost, ProxyPort, ProxyAuth} ->
       %% SOCKS5 proxy
       connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
-    {http, _ProxyHost, _ProxyPort, _ProxyAuth} ->
-      %% Simple HTTP proxy - TODO: implement in Step 6
-      ?report_debug("http proxy not yet implemented", []),
-      connect(Transport, Host, Port, Options)
+    {http, ProxyHost, ProxyPort, ProxyAuth} ->
+      %% Simple HTTP proxy - connect to proxy, use absolute URLs
+      connect_via_http_proxy(Scheme, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options)
   end.
 
 %% @doc Connect through HTTP CONNECT proxy (tunnel).
@@ -805,6 +809,38 @@ connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth,
     {error, Reason} ->
       {error, Reason}
   end.
+
+%% @doc Connect through simple HTTP proxy (no tunneling).
+%% Used for HTTP requests through HTTP proxy. Requests use absolute URLs.
+connect_via_http_proxy(TargetScheme, TargetHost, TargetPort, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+  %% Connect directly to the proxy server
+  case connect(hackney_tcp, ProxyHost, ProxyPort, Options) of
+    {ok, ConnPid} ->
+      %% Return connection with proxy info for absolute URL mode
+      {ok, ConnPid, {http_proxy, TargetScheme, TargetHost, TargetPort, ProxyAuth}};
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Build absolute URL for HTTP proxy requests.
+build_absolute_url(Scheme, Host, Port, Path) ->
+  SchemeBin = atom_to_binary(Scheme),
+  HostBin = hackney_bstr:to_binary(Host),
+  %% Include port only if non-default
+  HostPort = case {Scheme, Port} of
+    {http, 80} -> HostBin;
+    {https, 443} -> HostBin;
+    _ -> <<HostBin/binary, ":", (integer_to_binary(Port))/binary>>
+  end,
+  <<SchemeBin/binary, "://", HostPort/binary, Path/binary>>.
+
+%% @doc Add Proxy-Authorization header if auth is configured.
+add_proxy_auth_header(Headers, undefined) ->
+  Headers;
+add_proxy_auth_header(Headers, {User, Pass}) ->
+  Credentials = base64:encode(<<User/binary, ":", Pass/binary>>),
+  AuthHeader = {<<"Proxy-Authorization">>, <<"Basic ", Credentials/binary>>},
+  [AuthHeader | Headers].
 
 %% @doc Extract proxy configuration from options.
 %% Returns: false | {Type, Host, Port, Auth}

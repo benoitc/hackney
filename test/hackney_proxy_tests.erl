@@ -443,7 +443,8 @@ proxy_integration_test_() ->
      fun(State) ->
          [
           {"HTTP CONNECT proxy to HTTP target", {timeout, 30, fun() -> test_connect_proxy_http(State) end}},
-          {"SOCKS5 proxy to HTTP target", {timeout, 30, fun() -> test_socks5_proxy_http(State) end}}
+          {"SOCKS5 proxy to HTTP target", {timeout, 30, fun() -> test_socks5_proxy_http(State) end}},
+          {"Simple HTTP proxy to HTTP target", {timeout, 30, fun() -> test_http_proxy(State) end}}
          ]
      end}.
 
@@ -460,12 +461,15 @@ setup_integration() ->
     %% Start mock proxies
     {ok, ConnectPid, ConnectPort} = mock_proxy_server:start_connect_proxy(),
     {ok, Socks5Pid, Socks5Port} = mock_proxy_server:start_socks5_proxy(),
+    {ok, HttpPid, HttpPort} = mock_proxy_server:start_http_proxy(),
     #{connect_proxy => {ConnectPid, ConnectPort},
-      socks5_proxy => {Socks5Pid, Socks5Port}}.
+      socks5_proxy => {Socks5Pid, Socks5Port},
+      http_proxy => {HttpPid, HttpPort}}.
 
-teardown_integration(#{connect_proxy := {ConnectPid, _}, socks5_proxy := {Socks5Pid, _}}) ->
+teardown_integration(#{connect_proxy := {ConnectPid, _}, socks5_proxy := {Socks5Pid, _}, http_proxy := {HttpPid, _}}) ->
     mock_proxy_server:stop(ConnectPid),
     mock_proxy_server:stop(Socks5Pid),
+    mock_proxy_server:stop(HttpPid),
     cowboy:stop_listener(proxy_test_server),
     error_logger:tty(true),
     ok.
@@ -498,5 +502,21 @@ test_socks5_proxy_http(#{socks5_proxy := {_, ProxyPort}}) ->
         {error, Reason} ->
             ct:pal("SOCKS5 proxy failed: ~p~n", [Reason]),
             error({socks5_proxy_failed, Reason})
+    end.
+
+test_http_proxy(#{http_proxy := {_, ProxyPort}}) ->
+    %% Use simple HTTP proxy (with absolute URLs) to reach our test server
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    %% Use tuple format for simple HTTP proxy
+    Options = [{proxy, {"127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, Status, _Headers, ConnPid} ->
+            {ok, Body} = hackney:body(ConnPid),
+            hackney:close(ConnPid),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(byte_size(Body) > 0);
+        {error, Reason} ->
+            ct:pal("HTTP proxy failed: ~p~n", [Reason]),
+            error({http_proxy_failed, Reason})
     end.
 
