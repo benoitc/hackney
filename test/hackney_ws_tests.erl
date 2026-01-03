@@ -227,6 +227,54 @@ ws_error_test_() ->
     ].
 
 %%====================================================================
+%% Proxy tests (require both mock WS server and mock proxy)
+%%====================================================================
+
+ws_proxy_test_() ->
+    {setup,
+     fun() ->
+         start_ws_server(),
+         {ok, ProxyPid, ProxyPort} = mock_proxy_server:start_connect_proxy(),
+         {ProxyPid, ProxyPort}
+     end,
+     fun({ProxyPid, _ProxyPort}) ->
+         mock_proxy_server:stop(ProxyPid),
+         stop_ws_server()
+     end,
+     fun({_ProxyPid, ProxyPort}) ->
+         [
+          {"WebSocket through HTTP CONNECT proxy",
+           fun() ->
+               %% Connect through proxy using tuple config
+               ProxyConfig = {connect, "localhost", ProxyPort},
+               {ok, Ws} = hackney:ws_connect(?WS_URL, [{proxy, ProxyConfig}]),
+               ?assert(is_pid(Ws)),
+
+               %% Send and receive a message
+               ok = hackney:ws_send(Ws, {text, <<"proxy test">>}),
+               {ok, {text, Msg}} = hackney:ws_recv(Ws, 5000),
+               ?assertEqual(<<"proxy test">>, Msg),
+
+               hackney:ws_close(Ws)
+           end},
+          {"WebSocket through HTTP CONNECT proxy with URL config",
+           fun() ->
+               %% Connect through proxy using URL config
+               ProxyUrl = iolist_to_binary(["http://localhost:", integer_to_list(ProxyPort)]),
+               {ok, Ws} = hackney:ws_connect(?WS_URL, [{proxy, ProxyUrl}]),
+               ?assert(is_pid(Ws)),
+
+               %% Send and receive a message
+               ok = hackney:ws_send(Ws, {text, <<"proxy url test">>}),
+               {ok, {text, Msg}} = hackney:ws_recv(Ws, 5000),
+               ?assertEqual(<<"proxy url test">>, Msg),
+
+               hackney:ws_close(Ws)
+           end}
+         ]
+     end}.
+
+%%====================================================================
 %% API tests (no server needed)
 %%====================================================================
 
@@ -240,17 +288,3 @@ ws_api_test_() ->
       end}
     ].
 
-%%====================================================================
-%% Helper functions
-%%====================================================================
-
-%% Wait for a process to die, checking every 100ms up to N retries
-wait_for_process_death(Pid, 0) ->
-    ?assertNot(is_process_alive(Pid));
-wait_for_process_death(Pid, Retries) ->
-    case is_process_alive(Pid) of
-        false -> ok;
-        true ->
-            timer:sleep(100),
-            wait_for_process_death(Pid, Retries - 1)
-    end.

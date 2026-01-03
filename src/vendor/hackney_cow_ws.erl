@@ -782,7 +782,7 @@ utf8_class() ->
 
 %% @doc Return a frame tuple from parsed state and data.
 
--spec make_frame(frame_type(), binary(), close_code(), frag_state()) -> frame().
+-spec make_frame(frame_type(), binary(), close_code() | undefined, frag_state()) -> frame().
 %% Fragmented frame.
 make_frame(fragment, Payload, _, {Fin, Type, _}) -> {fragment, Fin, Type, Payload};
 make_frame(text, Payload, _, _) -> {text, Payload};

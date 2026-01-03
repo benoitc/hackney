@@ -89,6 +89,8 @@
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
+    proxy = false :: false | {connect | socks5, string(), inet:port_number(),
+                              undefined | {binary(), binary()}},
 
     %% WebSocket options
     active = false :: false | true | once,
@@ -213,6 +215,7 @@ init([Owner, Opts]) ->
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
+        proxy = maps:get(proxy, Opts, false),
         active = maps:get(active, Opts, false),
         headers = maps:get(headers, Opts, []),
         protocols = maps:get(protocols, Opts, [])
@@ -244,7 +247,8 @@ idle({call, From}, connect, Data) ->
         transport = Transport,
         connect_timeout = ConnectTimeout,
         connect_options = ConnectOpts0,
-        ssl_options = SSLOpts
+        ssl_options = SSLOpts,
+        proxy = Proxy
     } = Data,
 
     %% Build connection options
@@ -258,8 +262,19 @@ idle({call, From}, connect, Data) ->
         false -> Host
     end,
 
-    %% Connect to the server
-    case do_connect(Transport, Host1, Port, ConnectOpts, SSLOpts, ConnectTimeout) of
+    %% Connect to the server (directly or through proxy)
+    ConnectResult = case Proxy of
+        false ->
+            do_connect(Transport, Host1, Port, ConnectOpts, SSLOpts, ConnectTimeout);
+        {connect, ProxyHost, ProxyPort, ProxyAuth} ->
+            do_connect_via_http_proxy(Transport, Host1, Port, ProxyHost, ProxyPort,
+                                       ProxyAuth, ConnectOpts, SSLOpts, ConnectTimeout);
+        {socks5, ProxyHost, ProxyPort, ProxyAuth} ->
+            do_connect_via_socks5(Transport, Host1, Port, ProxyHost, ProxyPort,
+                                   ProxyAuth, ConnectOpts, SSLOpts, ConnectTimeout)
+    end,
+
+    case ConnectResult of
         {ok, Socket} ->
             Data1 = Data#ws_data{socket = Socket},
             %% Perform WebSocket handshake
@@ -309,7 +324,7 @@ connected(enter, OldState, #ws_data{active = Active} = Data) when OldState =:= i
         false ->
             keep_state_and_data;
         _ ->
-            set_socket_active(Data, Active),
+            _ = set_socket_active(Data, Active),
             keep_state_and_data
     end;
 
@@ -325,7 +340,7 @@ connected({call, From}, {send, Frame}, Data) ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
-connected({call, From}, recv, #ws_data{active = Active} = Data) when Active =/= false ->
+connected({call, From}, recv, #ws_data{active = Active}) when Active =/= false ->
     {keep_state_and_data, [{reply, From, {error, {active_mode, Active}}}]};
 
 connected({call, From}, recv, #ws_data{recv_timeout = Timeout} = Data) ->
@@ -347,7 +362,7 @@ connected({call, From}, {setopts, Opts}, Data) ->
         undefined ->
             {keep_state_and_data, [{reply, From, ok}]};
         NewActive when NewActive =:= true; NewActive =:= false; NewActive =:= once ->
-            set_socket_active(Data, NewActive),
+            _ = set_socket_active(Data, NewActive),
             {keep_state, Data#ws_data{active = NewActive}, [{reply, From, ok}]};
         _ ->
             {keep_state_and_data, [{reply, From, {error, badarg}}]}
@@ -430,10 +445,7 @@ closing(info, {Msg, Socket, SocketData}, #ws_data{socket = Socket} = Data)
             {next_state, closed, Data};
         more ->
             %% Keep waiting
-            keep_state_and_data;
-        _ ->
-            close_socket(Data),
-            {next_state, closed, Data}
+            keep_state_and_data
     end;
 
 closing(info, {Closed, Socket}, #ws_data{socket = Socket} = Data)
@@ -489,6 +501,61 @@ do_connect(hackney_ssl, Host, Port, Opts, SSLOpts, Timeout) ->
             end;
         Error ->
             Error
+    end.
+
+%% @private Connect through HTTP CONNECT proxy
+do_connect_via_http_proxy(Transport, Host, Port, ProxyHost, ProxyPort,
+                          ProxyAuth, _ConnectOpts, SSLOpts, Timeout) ->
+    %% Build options for hackney_http_connect
+    ConnectOpts0 = [
+        {connect_host, Host},
+        {connect_port, Port},
+        {connect_transport, Transport}
+    ],
+    ConnectOpts1 = case ProxyAuth of
+        undefined -> ConnectOpts0;
+        {User, Pass} -> [{connect_user, User}, {connect_pass, Pass} | ConnectOpts0]
+    end,
+    %% Add SSL options if connecting to wss:// target
+    ConnectOpts = case Transport of
+        hackney_ssl ->
+            [{ssl_options, SSLOpts} | ConnectOpts1];
+        _ ->
+            ConnectOpts1
+    end,
+    case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
+        {ok, {_ProxyTransport, Socket}} ->
+            {ok, Socket};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private Connect through SOCKS5 proxy
+do_connect_via_socks5(Transport, Host, Port, ProxyHost, ProxyPort,
+                      ProxyAuth, _ConnectOpts, SSLOpts, Timeout) ->
+    %% Build options for hackney_socks5
+    Socks5Opts0 = [
+        {socks5_host, ProxyHost},
+        {socks5_port, ProxyPort},
+        {socks5_transport, Transport}
+    ],
+    %% Add authentication if provided
+    Socks5Opts = case ProxyAuth of
+        undefined -> Socks5Opts0;
+        {User, Pass} -> [{socks5_user, User}, {socks5_pass, Pass} | Socks5Opts0]
+    end,
+    %% Add SSL options
+    AllOpts = case Transport of
+        hackney_ssl ->
+            [{ssl_options, SSLOpts} | Socks5Opts];
+        _ ->
+            Socks5Opts
+    end,
+    case hackney_socks5:connect(Host, Port, AllOpts, Timeout) of
+        {ok, {_ProxyTransport, Socket}} ->
+            {ok, Socket};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 %% @private Perform WebSocket handshake
@@ -715,7 +782,7 @@ parse_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
         {ok, Payload, Utf8State1, Rest} ->
             %% Non-close frame completed
             case FragState1 of
-                {nofin, FragType, _Rsv} ->
+                {nofin, _FragType, _Rsv} ->
                     %% This is a fragment, accumulate
                     Data1 = Data#ws_data{buffer = Rest, frag_state = FragState1,
                                          frag_buffer = [Payload | FragBuffer],
@@ -787,7 +854,7 @@ handle_active_data(SocketData, #ws_data{buffer = Buffer, owner = Owner, active =
             %% Handle active mode
             case Active of
                 once ->
-                    set_socket_active(Data2, false),
+                    _ = set_socket_active(Data2, false),
                     {keep_state, Data2#ws_data{active = false}};
                 true ->
                     {keep_state, Data2};

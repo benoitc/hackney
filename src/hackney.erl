@@ -428,6 +428,9 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
     _ -> <<Path0/binary, "?", Query/binary>>
   end,
 
+  %% Get proxy configuration (WebSocket always uses tunnel mode)
+  ProxyConfig = get_ws_proxy_config(Scheme, Host, Options),
+
   %% Build connection options
   WsOpts = #{
     host => Host,
@@ -440,7 +443,8 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
     ssl_options => proplists:get_value(ssl_options, Options, []),
     active => proplists:get_value(active, Options, false),
     headers => normalize_ws_headers(proplists:get_value(headers, Options, [])),
-    protocols => proplists:get_value(protocols, Options, [])
+    protocols => proplists:get_value(protocols, Options, []),
+    proxy => ProxyConfig
   },
 
   %% Start WebSocket process and connect
@@ -499,6 +503,26 @@ ws_close(WsPid, {Code, Reason}) when is_pid(WsPid) ->
 normalize_ws_headers(Headers) ->
   [{hackney_bstr:to_binary(Name), hackney_bstr:to_binary(Value)}
    || {Name, Value} <- Headers].
+
+%% @private Get proxy configuration for WebSocket.
+%% WebSocket always uses tunnel mode (CONNECT or SOCKS5), never simple HTTP proxy.
+get_ws_proxy_config(Scheme, Host, Options) ->
+  %% Map ws/wss to http/https for proxy env var lookup
+  HttpScheme = case Scheme of
+    ws -> http;
+    wss -> https
+  end,
+  case get_proxy_config(HttpScheme, Host, Options) of
+    false ->
+      false;
+    {http, ProxyHost, ProxyPort, ProxyAuth} ->
+      %% Simple HTTP proxy - convert to CONNECT tunnel for WebSocket
+      {connect, ProxyHost, ProxyPort, ProxyAuth};
+    {connect, _, _, _} = Config ->
+      Config;
+    {socks5, _, _, _} = Config ->
+      Config
+  end.
 
 %%====================================================================
 %% Helpers
