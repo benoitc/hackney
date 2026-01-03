@@ -36,6 +36,7 @@
 -ifdef(TEST).
 -export([get_proxy_env/1, do_get_proxy_env/1]).
 -export([get_proxy_config/2]).
+-export([start_conn_with_socket/5]).
 -endif.
 
 -define(METHOD_TPL(Method),
@@ -119,6 +120,48 @@ connect(Transport, Host, Port, Options) ->
 -spec close(conn()) -> ok.
 close(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:stop(ConnPid).
+
+%% @doc Start a connection with a pre-established socket.
+%% Used for proxy connections where the tunnel is established first.
+%% Socket can be a raw socket or a {Transport, Socket} tuple from proxy modules.
+-spec start_conn_with_socket(string(), inet:port_number(), module(),
+                              inet:socket() | {module(), inet:socket()}, list()) ->
+  {ok, conn()} | {error, term()}.
+start_conn_with_socket(Host, Port, Transport, {SocketTransport, Socket}, Options) ->
+  %% Handle {Transport, Socket} tuple from proxy modules
+  %% Use the socket's transport for operations
+  ActualTransport = normalize_transport(SocketTransport),
+  start_conn_with_socket_internal(Host, Port, ActualTransport, Socket, Options);
+start_conn_with_socket(Host, Port, Transport, Socket, Options) ->
+  %% Raw socket
+  ActualTransport = normalize_transport(Transport),
+  start_conn_with_socket_internal(Host, Port, ActualTransport, Socket, Options).
+
+start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
+  ConnOpts = #{
+    host => Host,
+    port => Port,
+    transport => Transport,
+    socket => Socket,
+    connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
+    recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    connect_options => proplists:get_value(connect_options, Options, []),
+    ssl_options => proplists:get_value(ssl_options, Options, [])
+  },
+  case hackney_conn_sup:start_conn(ConnOpts) of
+    {ok, ConnPid} ->
+      hackney_manager:start_request(Host),
+      {ok, ConnPid};
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% Normalize transport atoms (e.g., ssl -> hackney_ssl, gen_tcp -> hackney_tcp)
+normalize_transport(hackney_tcp) -> hackney_tcp;
+normalize_transport(hackney_ssl) -> hackney_ssl;
+normalize_transport(gen_tcp) -> hackney_tcp;
+normalize_transport(ssl) -> hackney_ssl;
+normalize_transport(Other) -> Other.
 
 %% @doc Get the remote address and port.
 -spec peername(conn()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.

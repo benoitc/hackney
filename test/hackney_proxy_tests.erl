@@ -301,3 +301,72 @@ get_proxy_config_test_() ->
       end}
     ].
 
+%% Tests for start_conn_with_socket/5
+start_conn_with_socket_test_() ->
+    {setup,
+     fun() ->
+         application:ensure_all_started(hackney),
+         ok
+     end,
+     fun(_) -> ok end,
+     [
+      {"Start connection with raw socket",
+       fun() ->
+           %% Create a mock socket (we just need any port for the test)
+           {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}]),
+           {ok, Port} = inet:port(ListenSock),
+
+           %% Connect to ourselves to get a real socket
+           {ok, ClientSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}]),
+           {ok, _ServerSock} = gen_tcp:accept(ListenSock, 1000),
+
+           %% Start hackney with pre-established socket
+           {ok, ConnPid} = hackney:start_conn_with_socket("127.0.0.1", Port, hackney_tcp, ClientSock, []),
+
+           ?assert(is_pid(ConnPid)),
+           ?assertEqual({ok, connected}, hackney_conn:get_state(ConnPid)),
+
+           hackney_conn:stop(ConnPid),
+           gen_tcp:close(ListenSock)
+       end},
+      {"Start connection with {Transport, Socket} tuple",
+       fun() ->
+           %% Create a mock socket
+           {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}]),
+           {ok, Port} = inet:port(ListenSock),
+
+           %% Connect to ourselves
+           {ok, ClientSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}]),
+           {ok, _ServerSock} = gen_tcp:accept(ListenSock, 1000),
+
+           %% Wrap in tuple like proxy modules return
+           WrappedSocket = {hackney_tcp, ClientSock},
+
+           {ok, ConnPid} = hackney:start_conn_with_socket("127.0.0.1", Port, hackney_tcp, WrappedSocket, []),
+
+           ?assert(is_pid(ConnPid)),
+           ?assertEqual({ok, connected}, hackney_conn:get_state(ConnPid)),
+
+           hackney_conn:stop(ConnPid),
+           gen_tcp:close(ListenSock)
+       end},
+      {"Normalize gen_tcp to hackney_tcp",
+       fun() ->
+           %% Create a mock socket
+           {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}]),
+           {ok, Port} = inet:port(ListenSock),
+
+           {ok, ClientSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}]),
+           {ok, _ServerSock} = gen_tcp:accept(ListenSock, 1000),
+
+           %% Use gen_tcp as transport - should be normalized to hackney_tcp
+           {ok, ConnPid} = hackney:start_conn_with_socket("127.0.0.1", Port, gen_tcp, ClientSock, []),
+
+           ?assert(is_pid(ConnPid)),
+           ?assertEqual({ok, connected}, hackney_conn:get_state(ConnPid)),
+
+           hackney_conn:stop(ConnPid),
+           gen_tcp:close(ListenSock)
+       end}
+     ]}.
+
