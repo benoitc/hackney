@@ -80,9 +80,10 @@ websocket_handle({text, Msg}, State) ->
 websocket_handle({binary, Data}, State) ->
     {reply, {binary, Data}, State};
 
-%% Handle ping (cowboy does this automatically but explicit for testing)
+%% Handle ping - Cowboy handles this automatically, so we do nothing
+%% (returning {ok, State} means no additional reply)
 websocket_handle(ping, State) ->
-    {reply, pong, State};
+    {ok, State};
 
 %% Handle pong
 websocket_handle(pong, State) ->

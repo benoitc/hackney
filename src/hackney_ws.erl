@@ -889,7 +889,7 @@ parse_active_frames(#ws_data{buffer = Buffer, frag_state = FragState,
                     case Frame of
                         ping ->
                             do_send_frame(pong, Data1),
-                            parse_active_frames(Data1, Acc);
+                            parse_active_frames(Data1, [ping | Acc]);
                         {ping, PingData} ->
                             do_send_frame({pong, PingData}, Data1),
                             parse_active_frames(Data1, [{ping, PingData} | Acc]);

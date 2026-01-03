@@ -714,6 +714,260 @@ ws_api_test_() ->
     ].
 
 %%====================================================================
+%% Scripted interaction tests (fake messages/scenarios)
+%%====================================================================
+
+ws_scripted_test_() ->
+    {setup,
+     fun start_ws_server/0,
+     fun(_) -> stop_ws_server() end,
+     [
+      {"Delayed response from server",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Ask server to wait 100ms then respond
+           ok = hackney:ws_send(Ws, {text, <<"delay:100:delayed_msg">>}),
+           T1 = erlang:monotonic_time(millisecond),
+           {ok, {text, Msg}} = hackney:ws_recv(Ws, 5000),
+           T2 = erlang:monotonic_time(millisecond),
+           ?assertEqual(<<"delayed_msg">>, Msg),
+           %% Verify delay occurred (at least 50ms to account for timing variance)
+           ?assert((T2 - T1) >= 50),
+           hackney:ws_close(Ws)
+       end},
+      {"Multiple messages from single command",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Ask server to send 5 messages
+           ok = hackney:ws_send(Ws, {text, <<"multi:5">>}),
+           %% Receive all 5
+           {ok, {text, <<"1">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {text, <<"2">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {text, <<"3">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {text, <<"4">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {text, <<"5">>}} = hackney:ws_recv(Ws, 5000),
+           hackney:ws_close(Ws)
+       end},
+      {"Multiple messages in active mode",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL, [{active, true}]),
+           ok = hackney:ws_send(Ws, {text, <<"multi:3">>}),
+           %% Receive all 3 via messages
+           Received = receive_n_messages(Ws, 3, 5000),
+           ?assertEqual([{text, <<"1">>}, {text, <<"2">>}, {text, <<"3">>}], Received),
+           hackney:ws_close(Ws)
+       end},
+      {"Server-initiated ping in active mode",
+       fun() ->
+           %% In passive mode, pings are auto-handled (pong sent) but not delivered
+           %% to the caller. Use active mode to receive ping frames.
+           {ok, Ws} = hackney:ws_connect(?WS_URL, [{active, true}]),
+           %% Tell server to send us a ping
+           ok = hackney:ws_send(Ws, {text, <<"ping">>}),
+           %% We should receive the ping (pong is auto-sent)
+           receive
+               {hackney_ws, Ws, ping} -> ok
+           after 5000 ->
+               ?assert(false)
+           end,
+           hackney:ws_close(Ws)
+       end},
+      {"Server-initiated ping with data in active mode",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL, [{active, true}]),
+           %% Tell server to ping us with specific data
+           ok = hackney:ws_send(Ws, {text, <<"ping:heartbeat-123">>}),
+           receive
+               {hackney_ws, Ws, {ping, Data}} ->
+                   ?assertEqual(<<"heartbeat-123">>, Data)
+           after 5000 ->
+               ?assert(false)
+           end,
+           hackney:ws_close(Ws)
+       end},
+      {"Echo command",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           ok = hackney:ws_send(Ws, {text, <<"echo:specific message">>}),
+           {ok, {text, Msg}} = hackney:ws_recv(Ws, 5000),
+           ?assertEqual(<<"specific message">>, Msg),
+           hackney:ws_close(Ws)
+       end},
+      {"Conversation sequence - request/response pattern",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Simulate a typical conversation
+           ok = hackney:ws_send(Ws, {text, <<"echo:login:user1">>}),
+           {ok, {text, <<"login:user1">>}} = hackney:ws_recv(Ws, 5000),
+
+           ok = hackney:ws_send(Ws, {text, <<"echo:subscribe:channel1">>}),
+           {ok, {text, <<"subscribe:channel1">>}} = hackney:ws_recv(Ws, 5000),
+
+           ok = hackney:ws_send(Ws, {text, <<"echo:message:hello">>}),
+           {ok, {text, <<"message:hello">>}} = hackney:ws_recv(Ws, 5000),
+
+           ok = hackney:ws_send(Ws, {text, <<"echo:unsubscribe:channel1">>}),
+           {ok, {text, <<"unsubscribe:channel1">>}} = hackney:ws_recv(Ws, 5000),
+
+           hackney:ws_close(Ws)
+       end},
+      {"Rapid message exchange",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Send 100 messages rapidly
+           Messages = [iolist_to_binary([<<"msg">>, integer_to_binary(N)]) || N <- lists:seq(1, 100)],
+           lists:foreach(fun(Msg) ->
+               ok = hackney:ws_send(Ws, {text, Msg})
+           end, Messages),
+           %% Receive all 100
+           lists:foreach(fun(Expected) ->
+               {ok, {text, Received}} = hackney:ws_recv(Ws, 5000),
+               ?assertEqual(Expected, Received)
+           end, Messages),
+           hackney:ws_close(Ws)
+       end},
+      {"Interleaved text and binary messages",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Send alternating text and binary
+           ok = hackney:ws_send(Ws, {text, <<"text1">>}),
+           ok = hackney:ws_send(Ws, {binary, <<1,2,3>>}),
+           ok = hackney:ws_send(Ws, {text, <<"text2">>}),
+           ok = hackney:ws_send(Ws, {binary, <<4,5,6>>}),
+           %% Receive in order
+           {ok, {text, <<"text1">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {binary, <<1,2,3>>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {text, <<"text2">>}} = hackney:ws_recv(Ws, 5000),
+           {ok, {binary, <<4,5,6>>}} = hackney:ws_recv(Ws, 5000),
+           hackney:ws_close(Ws)
+       end},
+      {"Ping between messages",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           ok = hackney:ws_send(Ws, {text, <<"msg1">>}),
+           {ok, {text, <<"msg1">>}} = hackney:ws_recv(Ws, 5000),
+           %% Send a ping mid-conversation
+           ok = hackney:ws_send(Ws, ping),
+           {ok, pong} = hackney:ws_recv(Ws, 5000),
+           %% Continue conversation
+           ok = hackney:ws_send(Ws, {text, <<"msg2">>}),
+           {ok, {text, <<"msg2">>}} = hackney:ws_recv(Ws, 5000),
+           hackney:ws_close(Ws)
+       end}
+     ]}.
+
+%% Helper to receive N messages in active mode
+receive_n_messages(Ws, N, Timeout) ->
+    receive_n_messages(Ws, N, Timeout, []).
+
+receive_n_messages(_Ws, 0, _Timeout, Acc) ->
+    lists:reverse(Acc);
+receive_n_messages(Ws, N, Timeout, Acc) ->
+    receive
+        {hackney_ws, Ws, Frame} ->
+            receive_n_messages(Ws, N - 1, Timeout, [Frame | Acc])
+    after Timeout ->
+        {error, {timeout, N, lists:reverse(Acc)}}
+    end.
+
+%%====================================================================
+%% Reconnection and recovery tests
+%%====================================================================
+
+ws_recovery_test_() ->
+    {setup,
+     fun start_ws_server/0,
+     fun(_) -> stop_ws_server() end,
+     [
+      {"Reconnect after server close",
+       fun() ->
+           {ok, Ws1} = hackney:ws_connect(?WS_URL),
+           ok = hackney:ws_send(Ws1, {text, <<"test1">>}),
+           {ok, {text, <<"test1">>}} = hackney:ws_recv(Ws1, 5000),
+
+           %% Server closes the connection
+           ok = hackney:ws_send(Ws1, {text, <<"close">>}),
+           {error, {closed, 1000, _}} = hackney:ws_recv(Ws1, 5000),
+
+           %% Reconnect (new connection)
+           {ok, Ws2} = hackney:ws_connect(?WS_URL),
+           ok = hackney:ws_send(Ws2, {text, <<"test2">>}),
+           {ok, {text, <<"test2">>}} = hackney:ws_recv(Ws2, 5000),
+           hackney:ws_close(Ws2)
+       end},
+      {"Handle multiple server closes",
+       fun() ->
+           lists:foreach(fun(N) ->
+               {ok, Ws} = hackney:ws_connect(?WS_URL),
+               Msg = iolist_to_binary([<<"iter">>, integer_to_binary(N)]),
+               ok = hackney:ws_send(Ws, {text, Msg}),
+               {ok, {text, Msg}} = hackney:ws_recv(Ws, 5000),
+               ok = hackney:ws_send(Ws, {text, <<"close">>}),
+               {error, {closed, 1000, _}} = hackney:ws_recv(Ws, 5000)
+           end, lists:seq(1, 5))
+       end}
+     ]}.
+
+%%====================================================================
+%% JSON-like messaging tests (simulating real protocols)
+%%====================================================================
+
+ws_protocol_simulation_test_() ->
+    {setup,
+     fun start_ws_server/0,
+     fun(_) -> stop_ws_server() end,
+     [
+      {"Simulate JSON-RPC style messaging",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Simulate JSON-RPC request
+           Req1 = <<"{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"id\":1}">>,
+           ok = hackney:ws_send(Ws, {text, Req1}),
+           {ok, {text, Req1}} = hackney:ws_recv(Ws, 5000),
+
+           Req2 = <<"{\"jsonrpc\":\"2.0\",\"method\":\"notify\"}">>,
+           ok = hackney:ws_send(Ws, {text, Req2}),
+           {ok, {text, Req2}} = hackney:ws_recv(Ws, 5000),
+
+           hackney:ws_close(Ws)
+       end},
+      {"Simulate pub/sub messaging",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Subscribe
+           ok = hackney:ws_send(Ws, {text, <<"{\"type\":\"subscribe\",\"channel\":\"news\"}">>}),
+           {ok, {text, _}} = hackney:ws_recv(Ws, 5000),
+
+           %% Publish
+           ok = hackney:ws_send(Ws, {text, <<"{\"type\":\"publish\",\"channel\":\"news\",\"data\":\"hello\"}">>}),
+           {ok, {text, _}} = hackney:ws_recv(Ws, 5000),
+
+           %% Unsubscribe
+           ok = hackney:ws_send(Ws, {text, <<"{\"type\":\"unsubscribe\",\"channel\":\"news\"}">>}),
+           {ok, {text, _}} = hackney:ws_recv(Ws, 5000),
+
+           hackney:ws_close(Ws)
+       end},
+      {"Binary protocol simulation (length-prefixed)",
+       fun() ->
+           {ok, Ws} = hackney:ws_connect(?WS_URL),
+           %% Simulate length-prefixed binary protocol
+           Payload1 = <<"command1">>,
+           Len1 = byte_size(Payload1),
+           ok = hackney:ws_send(Ws, {binary, <<Len1:32, Payload1/binary>>}),
+           {ok, {binary, <<Len1:32, Payload1/binary>>}} = hackney:ws_recv(Ws, 5000),
+
+           Payload2 = crypto:strong_rand_bytes(256),
+           Len2 = byte_size(Payload2),
+           ok = hackney:ws_send(Ws, {binary, <<Len2:32, Payload2/binary>>}),
+           {ok, {binary, Recv}} = hackney:ws_recv(Ws, 5000),
+           ?assertEqual(<<Len2:32, Payload2/binary>>, Recv),
+
+           hackney:ws_close(Ws)
+       end}
+     ]}.
+
+%%====================================================================
 %% Binary/text frame type tests
 %%====================================================================
 
