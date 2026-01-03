@@ -20,6 +20,13 @@
          send_body/2, finish_send_body/1, start_response/1,
          setopts/2]).
 
+%% WebSocket API
+-export([ws_connect/1, ws_connect/2,
+         ws_send/2,
+         ws_recv/1, ws_recv/2,
+         ws_setopts/2,
+         ws_close/1, ws_close/2]).
+
 -export([redirect_location/1, location/1]).
 
 -export([get_version/0]).
@@ -369,6 +376,129 @@ pause_stream(ConnPid) when is_pid(ConnPid) ->
 -spec resume_stream(conn()) -> ok.
 resume_stream(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:resume_stream(ConnPid).
+
+%%====================================================================
+%% WebSocket API
+%%====================================================================
+
+%% @doc Connect to a WebSocket server.
+%% URL should use ws:// or wss:// scheme.
+%%
+%% Options:
+%%   - active: false | true | once (default false)
+%%   - headers: Extra headers for upgrade request [{Name, Value}]
+%%   - protocols: Sec-WebSocket-Protocol values [binary()]
+%%   - connect_timeout: Connection timeout in ms (default 8000)
+%%   - recv_timeout: Receive timeout in ms (default infinity)
+%%   - connect_options: Options passed to transport connect
+%%   - ssl_options: Additional SSL options
+%%
+%% Returns {ok, WsPid} on success, where WsPid is the hackney_ws process.
+%%
+%% Example:
+%%   {ok, Ws} = hackney:ws_connect("wss://echo.websocket.org/"),
+%%   ok = hackney:ws_send(Ws, {text, <<"Hello">>}),
+%%   {ok, {text, <<"Hello">>}} = hackney:ws_recv(Ws),
+%%   hackney:ws_close(Ws).
+-spec ws_connect(binary() | string()) -> {ok, pid()} | {error, term()}.
+ws_connect(URL) ->
+  ws_connect(URL, []).
+
+-spec ws_connect(binary() | string(), list()) -> {ok, pid()} | {error, term()}.
+ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
+  #hackney_url{
+    transport = Transport,
+    scheme = Scheme,
+    host = Host,
+    port = Port,
+    path = Path0,
+    qs = Query
+  } = hackney_url:parse_url(URL),
+
+  %% Validate scheme
+  case Scheme of
+    ws -> ok;
+    wss -> ok;
+    _ -> error({invalid_websocket_scheme, Scheme})
+  end,
+
+  %% Build path with query string
+  Path = case Query of
+    <<>> -> Path0;
+    _ -> <<Path0/binary, "?", Query/binary>>
+  end,
+
+  %% Build connection options
+  WsOpts = #{
+    host => Host,
+    port => Port,
+    transport => Transport,
+    path => Path,
+    connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
+    recv_timeout => proplists:get_value(recv_timeout, Options, infinity),
+    connect_options => proplists:get_value(connect_options, Options, []),
+    ssl_options => proplists:get_value(ssl_options, Options, []),
+    active => proplists:get_value(active, Options, false),
+    headers => normalize_ws_headers(proplists:get_value(headers, Options, [])),
+    protocols => proplists:get_value(protocols, Options, [])
+  },
+
+  %% Start WebSocket process and connect
+  case hackney_ws:start_link(WsOpts) of
+    {ok, WsPid} ->
+      Timeout = maps:get(connect_timeout, WsOpts),
+      case hackney_ws:connect(WsPid, Timeout) of
+        ok ->
+          {ok, WsPid};
+        {error, Reason} ->
+          catch exit(WsPid, shutdown),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Send a WebSocket frame.
+%% Frame types:
+%%   - {text, Data} - Text message
+%%   - {binary, Data} - Binary message
+%%   - ping | {ping, Data} - Ping frame
+%%   - pong | {pong, Data} - Pong frame
+%%   - close | {close, Code, Reason} - Close frame
+-spec ws_send(pid(), hackney_ws:ws_frame()) -> ok | {error, term()}.
+ws_send(WsPid, Frame) when is_pid(WsPid) ->
+  hackney_ws:send(WsPid, Frame).
+
+%% @doc Receive a WebSocket frame (passive mode only).
+%% Blocks until a frame is received or timeout.
+%% Returns {ok, Frame} or {error, Reason}.
+-spec ws_recv(pid()) -> {ok, hackney_ws:ws_frame()} | {error, term()}.
+ws_recv(WsPid) when is_pid(WsPid) ->
+  hackney_ws:recv(WsPid).
+
+-spec ws_recv(pid(), timeout()) -> {ok, hackney_ws:ws_frame()} | {error, term()}.
+ws_recv(WsPid, Timeout) when is_pid(WsPid) ->
+  hackney_ws:recv(WsPid, Timeout).
+
+%% @doc Set WebSocket options.
+%% Supported options: [{active, true | false | once}]
+-spec ws_setopts(pid(), list()) -> ok | {error, term()}.
+ws_setopts(WsPid, Opts) when is_pid(WsPid) ->
+  hackney_ws:setopts(WsPid, Opts).
+
+%% @doc Close WebSocket connection gracefully.
+-spec ws_close(pid()) -> ok.
+ws_close(WsPid) when is_pid(WsPid) ->
+  hackney_ws:close(WsPid).
+
+-spec ws_close(pid(), {integer(), binary()}) -> ok.
+ws_close(WsPid, {Code, Reason}) when is_pid(WsPid) ->
+  hackney_ws:close(WsPid, {Code, Reason}).
+
+%% @private Normalize WebSocket headers to {binary(), binary()} format
+normalize_ws_headers(Headers) ->
+  [{hackney_bstr:to_binary(Name), hackney_bstr:to_binary(Value)}
+   || {Name, Value} <- Headers].
 
 %%====================================================================
 %% Helpers
