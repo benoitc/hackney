@@ -724,11 +724,50 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
     false ->
       %% No proxy configured, direct connection
       connect(Transport, Host, Port, Options);
-    _ProxyConfig ->
-      %% Proxy configured - for now just connect directly
-      %% TODO: Implement full proxy support
-      ?report_debug("proxy configured but not fully implemented", []),
+    {connect, ProxyHost, ProxyPort, ProxyAuth} ->
+      %% HTTP CONNECT tunnel (for HTTPS through HTTP proxy)
+      connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
+    {socks5, _ProxyHost, _ProxyPort, _ProxyAuth} ->
+      %% SOCKS5 proxy - TODO: implement in Step 5
+      ?report_debug("socks5 proxy not yet implemented", []),
+      connect(Transport, Host, Port, Options);
+    {http, _ProxyHost, _ProxyPort, _ProxyAuth} ->
+      %% Simple HTTP proxy - TODO: implement in Step 6
+      ?report_debug("http proxy not yet implemented", []),
       connect(Transport, Host, Port, Options)
+  end.
+
+%% @doc Connect through HTTP CONNECT proxy (tunnel).
+%% Used for HTTPS requests through HTTP proxy.
+connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+  %% Build options for hackney_http_connect
+  ConnectOpts0 = [
+    {connect_host, Host},
+    {connect_port, Port},
+    {connect_transport, Transport}
+  ],
+  ConnectOpts1 = case ProxyAuth of
+    undefined -> ConnectOpts0;
+    {User, Pass} -> [{connect_user, User}, {connect_pass, Pass} | ConnectOpts0]
+  end,
+  %% Add SSL options if connecting to HTTPS target
+  ConnectOpts2 = case Transport of
+    hackney_ssl ->
+      SslOpts = proplists:get_value(ssl_options, Options, []),
+      [{ssl_options, SslOpts} | ConnectOpts1];
+    _ ->
+      ConnectOpts1
+  end,
+  %% Add other connection options
+  ConnectOpts = ConnectOpts2 ++ proplists:get_value(connect_options, Options, []),
+  Timeout = proplists:get_value(connect_timeout, Options, 8000),
+
+  case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
+    {ok, ProxySocket} ->
+      %% Start hackney_conn with the pre-established socket
+      start_conn_with_socket(Host, Port, Transport, ProxySocket, Options);
+    {error, Reason} ->
+      {error, Reason}
   end.
 
 %% @doc Extract proxy configuration from options.

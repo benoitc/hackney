@@ -370,3 +370,30 @@ start_conn_with_socket_test_() ->
        end}
      ]}.
 
+%% Tests for HTTP CONNECT proxy
+connect_proxy_test_() ->
+    {setup,
+     fun() ->
+         application:ensure_all_started(hackney),
+         ok
+     end,
+     fun(_) -> ok end,
+     [
+      {"Connect proxy with unreachable proxy returns error",
+       fun() ->
+           %% Try to connect through a proxy that doesn't exist
+           %% This verifies the connect proxy code path is exercised
+           Options = [{proxy, {connect, "127.0.0.1", 19999}}],
+           Result = hackney:request(get, <<"https://example.com">>, [], <<>>, Options),
+           ?assertMatch({error, _}, Result)
+       end},
+      {"Connect proxy via URL for HTTPS target",
+       fun() ->
+           %% When target is HTTPS and proxy is HTTP URL, should use connect type
+           %% Verify by checking that connection fails to unreachable proxy
+           Options = [{proxy, "http://127.0.0.1:19998"}],
+           Result = hackney:request(get, <<"https://example.com">>, [], <<>>, Options),
+           ?assertMatch({error, _}, Result)
+       end}
+     ]}.
+
