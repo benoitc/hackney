@@ -727,10 +727,9 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
     {connect, ProxyHost, ProxyPort, ProxyAuth} ->
       %% HTTP CONNECT tunnel (for HTTPS through HTTP proxy)
       connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
-    {socks5, _ProxyHost, _ProxyPort, _ProxyAuth} ->
-      %% SOCKS5 proxy - TODO: implement in Step 5
-      ?report_debug("socks5 proxy not yet implemented", []),
-      connect(Transport, Host, Port, Options);
+    {socks5, ProxyHost, ProxyPort, ProxyAuth} ->
+      %% SOCKS5 proxy
+      connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
     {http, _ProxyHost, _ProxyPort, _ProxyAuth} ->
       %% Simple HTTP proxy - TODO: implement in Step 6
       ?report_debug("http proxy not yet implemented", []),
@@ -763,6 +762,43 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
+    {ok, ProxySocket} ->
+      %% Start hackney_conn with the pre-established socket
+      start_conn_with_socket(Host, Port, Transport, ProxySocket, Options);
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Connect through SOCKS5 proxy.
+connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+  %% Build options for hackney_socks5
+  Socks5Opts0 = [
+    {socks5_host, ProxyHost},
+    {socks5_port, ProxyPort},
+    {socks5_transport, Transport}
+  ],
+  Socks5Opts1 = case ProxyAuth of
+    undefined -> Socks5Opts0;
+    {User, Pass} -> [{socks5_user, User}, {socks5_pass, Pass} | Socks5Opts0]
+  end,
+  %% Add SSL options if connecting to HTTPS target
+  Socks5Opts2 = case Transport of
+    hackney_ssl ->
+      SslOpts = proplists:get_value(ssl_options, Options, []),
+      [{ssl_options, SslOpts} | Socks5Opts1];
+    _ ->
+      Socks5Opts1
+  end,
+  %% Add socks5_resolve option if specified
+  Socks5Opts3 = case proplists:get_value(socks5_resolve, Options) of
+    undefined -> Socks5Opts2;
+    Resolve -> [{socks5_resolve, Resolve} | Socks5Opts2]
+  end,
+  %% Add other connection options
+  Socks5Opts = Socks5Opts3 ++ proplists:get_value(connect_options, Options, []),
+  Timeout = proplists:get_value(connect_timeout, Options, 8000),
+
+  case hackney_socks5:connect(Host, Port, Socks5Opts, Timeout) of
     {ok, ProxySocket} ->
       %% Start hackney_conn with the pre-established socket
       start_conn_with_socket(Host, Port, Transport, ProxySocket, Options);

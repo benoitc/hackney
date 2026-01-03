@@ -397,3 +397,106 @@ connect_proxy_test_() ->
        end}
      ]}.
 
+%% Tests for SOCKS5 proxy
+socks5_proxy_test_() ->
+    {setup,
+     fun() ->
+         application:ensure_all_started(hackney),
+         ok
+     end,
+     fun(_) -> ok end,
+     [
+      {"SOCKS5 proxy with tuple config returns error for unreachable proxy",
+       fun() ->
+           %% Try to connect through a SOCKS5 proxy that doesn't exist
+           Options = [{proxy, {socks5, "127.0.0.1", 19997}}],
+           Result = hackney:request(get, <<"http://example.com">>, [], <<>>, Options),
+           ?assertMatch({error, _}, Result)
+       end},
+      {"SOCKS5 proxy via URL",
+       fun() ->
+           %% Verify socks5:// URL is parsed and used
+           Options = [{proxy, "socks5://127.0.0.1:19996"}],
+           Result = hackney:request(get, <<"http://example.com">>, [], <<>>, Options),
+           ?assertMatch({error, _}, Result)
+       end},
+      {"SOCKS5 proxy with auth",
+       fun() ->
+           %% Verify socks5 with authentication
+           Options = [
+               {proxy, {socks5, "127.0.0.1", 19995}},
+               {socks5_user, <<"testuser">>},
+               {socks5_pass, <<"testpass">>}
+           ],
+           Result = hackney:request(get, <<"http://example.com">>, [], <<>>, Options),
+           ?assertMatch({error, _}, Result)
+       end}
+     ]}.
+
+%% Integration tests with mock proxy servers
+-define(TEST_PORT, 8126).
+
+proxy_integration_test_() ->
+    {setup,
+     fun setup_integration/0,
+     fun teardown_integration/1,
+     fun(State) ->
+         [
+          {"HTTP CONNECT proxy to HTTP target", {timeout, 30, fun() -> test_connect_proxy_http(State) end}},
+          {"SOCKS5 proxy to HTTP target", {timeout, 30, fun() -> test_socks5_proxy_http(State) end}}
+         ]
+     end}.
+
+setup_integration() ->
+    error_logger:tty(false),
+    {ok, _} = application:ensure_all_started(cowboy),
+    {ok, _} = application:ensure_all_started(hackney),
+    %% Start test HTTP server
+    Host = '_',
+    Routes = [{"/[...]", test_http_resource, []}],
+    Dispatch = cowboy_router:compile([{Host, Routes}]),
+    {ok, _} = cowboy:start_clear(proxy_test_server, [{port, ?TEST_PORT}],
+                                  #{env => #{dispatch => Dispatch}}),
+    %% Start mock proxies
+    {ok, ConnectPid, ConnectPort} = mock_proxy_server:start_connect_proxy(),
+    {ok, Socks5Pid, Socks5Port} = mock_proxy_server:start_socks5_proxy(),
+    #{connect_proxy => {ConnectPid, ConnectPort},
+      socks5_proxy => {Socks5Pid, Socks5Port}}.
+
+teardown_integration(#{connect_proxy := {ConnectPid, _}, socks5_proxy := {Socks5Pid, _}}) ->
+    mock_proxy_server:stop(ConnectPid),
+    mock_proxy_server:stop(Socks5Pid),
+    cowboy:stop_listener(proxy_test_server),
+    error_logger:tty(true),
+    ok.
+
+test_connect_proxy_http(#{connect_proxy := {_, ProxyPort}}) ->
+    %% Use explicit connect proxy to reach our test server
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    Options = [{proxy, {connect, "127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, Status, _Headers, ConnPid} ->
+            {ok, Body} = hackney:body(ConnPid),
+            hackney:close(ConnPid),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(byte_size(Body) > 0);
+        {error, Reason} ->
+            ct:pal("Connect proxy failed: ~p~n", [Reason]),
+            error({connect_proxy_failed, Reason})
+    end.
+
+test_socks5_proxy_http(#{socks5_proxy := {_, ProxyPort}}) ->
+    %% Use SOCKS5 proxy to reach our test server
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    Options = [{proxy, {socks5, "127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, Status, _Headers, ConnPid} ->
+            {ok, Body} = hackney:body(ConnPid),
+            hackney:close(ConnPid),
+            ?assert(Status >= 200 andalso Status < 400),
+            ?assert(byte_size(Body) > 0);
+        {error, Reason} ->
+            ct:pal("SOCKS5 proxy failed: ~p~n", [Reason]),
+            error({socks5_proxy_failed, Reason})
+    end.
+
