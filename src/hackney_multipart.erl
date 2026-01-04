@@ -140,8 +140,8 @@ boundary() ->
 
 %% @doc create a generic multipart header
 mp_header(Headers, Boundary) ->
-    HeadersObj = hackney_headers_new:from_list(Headers),
-    BinHeaders = hackney_headers_new:to_binary(HeadersObj),
+    HeadersObj = hackney_headers:from_list(Headers),
+    BinHeaders = hackney_headers:to_binary(HeadersObj),
     <<"--", Boundary/binary, "\r\n", BinHeaders/binary >>.
 
 %% @doc return the boundary ending a multipart
@@ -150,8 +150,8 @@ mp_eof(Boundary) ->
 
 %% @doc create a part
 part(Content, Headers, Boundary) ->
-    HeadersObj = hackney_headers_new:from_list(Headers),
-    BinHeaders = hackney_headers_new:to_binary(HeadersObj),
+    HeadersObj = hackney_headers:from_list(Headers),
+    BinHeaders = hackney_headers:to_binary(HeadersObj),
     <<"--", Boundary/binary, "\r\n", BinHeaders/binary, Content/binary,
       "\r\n" >>.
 
@@ -446,14 +446,14 @@ parse_headers(Bin, Pattern, Acc) ->
             parse_headers(Rest, Pattern, [{Name2, Value} | Acc]);
         {ok, http_eoh, Rest} ->
             Headers = lists:reverse(Acc),
-            HeadersObj = hackney_headers_new:from_list(Headers),
-            ContentType = hackney_headers_new:get_value(<<"content-type">>, HeadersObj),
+            HeadersObj = hackney_headers:from_list(Headers),
+            ContentType = hackney_headers:get_value(<<"content-type">>, HeadersObj),
             case ContentType of
                 undefined ->
                     Fun = fun () -> parse_body(Rest, Pattern) end,
                     {headers, Headers, Fun};
                 CT ->
-                    case hackney_headers_new:parse_content_type(CT) of
+                    case hackney_headers:parse_content_type(CT) of
                         {<<"multipart">>, _, Params} ->
                             {_, Boundary} = lists:keyfind(<<"boundary">>, 1, Params),
                             Parser = hackney_multipart:parser(Boundary),

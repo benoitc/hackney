@@ -50,8 +50,8 @@ empty_clen(_) ->
     Headers = [],
     Opts = [with_body],
     {ok, 200, RespHeaders0, Body} = hackney:request(get, URL, Headers, <<>>, Opts),
-    RespHeaders1 = hackney_headers_new:from_list(RespHeaders0),
+    RespHeaders1 = hackney_headers:from_list(RespHeaders0),
     %% Cowboy 2.x uses chunked encoding for streaming, so we just verify no Content-Length
-    undefined = hackney_headers_new:get_value(<<"content-length">>, RespHeaders1),
+    undefined = hackney_headers:get_value(<<"content-length">>, RespHeaders1),
     ?_assertEqual( <<"this is a body">>, Body).
 

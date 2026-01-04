@@ -64,8 +64,8 @@ handle_connection_close() ->
 
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     Dict = receive_response(ClientRef, orddict:new(), 2000),
-    Headers = hackney_headers_new:from_list(orddict:fetch(headers, Dict)),
-    CloseHeader = hackney_headers_new:get_value(<<"connection">>, Headers),
+    Headers = hackney_headers:from_list(orddict:fetch(headers, Dict)),
+    CloseHeader = hackney_headers:get_value(<<"connection">>, Headers),
     %% Verify response completed successfully with Connection: close header
     %% In process-per-connection model, async returns the connection PID
     %% After Connection: close, process should terminate

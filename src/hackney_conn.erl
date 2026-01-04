@@ -640,13 +640,13 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
     %% Send only headers, then return ok and wait for body chunks
     #conn_data{host = Host, port = Port, transport = Transport, socket = Socket} = Data,
     %% Build request line and headers (with Transfer-Encoding: chunked for streaming)
-    HeadersObj = hackney_headers_new:from_list(Headers),
+    HeadersObj = hackney_headers:from_list(Headers),
     %% Add Transfer-Encoding: chunked if not present
-    HeadersWithTE = case hackney_headers_new:get_value(<<"transfer-encoding">>, HeadersObj) of
-        undefined -> hackney_headers_new:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
+    HeadersWithTE = case hackney_headers:get_value(<<"transfer-encoding">>, HeadersObj) of
+        undefined -> hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
         _ -> HeadersObj
     end,
-    HeadersList = hackney_headers_new:to_list(HeadersWithTE),
+    HeadersList = hackney_headers:to_list(HeadersWithTE),
     RequestLine = build_request_line(Method, Path),
     HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- HeadersList],
     HeadersData = [RequestLine, HeaderLines, <<"\r\n">>],
@@ -733,7 +733,7 @@ receiving(internal, do_recv_response_async, Data) ->
                follow_redirect = FollowRedirect, method = Method} = Data,
     case recv_status_and_headers(DataWithParser) of
         {ok, Status, Headers, NewData} ->
-            HeadersList = hackney_headers_new:to_list(Headers),
+            HeadersList = hackney_headers:to_list(Headers),
             %% Check if this is a redirect and we should handle it
             case maybe_handle_async_redirect(Status, Method, Headers, FollowRedirect) of
                 {redirect, Location} ->
@@ -1067,7 +1067,7 @@ reset_async(Data) ->
 should_close_connection(#conn_data{response_headers = undefined}) ->
     false;
 should_close_connection(#conn_data{response_headers = Headers}) ->
-    case hackney_headers_new:get_value(<<"connection">>, Headers) of
+    case hackney_headers:get_value(<<"connection">>, Headers) of
         undefined -> false;
         Value -> hackney_bstr:to_lower(Value) =:= <<"close">>
     end.
@@ -1103,7 +1103,7 @@ do_recv_response_impl(Data, IncludePid) ->
     case recv_status_and_headers(DataWithParser) of
         {ok, Status, Headers, NewData} ->
             From = NewData#conn_data.request_from,
-            HeadersList = hackney_headers_new:to_list(Headers),
+            HeadersList = hackney_headers:to_list(Headers),
             Reply = case IncludePid of
                 true -> {ok, Status, HeadersList, self()};
                 false -> {ok, Status, HeadersList}
@@ -1165,13 +1165,13 @@ compute_netloc(Host, Port, Transport) ->
 %% @private Build request headers
 build_headers(_Method, Headers0, Body, Netloc) ->
     %% Start with user headers
-    Headers1 = hackney_headers_new:new(Headers0),
+    Headers1 = hackney_headers:new(Headers0),
 
     %% Add Host header if not present
-    {_, Headers2} = hackney_headers_new:store_new(<<"Host">>, Netloc, Headers1),
+    {_, Headers2} = hackney_headers:store_new(<<"Host">>, Netloc, Headers1),
 
     %% Add User-Agent if not present
-    {_, Headers3} = hackney_headers_new:store_new(<<"User-Agent">>, default_ua(), Headers2),
+    {_, Headers3} = hackney_headers:store_new(<<"User-Agent">>, default_ua(), Headers2),
 
     %% Add Content-Length for bodies
     case Body of
@@ -1179,17 +1179,17 @@ build_headers(_Method, Headers0, Body, Netloc) ->
         [] -> Headers3;
         _ when is_binary(Body) ->
             Len = byte_size(Body),
-            case hackney_headers_new:is_key(<<"content-length">>, Headers3) of
+            case hackney_headers:is_key(<<"content-length">>, Headers3) of
                 true -> Headers3;
                 false ->
-                    hackney_headers_new:store(<<"Content-Length">>, integer_to_binary(Len), Headers3)
+                    hackney_headers:store(<<"Content-Length">>, integer_to_binary(Len), Headers3)
             end;
         _ when is_list(Body) ->
             Len = iolist_size(Body),
-            case hackney_headers_new:is_key(<<"content-length">>, Headers3) of
+            case hackney_headers:is_key(<<"content-length">>, Headers3) of
                 true -> Headers3;
                 false ->
-                    hackney_headers_new:store(<<"Content-Length">>, integer_to_binary(Len), Headers3)
+                    hackney_headers:store(<<"Content-Length">>, integer_to_binary(Len), Headers3)
             end;
         _ ->
             %% Streaming body - expect user to have set Content-Length or Transfer-Encoding
@@ -1198,7 +1198,7 @@ build_headers(_Method, Headers0, Body, Netloc) ->
 
 %% @private Convert headers to binary
 headers_to_binary(Headers) ->
-    hackney_headers_new:to_binary(Headers).
+    hackney_headers:to_binary(Headers).
 
 %% @private Build request line
 build_request_line(Method, Path) ->
@@ -1255,7 +1255,7 @@ recv_status(#conn_data{parser = Parser, buffer = Buffer} = Data) ->
                 version = Version,
                 status = Status,
                 reason = Reason
-            }, hackney_headers_new:new());
+            }, hackney_headers:new());
         {error, Reason} ->
             {error, Reason}
     end.
@@ -1267,7 +1267,7 @@ recv_headers(#conn_data{parser = Parser} = Data, Headers) ->
                 {ok, RecvData} ->
                     case hackney_http:execute(NewParser, RecvData) of
                         {header, {Key, Value}, NewParser2} ->
-                            Headers2 = hackney_headers_new:append(Key, Value, Headers),
+                            Headers2 = hackney_headers:append(Key, Value, Headers),
                             recv_headers(Data#conn_data{parser = NewParser2}, Headers2);
                         {headers_complete, NewParser2} ->
                             {ok, Data#conn_data.status, Headers, Data#conn_data{parser = NewParser2}};
@@ -1280,7 +1280,7 @@ recv_headers(#conn_data{parser = Parser} = Data, Headers) ->
                     {error, Reason}
             end;
         {header, {Key, Value}, NewParser} ->
-            Headers2 = hackney_headers_new:append(Key, Value, Headers),
+            Headers2 = hackney_headers:append(Key, Value, Headers),
             recv_headers(Data#conn_data{parser = NewParser}, Headers2);
         {headers_complete, NewParser} ->
             {ok, Data#conn_data.status, Headers, Data#conn_data{parser = NewParser}};
@@ -1415,13 +1415,13 @@ do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
 maybe_handle_async_redirect(Status, Method, Headers, true) when
         Status =:= 301; Status =:= 302; Status =:= 307; Status =:= 308 ->
     %% Redirect status - get location
-    case hackney_headers_new:get_value(<<"location">>, Headers) of
+    case hackney_headers:get_value(<<"location">>, Headers) of
         undefined -> no_redirect;
         Location -> {redirect, Location}
     end;
 maybe_handle_async_redirect(303, <<"POST">>, Headers, true) ->
     %% 303 See Other for POST - should redirect as GET
-    case hackney_headers_new:get_value(<<"location">>, Headers) of
+    case hackney_headers:get_value(<<"location">>, Headers) of
         undefined -> no_redirect;
         Location -> {see_other, Location}
     end;

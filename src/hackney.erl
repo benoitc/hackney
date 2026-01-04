@@ -552,9 +552,9 @@ cookies(Headers) ->
 
 %% @doc Get redirect location from headers.
 redirect_location(Headers) when is_list(Headers) ->
-  redirect_location(hackney_headers_new:from_list(Headers));
+  redirect_location(hackney_headers:from_list(Headers));
 redirect_location(Headers) ->
-  hackney_headers_new:get_value(<<"location">>, Headers).
+  hackney_headers:get_value(<<"location">>, Headers).
 
 %% @doc Get the final URL after following redirects.
 %% First checks the stored location (set after redirects),
@@ -578,7 +578,7 @@ location(ConnPid) when is_pid(ConnPid) ->
 
 do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
   %% Build headers
-  Headers1 = hackney_headers_new:new(Headers0),
+  Headers1 = hackney_headers:new(Headers0),
   Headers2 = add_host_header(URL, Headers1),
 
   %% Add default headers (User-Agent, Authorization, Cookies)
@@ -625,7 +625,7 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
                            FollowRedirect, MaxRedirect, RedirectCount) ->
   %% Handle body encoding
   {FinalHeaders, FinalBody} = encode_body(Headers, Body, Options),
-  HeadersList = hackney_headers_new:to_list(FinalHeaders),
+  HeadersList = hackney_headers:to_list(FinalHeaders),
 
   %% Check if this is a streaming body request
   case FinalBody of
@@ -741,7 +741,7 @@ resolve_redirect_url(CurrentURL, Location) when is_binary(Location) ->
 async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
   %% Handle body encoding
   {FinalHeaders, FinalBody} = encode_body(Headers, Body, []),
-  HeadersList = hackney_headers_new:to_list(FinalHeaders),
+  HeadersList = hackney_headers:to_list(FinalHeaders),
 
   case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode, StreamTo, FollowRedirect) of
     {ok, Ref} ->
@@ -756,8 +756,8 @@ encode_body(Headers, [], _Options) ->
   {Headers, <<>>};
 encode_body(Headers, {form, KVs}, _Options) ->
   {CLen, CType, EncodedBody} = encode_form(KVs),
-  Headers1 = hackney_headers_new:store(<<"Content-Type">>, CType, Headers),
-  Headers2 = hackney_headers_new:store(<<"Content-Length">>, integer_to_binary(CLen), Headers1),
+  Headers1 = hackney_headers:store(<<"Content-Type">>, CType, Headers),
+  Headers2 = hackney_headers:store(<<"Content-Length">>, integer_to_binary(CLen), Headers1),
   {Headers2, EncodedBody};
 encode_body(Headers, {multipart, Parts}, _Options) ->
   %% Encode multipart body
@@ -765,13 +765,13 @@ encode_body(Headers, {multipart, Parts}, _Options) ->
   {MpBody, MpSize} = hackney_multipart:encode_form(Parts, Boundary),
   %% Add Content-Type with boundary
   ContentType = <<"multipart/form-data; boundary=", Boundary/binary>>,
-  Headers1 = hackney_headers_new:store(<<"Content-Type">>, ContentType, Headers),
-  Headers2 = hackney_headers_new:store(<<"Content-Length">>, integer_to_binary(MpSize), Headers1),
+  Headers1 = hackney_headers:store(<<"Content-Type">>, ContentType, Headers),
+  Headers2 = hackney_headers:store(<<"Content-Length">>, integer_to_binary(MpSize), Headers1),
   {Headers2, MpBody};
 encode_body(Headers, Body, _Options) when is_binary(Body) ->
-  case hackney_headers_new:get_value(<<"content-length">>, Headers) of
+  case hackney_headers:get_value(<<"content-length">>, Headers) of
     undefined ->
-      Headers1 = hackney_headers_new:store(<<"Content-Length">>, integer_to_binary(byte_size(Body)), Headers),
+      Headers1 = hackney_headers:store(<<"Content-Length">>, integer_to_binary(byte_size(Body)), Headers),
       {Headers1, Body};
     _ ->
       {Headers, Body}
@@ -793,13 +793,13 @@ add_host_header(#hackney_url{transport=Transport, netloc=Netloc}, Headers) ->
                 hackney_local_tcp -> hackney_url:urlencode(Netloc);
                 _ -> Netloc
               end,
-  {_, Headers1} = hackney_headers_new:store_new(<<"Host">>, HostValue, Headers),
+  {_, Headers1} = hackney_headers:store_new(<<"Host">>, HostValue, Headers),
   Headers1.
 
 %% Add default headers: User-Agent, Authorization (basic auth), Cookies
 add_default_headers(Headers, Options, URL) ->
   %% Add User-Agent
-  {_, Headers1} = hackney_headers_new:store_new(<<"User-Agent">>, default_ua(), Headers),
+  {_, Headers1} = hackney_headers:store_new(<<"User-Agent">>, default_ua(), Headers),
 
   %% Add basic auth if present
   Headers2 = case proplists:get_value(basic_auth, Options) of
@@ -835,7 +835,7 @@ add_basic_auth_header(User, Pwd, Headers) ->
   User1 = hackney_bstr:to_binary(User),
   Pwd1 = hackney_bstr:to_binary(Pwd),
   Credentials = base64:encode(<<User1/binary, ":", Pwd1/binary>>),
-  hackney_headers_new:store(<<"Authorization">>, <<"Basic ", Credentials/binary>>, Headers).
+  hackney_headers:store(<<"Authorization">>, <<"Basic ", Credentials/binary>>, Headers).
 
 add_cookies_header([], Headers) ->
   Headers;
@@ -844,10 +844,10 @@ add_cookies_header(Cookies, Headers) when is_list(Cookies) ->
   CookieStr = format_cookies(Cookies),
   case CookieStr of
     <<>> -> Headers;
-    _ -> hackney_headers_new:store(<<"Cookie">>, CookieStr, Headers)
+    _ -> hackney_headers:store(<<"Cookie">>, CookieStr, Headers)
   end;
 add_cookies_header(Cookie, Headers) when is_binary(Cookie) ->
-  hackney_headers_new:store(<<"Cookie">>, Cookie, Headers).
+  hackney_headers:store(<<"Cookie">>, Cookie, Headers).
 
 format_cookies([]) ->
   <<>>;

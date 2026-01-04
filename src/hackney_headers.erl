@@ -3,7 +3,7 @@
 %%% This file is part of hackney_lib released under the Apache 2 license.
 %%% See the NOTICE for more information.
 
--module(hackney_headers_new).
+-module(hackney_headers).
 -author("benoitc").
 
 %% API

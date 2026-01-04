@@ -50,7 +50,7 @@ The following modules have been **removed** (functionality moved to `hackney_con
 | `hackney_response` | Response parsing moved to `hackney_conn` |
 | `hackney_stream` | Async streaming moved to `hackney_conn` |
 | `hackney_pool_handler` | Pool interface simplified |
-| `hackney_headers` | Use `hackney_headers_new` instead |
+| `hackney_headers` | Renamed from `hackney_headers_new` |
 
 #### Removed Features (Not Yet Reimplemented)
 
@@ -337,7 +337,7 @@ systems using URL as signature or in an hash.
 - doc: document self-signed certificate usage
 - bump `ssl_verify_fun` to 1.1.5
 - fix: don't use default pool if set to false
-- fix: `hackney_headers_new:store/3`  fix value appending to a list
+- fix: `hackney_headers:store/3`  fix value appending to a list
 - fix: miscellaneous specs
 - doc: miscellaneous improvements
 
