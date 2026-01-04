@@ -17,7 +17,7 @@ start() ->
     Host = '_',
     Resource = {"/mp", upload_resource, []},
     Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-    cowboy:start_clear(test_server, [{port, 8123}], #{env => #{dispatch => Dispatch}}).
+    cowboy:start_clear(test_server, [{port, 8125}], #{env => #{dispatch => Dispatch}}).
 
 stop({ok, _Pid}) ->
     cowboy:stop_listener(test_server),
@@ -28,17 +28,20 @@ stop({ok, _Pid}) ->
 
 multipart_post() ->
     fun() ->
-        URL = <<"http://localhost:8123/mp">>,
+        URL = <<"http://localhost:8125/mp">>,
         Headers = [],
         Parts = [
             {<<"part1">>, <<"foo">>},
             {<<"part2">>, <<"bar">>},
             {<<"part3">>, <<"baz">>}],
-        case hackney:request(post, URL, Headers, {multipart, Parts}, []) of
-            {ok, Code, _Headers, Ref} when code >= 200, Code < 300 ->
+        %% Use {pool, false} to avoid pool conflicts with other tests
+        case hackney:request(post, URL, Headers, {multipart, Parts}, [{pool, false}]) of
+            {ok, Code, _Headers, Ref} when Code >= 200, Code < 300 ->
                 {ok, Body} = hackney:body(Ref),
                 hackney:close(Ref),
-                ?assertEqual(Parts, binary_to_term(Body))
+                ?assertEqual(Parts, binary_to_term(Body));
+            {error, Reason} ->
+                ?assertEqual(ok, {error, Reason})
         end
     end.
 

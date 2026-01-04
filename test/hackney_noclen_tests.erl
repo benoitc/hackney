@@ -39,14 +39,14 @@ start() ->
   Host = '_',
   Resource = {"/empty", empty_clen_resource, []},
   Dispatch = cowboy_router:compile([{Host, [Resource]}]),
-  cowboy:start_clear(test_empty_clen_server, [{port, 8123}], #{env => #{dispatch => Dispatch}}).
+  cowboy:start_clear(test_empty_clen_server, [{port, 8124}], #{env => #{dispatch => Dispatch}}).
 
 stop(_) ->
   ok = cowboy:stop_listener(test_empty_clen_server),
   ok.
 
 empty_clen(_) ->
-    URL = <<"http://localhost:8123/empty/">>,
+    URL = <<"http://localhost:8124/empty/">>,
     Headers = [],
     Opts = [with_body],
     {ok, 200, RespHeaders0, Body} = hackney:request(get, URL, Headers, <<>>, Opts),
