@@ -35,7 +35,7 @@ ssl_opts(Host, Options) ->
     [] ->
       ssl_opts_1(Host, Options);
     SSLOpts ->
-      merge_ssl_opts(Host, SSLOpts)
+      merge_ssl_opts(Host, SSLOpts, Options)
   end.
 
 ssl_opts_1(Host, Options) ->
@@ -47,12 +47,20 @@ ssl_opts_1(Host, Options) ->
       check_hostname_opts(Host) ++ cipher_opts()
   end.
 
-merge_ssl_opts(Host, OverrideOpts) ->
+merge_ssl_opts(Host, OverrideOpts, Options) ->
   VerifyHost = case proplists:get_value(server_name_indication, OverrideOpts, disable) of
     disable -> Host;
     SNI -> SNI
   end,
-  DefaultOpts = ssl_opts_1(VerifyHost, OverrideOpts),
+  %% Check insecure from top-level Options first, then fall back to ssl_options (fixes #786)
+  Insecure = proplists:get_value(insecure, Options,
+               proplists:get_value(insecure, OverrideOpts, false)),
+  DefaultOpts = case Insecure of
+    true ->
+      [{verify, verify_none} | cipher_opts()];
+    false ->
+      check_hostname_opts(VerifyHost) ++ cipher_opts()
+  end,
   MergedOpts = orddict:merge(fun(_K, _V1, V) -> V end,
                              orddict:from_list(DefaultOpts),
                              orddict:from_list(OverrideOpts)),

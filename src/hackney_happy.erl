@@ -90,8 +90,11 @@ do_connect_2(Pid, MRef, Timeout) ->
     {'DOWN', MRef, _Type, _Pid, {happy_connect, OK}} ->
       ?report_trace("happy_connect ~p", [OK]),
       OK;
+    {'DOWN', MRef, _Type, _Pid, {error, _} = Error} ->
+      Error;
     {'DOWN', MRef, _Type, _Pid, Info} ->
-      Info
+      %% Wrap unexpected exit reasons in error tuple
+      {error, Info}
   after Timeout ->
           connect_gc(Pid, MRef),
           {error, connect_timeout}
