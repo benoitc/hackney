@@ -15,6 +15,9 @@
          finish_request/2,
          get_metrics_engine/0]).
 
+%% Backward compatibility API
+-export([get_state/1, async_response_pid/1]).
+
 %% gen_server API
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -42,6 +45,42 @@ finish_request(Host, StartTime) ->
 -spec get_metrics_engine() -> module().
 get_metrics_engine() ->
     hackney_metrics:get_engine().
+
+%% @doc Check the state of a connection (backward compatibility).
+%% In the old architecture, this tracked request state.
+%% In the new architecture, we simply check if the connection process is alive.
+%% Returns `req_not_found' if the process is dead, or the connection state.
+-spec get_state(pid() | term()) -> req_not_found | term().
+get_state(ConnPid) when is_pid(ConnPid) ->
+    case is_process_alive(ConnPid) of
+        false -> req_not_found;
+        true ->
+            case hackney_conn:get_state(ConnPid) of
+                {ok, State} -> State;
+                _ -> req_not_found
+            end
+    end;
+get_state(_) ->
+    req_not_found.
+
+%% @doc Check if a connection is in async mode (backward compatibility).
+%% In the old architecture, this returned the async response process PID.
+%% In the new architecture, we check if the connection process is in async mode.
+%% Returns `{error, req_not_async}' if not in async mode.
+-spec async_response_pid(pid() | term()) -> {ok, pid()} | {error, req_not_async}.
+async_response_pid(ConnPid) when is_pid(ConnPid) ->
+    case is_process_alive(ConnPid) of
+        false -> {error, req_not_async};
+        true ->
+            case hackney_conn:get_state(ConnPid) of
+                {ok, State} when State =:= receiving; State =:= streaming ->
+                    {ok, ConnPid};
+                _ ->
+                    {error, req_not_async}
+            end
+    end;
+async_response_pid(_) ->
+    {error, req_not_async}.
 
 %%====================================================================
 %% gen_server callbacks

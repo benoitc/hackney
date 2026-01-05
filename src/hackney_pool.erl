@@ -156,15 +156,24 @@ child_spec(Name, Options0) ->
 
 %% @doc get the number of connections in the pool
 count(Name) ->
-    gen_server:call(find_pool(Name), count).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, count)
+    end.
 
 %% @doc get the number of connections in the pool for `{Host, Port, Transport}'
 count(Name, Key) ->
-    gen_server:call(find_pool(Name), {count, Key}).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, {count, Key})
+    end.
 
 %% @doc get max pool size
 max_connections(Name) ->
-    gen_server:call(find_pool(Name), max_connections).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, max_connections)
+    end.
 
 %% @doc change the pool size
 set_max_connections(Name, NewSize) ->
@@ -172,7 +181,10 @@ set_max_connections(Name, NewSize) ->
 
 %% @doc get timeout
 timeout(Name) ->
-    gen_server:call(find_pool(Name), timeout).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, timeout)
+    end.
 
 %% @doc change the connection timeout
 set_timeout(Name, NewTimeout) ->

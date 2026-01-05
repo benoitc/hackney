@@ -16,7 +16,7 @@ wait_request() ->
 request(WaitPid) ->
     wait_request(),
     Method = get,
-    Url = <<"https://httparrot.herokuapp.com/get">>,
+    Url = <<"https://httpbin.org/get">>,
     Headers = [{<<"Connection">>, <<"keep-alive">>}],
     Options = [{pool, default}, {proxy, ?PROXY_OPTS}],
     {ok, _, _Headers, Ref} = hackney:request(Method, Url, Headers, <<>>, Options),
