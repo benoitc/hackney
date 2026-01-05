@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% Tests for vendored hackney_cow_ws module
+%%% Tests for hackney_cow_ws module (in libs/)
 
 -module(hackney_cow_ws_tests).
 
