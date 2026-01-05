@@ -57,11 +57,15 @@
 
 
 -type url() :: #hackney_url{} | binary().
--export_type([url/0]).
-
-%% Connection handle is now the hackney_conn process PID
 -type conn() :: pid().
--export_type([conn/0]).
+-type request_ret() ::
+    {ok, integer(), list(), conn()} |     %% normal response with body to read
+    {ok, integer(), list(), binary()} |   %% with_body option
+    {ok, integer(), list()} |             %% HEAD request
+    {ok, reference()} |                   %% async mode
+    {ok, conn()} |                        %% streaming body mode (body = stream)
+    {error, term()}.
+-export_type([url/0, conn/0, request_ret/0]).
 
 %%====================================================================
 %% Connection API
@@ -191,19 +195,19 @@ setopts(ConnPid, Options) when is_pid(ConnPid) ->
 %%====================================================================
 
 %% @doc Make a request.
--spec request(url()) -> {ok, integer(), list(), conn()} | {ok, integer(), list()} | {error, term()}.
+-spec request(url()) -> request_ret().
 request(URL) ->
   request(get, URL).
 
--spec request(atom() | binary(), url()) -> {ok, integer(), list(), conn()} | {ok, integer(), list()} | {error, term()}.
+-spec request(atom() | binary(), url()) -> request_ret().
 request(Method, URL) ->
   request(Method, URL, [], <<>>, []).
 
--spec request(atom() | binary(), url(), list()) -> {ok, integer(), list(), conn()} | {ok, integer(), list()} | {error, term()}.
+-spec request(atom() | binary(), url(), list()) -> request_ret().
 request(Method, URL, Headers) ->
   request(Method, URL, Headers, <<>>, []).
 
--spec request(atom() | binary(), url(), list(), term()) -> {ok, integer(), list(), conn()} | {ok, integer(), list()} | {error, term()}.
+-spec request(atom() | binary(), url(), list(), term()) -> request_ret().
 request(Method, URL, Headers, Body) ->
   request(Method, URL, Headers, Body, []).
 
@@ -230,12 +234,10 @@ request(Method, URL, Headers, Body) ->
 %% - {ok, Status, Headers, ConnPid}: Success, use body/1 or stream_body/1 to get body
 %% - {ok, Status, Headers, Body}: Success with with_body option
 %% - {ok, Status, Headers}: HEAD request
+%% - {ok, Ref}: Async mode - use stream_next/1 to receive messages
+%% - {ok, ConnPid}: Streaming body mode (body = stream) - use send_body/2, finish_send_body/1
 %% - {error, Reason}: Error
--spec request(atom() | binary(), url(), list(), term(), list()) ->
-    {ok, integer(), list(), conn()} |
-    {ok, integer(), list(), binary()} |
-    {ok, integer(), list()} |
-    {error, term()}.
+-spec request(atom() | binary(), url(), list(), term(), list()) -> request_ret().
 request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
     fun hackney_url:pathencode/1),
