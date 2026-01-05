@@ -638,7 +638,7 @@ streaming_body(enter, connected, _Data) ->
 
 streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
     %% Send only headers, then return ok and wait for body chunks
-    #conn_data{host = Host, port = Port, transport = Transport, socket = Socket} = Data,
+    #conn_data{host = _Host, port = _Port, transport = Transport, socket = Socket} = Data,
     %% Build request line and headers (with Transfer-Encoding: chunked for streaming)
     HeadersObj = hackney_headers:from_list(Headers),
     %% Add Transfer-Encoding: chunked if not present
@@ -1423,7 +1423,7 @@ do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
     {next_state, sending, NewData, [{next_event, internal, {send_request_async, Method, Path, Headers, Body}}]}.
 
 %% @private Check if response is a redirect that should be handled
-maybe_handle_async_redirect(Status, Method, Headers, true) when
+maybe_handle_async_redirect(Status, _Method, Headers, true) when
         Status =:= 301; Status =:= 302; Status =:= 307; Status =:= 308 ->
     %% Redirect status - get location
     case hackney_headers:get_value(<<"location">>, Headers) of
