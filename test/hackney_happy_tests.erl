@@ -6,221 +6,212 @@
 -module(hackney_happy_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-%% Tests for connect/3 and connect/4 using the Happy Eyeballs algorithm
-%% These tests verify connection behavior with various address formats
+-behaviour(ranch_protocol).
+-export([start_link/4]).
 
-%% connect/3 with IPv4 tuple address
+%% Ranch protocol - just accept and hold connection open
+start_link(Ref, _Socket, Transport, _Opts) ->
+    Pid = spawn_link(fun() -> init(Ref, Transport) end),
+    {ok, Pid}.
+
+init(Ref, Transport) ->
+    {ok, Socket} = ranch:handshake(Ref),
+    loop(Transport, Socket).
+
+loop(Transport, Socket) ->
+    case Transport:recv(Socket, 0, 5000) of
+        {ok, _Data} -> loop(Transport, Socket);
+        {error, closed} -> ok;
+        {error, _} -> ok
+    end.
+
+%% Tests for connect/3 and connect/4 using the Happy Eyeballs algorithm
+
 connect_ipv4_tuple_test_() ->
     {setup,
-     fun() -> start_test_server(inet) end,
-     fun(Port) -> stop_test_server(Port) end,
-     fun(Port) ->
-         [
-            {"connect to IPv4 tuple address",
-             fun() ->
-                 Result = hackney_happy:connect({127,0,0,1}, Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+     fun() -> start_ranch(inet) end,
+     fun(Ref) -> stop_ranch(Ref) end,
+     fun(Ref) ->
+         Port = ranch:get_port(Ref),
+         [{"connect to IPv4 tuple address",
+           fun() ->
+               Result = hackney_happy:connect({127,0,0,1}, Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect/3 with IPv6 tuple address (loopback)
 connect_ipv6_tuple_test_() ->
     {setup,
      fun() ->
-         case start_test_server(inet6) of
-             Port when is_integer(Port) -> {ok, Port};
-             {error, _} -> skip  %% IPv6 may not be available
+         case start_ranch(inet6) of
+             {error, _} -> skip;
+             Ref -> {ok, Ref}
          end
      end,
      fun(skip) -> ok;
-        ({ok, Port}) -> stop_test_server(Port)
+        ({ok, Ref}) -> stop_ranch(Ref)
      end,
      fun(skip) ->
          [{"skip - IPv6 not available", fun() -> ok end}];
-        ({ok, Port}) ->
-         [
-            {"connect to IPv6 tuple address",
-             fun() ->
-                 Result = hackney_happy:connect({0,0,0,0,0,0,0,1}, Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+        ({ok, Ref}) ->
+         Port = ranch:get_port(Ref),
+         [{"connect to IPv6 tuple address",
+           fun() ->
+               Result = hackney_happy:connect({0,0,0,0,0,0,0,1}, Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect/3 with hostname string - localhost
-%% Note: "localhost" may resolve to IPv6 (::1) or IPv4 (127.0.0.1) depending on
-%% the system configuration. We start servers on both to handle either case.
 connect_localhost_test_() ->
     {setup,
-     fun() -> start_test_server_dual_stack() end,
-     fun({Port4, Port6Opt}) ->
-         stop_test_server(Port4),
-         case Port6Opt of
-             {ok, Port6} -> stop_test_server(Port6);
+     fun() -> start_ranch_dual_stack() end,
+     fun({Ref4, Ref6Opt}) ->
+         stop_ranch(Ref4),
+         case Ref6Opt of
+             {ok, Ref6} -> stop_ranch(Ref6);
              _ -> ok
          end
      end,
-     fun({Port, _Port6Opt}) ->
-         [
-            {"connect to localhost string",
-             fun() ->
-                 Result = hackney_happy:connect("localhost", Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end},
-            {"connect to 127.0.0.1 string",
-             fun() ->
-                 Result = hackney_happy:connect("127.0.0.1", Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+     fun({Ref4, _Ref6Opt}) ->
+         Port = ranch:get_port(Ref4),
+         [{"connect to localhost string",
+           fun() ->
+               Result = hackney_happy:connect("localhost", Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end},
+          {"connect to 127.0.0.1 string",
+           fun() ->
+               Result = hackney_happy:connect("127.0.0.1", Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect/4 with timeout
 connect_with_timeout_test_() ->
     {setup,
-     fun() -> start_test_server(inet) end,
-     fun(Port) -> stop_test_server(Port) end,
-     fun(Port) ->
-         [
-            {"connect with explicit timeout",
-             fun() ->
-                 Result = hackney_happy:connect("127.0.0.1", Port, [], 5000),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+     fun() -> start_ranch(inet) end,
+     fun(Ref) -> stop_ranch(Ref) end,
+     fun(Ref) ->
+         Port = ranch:get_port(Ref),
+         [{"connect with explicit timeout",
+           fun() ->
+               Result = hackney_happy:connect("127.0.0.1", Port, [], 5000),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect to non-existent host
 connect_failure_test_() ->
-    [
-        {"connect to invalid port fails",
-         fun() ->
-             %% Port 0 is not valid, should fail
-             Result = hackney_happy:connect("127.0.0.1", 1, [], 100),
-             ?assertMatch({error, _}, Result)
-         end},
-        {"connect to non-existent domain fails",
-         fun() ->
-             %% Non-existent domain should return nxdomain
-             Result = hackney_happy:connect("this.domain.does.not.exist.invalid", 80, [], 100),
-             ?assertMatch({error, _}, Result)
-         end}
-    ].
+    [{"connect to invalid port fails",
+      fun() ->
+          Result = hackney_happy:connect("127.0.0.1", 1, [], 100),
+          ?assertMatch({error, _}, Result)
+      end},
+     {"connect to non-existent domain fails",
+      fun() ->
+          Result = hackney_happy:connect("this.domain.does.not.exist.invalid", 80, [], 100),
+          ?assertMatch({error, _}, Result)
+      end}].
 
-%% connect with IPv4 string address
 connect_ipv4_string_test_() ->
     {setup,
-     fun() -> start_test_server(inet) end,
-     fun(Port) -> stop_test_server(Port) end,
-     fun(Port) ->
-         [
-            {"connect to IPv4 string address",
-             fun() ->
-                 Result = hackney_happy:connect("127.0.0.1", Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+     fun() -> start_ranch(inet) end,
+     fun(Ref) -> stop_ranch(Ref) end,
+     fun(Ref) ->
+         Port = ranch:get_port(Ref),
+         [{"connect to IPv4 string address",
+           fun() ->
+               Result = hackney_happy:connect("127.0.0.1", Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect with binary address
 connect_binary_address_test_() ->
     {setup,
-     fun() -> start_test_server(inet) end,
-     fun(Port) -> stop_test_server(Port) end,
-     fun(Port) ->
-         [
-            {"connect with binary IPv4 address",
-             fun() ->
-                 Result = hackney_happy:connect(<<"127.0.0.1">>, Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+     fun() -> start_ranch(inet) end,
+     fun(Ref) -> stop_ranch(Ref) end,
+     fun(Ref) ->
+         Port = ranch:get_port(Ref),
+         [{"connect with binary IPv4 address",
+           fun() ->
+               Result = hackney_happy:connect(<<"127.0.0.1">>, Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
-%% connect with bracketed IPv6 address
 connect_bracketed_ipv6_test_() ->
     {setup,
      fun() ->
-         case start_test_server(inet6) of
-             Port when is_integer(Port) -> {ok, Port};
-             {error, _} -> skip
+         case start_ranch(inet6) of
+             {error, _} -> skip;
+             Ref -> {ok, Ref}
          end
      end,
      fun(skip) -> ok;
-        ({ok, Port}) -> stop_test_server(Port)
+        ({ok, Ref}) -> stop_ranch(Ref)
      end,
      fun(skip) ->
          [{"skip - IPv6 not available", fun() -> ok end}];
-        ({ok, Port}) ->
-         [
-            {"connect with bracketed IPv6 address",
-             fun() ->
-                 Result = hackney_happy:connect("[::1]", Port, []),
-                 ?assertMatch({ok, _Socket}, Result),
-                 {ok, Socket} = Result,
-                 gen_tcp:close(Socket)
-             end}
-         ]
+        ({ok, Ref}) ->
+         Port = ranch:get_port(Ref),
+         [{"connect with bracketed IPv6 address",
+           fun() ->
+               Result = hackney_happy:connect("[::1]", Port, []),
+               ?assertMatch({ok, _Socket}, Result),
+               {ok, Socket} = Result,
+               gen_tcp:close(Socket)
+           end}]
      end}.
 
 %% Helper functions
 
-start_test_server(Family) ->
-    Opts = [Family, binary, {packet, 0}, {active, false}, {reuseaddr, true}],
-    case gen_tcp:listen(0, Opts) of
-        {ok, LSock} ->
-            {ok, Port} = inet:port(LSock),
-            %% Start an acceptor process
-            spawn(fun() -> accept_loop(LSock) end),
-            Port;
-        {error, Reason} ->
-            {error, Reason}
+ensure_ranch_started() ->
+    case application:ensure_all_started(ranch) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
     end.
 
-%% Start test servers on both IPv4 and IPv6 (same port) for localhost tests
-%% Returns {Port, IPv6Result} where IPv6Result is {ok, Port} or {error, Reason}
-start_test_server_dual_stack() ->
-    %% Start IPv4 server first to get a port
-    Port = start_test_server(inet),
-    %% Try to start IPv6 server on the same port
-    Opts6 = [inet6, binary, {packet, 0}, {active, false}, {reuseaddr, true}],
-    Port6Result = case gen_tcp:listen(Port, Opts6) of
-        {ok, LSock6} ->
-            spawn(fun() -> accept_loop(LSock6) end),
-            {ok, Port};
-        {error, Reason} ->
-            {error, Reason}
+start_ranch(inet) ->
+    ensure_ranch_started(),
+    Ref = make_ref(),
+    case ranch:start_listener(Ref, ranch_tcp, #{socket_opts => [{ip, {127,0,0,1}}, {port, 0}]},
+                              ?MODULE, []) of
+        {ok, _} -> Ref;
+        {error, _} = Err -> Err
+    end;
+start_ranch(inet6) ->
+    ensure_ranch_started(),
+    Ref = make_ref(),
+    case ranch:start_listener(Ref, ranch_tcp, #{socket_opts => [inet6, {ip, {0,0,0,0,0,0,0,1}}, {port, 0}]},
+                              ?MODULE, []) of
+        {ok, _} -> Ref;
+        {error, _} = Err -> Err
+    end.
+
+start_ranch_dual_stack() ->
+    Ref4 = start_ranch(inet),
+    Port = ranch:get_port(Ref4),
+    %% Try to start IPv6 on same port
+    Ref6 = make_ref(),
+    Ref6Result = case ranch:start_listener(Ref6, ranch_tcp,
+                                           #{socket_opts => [inet6, {ip, {0,0,0,0,0,0,0,1}}, {port, Port}]},
+                                           ?MODULE, []) of
+        {ok, _} -> {ok, Ref6};
+        {error, Reason} -> {error, Reason}
     end,
-    {Port, Port6Result}.
+    {Ref4, Ref6Result}.
 
-stop_test_server(_Port) ->
-    %% The server will stop when the socket is closed
-    ok.
-
-accept_loop(LSock) ->
-    case gen_tcp:accept(LSock, 1000) of
-        {ok, Sock} ->
-            gen_tcp:close(Sock),
-            accept_loop(LSock);
-        {error, timeout} ->
-            accept_loop(LSock);
-        {error, closed} ->
-            ok;
-        {error, _} ->
-            ok
-    end.
+stop_ranch(Ref) ->
+    ranch:stop_listener(Ref).
