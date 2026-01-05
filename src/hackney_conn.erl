@@ -64,7 +64,10 @@
     %% Pool management
     release_to_pool/1,
     verify_socket/1,
-    is_ready/1
+    is_ready/1,
+    %% Owner management
+    set_owner/2,
+    set_owner_async/2
 ]).
 
 %% gen_statem callbacks
@@ -343,6 +346,21 @@ close(Pid) ->
 release_to_pool(Pid) ->
     gen_statem:call(Pid, release_to_pool, 5000).
 
+%% @doc Set a new owner for this connection (sync).
+%% This updates the process being monitored - if the new owner crashes,
+%% the connection will terminate. Used by the pool when checking out
+%% a connection to a new requester.
+-spec set_owner(pid(), pid()) -> ok.
+set_owner(Pid, NewOwner) ->
+    gen_statem:call(Pid, {set_owner, NewOwner}, 5000).
+
+%% @doc Set a new owner for this connection (async).
+%% Same as set_owner/2 but non-blocking. Used when the caller cannot
+%% block (e.g., during pool checkin to avoid deadlock).
+-spec set_owner_async(pid(), pid()) -> ok.
+set_owner_async(Pid, NewOwner) ->
+    gen_statem:cast(Pid, {set_owner, NewOwner}).
+
 %% @doc Check if the connection's socket is still healthy.
 %% Returns ok if socket is open, {error, closed} otherwise.
 -spec verify_socket(pid()) -> ok | {error, closed | term()}.
@@ -362,8 +380,10 @@ is_ready(Pid) ->
 
 callback_mode() -> [state_functions, state_enter].
 
-init([Owner, Opts]) ->
+init([DefaultOwner, Opts]) ->
     process_flag(trap_exit, true),
+    %% Use owner from opts if provided (e.g., from pool), otherwise use default
+    Owner = maps:get(owner, Opts, DefaultOwner),
     OwnerMon = monitor(process, Owner),
 
     Host = maps:get(host, Opts),
@@ -490,10 +510,33 @@ connected(enter, _OldState, #conn_data{idle_timeout = Timeout} = Data) ->
         _ -> {keep_state, Data, [{state_timeout, Timeout, idle_timeout}]}
     end;
 
-connected({call, From}, release_to_pool, Data) ->
+connected({call, From}, release_to_pool, #conn_data{pool_pid = PoolPid, owner_mon = OldMon} = Data) ->
+    %% Reset owner to pool before notifying, to avoid deadlock
+    %% (pool might call set_owner back, but connection is blocked here)
+    Data2 = case PoolPid of
+        undefined ->
+            Data;
+        _ ->
+            demonitor(OldMon, [flush]),
+            NewMon = monitor(process, PoolPid),
+            Data#conn_data{owner = PoolPid, owner_mon = NewMon}
+    end,
     %% Notify pool that connection is available for reuse (sync)
-    notify_pool_available_sync(Data),
-    {keep_state_and_data, [{reply, From, ok}]};
+    notify_pool_available_sync(Data2),
+    {keep_state, Data2, [{reply, From, ok}]};
+
+connected({call, From}, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    %% Update owner - demonitor old, monitor new
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon},
+     [{reply, From, ok}]};
+
+connected(cast, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    %% Async owner update - used by pool during checkin to avoid deadlock
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}};
 
 connected(state_timeout, idle_timeout, Data) ->
     %% Idle timeout - close connection

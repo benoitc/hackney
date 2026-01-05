@@ -41,6 +41,8 @@ hackney_pool_integration_test_() ->
       {"checkin returns connection", fun test_checkin_returns/0},
       {"connection reuse", fun test_connection_reuse/0},
       {"connection death cleanup", fun test_connection_death/0},
+      {"owner crash kills connection", fun test_owner_crash/0},
+      {"checkin resets owner to pool", fun test_checkin_resets_owner/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}}
      ]}.
@@ -195,6 +197,83 @@ test_connection_death() ->
     ?assertEqual(0, proplists:get_value(free_count, Stats2)),
 
     ok = hackney_pool:stop_pool(test_pool_conn_4).
+
+test_owner_crash() ->
+    %% Test that when the owner process crashes, the connection dies
+    ok = hackney_pool:start_pool(test_pool_owner_crash, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_owner_crash}],
+    Self = self(),
+
+    %% Spawn a process that checks out a connection
+    Owner = spawn(fun() ->
+        {ok, _PoolInfo, Pid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+        Self ! {conn_pid, Pid},
+        %% Wait to be killed
+        receive stop -> ok end
+    end),
+
+    %% Get the connection pid
+    ConnPid = receive {conn_pid, P} -> P after 5000 -> error(timeout) end,
+    ?assert(is_process_alive(ConnPid)),
+
+    %% Verify it's in use
+    Stats1 = hackney_pool:get_stats(test_pool_owner_crash),
+    ?assertEqual(1, proplists:get_value(in_use_count, Stats1)),
+
+    %% Kill the owner process
+    exit(Owner, kill),
+    timer:sleep(100),
+
+    %% Connection should have died
+    ?assertNot(is_process_alive(ConnPid)),
+
+    %% Should be removed from in_use
+    Stats2 = hackney_pool:get_stats(test_pool_owner_crash),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats2)),
+
+    ok = hackney_pool:stop_pool(test_pool_owner_crash).
+
+test_checkin_resets_owner() ->
+    %% Test that after checkin, the connection survives if the previous owner crashes
+    ok = hackney_pool:start_pool(test_pool_checkin_owner, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_checkin_owner}],
+    Self = self(),
+
+    %% Spawn a process that checks out and checks in a connection
+    Owner = spawn(fun() ->
+        {ok, PoolInfo, Pid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+        Self ! {conn_pid, Pid},
+        %% Check the connection back in
+        ok = hackney_pool:checkin(PoolInfo, Pid),
+        Self ! checked_in,
+        %% Wait to be killed
+        receive stop -> ok end
+    end),
+
+    %% Get the connection pid
+    ConnPid = receive {conn_pid, P} -> P after 5000 -> error(timeout) end,
+
+    %% Wait for checkin
+    receive checked_in -> ok after 5000 -> error(timeout) end,
+    timer:sleep(50),
+
+    %% Verify connection is in the pool (free)
+    Stats1 = hackney_pool:get_stats(test_pool_checkin_owner),
+    ?assertEqual(1, proplists:get_value(free_count, Stats1)),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats1)),
+
+    %% Kill the previous owner
+    exit(Owner, kill),
+    timer:sleep(100),
+
+    %% Connection should still be alive (owner is now the pool)
+    ?assert(is_process_alive(ConnPid)),
+
+    %% Should still be in the pool
+    Stats2 = hackney_pool:get_stats(test_pool_checkin_owner),
+    ?assertEqual(1, proplists:get_value(free_count, Stats2)),
+
+    ok = hackney_pool:stop_pool(test_pool_checkin_owner).
 
 %%====================================================================
 %% Timeout Tests

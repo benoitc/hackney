@@ -282,8 +282,9 @@ handle_call({checkout, Key, Requester, Opts}, From, State) ->
 
     case find_available(Key, Available) of
         {ok, Pid, Available2} ->
-            %% Found an available connection
+            %% Found an available connection - update owner to new requester
             ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
+            ok = hackney_conn:set_owner(Pid, Requester),
             _ = metrics:update_meter(Engine, [hackney_pool, PoolName, take_rate], 1),
             InUse2 = maps:put(Pid, {Key, CheckoutRef}, InUse),
             {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
@@ -297,7 +298,7 @@ handle_call({checkout, Key, Requester, Opts}, From, State) ->
         none ->
             %% No available connection, start a new one
             ?report_trace("pool: starting new connection", [{pool, PoolName}]),
-            case start_connection(Key, Opts, State) of
+            case start_connection(Key, Requester, Opts, State) of
                 {ok, Pid, State2} ->
                     InUse2 = maps:put(Pid, {Key, CheckoutRef}, State2#state.in_use),
                     {reply, {ok, Pid}, State2#state{in_use=InUse2}};
@@ -410,7 +411,7 @@ find_available(Key, Available) ->
             none
     end.
 
-start_connection(Key, Opts, State) ->
+start_connection(Key, Owner, Opts, State) ->
     {Host, Port, Transport} = Key,
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
     RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
@@ -427,7 +428,8 @@ start_connection(Key, Opts, State) ->
         idle_timeout => IdleTimeout,
         ssl_options => SslOpts,
         connect_options => ConnectOpts,
-        pool_pid => self()
+        pool_pid => self(),
+        owner => Owner
     },
 
     case hackney_conn_sup:start_conn(ConnOpts) of
@@ -471,15 +473,20 @@ deliver_or_store(Key, Pid, State) ->
            available=Available, in_use=InUse} = State,
 
     case queue:out(Queue) of
-        {{value, {From, WaitKey, _Requester, _Opts}}, Queue2} when WaitKey =:= Key ->
-            %% Deliver to waiting request with same key
+        {{value, {From, WaitKey, Requester, _Opts}}, Queue2} when WaitKey =:= Key ->
+            %% Deliver to waiting request with same key - update owner first
+            ok = hackney_conn:set_owner(Pid, Requester),
             CheckoutRef = make_ref(),
             _ = metrics:update_histogram(Engine, [hackney_pool, PoolName, queue_count], queue:len(Queue2)),
             gen_server:reply(From, {ok, Pid}),
             InUse2 = maps:put(Pid, {Key, CheckoutRef}, InUse),
             State#state{queue=Queue2, pending=Pending, in_use=InUse2};
         _ ->
-            %% Store in available pool
+            %% Store in available pool - set owner to pool so connection
+            %% doesn't die if previous requester crashes.
+            %% Use async version to avoid deadlock when called from checkin_sync
+            %% (connection would be blocked waiting for pool response).
+            hackney_conn:set_owner_async(Pid, self()),
             Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
 
             %% Ensure we're monitoring this pid
