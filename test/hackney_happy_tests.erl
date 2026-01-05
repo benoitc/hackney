@@ -53,11 +53,19 @@ connect_ipv6_tuple_test_() ->
      end}.
 
 %% connect/3 with hostname string - localhost
+%% Note: "localhost" may resolve to IPv6 (::1) or IPv4 (127.0.0.1) depending on
+%% the system configuration. We start servers on both to handle either case.
 connect_localhost_test_() ->
     {setup,
-     fun() -> start_test_server(inet) end,
-     fun(Port) -> stop_test_server(Port) end,
-     fun(Port) ->
+     fun() -> start_test_server_dual_stack() end,
+     fun({Port4, Port6Opt}) ->
+         stop_test_server(Port4),
+         case Port6Opt of
+             {ok, Port6} -> stop_test_server(Port6);
+             _ -> ok
+         end
+     end,
+     fun({Port, _Port6Opt}) ->
          [
             {"connect to localhost string",
              fun() ->
@@ -183,6 +191,22 @@ start_test_server(Family) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+%% Start test servers on both IPv4 and IPv6 (same port) for localhost tests
+%% Returns {Port, IPv6Result} where IPv6Result is {ok, Port} or {error, Reason}
+start_test_server_dual_stack() ->
+    %% Start IPv4 server first to get a port
+    Port = start_test_server(inet),
+    %% Try to start IPv6 server on the same port
+    Opts6 = [inet6, binary, {packet, 0}, {active, false}, {reuseaddr, true}],
+    Port6Result = case gen_tcp:listen(Port, Opts6) of
+        {ok, LSock6} ->
+            spawn(fun() -> accept_loop(LSock6) end),
+            {ok, Port};
+        {error, Reason} ->
+            {error, Reason}
+    end,
+    {Port, Port6Result}.
 
 stop_test_server(_Port) ->
     %% The server will stop when the socket is closed
