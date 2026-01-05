@@ -3,152 +3,32 @@
 2.0.0 - UNRELEASED
 ------------------
 
-**MAJOR RELEASE: Process-per-Connection Architecture**
+Process-per-connection architecture. Each connection is a `gen_statem` process.
 
-This release introduces a complete rewrite of hackney's connection handling using a process-per-connection architecture. Each HTTP connection is now managed by a dedicated `gen_statem` process (`hackney_conn`), providing better isolation, cleaner resource management, and improved error handling.
+See [Migration Guide](doc/MIGRATION.md) for details.
 
-### Breaking Changes
+### Changes
 
-#### Connection Handle Type Change
+- connection handle is now a PID (was opaque reference)
+- `hackney_conn` manages connections (replaces hackney_connect, hackney_connection, hackney_request, hackney_response, hackney_stream)
+- `hackney_headers` renamed from `hackney_headers_new`
+- pool rewritten for new model
 
-The client reference type has changed from an opaque record/reference to a PID:
+### Removed
 
-```erlang
-%% Before (1.x)
--type client_ref() :: term().
+- `cancel_request/1` - use `close/1`
+- `controlling_process/2` - not needed
+- `send_multipart_body/2` - use `send_body/2`
+- SOCKS5 and HTTP CONNECT proxy (planned 2.1.0)
 
-%% After (2.x)
--type conn() :: pid().
-```
+### Added
 
-All functions that previously returned `client_ref()` now return `conn()` (a PID).
-
-#### Removed Functions
-
-The following functions have been **removed** from the `hackney` module:
-
-| Function | Reason |
-|----------|--------|
-| `request_info/1` | Use `hackney_conn:get_state/1` for connection info |
-| `send_request/3` | Use `send_request/2` with options in request |
-| `send_multipart_body/2` | Use `send_body/2` with multipart-encoded body |
-| `stream_multipart/1` | Use `stream_body/1` with multipart parser |
-| `skip_multipart/1` | Use `skip_body/1` |
-| `controlling_process/2` | Connection ownership is tied to the conn process |
-| `cancel_request/1` | Use `hackney:close/1` or `hackney_conn:stop/1` |
-
-#### Removed Modules
-
-The following modules have been **removed** (functionality moved to `hackney_conn`):
-
-| Module | Replacement |
-|--------|-------------|
-| `hackney_connect` | `hackney_conn` handles connection establishment |
-| `hackney_connection` | Merged into `hackney_conn` |
-| `hackney_connections` | Merged into `hackney_pool` |
-| `hackney_request` | Request handling moved to `hackney_conn` |
-| `hackney_response` | Response parsing moved to `hackney_conn` |
-| `hackney_stream` | Async streaming moved to `hackney_conn` |
-| `hackney_pool_handler` | Pool interface simplified |
-| `hackney_headers` | Renamed from `hackney_headers_new` |
-
-#### Removed Features (Not Yet Reimplemented)
-
-The following features are **temporarily unavailable** and planned for future releases:
-
-| Feature | Module | Status |
-|---------|--------|--------|
-| SOCKS5 proxy support | `hackney_socks5` | Planned for 2.1.0 |
-| HTTP CONNECT proxy tunneling | `hackney_http_connect` | Planned for 2.1.0 |
-
-### New Modules
-
-| Module | Description |
-|--------|-------------|
-| `hackney_conn` | gen_statem process managing a single HTTP connection |
-| `hackney_conn_sup` | Simple one-for-one supervisor for connection processes |
-
-### New Functions
-
-| Function | Description |
-|----------|-------------|
-| `hackney:get_version/0` | Returns hackney version |
-
-### Migration Guide
-
-#### Basic Usage (No Changes Required)
-
-Most simple use cases work unchanged:
-
-```erlang
-%% This still works exactly the same
-{ok, Status, Headers, Body} = hackney:get(URL, [], <<>>, [with_body]).
-```
-
-#### Streaming Requests
-
-```erlang
-%% Before (1.x)
-{ok, Ref} = hackney:request(post, URL, Headers, stream, []),
-ok = hackney:send_body(Ref, <<"chunk1">>),
-ok = hackney:send_body(Ref, <<"chunk2">>),
-ok = hackney:finish_send_body(Ref),
-{ok, Status, RespHeaders, Ref} = hackney:start_response(Ref).
-
-%% After (2.x) - Same API, Ref is now a PID
-{ok, ConnPid} = hackney:request(post, URL, Headers, stream, []),
-ok = hackney:send_body(ConnPid, <<"chunk1">>),
-ok = hackney:send_body(ConnPid, <<"chunk2">>),
-ok = hackney:finish_send_body(ConnPid),
-{ok, Status, RespHeaders, ConnPid} = hackney:start_response(ConnPid).
-```
-
-#### Async Streaming
-
-```erlang
-%% Before and After - Same API
-{ok, Ref} = hackney:get(URL, [], <<>>, [async]),
-receive
-    {hackney_response, Ref, {status, Status, _}} -> ok
-end.
-```
-
-#### Multipart Uploads
-
-```erlang
-%% Use hackney_multipart to encode the body
-{Body, ContentLength} = hackney_multipart:encode_form([
-    {file, "/path/to/file"},
-    {<<"field">>, <<"value">>}
-]),
-Headers = [{<<"Content-Type">>, <<"multipart/form-data; boundary=...",>>},
-           {<<"Content-Length">>, integer_to_binary(ContentLength)}],
-{ok, Status, _, _} = hackney:post(URL, Headers, Body, []).
-```
-
-#### Canceling Requests
-
-```erlang
-%% Before (1.x)
-hackney:cancel_request(Ref).
-
-%% After (2.x)
-hackney:close(ConnPid).
-%% or
-hackney_conn:stop(ConnPid).
-```
-
-### Internal Changes
-
-- Connection state is now managed in a `gen_statem` process instead of ETS
-- Pool implementation rewritten for the new connection model
-- Simplified supervisor tree
-- Better resource cleanup on process termination
-- Improved timeout handling
+- `hackney:get_version/0`
+- `hackney_conn_sup` supervisor
 
 ### Requirements
 
-- Erlang/OTP 27+ (uses stdlib `json` module for tests)
+- Erlang/OTP 27+
 
 1.25.0 - 2025-07-24
 -------------------

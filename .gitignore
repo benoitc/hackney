@@ -12,3 +12,4 @@ mime.types
 *_plt
 rebar3.crashdump
 .aider*
+doc/

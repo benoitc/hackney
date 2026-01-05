@@ -119,17 +119,19 @@
 
 %% @doc Start a WebSocket connection process.
 %% Options:
-%%   - host: Target host (string or binary)
-%%   - port: Target port (integer)
-%%   - transport: hackney_tcp or hackney_ssl
-%%   - path: WebSocket path (binary, default <<"/">>)
-%%   - connect_timeout: Connection timeout (default 8000ms)
-%%   - recv_timeout: Receive timeout (default infinity)
-%%   - connect_options: Options passed to transport connect
-%%   - ssl_options: Additional SSL options
-%%   - active: false | true | once (default false)
-%%   - headers: Extra headers for upgrade request
-%%   - protocols: Sec-WebSocket-Protocol values
+%% <ul>
+%%   <li>host: Target host (string or binary)</li>
+%%   <li>port: Target port (integer)</li>
+%%   <li>transport: hackney_tcp or hackney_ssl</li>
+%%   <li>path: WebSocket path (binary, default "/")</li>
+%%   <li>connect_timeout: Connection timeout (default 8000ms)</li>
+%%   <li>recv_timeout: Receive timeout (default infinity)</li>
+%%   <li>connect_options: Options passed to transport connect</li>
+%%   <li>ssl_options: Additional SSL options</li>
+%%   <li>active: false | true | once (default false)</li>
+%%   <li>headers: Extra headers for upgrade request</li>
+%%   <li>protocols: Sec-WebSocket-Protocol values</li>
+%% </ul>
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
 start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, [self(), Opts], []).

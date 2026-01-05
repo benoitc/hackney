@@ -385,21 +385,17 @@ resume_stream(ConnPid) when is_pid(ConnPid) ->
 %% URL should use ws:// or wss:// scheme.
 %%
 %% Options:
-%%   - active: false | true | once (default false)
-%%   - headers: Extra headers for upgrade request [{Name, Value}]
-%%   - protocols: Sec-WebSocket-Protocol values [binary()]
-%%   - connect_timeout: Connection timeout in ms (default 8000)
-%%   - recv_timeout: Receive timeout in ms (default infinity)
-%%   - connect_options: Options passed to transport connect
-%%   - ssl_options: Additional SSL options
+%% <ul>
+%%   <li>active: false | true | once (default false)</li>
+%%   <li>headers: Extra headers for upgrade request</li>
+%%   <li>protocols: Sec-WebSocket-Protocol values</li>
+%%   <li>connect_timeout: Connection timeout in ms (default 8000)</li>
+%%   <li>recv_timeout: Receive timeout in ms (default infinity)</li>
+%%   <li>connect_options: Options passed to transport connect</li>
+%%   <li>ssl_options: Additional SSL options</li>
+%% </ul>
 %%
-%% Returns {ok, WsPid} on success, where WsPid is the hackney_ws process.
-%%
-%% Example:
-%%   {ok, Ws} = hackney:ws_connect("wss://echo.websocket.org/"),
-%%   ok = hackney:ws_send(Ws, {text, <<"Hello">>}),
-%%   {ok, {text, <<"Hello">>}} = hackney:ws_recv(Ws),
-%%   hackney:ws_close(Ws).
+%% Returns `{ok, WsPid}' on success, where WsPid is the hackney_ws process.
 -spec ws_connect(binary() | string()) -> {ok, pid()} | {error, term()}.
 ws_connect(URL) ->
   ws_connect(URL, []).
