@@ -979,6 +979,10 @@ closed(EventType, Event, Data) ->
 %%====================================================================
 
 %% @private Handle common events across all states
+%% Handle enter events for state transitions (required when using state_enter callback mode)
+handle_common(enter, _OldState, _NewState, _Data) ->
+    keep_state_and_data;
+
 handle_common(cast, _Msg, _State, _Data) ->
     keep_state_and_data;
 
