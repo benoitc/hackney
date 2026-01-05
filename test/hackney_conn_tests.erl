@@ -46,7 +46,9 @@ hackney_conn_integration_test_() ->
       {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}},
       %% Async tests
       {"async request continuous", {timeout, 30, fun test_async_continuous/0}},
-      {"async request once mode", {timeout, 30, fun test_async_once/0}}
+      {"async request once mode", {timeout, 30, fun test_async_once/0}},
+      %% 1XX response handling
+      {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
      ]}.
 
 setup() ->
@@ -430,6 +432,54 @@ test_async_once() ->
     ?assert(lists:member(done, Messages)),
 
     hackney_conn:stop(Pid).
+
+%%====================================================================
+%% 1XX Response Tests
+%%====================================================================
+
+test_skip_1xx_responses() ->
+    %% Start a mock server that sends 103 Early Hints before 200 OK
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, MockPort} = inet:port(ListenSock),
+
+    %% Spawn a process to handle the connection
+    Self = self(),
+    spawn_link(fun() ->
+        {ok, Sock} = gen_tcp:accept(ListenSock, 5000),
+        %% Read the HTTP request (simple approach - just read some data)
+        _ = gen_tcp:recv(Sock, 0, 5000),
+        %% Send 103 Early Hints followed immediately by 200 OK
+        Response = <<"HTTP/1.1 103 Early Hints\r\n",
+                     "Link: </style.css>; rel=preload; as=style\r\n",
+                     "\r\n",
+                     "HTTP/1.1 200 OK\r\n",
+                     "Content-Type: text/plain\r\n",
+                     "Content-Length: 13\r\n",
+                     "\r\n",
+                     "Hello, World!">>,
+        ok = gen_tcp:send(Sock, Response),
+        %% Wait for client to read before closing
+        receive after 1000 -> ok end,
+        gen_tcp:close(Sock),
+        Self ! mock_server_done
+    end),
+
+    %% Use hackney directly (which uses hackney_conn internally)
+    URL = iolist_to_binary(["http://127.0.0.1:", integer_to_list(MockPort), "/"]),
+    {ok, Status, Headers, ClientRef} = hackney:request(get, URL, [], <<>>, []),
+
+    %% Verify we got the final 200 response, not the 103
+    ?assertEqual(200, Status),
+    ?assert(is_list(Headers)),
+
+    %% Read body
+    {ok, Body} = hackney:body(ClientRef),
+    ?assertEqual(<<"Hello, World!">>, Body),
+
+    %% Cleanup
+    hackney:close(ClientRef),
+    gen_tcp:close(ListenSock),
+    receive mock_server_done -> ok after 1000 -> ok end.
 
 %%====================================================================
 %% Helpers

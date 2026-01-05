@@ -1236,17 +1236,28 @@ send_body(Transport, Socket, Body) when is_binary(Body); is_list(Body) ->
     Transport:send(Socket, Body).
 
 %% @private Receive and parse response status and headers
+%% Note: 1XX informational responses are automatically skipped by the HTTP parser
 recv_status_and_headers(Data) ->
     recv_status(Data).
 
 recv_status(#conn_data{parser = Parser, buffer = Buffer} = Data) ->
     case hackney_http:execute(Parser, Buffer) of
         {more, NewParser} ->
-            case recv_data(Data) of
-                {ok, RecvData} ->
-                    recv_status(Data#conn_data{parser = NewParser, buffer = RecvData});
-                {error, Reason} ->
-                    {error, Reason}
+            %% Check if parser has data in its internal buffer (e.g., after skipping 1XX response)
+            %% If so, continue parsing; otherwise read from socket
+            ParserBuffer = hackney_http:get(NewParser, buffer),
+            case ParserBuffer of
+                <<>> ->
+                    %% Parser buffer empty - need to read from socket
+                    case recv_data(Data) of
+                        {ok, RecvData} ->
+                            recv_status(Data#conn_data{parser = NewParser, buffer = RecvData});
+                        {error, Reason} ->
+                            {error, Reason}
+                    end;
+                _ ->
+                    %% Parser has data in buffer - continue parsing without reading
+                    recv_status(Data#conn_data{parser = NewParser, buffer = <<>>})
             end;
         {response, Version, Status, Reason, NewParser} ->
             recv_headers(Data#conn_data{
