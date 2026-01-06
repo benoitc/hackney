@@ -222,6 +222,162 @@ connect_pool(Host, Port, Transport, Opts) ->
     end.
 ```
 
+## HTTP/2 Multiplexing
+
+HTTP/2 connections are handled differently from HTTP/1.1. A single HTTP/2 connection can handle multiple concurrent requests via stream multiplexing.
+
+### HTTP/2 Pool Design
+
+The pool maintains a separate map for HTTP/2 connections:
+
+```erlang
+-record(state, {
+    %% ... existing fields ...
+
+    %% HTTP/2 connections: one per host, shared across callers
+    h2_connections = #{}  %% #{Key => Pid}
+}).
+```
+
+Key differences from HTTP/1.1 pooling:
+
+| Aspect | HTTP/1.1 | HTTP/2 |
+|--------|----------|--------|
+| Connections per host | Multiple (pool) | One (shared) |
+| Checkout behavior | Exclusive access | Shared access |
+| Checkin behavior | Return to pool | Keep in pool |
+| Request handling | Sequential | Multiplexed streams |
+
+### HTTP/2 Connection Flow
+
+```
+hackney:get("https://api.example.com/data")
+    │
+    ▼
+┌─────────────────────────────────────┐
+│ 1. Check for existing HTTP/2 conn   │
+│    checkout_h2(Host, Port, ...)     │
+│    → Returns {ok, Pid} or none      │
+└─────────────────┬───────────────────┘
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+   {ok, Pid}              none
+   (reuse!)                 │
+        │                   ▼
+        │         ┌─────────────────────┐
+        │         │ 2. Normal TCP flow  │
+        │         │    checkout → new   │
+        │         │    → upgrade SSL    │
+        │         └──────────┬──────────┘
+        │                    │
+        │                    ▼
+        │         ┌─────────────────────┐
+        │         │ 3. Check protocol   │
+        │         │    get_protocol()   │
+        │         │    → http2 | http1  │
+        │         └──────────┬──────────┘
+        │                    │
+        │              ┌─────┴─────┐
+        │              │           │
+        │           http2       http1
+        │              │           │
+        │              ▼           │
+        │    ┌─────────────────┐   │
+        │    │ 4. Register H2  │   │
+        │    │    register_h2()│   │
+        │    └────────┬────────┘   │
+        │             │            │
+        └──────┬──────┘            │
+               │                   │
+               ▼                   │
+┌─────────────────────────────────────┐
+│ 5. Send request                     │
+│    HTTP/2: assign StreamId          │
+│    HTTP/1.1: send directly          │
+└─────────────────────────────────────┘
+```
+
+### Stream Multiplexing in hackney_conn
+
+Each `hackney_conn` process maintains a map of active HTTP/2 streams:
+
+```erlang
+-record(conn_data, {
+    %% HTTP/2 state machine (from cowlib)
+    h2_machine :: tuple(),
+
+    %% Active streams: #{StreamId => {Caller, State}}
+    h2_streams = #{} :: #{
+        pos_integer() => {gen_statem:from(), atom()}
+    }
+}).
+```
+
+When a request arrives:
+
+```erlang
+%% In hackney_conn.erl
+do_h2_request(From, Method, Path, Headers, Body, Data) ->
+    %% 1. Get next stream ID from h2_machine
+    {ok, StreamId, H2Machine1} = hackney_cow_http2_machine:init_stream(...),
+
+    %% 2. Track caller for this stream
+    Streams = maps:put(StreamId, {From, waiting_response}, Data#conn_data.h2_streams),
+
+    %% 3. Send HEADERS frame (and DATA if body present)
+    HeadersFrame = hackney_cow_http2:headers(StreamId, ...),
+    Transport:send(Socket, HeadersFrame),
+
+    %% 4. Return updated state (caller will receive reply when response arrives)
+    {keep_state, Data#conn_data{h2_streams = Streams}}.
+```
+
+When a response arrives:
+
+```erlang
+%% Response for StreamId received
+handle_h2_frame({headers, StreamId, ...}, Data) ->
+    %% Lookup caller from h2_streams
+    {From, _State} = maps:get(StreamId, Data#conn_data.h2_streams),
+
+    %% Reply to the correct caller
+    gen_statem:reply(From, {ok, Status, Headers, Body}),
+
+    %% Remove completed stream
+    Streams = maps:remove(StreamId, Data#conn_data.h2_streams),
+    {ok, Data#conn_data{h2_streams = Streams}}.
+```
+
+### Benefits of HTTP/2 Multiplexing
+
+1. **Reduced latency** - No connection setup for subsequent requests
+2. **Better resource usage** - One TCP connection instead of many
+3. **Head-of-line blocking avoided** - Responses can arrive out of order
+4. **Server efficiency** - Servers prefer fewer connections with more streams
+
+### ALPN Protocol Negotiation
+
+HTTP/2 is negotiated during TLS handshake via ALPN:
+
+```erlang
+%% In hackney_ssl.erl
+alpn_opts(Opts) ->
+    Protocols = proplists:get_value(protocols, Opts, [http2, http1]),
+    AlpnProtos = [proto_to_alpn(P) || P <- Protocols],
+    [{alpn_advertised_protocols, AlpnProtos}].
+
+proto_to_alpn(http2) -> <<"h2">>;
+proto_to_alpn(http1) -> <<"http/1.1">>.
+
+%% After connection
+get_negotiated_protocol(SslSocket) ->
+    case ssl:negotiated_protocol(SslSocket) of
+        {ok, <<"h2">>} -> http2;
+        _ -> http1
+    end.
+```
+
 ## Connection Prewarm
 
 After first use of a host, the pool maintains warm TCP connections ready for immediate use.

@@ -212,6 +212,108 @@ h2_post_request() ->
     end.
 
 %%====================================================================
+%% Multiplexing Tests
+%%====================================================================
+
+%% Test that multiple requests on same connection work (sequential)
+h2_sequential_requests_test() ->
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+            %% Create a fresh connection (not from pool) for this test
+            {ok, Conn} = hackney_conn:start_link(#{
+                host => "nghttp2.org",
+                port => 443,
+                transport => hackney_ssl,
+                connect_timeout => 10000
+            }),
+            ok = hackney_conn:connect(Conn, 10000),
+            ?assertEqual(http2, hackney_conn:get_protocol(Conn)),
+
+            %% Make 3 sequential requests on same connection
+            {ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 10000),
+            {ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/blog/">>, [], <<>>, 10000),
+            {ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 10000),
+
+            hackney_conn:stop(Conn);
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
+    end.
+
+%% Test that hackney:connect returns same PID for HTTP/2 (connection reuse)
+h2_connection_reuse_test() ->
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+
+            %% First connection - creates new HTTP/2 connection
+            {ok, Conn1} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []),
+            ?assertEqual(http2, hackney_conn:get_protocol(Conn1)),
+
+            %% Second connection - should reuse same connection (multiplexing)
+            {ok, Conn2} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []),
+            ?assertEqual(http2, hackney_conn:get_protocol(Conn2)),
+
+            %% Third connection - should also reuse
+            {ok, Conn3} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []),
+            ?assertEqual(http2, hackney_conn:get_protocol(Conn3)),
+
+            %% All should be the same PID (multiplexed)
+            ?assertEqual(Conn1, Conn2),
+            ?assertEqual(Conn2, Conn3),
+
+            hackney_conn:stop(Conn1);
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
+    end.
+
+%% Test that pool checkout_h2/register_h2 work correctly
+h2_pool_registration_test() ->
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+
+            %% Initially no HTTP/2 connection in pool
+            ?assertEqual(none, hackney_pool:checkout_h2("nghttp2.org", 443, hackney_ssl, [])),
+
+            %% Connect - this should register the HTTP/2 connection
+            {ok, Conn} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []),
+            ?assertEqual(http2, hackney_conn:get_protocol(Conn)),
+
+            %% Now checkout_h2 should return the connection
+            ?assertEqual({ok, Conn}, hackney_pool:checkout_h2("nghttp2.org", 443, hackney_ssl, [])),
+
+            %% Unregister
+            hackney_pool:unregister_h2(Conn, []),
+
+            %% Should be gone from pool
+            ?assertEqual(none, hackney_pool:checkout_h2("nghttp2.org", 443, hackney_ssl, [])),
+
+            hackney_conn:stop(Conn);
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
+    end.
+
+%% Test high-level API connection reuse
+h2_high_level_api_reuse_test() ->
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+
+            %% Make multiple requests via high-level API
+            {ok, 200, H1, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]),
+            {ok, 200, H2, _} = hackney:get(<<"https://nghttp2.org/blog/">>, [], <<>>, [with_body]),
+            {ok, 200, H3, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]),
+
+            %% All should have lowercase headers (HTTP/2)
+            ?assertMatch({<<"date">>, _}, hd(H1)),
+            ?assertMatch({<<"date">>, _}, hd(H2)),
+            ?assertMatch({<<"date">>, _}, hd(H3));
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
+    end.
+
+%%====================================================================
 %% Test Suites
 %%====================================================================
 
@@ -232,3 +334,18 @@ alpn_test_() ->
         {"ALPN opts HTTP/2 only", fun alpn_opts_http2_only_test/0},
         {"ALPN opts HTTP/1 only", fun alpn_opts_http1_only_test/0}
     ].
+
+multiplexing_test_() ->
+    {
+        "HTTP/2 multiplexing tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"Sequential requests on same connection", fun h2_sequential_requests_test/0},
+                {"Connection reuse (same PID)", fun h2_connection_reuse_test/0},
+                {"Pool registration", fun h2_pool_registration_test/0},
+                {"High-level API reuse", fun h2_high_level_api_reuse_test/0}
+            ]
+        }
+    }.

@@ -124,14 +124,115 @@ The high-level API returns the same format for both protocols:
 
 ## Connection Multiplexing
 
-HTTP/2 allows multiple concurrent requests on a single connection. This happens automatically when using connection pooling:
+HTTP/2 allows multiple concurrent requests on a single connection. Unlike HTTP/1.1 where each request needs its own connection, HTTP/2 multiplexes requests as independent "streams" on a shared connection.
+
+### Automatic Multiplexing
+
+When using the high-level API, hackney automatically reuses HTTP/2 connections:
 
 ```erlang
-%% These requests may share one HTTP/2 connection
-spawn(fun() -> hackney:get(<<"https://example.com/a">>) end),
-spawn(fun() -> hackney:get(<<"https://example.com/b">>) end),
-spawn(fun() -> hackney:get(<<"https://example.com/c">>) end).
+%% All three requests share ONE TCP connection
+{ok, _, _, _} = hackney:get(<<"https://nghttp2.org/">>).
+{ok, _, _, _} = hackney:get(<<"https://nghttp2.org/blog/">>).
+{ok, _, _, _} = hackney:get(<<"https://nghttp2.org/documentation/">>).
 ```
+
+You can verify this:
+
+```erlang
+{ok, Conn1} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []).
+{ok, Conn2} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []).
+{ok, Conn3} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []).
+
+Conn1 =:= Conn2.  %% true - same PID
+Conn2 =:= Conn3.  %% true - same PID
+```
+
+### Explicit Connection Reuse
+
+For more control, get a connection and reuse it directly:
+
+```erlang
+%% 1. Get a connection
+{ok, Conn} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []).
+
+%% 2. Verify HTTP/2
+http2 = hackney_conn:get_protocol(Conn).
+
+%% 3. Make multiple requests on same connection
+{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 5000).
+{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/blog/">>, [], <<>>, 5000).
+{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 5000).
+
+%% 4. Close when done
+hackney_conn:stop(Conn).
+```
+
+### Concurrent Requests
+
+Fire multiple requests in parallel on the same connection:
+
+```erlang
+{ok, Conn} = hackney:connect(hackney_ssl, "nghttp2.org", 443, []).
+
+%% Spawn 3 concurrent requests
+Self = self(),
+Paths = [<<"/">>, <<"/blog/">>, <<"/documentation/">>],
+[spawn(fun() ->
+    Result = hackney_conn:request(Conn, <<"GET">>, Path, [], <<>>, 5000),
+    Self ! {Path, Result}
+end) || Path <- Paths].
+
+%% Collect responses (may arrive out of order due to multiplexing)
+[receive {Path, {ok, Status, _, _}} -> {Path, Status} end || _ <- Paths].
+```
+
+### How It Works (Architecture)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        hackney_pool                              │
+│                                                                  │
+│  h2_connections = #{ {Host, Port, Transport} => Pid }           │
+│                                                                  │
+│  checkout_h2(Host, Port, ...) ->                                │
+│      case maps:get(Key, h2_connections) of                      │
+│          Pid -> {ok, Pid};      %% Reuse existing               │
+│          undefined -> none       %% Create new                   │
+│      end                                                         │
+│                                                                  │
+│  register_h2(Host, Port, ..., Pid) ->                           │
+│      h2_connections#{Key => Pid}  %% Store for reuse            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              hackney_conn (gen_statem process)                   │
+│                                                                  │
+│  h2_machine = <HTTP/2 state machine>                            │
+│                                                                  │
+│  h2_streams = #{                                                │
+│      1 => {CallerA, waiting_response},                          │
+│      3 => {CallerB, waiting_response},                          │
+│      5 => {CallerC, waiting_response}                           │
+│  }                                                               │
+│                                                                  │
+│  Request from CallerA → init_stream() → StreamId=1              │
+│  Request from CallerB → init_stream() → StreamId=3              │
+│  Request from CallerC → init_stream() → StreamId=5              │
+│                                                                  │
+│  Response for StreamId=3 arrives:                               │
+│      → lookup h2_streams[3] → CallerB                           │
+│      → gen_statem:reply(CallerB, {ok, Status, Headers, Body})   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key points:**
+
+1. **One connection per host** - The pool stores at most one HTTP/2 connection per `{Host, Port, Transport}` tuple
+2. **Connection sharing** - Unlike HTTP/1.1, HTTP/2 connections are not "checked out" exclusively; multiple callers share the same connection
+3. **Stream isolation** - Each request gets a unique StreamId; responses are routed back to the correct caller via the `h2_streams` map
+4. **Automatic registration** - When a new SSL connection negotiates HTTP/2, it's automatically registered in the pool for future reuse
 
 ## Server Push
 
