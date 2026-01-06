@@ -85,12 +85,13 @@ test_default_pool() ->
     ok = hackney_pool:stop_pool(test_pool_1).
 
 test_custom_pool() ->
+    %% Timeout is capped at 2000ms for keepalive
     Options = [{pool_size, 10}, {timeout, 60000}],
     ok = hackney_pool:start_pool(test_pool_2, Options),
     Pool = hackney_pool:find_pool(test_pool_2),
     ?assert(is_pid(Pool)),
     ?assertEqual(10, hackney_pool:max_connections(test_pool_2)),
-    ?assertEqual(60000, hackney_pool:timeout(test_pool_2)),
+    ?assertEqual(2000, hackney_pool:timeout(test_pool_2)),  % Capped at 2s
     ok = hackney_pool:stop_pool(test_pool_2).
 
 test_pool_stats() ->
@@ -112,11 +113,15 @@ test_max_connections() ->
     ok = hackney_pool:stop_pool(test_pool_4).
 
 test_timeout_setting() ->
+    %% Keepalive timeout is capped at 2000ms
     ok = hackney_pool:start_pool(test_pool_5, [{timeout, 5000}]),
-    ?assertEqual(5000, hackney_pool:timeout(test_pool_5)),
+    ?assertEqual(2000, hackney_pool:timeout(test_pool_5)),  % Capped at 2s
+    hackney_pool:set_timeout(test_pool_5, 1000),
+    timer:sleep(10),
+    ?assertEqual(1000, hackney_pool:timeout(test_pool_5)),
     hackney_pool:set_timeout(test_pool_5, 10000),
     timer:sleep(10),
-    ?assertEqual(10000, hackney_pool:timeout(test_pool_5)),
+    ?assertEqual(2000, hackney_pool:timeout(test_pool_5)),  % Capped at 2s
     ok = hackney_pool:stop_pool(test_pool_5).
 
 %%====================================================================
@@ -280,16 +285,23 @@ test_checkin_resets_owner() ->
 %%====================================================================
 
 test_queue_timeout() ->
+    %% Test that when pool is full, second checkout returns error immediately
+    %% (no more queuing - load regulation handles waiting)
     URL = <<"http://localhost:8123/pool">>,
     Headers = [],
     hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
     Opts = [{pool, pool_test}, {connect_timeout, 100}, {checkout_timeout, 5000}],
     case hackney:request(post, URL, Headers, stream, Opts) of
         {ok, Ref} ->
-            {error, _} = hackney:request(post, URL, Headers, stream, Opts),
+            %% Second request should fail immediately (pool full, no queue)
+            {error, checkout_timeout} = hackney:request(post, URL, Headers, stream, Opts),
+
+            %% Finish first request
             ok = hackney:finish_send_body(Ref),
             {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
             ok = hackney:skip_body(Ref),
+
+            %% Now pool is free, next request should succeed
             {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),
             hackney:close(Ref2)
     end,

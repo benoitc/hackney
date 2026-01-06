@@ -51,21 +51,17 @@
     name,
     metrics,
     max_connections,
-    timeout,
+    keepalive_timeout,
     %% Available connection processes: #{Key => [Pid]}
     available = #{},
-    %% In-use connections: #{Ref => {Key, Pid}}
+    %% In-use connections: #{Pid => Key}
     in_use = #{},
     %% Pid to monitor ref mapping: #{Pid => MonitorRef}
-    pid_monitors = #{},
-    %% Queued checkout requests: queue of {From, Key, Requester, RequestRef}
-    queue = queue:new(),
-    %% Pending requests by ref: #{RequestRef => {From, Key, Requester}}
-    pending = #{}
+    pid_monitors = #{}
 }).
 
 -define(DEFAULT_MAX_CONNECTIONS, 50).
--define(DEFAULT_TIMEOUT, 150000).
+-define(DEFAULT_KEEPALIVE_TIMEOUT, 2000).  % 2 seconds max idle
 
 start() ->
     %% Create ETS table to store pool pid by name
@@ -239,7 +235,15 @@ init([Name, Options]) ->
                   Size ->
                       Size
               end,
-    Timeout = proplists:get_value(timeout, Options, ?DEFAULT_TIMEOUT),
+    %% keepalive_timeout: max idle time for pooled connections (capped at 2s)
+    %% Also accept 'timeout' for backward compatibility
+    RawTimeout = case proplists:get_value(keepalive_timeout, Options) of
+                     undefined ->
+                         proplists:get_value(timeout, Options, ?DEFAULT_KEEPALIVE_TIMEOUT);
+                     KT ->
+                         KT
+                 end,
+    KeepaliveTimeout = min(RawTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
 
     %% register the module
     ets:insert(?MODULE, {Name, self()}),
@@ -247,7 +251,7 @@ init([Name, Options]) ->
     %% initialize metrics
     Engine = init_metrics(Name),
 
-    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn, timeout=Timeout}}.
+    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn, keepalive_timeout=KeepaliveTimeout}}.
 
 handle_call(stats, _From, State) ->
     {reply, handle_stats(State), State};
@@ -256,7 +260,7 @@ handle_call(count, _From, #state{available=Available, in_use=InUse}=State) ->
     AvailCount = maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available),
     {reply, AvailCount + maps:size(InUse), State};
 
-handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
+handle_call(timeout, _From, #state{keepalive_timeout=Timeout}=State) ->
     {reply, Timeout, State};
 
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
@@ -269,13 +273,11 @@ handle_call({count, Key}, _From, #state{available=Available}=State) ->
             end,
     {reply, Count, State};
 
-handle_call({checkout, Key, Requester, Opts}, From, State) ->
+handle_call({checkout, Key, Requester, Opts}, _From, State) ->
     #state{name=PoolName, metrics=Engine, max_connections=MaxConn,
-           available=Available, in_use=InUse, queue=Queue, pending=Pending} = State,
+           available=Available, in_use=InUse} = State,
 
     TotalInUse = maps:size(InUse),
-    %% Generate a unique ref for tracking this checkout
-    CheckoutRef = make_ref(),
 
     ?report_trace("pool: checkout request", [{pool, PoolName}, {key, Key},
         {total_in_use, TotalInUse}, {max_conn, MaxConn}]),
@@ -286,21 +288,19 @@ handle_call({checkout, Key, Requester, Opts}, From, State) ->
             ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
             ok = hackney_conn:set_owner(Pid, Requester),
             _ = metrics:update_meter(Engine, [hackney_pool, PoolName, take_rate], 1),
-            InUse2 = maps:put(Pid, {Key, CheckoutRef}, InUse),
+            InUse2 = maps:put(Pid, Key, InUse),
             {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
         none when TotalInUse >= MaxConn ->
-            %% At max connections, queue the request
-            ?report_trace("pool: at max connections, queuing", [{pool, PoolName}, {in_use, InUse}]),
-            Queue2 = queue:in({From, Key, Requester, Opts}, Queue),
-            Pending2 = maps:put(CheckoutRef, {From, Key, Requester}, Pending),
-            _ = metrics:update_histogram(Engine, [hackney_pool, PoolName, queue_count], maps:size(Pending2)),
-            {noreply, State#state{queue=Queue2, pending=Pending2}};
+            %% At max connections - return error immediately (no queue)
+            %% Note: In the new architecture, load_regulation handles waiting
+            ?report_trace("pool: at max connections", [{pool, PoolName}, {in_use, TotalInUse}]),
+            {reply, {error, checkout_timeout}, State};
         none ->
             %% No available connection, start a new one
             ?report_trace("pool: starting new connection", [{pool, PoolName}]),
             case start_connection(Key, Requester, Opts, State) of
                 {ok, Pid, State2} ->
-                    InUse2 = maps:put(Pid, {Key, CheckoutRef}, State2#state.in_use),
+                    InUse2 = maps:put(Pid, Key, State2#state.in_use),
                     {reply, {ok, Pid}, State2#state{in_use=InUse2}};
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
@@ -320,7 +320,9 @@ handle_cast({set_maxconn, MaxConn}, State) ->
     {noreply, State#state{max_connections=MaxConn}};
 
 handle_cast({set_timeout, NewTimeout}, State) ->
-    {noreply, State#state{timeout=NewTimeout}};
+    %% Cap at 2 seconds
+    Capped = min(NewTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
+    {noreply, State#state{keepalive_timeout=Capped}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -415,7 +417,7 @@ start_connection(Key, Owner, Opts, State) ->
     {Host, Port, Transport} = Key,
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
     RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
-    IdleTimeout = State#state.timeout,
+    IdleTimeout = State#state.keepalive_timeout,
     SslOpts = proplists:get_value(ssl_options, Opts, []),
     ConnectOpts = proplists:get_value(connect_options, Opts, []),
 
@@ -451,54 +453,34 @@ start_connection(Key, Owner, Opts, State) ->
 
 %% @private Process a checkin - return connection to pool
 do_checkin(Pid, State) ->
-    #state{in_use=InUse} = State,
+    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
     %% Get the key from in_use and remove
-    {Key, InUse2} = case maps:take(Pid, InUse) of
-        {{K, _Ref}, InUse1} -> {K, InUse1};
-        error -> {undefined, InUse}
-    end,
+    case maps:take(Pid, InUse) of
+        {Key, InUse2} ->
+            %% Check if connection is still alive
+            case is_process_alive(Pid) of
+                true ->
+                    %% Store in available pool - set owner to pool so connection
+                    %% doesn't die if previous requester crashes.
+                    %% Use async version to avoid deadlock when called from checkin_sync
+                    hackney_conn:set_owner_async(Pid, self()),
+                    Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
 
-    %% Check if connection is still alive
-    case Key =/= undefined andalso is_process_alive(Pid) of
-        true ->
-            %% Try to deliver to waiting request or store
-            deliver_or_store(Key, Pid, State#state{in_use=InUse2});
-        false ->
-            State#state{in_use=InUse2}
-    end.
+                    %% Ensure we're monitoring this pid
+                    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                        true -> PidMonitors;
+                        false ->
+                            MonRef = erlang:monitor(process, Pid),
+                            maps:put(Pid, MonRef, PidMonitors)
+                    end,
 
-deliver_or_store(Key, Pid, State) ->
-    #state{name=PoolName, metrics=Engine, queue=Queue, pending=Pending,
-           available=Available, in_use=InUse} = State,
-
-    case queue:out(Queue) of
-        {{value, {From, WaitKey, Requester, _Opts}}, Queue2} when WaitKey =:= Key ->
-            %% Deliver to waiting request with same key - update owner first
-            ok = hackney_conn:set_owner(Pid, Requester),
-            CheckoutRef = make_ref(),
-            _ = metrics:update_histogram(Engine, [hackney_pool, PoolName, queue_count], queue:len(Queue2)),
-            gen_server:reply(From, {ok, Pid}),
-            InUse2 = maps:put(Pid, {Key, CheckoutRef}, InUse),
-            State#state{queue=Queue2, pending=Pending, in_use=InUse2};
-        _ ->
-            %% Store in available pool - set owner to pool so connection
-            %% doesn't die if previous requester crashes.
-            %% Use async version to avoid deadlock when called from checkin_sync
-            %% (connection would be blocked waiting for pool response).
-            hackney_conn:set_owner_async(Pid, self()),
-            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
-
-            %% Ensure we're monitoring this pid
-            PidMonitors = State#state.pid_monitors,
-            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
-                true -> PidMonitors;
+                    State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2};
                 false ->
-                    MonRef = erlang:monitor(process, Pid),
-                    maps:put(Pid, MonRef, PidMonitors)
-            end,
-
-            State#state{available=Available2, pid_monitors=PidMonitors2}
+                    State#state{in_use=InUse2}
+            end;
+        error ->
+            State
     end.
 
 init_metrics(PoolName) ->
@@ -520,10 +502,10 @@ delete_metrics(Engine, PoolName) ->
 
 handle_stats(State) ->
     #state{name=PoolName, max_connections=Max, available=Available,
-           in_use=InUse, pending=Pending} = State,
+           in_use=InUse} = State,
     AvailCount = maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available),
     [{name, PoolName},
      {max, Max},
      {in_use_count, maps:size(InUse)},
      {free_count, AvailCount},
-     {queue_count, maps:size(Pending)}].
+     {queue_count, 0}].  % No more queue
