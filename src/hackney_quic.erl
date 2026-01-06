@@ -28,6 +28,7 @@
 %%% Messages sent from NIF to owner process:
 %%% <ul>
 %%%   <li>`{quic, ConnRef, {connected, Info}}' - Connection established</li>
+%%%   <li>`{quic, ConnRef, {stream_opened, StreamId}}' - Stream opened</li>
 %%%   <li>`{quic, ConnRef, {closed, Reason}}' - Connection closed</li>
 %%%   <li>`{quic, ConnRef, {transport_error, Code, Reason}}' - Transport error</li>
 %%%   <li>`{quic, ConnRef, {stream_headers, StreamId, Headers, Fin}}' - Headers received</li>

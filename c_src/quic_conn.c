@@ -335,8 +335,21 @@ static lsquic_stream_ctx_t *on_new_stream(void *stream_if_ctx, lsquic_stream_t *
     stream->next = conn->streams;
     conn->streams = stream;
 
-    /* Want to read headers/data and write */
+    /* Want to read headers/data */
     lsquic_stream_wantread(s, 1);
+
+    /* Notify Erlang of the new stream */
+    ErlNifEnv *env = enif_alloc_env();
+    if (env) {
+        ERL_NIF_TERM msg = enif_make_tuple3(env,
+            ATOM_QUIC,
+            enif_make_resource(env, conn),
+            enif_make_tuple2(env, ATOM_STREAM_OPENED,
+                enif_make_int64(env, stream->stream_id)));
+
+        enif_send(NULL, &conn->owner_pid, env, msg);
+        enif_free_env(env);
+    }
 
     return (lsquic_stream_ctx_t *)stream;
 }
@@ -528,7 +541,9 @@ static struct lsxpack_header *hsi_prepare_decode(void *hdr_set,
 }
 
 static int hsi_process_header(void *hdr_set, struct lsxpack_header *hdr) {
-    if (!hdr) return 0;  /* End of headers */
+    if (!hdr) {
+        return 0;  /* End of headers */
+    }
 
     QuicHeaderSet *hs = (QuicHeaderSet *)hdr_set;
 
@@ -656,6 +671,7 @@ static void *io_thread_func(void *arg) {
 
         /* Process connections (handles timeouts too) */
         lsquic_engine_process_conns(conn->engine);
+
 
         /* Update next timeout */
         int diff = lsquic_engine_earliest_adv_tick(conn->engine, &ret);
@@ -968,14 +984,21 @@ int64_t quic_conn_open_stream(QuicConn *conn) {
         return -1;
     }
 
-    /* Request a new stream - callback will be triggered */
+    /* Remember the current head of streams list */
+    QuicStream *prev_head = conn->streams;
+
+    /* Request a new stream - callback will be triggered synchronously */
     lsquic_conn_make_stream(conn->conn);
     lsquic_engine_process_conns(conn->engine);
 
-    enif_mutex_unlock(conn->mutex);
+    /* on_new_stream adds new stream at head of list */
+    int64_t stream_id = -1;
+    if (conn->streams && conn->streams != prev_head) {
+        stream_id = conn->streams->stream_id;
+    }
 
-    /* Stream ID will be provided via callback */
-    return 0;
+    enif_mutex_unlock(conn->mutex);
+    return stream_id;
 }
 
 int quic_conn_close(QuicConn *conn) {
@@ -1108,10 +1131,24 @@ int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
         stream->headers_sent = true;
         if (fin) {
             stream->fin_sent = true;
+            /* Shutdown write side to send FIN */
+            lsquic_stream_shutdown(stream->stream, 1);  /* 1 = write side */
         }
+        /* Flush the stream to ensure headers are sent */
+        lsquic_stream_flush(stream->stream);
+
+        /* Re-enable read after sending request headers */
+        lsquic_stream_wantread(stream->stream, 1);
     }
 
+    /* Process to send the headers packet */
     lsquic_engine_process_conns(conn->engine);
+
+    /* Send any packets immediately */
+    if (lsquic_engine_has_unsent_packets(conn->engine)) {
+        lsquic_engine_send_unsent_packets(conn->engine);
+    }
+
     enif_mutex_unlock(conn->mutex);
 
     return ret;

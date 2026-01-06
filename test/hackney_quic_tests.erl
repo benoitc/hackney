@@ -175,10 +175,68 @@ http3_request_test_() ->
             setup,
             fun setup/0, fun cleanup/1,
             [
-                {"Send HTTP/3 headers", fun test_send_request/0}
+                {"Send HTTP/3 headers", fun test_send_request/0},
+                {"Full HTTP/3 request/response", fun test_full_request_response/0}
             ]
         }
     }.
+
+%% Test full HTTP/3 request and response flow
+test_full_request_response() ->
+    case hackney_quic:is_available() of
+        false ->
+            {skip, "QUIC NIF not available"};
+        true ->
+            {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+            receive
+                {quic, ConnRef, {connected, _}} ->
+                    %% Wait for H3 control streams to be established
+                    timer:sleep(100),
+
+                    %% Open a stream
+                    {ok, StreamId} = hackney_quic:open_stream(ConnRef),
+
+                    %% Wait for stream_opened notification
+                    receive
+                        {quic, ConnRef, {stream_opened, StreamId}} -> ok
+                    after 1000 -> ok
+                    end,
+
+                    %% Send HTTP/3 request headers
+                    Headers = [
+                        {<<":method">>, <<"GET">>},
+                        {<<":scheme">>, <<"https">>},
+                        {<<":authority">>, <<"cloudflare.com">>},
+                        {<<":path">>, <<"/">>},
+                        {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
+                    ],
+                    ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
+
+                    %% Wait for response headers
+                    receive
+                        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
+                            %% Check we got a valid status
+                            ?assert(lists:keymember(<<":status">>, 1, RespHeaders))
+                    after 10000 ->
+                        hackney_quic:close(ConnRef, normal),
+                        ?assert(false, "Timeout waiting for response headers")
+                    end,
+
+                    %% Wait for response body
+                    receive
+                        {quic, ConnRef, {stream_data, StreamId, Body, _BodyFin}} ->
+                            ?assert(byte_size(Body) > 0)
+                    after 10000 ->
+                        ok  %% Body might be empty for redirects
+                    end;
+                {quic, ConnRef, {closed, _}} ->
+                    ?assert(false, "Connection closed unexpectedly")
+            after 15000 ->
+                hackney_quic:close(ConnRef, normal),
+                ?assert(false, "Timeout waiting for connection")
+            end,
+            hackney_quic:close(ConnRef, normal)
+    end.
 
 %%====================================================================
 %% Error Handling Tests

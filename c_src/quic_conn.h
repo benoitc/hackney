@@ -108,6 +108,7 @@ struct QuicConn {
     ErlNifTid io_thread;
     bool io_thread_running;
     bool should_stop;
+
 };
 
 /* Global initialization (call once at NIF load) */

@@ -26,6 +26,7 @@ ERL_NIF_TERM ATOM_CLOSED;
 ERL_NIF_TERM ATOM_TRANSPORT_ERROR;
 ERL_NIF_TERM ATOM_STREAM_HEADERS;
 ERL_NIF_TERM ATOM_STREAM_DATA;
+ERL_NIF_TERM ATOM_STREAM_OPENED;
 ERL_NIF_TERM ATOM_STREAM_RESET;
 ERL_NIF_TERM ATOM_STOP_SENDING;
 ERL_NIF_TERM ATOM_GOAWAY;
@@ -63,6 +64,7 @@ static inline void init_atoms(ErlNifEnv *env) {
     ATOM_TRANSPORT_ERROR = enif_make_atom(env, "transport_error");
     ATOM_STREAM_HEADERS = enif_make_atom(env, "stream_headers");
     ATOM_STREAM_DATA = enif_make_atom(env, "stream_data");
+    ATOM_STREAM_OPENED = enif_make_atom(env, "stream_opened");
     ATOM_STREAM_RESET = enif_make_atom(env, "stream_reset");
     ATOM_STOP_SENDING = enif_make_atom(env, "stop_sending");
     ATOM_GOAWAY = enif_make_atom(env, "goaway");
