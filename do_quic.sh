@@ -9,10 +9,10 @@
 
 set -e
 
-# Check if QUIC dependencies are available
-if [ ! -d "libs/ngtcp2" ] || [ ! -d "libs/nghttp3" ]; then
-    echo "ERROR: QUIC dependencies not found"
-    echo "Run: make quic-deps"
+# Check if QUIC dependencies are available (lsquic + BoringSSL in c_src/)
+if [ ! -d "c_src/lsquic" ] || [ ! -d "c_src/boringssl" ]; then
+    echo "ERROR: QUIC dependencies not found (c_src/lsquic or c_src/boringssl missing)"
+    echo "The lsquic and boringssl libraries should be vendored in c_src/"
     exit 1
 fi
 
