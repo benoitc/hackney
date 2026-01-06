@@ -1,6 +1,7 @@
 -module(hackney_happy).
 
 -export([connect/3, connect/4]).
+-export([connect_udp/3, connect_udp/4]).
 
 -include("hackney_internal.hrl").
 -include_lib("kernel/include/inet.hrl").
@@ -179,4 +180,109 @@ try_connect([{IP, Type} | Rest], Port, Opts, Timeout, ServerPid, _LastError) ->
       end;
     Error ->
       try_connect(Rest, Port, Opts, Timeout, ServerPid, Error)
+  end.
+
+%%====================================================================
+%% UDP Happy Eyeballs (for QUIC/HTTP3)
+%%====================================================================
+
+%% @doc Connect via UDP using happy eyeballs algorithm.
+%% Returns {ok, Socket, RemoteAddr} where RemoteAddr is {IP, Port}.
+connect_udp(Hostname, Port, Opts) ->
+  connect_udp(Hostname, Port, Opts, ?CONNECT_TIMEOUT).
+
+connect_udp(Hostname, Port, Opts, Timeout) ->
+  do_connect_udp(parse_address(Hostname), Port, Opts, Timeout).
+
+do_connect_udp(Hostname, Port, Opts, _Timeout) when is_tuple(Hostname) ->
+  case hackney_cidr:is_ipv6(Hostname) of
+    true ->
+      try_udp_connect(Hostname, Port, inet6, Opts);
+    false ->
+      case hackney_cidr:is_ipv4(Hostname) of
+        true ->
+          try_udp_connect(Hostname, Port, inet, Opts);
+        false ->
+          {error, nxdomain}
+      end
+  end;
+do_connect_udp(Hostname, Port, Opts, Timeout) ->
+  Self = self(),
+  case getaddrs(Hostname) of
+    {[], []} -> {error, nxdomain};
+    {[], IPv4Addrs} ->
+      {Pid4, MRef4} = spawn_monitor(fun() -> try_udp_list(IPv4Addrs, Port, Opts, Self) end),
+      do_udp_wait(Pid4, MRef4, Timeout);
+    {Ipv6Addrs, []} ->
+      {Pid6, MRef6} = spawn_monitor(fun() -> try_udp_list(Ipv6Addrs, Port, Opts, Self) end),
+      do_udp_wait(Pid6, MRef6, Timeout);
+    {Ipv6Addrs, IPv4Addrs} ->
+      {Pid6, MRef6} = spawn_monitor(fun() -> try_udp_list(Ipv6Addrs, Port, Opts, Self) end),
+      TRef = erlang:start_timer(?TIMEOUT, self(), try_ipv4),
+      receive
+        {'DOWN', MRef6, _, _, {happy_connect, OK}} ->
+          _ = erlang:cancel_timer(TRef, []),
+          OK;
+        {'DOWN', MRef6, _, _, _} ->
+          _ = erlang:cancel_timer(TRef, []),
+          {Pid4, MRef4} = spawn_monitor(fun() -> try_udp_list(IPv4Addrs, Port, Opts, Self) end),
+          do_udp_wait(Pid4, MRef4, Timeout);
+        {timeout, TRef, try_ipv4} ->
+          PidRef4 = spawn_monitor(fun() -> try_udp_list(IPv4Addrs, Port, Opts, Self) end),
+          do_udp_race(PidRef4, {Pid6, MRef6}, Timeout)
+      after Timeout ->
+        _ = erlang:cancel_timer(TRef, []),
+        erlang:demonitor(MRef6, [flush]),
+        {error, connect_timeout}
+      end
+  end.
+
+do_udp_wait(Pid, MRef, Timeout) ->
+  receive
+    {'DOWN', MRef, _, _, {happy_connect, OK}} -> OK;
+    {'DOWN', MRef, _, _, {error, _} = E} -> E;
+    {'DOWN', MRef, _, _, Info} -> {error, Info}
+  after Timeout ->
+    connect_gc(Pid, MRef),
+    {error, connect_timeout}
+  end.
+
+do_udp_race({Pid4, MRef4}, {Pid6, MRef6}, Timeout) ->
+  receive
+    {'DOWN', MRef4, _, _, {happy_connect, OK}} ->
+      connect_gc(Pid6, MRef6), OK;
+    {'DOWN', MRef6, _, _, {happy_connect, OK}} ->
+      connect_gc(Pid4, MRef4), OK;
+    {'DOWN', MRef4, _, _, _} ->
+      do_udp_wait(Pid6, MRef6, Timeout);
+    {'DOWN', MRef6, _, _, _} ->
+      do_udp_wait(Pid4, MRef4, Timeout)
+  after Timeout ->
+    connect_gc(Pid4, MRef4),
+    connect_gc(Pid6, MRef6),
+    {error, connect_timeout}
+  end.
+
+try_udp_list(Addrs, Port, Opts, _ServerPid) ->
+  try_udp_list_1(Addrs, Port, Opts, {error, nxdomain}).
+
+try_udp_list_1([], _Port, _Opts, LastError) ->
+  exit(LastError);
+try_udp_list_1([{IP, Type} | Rest], Port, Opts, _LastError) ->
+  case try_udp_connect(IP, Port, Type, Opts) of
+    {ok, _, _} = OK -> exit({happy_connect, OK});
+    Error -> try_udp_list_1(Rest, Port, Opts, Error)
+  end.
+
+try_udp_connect(IP, Port, Type, Opts) ->
+  UdpOpts = [binary, {active, false}, Type | proplists:delete(inet, proplists:delete(inet6, Opts))],
+  case gen_udp:open(0, UdpOpts) of
+    {ok, Socket} ->
+      case gen_udp:connect(Socket, IP, Port) of
+        ok -> {ok, Socket, {IP, Port}};
+        {error, Reason} ->
+          gen_udp:close(Socket),
+          {error, Reason}
+      end;
+    {error, _} = Error -> Error
   end.

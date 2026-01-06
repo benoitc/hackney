@@ -265,8 +265,10 @@ sockname(Socket) ->
 %% the protocols specified in Options.
 %%
 %% Options:
-%%   - protocols: list of atoms [http2, http1] (default: [http2, http1])
+%%   - protocols: list of atoms [http3, http2, http1] (default: [http2, http1])
 %%     Order matters - first protocol is preferred
+%%     Note: http3 is only used for informational purposes here - HTTP/3 uses
+%%     QUIC which has its own ALPN negotiation handled by hackney_http3.
 %%
 %% Example:
 %% ```
@@ -277,14 +279,21 @@ sockname(Socket) ->
 alpn_opts(Opts) ->
   case proplists:get_value(protocols, Opts, [http2, http1]) of
     Protos when is_list(Protos), Protos =/= [] ->
-      AlpnProtos = [proto_to_alpn(P) || P <- Protos],
-      [{alpn_advertised_protocols, AlpnProtos}];
+      %% Filter out http3 - it doesn't use TLS ALPN
+      TlsProtos = [P || P <- Protos, P =/= http3],
+      case TlsProtos of
+        [] -> [];
+        _ ->
+          AlpnProtos = [proto_to_alpn(P) || P <- TlsProtos],
+          [{alpn_advertised_protocols, AlpnProtos}]
+      end;
     _ ->
       []
   end.
 
 %% @doc Get the negotiated protocol after SSL handshake.
 %% Returns http2 if HTTP/2 was negotiated, http1 otherwise.
+%% Note: HTTP/3 is not returned here as it uses QUIC, not TLS.
 %% @see ssl:negotiated_protocol/1
 -spec get_negotiated_protocol(ssl:sslsocket()) -> http2 | http1.
 get_negotiated_protocol(SslSocket) ->
