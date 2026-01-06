@@ -33,6 +33,8 @@
          set_max_connections/2,
          timeout/1,
          set_timeout/2,
+         prewarm/3,
+         prewarm/4,
          child_spec/2]).
 
 -export([start_link/2]).
@@ -52,16 +54,20 @@
     metrics,
     max_connections,
     keepalive_timeout,
+    prewarm_count,
     %% Available connection processes: #{Key => [Pid]}
     available = #{},
     %% In-use connections: #{Pid => Key}
     in_use = #{},
     %% Pid to monitor ref mapping: #{Pid => MonitorRef}
-    pid_monitors = #{}
+    pid_monitors = #{},
+    %% Hosts that have been activated (prewarm triggered): sets:set(Key)
+    activated_hosts = sets:new()
 }).
 
 -define(DEFAULT_MAX_CONNECTIONS, 50).
 -define(DEFAULT_KEEPALIVE_TIMEOUT, 2000).  % 2 seconds max idle
+-define(DEFAULT_PREWARM_COUNT, 4).         % Connections to maintain per host
 
 start() ->
     %% Create ETS table to store pool pid by name
@@ -186,6 +192,20 @@ timeout(Name) ->
 set_timeout(Name, NewTimeout) ->
     gen_server:cast(find_pool(Name), {set_timeout, NewTimeout}).
 
+%% @doc Prewarm connections to a host (default count from pool settings)
+%% Starts the pool if it doesn't exist.
+-spec prewarm(atom(), string() | binary(), inet:port_number()) -> ok.
+prewarm(PoolName, Host, Port) ->
+    Pool = find_pool(PoolName, []),
+    gen_server:cast(Pool, {prewarm, Host, Port}).
+
+%% @doc Prewarm a specific number of connections to a host
+%% Starts the pool if it doesn't exist.
+-spec prewarm(atom(), string() | binary(), inet:port_number(), non_neg_integer()) -> ok.
+prewarm(PoolName, Host, Port, Count) ->
+    Pool = find_pool(PoolName, []),
+    gen_server:cast(Pool, {prewarm, Host, Port, Count}).
+
 to_pool_name(Name) when is_atom(Name) ->
     list_to_atom("hackney_pool_" ++ atom_to_list(Name));
 to_pool_name(Name) when is_list(Name) ->
@@ -245,13 +265,23 @@ init([Name, Options]) ->
                  end,
     KeepaliveTimeout = min(RawTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
 
+    %% prewarm_count: number of TCP connections to maintain per host
+    %% Check pool options first, then app env, then default
+    PrewarmCount = case proplists:get_value(prewarm_count, Options) of
+                       undefined ->
+                           hackney_app:get_app_env(prewarm_count, ?DEFAULT_PREWARM_COUNT);
+                       PC ->
+                           PC
+                   end,
+
     %% register the module
     ets:insert(?MODULE, {Name, self()}),
 
     %% initialize metrics
     Engine = init_metrics(Name),
 
-    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn, keepalive_timeout=KeepaliveTimeout}}.
+    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
+                keepalive_timeout=KeepaliveTimeout, prewarm_count=PrewarmCount}}.
 
 handle_call(stats, _From, State) ->
     {reply, handle_stats(State), State};
@@ -323,6 +353,26 @@ handle_cast({set_timeout, NewTimeout}, State) ->
     %% Cap at 2 seconds
     Capped = min(NewTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
     {noreply, State#state{keepalive_timeout=Capped}};
+
+handle_cast({prewarm, Host, Port}, #state{prewarm_count=Count}=State) ->
+    State2 = do_prewarm(Host, Port, Count, State),
+    {noreply, State2};
+
+handle_cast({prewarm, Host, Port, Count}, State) ->
+    State2 = do_prewarm(Host, Port, Count, State),
+    {noreply, State2};
+
+handle_cast({prewarm_checkin, Pid, Key}, State) ->
+    %% Add a prewarmed connection to the pool
+    #state{available=Available, pid_monitors=PidMonitors} = State,
+    %% Set owner to pool
+    hackney_conn:set_owner_async(Pid, self()),
+    %% Monitor the connection
+    MonRef = erlang:monitor(process, Pid),
+    PidMonitors2 = maps:put(Pid, MonRef, PidMonitors),
+    %% Add to available
+    Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+    {noreply, State#state{available=Available2, pid_monitors=PidMonitors2}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -504,7 +554,9 @@ do_checkin(Pid, State) ->
                                     maps:put(Pid, MonRef, PidMonitors)
                             end,
 
-                            State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2}
+                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
+                            %% Maintain prewarm for activated hosts
+                            maybe_maintain_prewarm(Key, State2)
                     end;
                 false ->
                     State#state{in_use=InUse2}
@@ -512,6 +564,91 @@ do_checkin(Pid, State) ->
         error ->
             State
     end.
+
+%% @private Prewarm connections to a host
+%% Creates connections up to Count if there are fewer available.
+%% Only creates TCP connections (prewarm doesn't apply to SSL).
+do_prewarm(Host, Port, Count, State) ->
+    #state{name=PoolName, available=Available, keepalive_timeout=IdleTimeout} = State,
+    Key = connection_key(Host, Port, hackney_tcp),
+    CurrentCount = case maps:find(Key, Available) of
+        {ok, Pids} -> length(Pids);
+        error -> 0
+    end,
+    Needed = max(0, Count - CurrentCount),
+    ?report_trace("pool: prewarm", [{pool, PoolName}, {host, Host}, {port, Port},
+                                    {current, CurrentCount}, {needed, Needed}]),
+    case Needed > 0 of
+        true ->
+            %% Mark host as activated
+            State2 = activate_host(Key, State),
+            %% Create connections in background to not block the pool
+            PoolPid = self(),
+            spawn(fun() ->
+                prewarm_connections(PoolPid, Host, Port, Needed, IdleTimeout)
+            end),
+            State2;
+        false ->
+            State
+    end.
+
+%% @private Mark a host as activated for prewarm
+activate_host(Key, #state{activated_hosts=Activated}=State) ->
+    State#state{activated_hosts=sets:add_element(Key, Activated)}.
+
+%% @private Check if a host has been activated
+is_host_activated(Key, #state{activated_hosts=Activated}) ->
+    sets:is_element(Key, Activated).
+
+%% @private Maintain prewarm count for activated hosts
+maybe_maintain_prewarm(Key, State) ->
+    case is_host_activated(Key, State) of
+        true ->
+            #state{prewarm_count=PrewarmCount, available=Available} = State,
+            CurrentCount = case maps:find(Key, Available) of
+                {ok, Pids} -> length(Pids);
+                error -> 0
+            end,
+            case CurrentCount < PrewarmCount of
+                true ->
+                    {Host, Port, _Transport} = Key,
+                    do_prewarm(Host, Port, PrewarmCount, State);
+                false ->
+                    State
+            end;
+        false ->
+            State
+    end.
+
+%% @private Create prewarm connections (runs in separate process)
+prewarm_connections(_PoolPid, _Host, _Port, 0, _IdleTimeout) ->
+    ok;
+prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
+    ConnOpts = #{
+        host => Host,
+        port => Port,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000,
+        idle_timeout => IdleTimeout,
+        ssl_options => [],
+        connect_options => [],
+        pool_pid => PoolPid,
+        owner => PoolPid
+    },
+    case hackney_conn_sup:start_conn(ConnOpts) of
+        {ok, Pid} ->
+            case hackney_conn:connect(Pid) of
+                ok ->
+                    %% Checkin the new connection to the pool
+                    gen_server:cast(PoolPid, {prewarm_checkin, Pid, {Host, Port, hackney_tcp}});
+                {error, _Reason} ->
+                    catch hackney_conn:stop(Pid)
+            end;
+        {error, _Reason} ->
+            ok
+    end,
+    prewarm_connections(PoolPid, Host, Port, Count - 1, IdleTimeout).
 
 init_metrics(PoolName) ->
     Engine = hackney_metrics:get_engine(),

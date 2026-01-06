@@ -43,6 +43,7 @@ hackney_pool_integration_test_() ->
       {"connection death cleanup", fun test_connection_death/0},
       {"owner crash kills connection", fun test_owner_crash/0},
       {"checkin resets owner to pool", fun test_checkin_resets_owner/0},
+      {"prewarm creates connections", fun test_prewarm/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}}
      ]}.
@@ -279,6 +280,36 @@ test_checkin_resets_owner() ->
     ?assertEqual(1, proplists:get_value(free_count, Stats2)),
 
     ok = hackney_pool:stop_pool(test_pool_checkin_owner).
+
+%%====================================================================
+%% Prewarm Tests
+%%====================================================================
+
+test_prewarm() ->
+    %% Test that prewarm creates connections
+    ok = hackney_pool:start_pool(test_pool_prewarm, [{pool_size, 10}, {prewarm_count, 3}]),
+
+    %% Initially no connections
+    Stats1 = hackney_pool:get_stats(test_pool_prewarm),
+    ?assertEqual(0, proplists:get_value(free_count, Stats1)),
+
+    %% Prewarm 3 connections to localhost
+    hackney_pool:prewarm(test_pool_prewarm, "127.0.0.1", ?PORT, 3),
+    timer:sleep(500),  %% Wait for prewarm connections to be created
+
+    %% Should have 3 free connections
+    Stats2 = hackney_pool:get_stats(test_pool_prewarm),
+    ?assertEqual(3, proplists:get_value(free_count, Stats2)),
+
+    %% Prewarm with different count
+    hackney_pool:prewarm(test_pool_prewarm, "127.0.0.1", ?PORT, 5),
+    timer:sleep(500),
+
+    %% Should have 5 free connections now (2 more added)
+    Stats3 = hackney_pool:get_stats(test_pool_prewarm),
+    ?assertEqual(5, proplists:get_value(free_count, Stats3)),
+
+    ok = hackney_pool:stop_pool(test_pool_prewarm).
 
 %%====================================================================
 %% Timeout Tests
