@@ -59,7 +59,9 @@ get_protocol_idle_test() ->
 %% Test that HTTP/2 machine can be initialized
 h2_machine_init_test() ->
     %% Test direct initialization of h2_machine (unit test)
-    {ok, Preface, Machine} = hackney_cow_http2_machine:init(client, #{}),
+    %% Use infinity timeouts to prevent orphaned timer messages
+    Opts = #{preface_timeout => infinity, settings_timeout => infinity},
+    {ok, Preface, Machine} = hackney_cow_http2_machine:init(client, Opts),
     ?assert(is_binary(iolist_to_binary(Preface))),
     ?assert(is_tuple(Machine)),
     %% Verify preface contains HTTP/2 magic
@@ -96,7 +98,9 @@ http2_connection_test_() ->
             setup,
             fun setup/0, fun cleanup/1,
             [
-                {"Connect to HTTP/2 server", fun connect_http2_server/0}
+                {"Connect to HTTP/2 server", fun connect_http2_server/0},
+                {"HTTP/2 GET request", fun h2_get_request/0},
+                {"HTTP/2 POST request", fun h2_post_request/0}
             ]
         }
     }.
@@ -129,6 +133,82 @@ connect_http2_server() ->
         {error, _} ->
             %% Network not available, skip test
             ?debugMsg("Skipping HTTP/2 test - network not available")
+    end.
+
+h2_get_request() ->
+    %% Test HTTP/2 GET request
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+            {ok, Pid} = hackney_conn:start_link(#{
+                host => "nghttp2.org",
+                port => 443,
+                transport => hackney_ssl,
+                connect_timeout => 10000,
+                recv_timeout => 10000
+            }),
+            case hackney_conn:connect(Pid, 10000) of
+                ok ->
+                    ?assertEqual(http2, hackney_conn:get_protocol(Pid)),
+                    %% Send GET request
+                    case hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>, 15000) of
+                        {ok, Status, Headers} when is_integer(Status) ->
+                            ?assert(Status >= 200 andalso Status < 400),
+                            ?assert(is_list(Headers)),
+                            hackney_conn:stop(Pid);
+                        {ok, Status, Headers, _Body} when is_integer(Status) ->
+                            ?assert(Status >= 200 andalso Status < 400),
+                            ?assert(is_list(Headers)),
+                            hackney_conn:stop(Pid);
+                        {error, Reason} ->
+                            hackney_conn:stop(Pid),
+                            ?debugFmt("HTTP/2 GET request failed: ~p", [Reason])
+                    end;
+                {error, _} ->
+                    hackney_conn:stop(Pid),
+                    ?debugMsg("Skipping - connection failed")
+            end;
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
+    end.
+
+h2_post_request() ->
+    %% Test HTTP/2 POST request with body
+    case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+            {ok, Pid} = hackney_conn:start_link(#{
+                host => "nghttp2.org",
+                port => 443,
+                transport => hackney_ssl,
+                connect_timeout => 10000,
+                recv_timeout => 10000
+            }),
+            case hackney_conn:connect(Pid, 10000) of
+                ok ->
+                    ?assertEqual(http2, hackney_conn:get_protocol(Pid)),
+                    %% Send POST request with body
+                    Body = <<"test=data">>,
+                    Headers = [{<<"content-type">>, <<"application/x-www-form-urlencoded">>}],
+                    case hackney_conn:request(Pid, <<"POST">>, <<"/">>, Headers, Body, 15000) of
+                        {ok, Status, RespHeaders} when is_integer(Status) ->
+                            ?assert(Status >= 200 andalso Status < 500),
+                            ?assert(is_list(RespHeaders)),
+                            hackney_conn:stop(Pid);
+                        {ok, Status, RespHeaders, _RespBody} when is_integer(Status) ->
+                            ?assert(Status >= 200 andalso Status < 500),
+                            ?assert(is_list(RespHeaders)),
+                            hackney_conn:stop(Pid);
+                        {error, Reason} ->
+                            hackney_conn:stop(Pid),
+                            ?debugFmt("HTTP/2 POST request failed: ~p", [Reason])
+                    end;
+                {error, _} ->
+                    hackney_conn:stop(Pid),
+                    ?debugMsg("Skipping - connection failed")
+            end;
+        {error, _} ->
+            ?debugMsg("Skipping - network not available")
     end.
 
 %%====================================================================

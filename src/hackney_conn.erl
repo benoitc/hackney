@@ -459,11 +459,44 @@ init([DefaultOwner, Opts]) ->
             {ok, connected, Data}
     end.
 
-terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport}) ->
+terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport, h2_machine = H2Machine}) ->
+    %% Cancel any HTTP/2 timers to prevent orphaned timer messages
+    cancel_h2_timers(H2Machine),
+    %% Close socket
     case Socket of
         undefined -> ok;
         _ -> Transport:close(Socket)
     end,
+    ok.
+
+%% @private Cancel HTTP/2 preface and settings timers
+cancel_h2_timers(undefined) ->
+    ok;
+cancel_h2_timers(H2Machine) when is_tuple(H2Machine), element(1, H2Machine) =:= http2_machine ->
+    %% H2Machine is #http2_machine{} record:
+    %% Element 1: http2_machine (record name)
+    %% Element 2: mode
+    %% Element 3: opts
+    %% Element 4: state
+    %% Element 5: preface_timer
+    %% Element 6: settings_timer
+    try
+        case element(5, H2Machine) of
+            undefined -> ok;
+            PrefaceTimer ->
+                _ = erlang:cancel_timer(PrefaceTimer, [{async, true}, {info, false}]),
+                ok
+        end,
+        case element(6, H2Machine) of
+            undefined -> ok;
+            SettingsTimer ->
+                _ = erlang:cancel_timer(SettingsTimer, [{async, true}, {info, false}]),
+                ok
+        end
+    catch
+        _:_ -> ok
+    end;
+cancel_h2_timers(_) ->
     ok.
 
 code_change(_OldVsn, State, Data, _Extra) ->
@@ -655,8 +688,12 @@ connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, h
 connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
     {keep_state_and_data, [{reply, From, Upgraded}]};
 
+connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 request - use h2_machine
+    do_h2_request(From, Method, Path, Headers, Body, Data);
+
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
-    %% Start a new sync request
+    %% HTTP/1.1 request
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -699,6 +736,12 @@ connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
     },
     %% Transition to streaming_body state
     {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
+
+%% HTTP/2 socket data handling
+connected(info, {ssl, Socket, RecvData}, #conn_data{socket = Socket, protocol = http2} = Data) ->
+    handle_h2_data(RecvData, Data);
+connected(info, {tcp, Socket, RecvData}, #conn_data{socket = Socket, protocol = http2} = Data) ->
+    handle_h2_data(RecvData, Data);
 
 connected(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
@@ -1635,4 +1678,365 @@ init_h2_after_upgrade(SslSocket, Data, From) ->
             {keep_state, NewData, [{reply, From, ok}]};
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Send an HTTP/2 request
+%% Creates a stream, sends HEADERS and optionally DATA frames
+do_h2_request(From, Method, Path, Headers, Body, Data) ->
+    #conn_data{
+        transport = Transport,
+        socket = Socket,
+        host = Host,
+        port = Port,
+        h2_machine = H2Machine0
+    } = Data,
+
+    %% Initialize a new stream
+    MethodBin = to_binary(Method),
+    {ok, StreamId, H2Machine1} = hackney_cow_http2_machine:init_stream(MethodBin, H2Machine0),
+
+    %% Build pseudo-headers
+    Scheme = case Transport of
+        hackney_ssl -> <<"https">>;
+        _ -> <<"http">>
+    end,
+    Authority = build_authority(Host, Port, Transport),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> to_binary(Path)
+    end,
+
+    PseudoHeaders = #{
+        method => MethodBin,
+        scheme => Scheme,
+        authority => Authority,
+        path => PathBin
+    },
+
+    %% Convert headers to binary tuples
+    H2Headers = normalize_headers(Headers),
+
+    %% Determine if this is the final frame (no body)
+    IsFin = case Body of
+        <<>> -> fin;
+        [] -> fin;
+        _ -> nofin
+    end,
+
+    %% Prepare headers using h2_machine
+    {ok, _IsFin2, HeaderBlock, H2Machine2} = hackney_cow_http2_machine:prepare_headers(StreamId, H2Machine1, IsFin, PseudoHeaders, H2Headers),
+    %% Build and send HEADERS frame
+    HeadersFrame = hackney_cow_http2:headers(StreamId, IsFin, HeaderBlock),
+    case Transport:send(Socket, HeadersFrame) of
+        ok ->
+            %% Send body if present
+            case send_h2_body(Transport, Socket, StreamId, Body, H2Machine2) of
+                {ok, H2Machine3} ->
+                    %% Track stream for response
+                    Streams = maps:put(StreamId, {From, waiting_response}, Data#conn_data.h2_streams),
+                    NewData = Data#conn_data{
+                        h2_machine = H2Machine3,
+                        h2_streams = Streams,
+                        method = MethodBin,
+                        path = PathBin,
+                        request_from = From
+                    },
+                    %% Set socket to active mode for receiving response
+                    ok = Transport:setopts(Socket, [{active, once}]),
+                    %% Stay in connected state, wait for response via info messages
+                    {keep_state, NewData};
+                {error, Reason} ->
+                    {keep_state_and_data, [{reply, From, {error, Reason}}]}
+            end;
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Send HTTP/2 request body as DATA frames
+send_h2_body(_Transport, _Socket, _StreamId, <<>>, H2Machine) ->
+    {ok, H2Machine};
+send_h2_body(_Transport, _Socket, _StreamId, [], H2Machine) ->
+    {ok, H2Machine};
+send_h2_body(Transport, Socket, StreamId, Body, H2Machine) ->
+    %% For now, send entire body in one DATA frame
+    %% TODO: Respect flow control window and split large bodies
+    BodyBin = iolist_to_binary(Body),
+    DataFrame = hackney_cow_http2:data(StreamId, fin, BodyBin),
+    case Transport:send(Socket, DataFrame) of
+        ok -> {ok, H2Machine};
+        {error, Reason} -> {error, Reason}
+    end.
+
+%% @private Build authority (host:port) for HTTP/2 :authority pseudo-header
+build_authority(Host, Port, Transport) ->
+    HostBin = to_binary(Host),
+    case {Transport, Port} of
+        {hackney_ssl, 443} -> HostBin;
+        {hackney_tcp, 80} -> HostBin;
+        _ -> <<HostBin/binary, ":", (integer_to_binary(Port))/binary>>
+    end.
+
+%% @private Convert value to binary
+to_binary(V) when is_binary(V) -> V;
+to_binary(V) when is_list(V) -> list_to_binary(V);
+to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8).
+
+%% @private Normalize headers to binary key-value pairs for HTTP/2
+normalize_headers(Headers) ->
+    lists:map(fun({K, V}) ->
+        {hackney_bstr:to_lower(to_binary(K)), to_binary(V)}
+    end, Headers).
+
+%% @private Handle incoming HTTP/2 data
+%% Parses frames and processes them through the h2_machine
+handle_h2_data(RecvData, Data) ->
+    #conn_data{buffer = Buffer, transport = Transport, socket = Socket} = Data,
+    FullData = <<Buffer/binary, RecvData/binary>>,
+    case parse_h2_frames(FullData, Data#conn_data{buffer = <<>>}) of
+        {ok, NewData} ->
+            %% Continue receiving if we have pending streams
+            case maps:size(NewData#conn_data.h2_streams) > 0 of
+                true ->
+                    ok = Transport:setopts(Socket, [{active, once}]),
+                    {keep_state, NewData};
+                false ->
+                    {keep_state, NewData}
+            end;
+        {reply, Reply, NewData} ->
+            %% Reply to caller and continue
+            case NewData#conn_data.request_from of
+                undefined ->
+                    {keep_state, NewData};
+                From ->
+                    ok = Transport:setopts(Socket, [{active, once}]),
+                    {keep_state, NewData#conn_data{request_from = undefined}, [{reply, From, Reply}]}
+            end;
+        {error, Reason, NewData} ->
+            %% Error - reply and close
+            case NewData#conn_data.request_from of
+                undefined ->
+                    {next_state, closed, NewData};
+                From ->
+                    {next_state, closed, NewData, [{reply, From, {error, Reason}}]}
+            end
+    end.
+
+%% @private Parse HTTP/2 frames from buffer
+parse_h2_frames(Buffer, Data) ->
+    case hackney_cow_http2:parse(Buffer) of
+        {ok, Frame, Rest} ->
+            case handle_h2_frame(Frame, Data) of
+                {ok, NewData} ->
+                    parse_h2_frames(Rest, NewData);
+                {reply, Reply, NewData} ->
+                    {reply, Reply, NewData#conn_data{buffer = Rest}};
+                {error, Reason, NewData} ->
+                    {error, Reason, NewData}
+            end;
+        more ->
+            {ok, Data#conn_data{buffer = Buffer}};
+        {connection_error, ErrorCode, _Reason} ->
+            {error, {h2_connection_error, ErrorCode}, Data}
+    end.
+
+%% @private Handle individual HTTP/2 frames
+handle_h2_frame({settings, Settings}, Data) ->
+    %% Server SETTINGS frame - acknowledge and update machine
+    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
+    case hackney_cow_http2_machine:frame({settings, Settings}, H2Machine) of
+        {ok, H2Machine2} ->
+            %% Send SETTINGS ACK
+            SettingsAck = hackney_cow_http2:settings_ack(),
+            case Transport:send(Socket, SettingsAck) of
+                ok -> {ok, Data#conn_data{h2_machine = H2Machine2}};
+                {error, Reason} -> {error, Reason, Data}
+            end;
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame(settings_ack, Data) ->
+    %% Server acknowledged our SETTINGS
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame(settings_ack, H2Machine) of
+        {ok, H2Machine2} ->
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({headers, StreamId, IsFin, HeadFin, HeaderBlock}, Data) ->
+    %% Response headers received (5-tuple format - no priority)
+    %% Convert to 8-tuple format expected by h2_machine
+    %% DepStreamId must be positive (1 means no actual dependency)
+    Frame = {headers, StreamId, IsFin, HeadFin, shared, 1, 16, HeaderBlock},
+    do_handle_h2_headers(StreamId, IsFin, Frame, Data);
+handle_h2_frame({headers, StreamId, IsFin, HeadFin, Exclusive, DepStreamId, Weight, HeaderBlock}, Data) ->
+    %% Response headers received (8-tuple format - with priority)
+    Frame = {headers, StreamId, IsFin, HeadFin, Exclusive, DepStreamId, Weight, HeaderBlock},
+    do_handle_h2_headers(StreamId, IsFin, Frame, Data);
+
+handle_h2_frame({data, StreamId, IsFin, BodyData}, Data) ->
+    %% Response body data received
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({data, StreamId, IsFin, BodyData}, H2Machine) of
+        {ok, {data, StreamId, RespIsFin, RespData}, H2Machine2} ->
+            %% h2_machine may return processed data
+            do_handle_h2_data_body(StreamId, RespIsFin, RespData, H2Machine2, Data);
+        {ok, H2Machine2} ->
+            %% Simple ack from machine
+            do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine2, Data);
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({ping, Opaque}, Data) ->
+    %% Respond to PING with PING ACK
+    #conn_data{transport = Transport, socket = Socket, h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({ping, Opaque}, H2Machine) of
+        {ok, H2Machine2} ->
+            PingAck = hackney_cow_http2:ping_ack(Opaque),
+            Transport:send(Socket, PingAck),
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({ping_ack, _Opaque}, Data) ->
+    %% PING ACK received - ignore
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({ping_ack, _Opaque}, H2Machine) of
+        {ok, H2Machine2} ->
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({goaway, LastStreamId, ErrorCode, _DebugData}, Data) ->
+    %% Server is going away
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({goaway, LastStreamId, ErrorCode, _DebugData}, H2Machine) of
+        {ok, {goaway, _, _, _}, H2Machine2} ->
+            {error, {goaway, ErrorCode}, Data#conn_data{h2_machine = H2Machine2}};
+        {ok, H2Machine2} ->
+            {error, {goaway, ErrorCode}, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({window_update, Increment}, Data) ->
+    %% Connection-level window update
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({window_update, Increment}, H2Machine) of
+        {ok, H2Machine2} ->
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({window_update, StreamId, Increment}, Data) ->
+    %% Stream-level window update
+    #conn_data{h2_machine = H2Machine} = Data,
+    case hackney_cow_http2_machine:frame({window_update, StreamId, Increment}, H2Machine) of
+        {ok, H2Machine2} ->
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame({rst_stream, StreamId, ErrorCode}, Data) ->
+    %% Stream reset
+    #conn_data{h2_streams = Streams} = Data,
+    case maps:get(StreamId, Streams, undefined) of
+        {From, _} ->
+            Streams2 = maps:remove(StreamId, Streams),
+            {reply, {error, {stream_error, ErrorCode}},
+             Data#conn_data{h2_streams = Streams2, request_from = From}};
+        undefined ->
+            {ok, Data}
+    end;
+
+handle_h2_frame({push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock}, Data) ->
+    %% Server is attempting to push a resource
+    %% First inform h2_machine about the push, then reject with RST_STREAM
+    %% This is valid behavior per RFC 7540 Section 8.2
+    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
+    Frame = {push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock},
+    case hackney_cow_http2_machine:frame(Frame, H2Machine) of
+        {ok, {push_promise, _StreamId, PromisedStreamId2, _Headers, _PseudoHeaders}, H2Machine2} ->
+            %% Reject the push with RST_STREAM (REFUSED_STREAM = 0x7)
+            RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId2, refused_stream),
+            Transport:send(Socket, RstFrame),
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {ok, H2Machine2} ->
+            %% Machine processed it, still reject
+            RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId, refused_stream),
+            Transport:send(Socket, RstFrame),
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
+    end;
+
+handle_h2_frame(_Frame, Data) ->
+    %% Unknown or unhandled frame - ignore
+    {ok, Data}.
+
+%% @private Handle DATA frame body after h2_machine processing
+do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine, Data) ->
+    #conn_data{h2_streams = Streams} = Data,
+    %% Update stream with body data
+    case maps:get(StreamId, Streams, undefined) of
+        {From, {waiting_body, Status, Headers, AccBody}} ->
+            NewBody = <<AccBody/binary, BodyData/binary>>,
+            case IsFin of
+                fin ->
+                    %% Body complete - reply
+                    Streams2 = maps:remove(StreamId, Streams),
+                    {reply, {ok, Status, Headers, NewBody},
+                     Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2,
+                                    status = Status, response_headers = Headers,
+                                    request_from = From}};
+                nofin ->
+                    %% More body data expected
+                    Streams2 = maps:put(StreamId, {From, {waiting_body, Status, Headers, NewBody}}, Streams),
+                    {ok, Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2}}
+            end;
+        _ ->
+            {ok, Data#conn_data{h2_machine = H2Machine}}
+    end.
+
+%% @private Handle HTTP/2 headers response
+do_handle_h2_headers(StreamId, _IsFin, Frame, Data) ->
+    #conn_data{h2_machine = H2Machine, h2_streams = Streams} = Data,
+    case hackney_cow_http2_machine:frame(Frame, H2Machine) of
+        {ok, {headers, StreamId, RespIsFin, Headers, PseudoHeaders, _Len}, H2Machine2} ->
+            %% Response headers received
+            %% PseudoHeaders contains #{status => Status} for responses
+            Status = maps:get(status, PseudoHeaders, 200),
+            case maps:get(StreamId, Streams, undefined) of
+                {From, waiting_response} ->
+                    case RespIsFin of
+                        fin ->
+                            %% No body - reply immediately
+                            Streams2 = maps:remove(StreamId, Streams),
+                            {reply, {ok, Status, Headers},
+                             Data#conn_data{h2_machine = H2Machine2, h2_streams = Streams2,
+                                            status = Status, response_headers = Headers,
+                                            request_from = From}};
+                        nofin ->
+                            %% Body follows - update stream state
+                            Streams2 = maps:put(StreamId, {From, {waiting_body, Status, Headers, <<>>}}, Streams),
+                            {ok, Data#conn_data{h2_machine = H2Machine2, h2_streams = Streams2,
+                                                request_from = From}}
+                    end;
+                _ ->
+                    {ok, Data#conn_data{h2_machine = H2Machine2}}
+            end;
+        {ok, {trailers, StreamId, _TrailerHeaders}, H2Machine2} ->
+            %% Trailers received - ignore for now
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {ok, H2Machine2} ->
+            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {error, Reason, _H2Machine} ->
+            {error, Reason, Data}
     end.
