@@ -383,7 +383,7 @@ is_ready(Pid) ->
 
 %% @doc Upgrade a TCP connection to SSL.
 %% This performs an SSL handshake on the existing TCP socket.
-%% After upgrade, the connection is marked as `upgraded_ssl` and should
+%% After upgrade, the connection is marked as upgraded_ssl and should
 %% NOT be returned to the pool (SSL connections are not pooled for security).
 -spec upgrade_to_ssl(pid(), list()) -> ok | {error, term()}.
 upgrade_to_ssl(Pid, SslOpts) ->

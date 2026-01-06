@@ -63,7 +63,7 @@ init() ->
 
 %% @doc Acquire a slot for the given host.
 %% Blocks with exponential backoff until a slot is available or timeout.
-%% Returns `ok` if slot acquired, `{error, timeout}` otherwise.
+%% Returns ok if slot acquired, {error, timeout} otherwise.
 -spec acquire(Host :: string() | binary(), Port :: inet:port_number(),
               MaxPerHost :: pos_integer(), Timeout :: timeout()) ->
     ok | {error, timeout}.
@@ -73,7 +73,7 @@ acquire(Host, Port, MaxPerHost, Timeout) ->
     acquire_loop(Key, MaxPerHost, Deadline).
 
 %% @doc Release a slot for the given host.
-%% Should always be called after acquire, typically in an `after` block.
+%% Should always be called after acquire, typically in an after block.
 -spec release(Host :: string() | binary(), Port :: inet:port_number()) -> ok.
 release(Host, Port) ->
     Key = normalize_key(Host, Port),

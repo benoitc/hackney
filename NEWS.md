@@ -5,14 +5,38 @@
 
 Process-per-connection architecture. Each connection is a `gen_statem` process.
 
-See [Migration Guide](doc/MIGRATION.md) for details.
+See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) for details.
 
-### Changes
+### Architecture Changes
 
-- connection handle is now a PID (was opaque reference)
+- Connection handle is now a PID (was opaque reference)
 - `hackney_conn` manages connections (replaces hackney_connect, hackney_connection, hackney_request, hackney_response, hackney_stream)
 - `hackney_headers` renamed from `hackney_headers_new`
-- pool rewritten for new model
+- Clean OTP supervision tree with `hackney_conn_sup`
+
+### Pool Redesign
+
+The connection pool has been completely redesigned:
+
+- **Per-host connection limits** - Each host gets up to `max_per_host` concurrent connections (default 50), replacing the global pool limit
+- **TCP-only pooling** - SSL connections are never pooled (security improvement). HTTPS requests upgrade pooled TCP connections to SSL
+- **Connection prewarm** - Pool maintains warm TCP connections per host (default 4) after first use
+- **Load regulation** - New `hackney_load_regulation` module provides lock-free per-host backpressure using ETS counting semaphore
+- **Keepalive timeout capped** - Maximum 2 seconds idle time to prevent stale connections
+- **Host stats API** - New `hackney_pool:host_stats/3` for per-host monitoring
+
+### New Options
+
+- `max_per_host` - Maximum concurrent connections per host (default 50)
+- `checkout_timeout` - Timeout to acquire connection slot (default 8000ms)
+- `prewarm_count` - Warm connections per host (default 4)
+
+### New Functions
+
+- `hackney:get_version/0` - Get hackney version
+- `hackney_pool:host_stats/3` - Get per-host connection stats
+- `hackney_pool:prewarm/3,4` - Explicitly prewarm connections to a host
+- `hackney_load_regulation:current/2` - Get current connection count for host
 
 ### Removed
 
@@ -20,11 +44,6 @@ See [Migration Guide](doc/MIGRATION.md) for details.
 - `controlling_process/2` - not needed
 - `send_multipart_body/2` - use `send_body/2`
 - SOCKS5 and HTTP CONNECT proxy (planned 2.1.0)
-
-### Added
-
-- `hackney:get_version/0`
-- `hackney_conn_sup` supervisor
 
 ### Requirements
 

@@ -61,6 +61,7 @@ stream_body(Ref) ->
 | [Getting Started](GETTING_STARTED.md) | Installation, first requests, basic patterns |
 | [HTTP Guide](guides/http_guide.md) | Requests, responses, streaming, async, pools |
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
+| [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
 | [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x |
 | [API Reference](https://hexdocs.pm/hackney) | Full module documentation |
 | [Changelog](NEWS.md) | Version history |
