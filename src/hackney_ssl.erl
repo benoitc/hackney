@@ -23,6 +23,10 @@
 -export([cipher_opts/0]).
 -export([ssl_opts/2]).
 
+%% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
+-export([alpn_opts/1]).
+-export([get_negotiated_protocol/1]).
+
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
 
@@ -251,3 +255,46 @@ shutdown(Socket, How) ->
     -> {ok, {inet:ip_address(), inet:port_number()}} | {error, atom()}.
 sockname(Socket) ->
   ssl:sockname(Socket).
+
+%%====================================================================
+%% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
+%%====================================================================
+
+%% @doc Generate ALPN options for SSL connection.
+%% Returns a list containing alpn_advertised_protocols option based on
+%% the protocols specified in Options.
+%%
+%% Options:
+%%   - protocols: list of atoms [http2, http1] (default: [http2, http1])
+%%     Order matters - first protocol is preferred
+%%
+%% Example:
+%%   alpn_opts([{protocols, [http2, http1]}]) ->
+%%     [{alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}]
+-spec alpn_opts(list()) -> list().
+alpn_opts(Opts) ->
+  case proplists:get_value(protocols, Opts, [http2, http1]) of
+    Protos when is_list(Protos), Protos =/= [] ->
+      AlpnProtos = [proto_to_alpn(P) || P <- Protos],
+      [{alpn_advertised_protocols, AlpnProtos}];
+    _ ->
+      []
+  end.
+
+%% @doc Get the negotiated protocol after SSL handshake.
+%% Returns http2 if HTTP/2 was negotiated, http1 otherwise.
+%% @see ssl:negotiated_protocol/1
+-spec get_negotiated_protocol(ssl:sslsocket()) -> http2 | http1.
+get_negotiated_protocol(SslSocket) ->
+  case ssl:negotiated_protocol(SslSocket) of
+    {ok, <<"h2">>} -> http2;
+    {ok, <<"http/1.1">>} -> http1;
+    {error, protocol_not_negotiated} -> http1;
+    _ -> http1
+  end.
+
+%% @private Convert protocol atom to ALPN protocol identifier
+-spec proto_to_alpn(http2 | http1 | http11) -> binary().
+proto_to_alpn(http2) -> <<"h2">>;
+proto_to_alpn(http1) -> <<"http/1.1">>;
+proto_to_alpn(http11) -> <<"http/1.1">>.

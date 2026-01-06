@@ -87,3 +87,35 @@ googleapis_ssl_opts_test(_) ->
            end,
     ?_assertEqual(Resp, success).
 
+%%====================================================================
+%% ALPN Tests
+%%====================================================================
+
+alpn_opts_default_test() ->
+    %% Default should include both http2 and http1
+    Opts = hackney_ssl:alpn_opts([]),
+    ?assertEqual([{alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}], Opts).
+
+alpn_opts_http2_only_test() ->
+    Opts = hackney_ssl:alpn_opts([{protocols, [http2]}]),
+    ?assertEqual([{alpn_advertised_protocols, [<<"h2">>]}], Opts).
+
+alpn_opts_http1_only_test() ->
+    Opts = hackney_ssl:alpn_opts([{protocols, [http1]}]),
+    ?assertEqual([{alpn_advertised_protocols, [<<"http/1.1">>]}], Opts).
+
+alpn_opts_http11_alias_test() ->
+    %% http11 should be an alias for http1
+    Opts = hackney_ssl:alpn_opts([{protocols, [http11]}]),
+    ?assertEqual([{alpn_advertised_protocols, [<<"http/1.1">>]}], Opts).
+
+alpn_opts_order_preserved_test() ->
+    %% Order should be preserved - http1 first, then http2
+    Opts = hackney_ssl:alpn_opts([{protocols, [http1, http2]}]),
+    ?assertEqual([{alpn_advertised_protocols, [<<"http/1.1">>, <<"h2">>]}], Opts).
+
+alpn_opts_empty_protocols_test() ->
+    %% Empty protocols list should return empty opts
+    Opts = hackney_ssl:alpn_opts([{protocols, []}]),
+    ?assertEqual([], Opts).
+
