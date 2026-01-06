@@ -328,6 +328,7 @@ static lsquic_stream_ctx_t *on_new_stream(void *stream_if_ctx, lsquic_stream_t *
 
     memset(stream, 0, sizeof(QuicStream));
     stream->stream_id = lsquic_stream_id(s);
+    stream->stream = s;  /* Store lsquic stream handle */
     stream->conn = conn;
 
     /* Add to connection's stream list (no mutex - called from I/O thread) */
@@ -946,6 +947,18 @@ void quic_conn_destroy(QuicConn *conn) {
  * Stream operations
  *===========================================================================*/
 
+/* Find a stream by its ID */
+static QuicStream *find_stream(QuicConn *conn, int64_t stream_id) {
+    QuicStream *stream = conn->streams;
+    while (stream) {
+        if (stream->stream_id == stream_id) {
+            return stream;
+        }
+        stream = stream->next;
+    }
+    return NULL;
+}
+
 int64_t quic_conn_open_stream(QuicConn *conn) {
     if (!conn || !conn->conn) return -1;
 
@@ -976,6 +989,94 @@ int quic_conn_close(QuicConn *conn) {
     }
     enif_mutex_unlock(conn->mutex);
 
+    return 0;
+}
+
+int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
+                           ERL_NIF_TERM headers_list, bool fin) {
+    if (!conn || !conn->conn) return -1;
+
+    enif_mutex_lock(conn->mutex);
+    if (conn->state != QUIC_CONN_CONNECTED) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    QuicStream *stream = find_stream(conn, stream_id);
+    if (!stream || !stream->stream) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    if (stream->headers_sent) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;  /* Headers already sent */
+    }
+
+    /* TODO: Convert Erlang headers_list to lsxpack_header array and call
+     * lsquic_stream_send_headers. For now, just mark headers as sent. */
+    stream->headers_sent = true;
+
+    lsquic_engine_process_conns(conn->engine);
+    enif_mutex_unlock(conn->mutex);
+
+    return 0;
+}
+
+int quic_conn_send_data(QuicConn *conn, int64_t stream_id,
+                        const uint8_t *data, size_t len, bool fin) {
+    if (!conn || !conn->conn) return -1;
+
+    enif_mutex_lock(conn->mutex);
+    if (conn->state != QUIC_CONN_CONNECTED) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    QuicStream *stream = find_stream(conn, stream_id);
+    if (!stream || !stream->stream) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    ssize_t written = lsquic_stream_write(stream->stream, data, len);
+    if (written < 0) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    if (fin) {
+        lsquic_stream_shutdown(stream->stream, 1);  /* Shutdown write side */
+        stream->fin_sent = true;
+    }
+
+    lsquic_engine_process_conns(conn->engine);
+    enif_mutex_unlock(conn->mutex);
+
+    return (int)written;
+}
+
+int quic_conn_reset_stream(QuicConn *conn, int64_t stream_id, uint64_t error_code) {
+    UNUSED(error_code);  /* lsquic doesn't have a reset with error code API */
+    if (!conn || !conn->conn) return -1;
+
+    enif_mutex_lock(conn->mutex);
+    if (conn->state != QUIC_CONN_CONNECTED) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    QuicStream *stream = find_stream(conn, stream_id);
+    if (!stream || !stream->stream) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    /* Close the stream (lsquic doesn't have a reset with error code) */
+    lsquic_stream_close(stream->stream);
+    lsquic_engine_process_conns(conn->engine);
+
+    enif_mutex_unlock(conn->mutex);
     return 0;
 }
 

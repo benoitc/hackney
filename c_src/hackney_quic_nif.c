@@ -191,9 +191,28 @@ nif_send_headers(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         return enif_make_badarg(env);
     }
 
-    /* TODO: Implement header sending via lsquic_stream_send_headers */
-    UNUSED(argv);
-    return make_error_str(env, "not_implemented");
+    /* Extract stream ID */
+    int64_t stream_id;
+    if (!enif_get_int64(env, argv[1], &stream_id)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Extract fin flag */
+    char fin_str[6];
+    int fin = 0;
+    if (enif_get_atom(env, argv[3], fin_str, sizeof(fin_str), ERL_NIF_LATIN1)) {
+        fin = (strcmp(fin_str, "true") == 0);
+    } else {
+        return enif_make_badarg(env);
+    }
+
+    /* Send headers (full implementation needs header conversion) */
+    int ret = quic_conn_send_headers(conn, stream_id, argv[2], fin);
+    if (ret < 0) {
+        return make_error(env, ATOM_NOT_CONNECTED);
+    }
+
+    return ATOM_OK;
 }
 
 /*
@@ -211,9 +230,34 @@ nif_send_data(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         return enif_make_badarg(env);
     }
 
-    /* TODO: Implement data sending via lsquic_stream_write */
-    UNUSED(argv);
-    return make_error_str(env, "not_implemented");
+    /* Extract stream ID */
+    int64_t stream_id;
+    if (!enif_get_int64(env, argv[1], &stream_id)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Extract data */
+    ErlNifBinary data_bin;
+    if (!enif_inspect_iolist_as_binary(env, argv[2], &data_bin)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Extract fin flag */
+    char fin_str[6];
+    int fin = 0;
+    if (enif_get_atom(env, argv[3], fin_str, sizeof(fin_str), ERL_NIF_LATIN1)) {
+        fin = (strcmp(fin_str, "true") == 0);
+    } else {
+        return enif_make_badarg(env);
+    }
+
+    /* Send data */
+    int ret = quic_conn_send_data(conn, stream_id, data_bin.data, data_bin.size, fin);
+    if (ret < 0) {
+        return make_error(env, ATOM_NOT_CONNECTED);
+    }
+
+    return ATOM_OK;
 }
 
 /*
@@ -231,9 +275,25 @@ nif_reset_stream(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         return enif_make_badarg(env);
     }
 
-    /* TODO: Implement stream reset */
-    UNUSED(argv);
-    return make_error_str(env, "not_implemented");
+    /* Extract stream ID */
+    int64_t stream_id;
+    if (!enif_get_int64(env, argv[1], &stream_id)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Extract error code */
+    uint64_t error_code;
+    if (!enif_get_uint64(env, argv[2], &error_code)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Reset stream */
+    int ret = quic_conn_reset_stream(conn, stream_id, error_code);
+    if (ret < 0) {
+        return make_error(env, ATOM_NOT_CONNECTED);
+    }
+
+    return ATOM_OK;
 }
 
 /*

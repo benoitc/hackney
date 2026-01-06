@@ -28,6 +28,7 @@ typedef enum {
 /* Stream context for tracking individual HTTP/3 streams */
 typedef struct QuicStream {
     int64_t stream_id;
+    lsquic_stream_t *stream;  /* lsquic stream handle */
     struct QuicConn *conn;
     bool headers_sent;
     bool headers_received;
