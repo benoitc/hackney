@@ -694,6 +694,31 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
 sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
                                 WithBody, Options, URL, FollowRedirect, MaxRedirect, RedirectCount) ->
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody) of
+    %% HTTP/2 returns body directly - handle 4-tuple first
+    {ok, Status, RespHeaders, RespBody} when Status >= 301, Status =< 303; Status =:= 307; Status =:= 308 ->
+      %% HTTP/2 redirect status
+      case FollowRedirect of
+        true when RedirectCount < MaxRedirect ->
+          follow_redirect(ConnPid, Method, FinalBody, WithBody, Options, URL,
+                         RespHeaders, Status, MaxRedirect, RedirectCount);
+        true ->
+          {error, {max_redirect, RedirectCount}};
+        false ->
+          {ok, Status, RespHeaders, RespBody}
+      end;
+    {ok, Status, RespHeaders, RespBody} ->
+      %% HTTP/2 response with body - already have body
+      case Method of
+        <<"HEAD">> ->
+          {ok, Status, RespHeaders};
+        _ when WithBody ->
+          {ok, Status, RespHeaders, RespBody};
+        _ ->
+          %% Caller wants connection ref but HTTP/2 already consumed body
+          %% Return body anyway since we have it
+          {ok, Status, RespHeaders, RespBody}
+      end;
+    %% HTTP/1.1 returns 3-tuple, body fetched separately
     {ok, Status, RespHeaders} when Status >= 301, Status =< 303; Status =:= 307; Status =:= 308 ->
       %% Redirect status
       case FollowRedirect of

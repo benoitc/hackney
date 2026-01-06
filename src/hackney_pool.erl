@@ -20,6 +20,11 @@
          checkout/4,
          checkin/2]).
 
+%% HTTP/2 connection pooling
+-export([checkout_h2/4,
+         register_h2/5,
+         unregister_h2/2]).
+
 -export([
          get_stats/1,
          start_pool/2,
@@ -63,7 +68,10 @@
     %% Pid to monitor ref mapping: #{Pid => MonitorRef}
     pid_monitors = #{},
     %% Hosts that have been activated (prewarm triggered): sets:set(Key)
-    activated_hosts = sets:new()
+    activated_hosts = sets:new(),
+    %% HTTP/2 connections: #{Key => Pid} - one multiplexed connection per host
+    %% These connections are shared across callers (not checked out exclusively)
+    h2_connections = #{}
 }).
 
 -define(DEFAULT_MAX_CONNECTIONS, 50).
@@ -115,6 +123,46 @@ do_checkout(Requester, Host, Port, Transport, Opts) ->
 -spec checkin(PoolInfo :: term(), Pid :: pid()) -> ok.
 checkin({_PoolName, _Key, Pool, _Transport}, Pid) ->
     gen_server:cast(Pool, {checkin, nil, Pid}),
+    ok.
+
+%%====================================================================
+%% HTTP/2 Connection Pooling
+%%====================================================================
+
+%% @doc Get an existing HTTP/2 connection for a host/port, or 'none' if not available.
+%% HTTP/2 connections are shared (multiplexed) across callers.
+-spec checkout_h2(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Options :: list()) ->
+    {ok, pid()} | none.
+checkout_h2(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    try
+        gen_server:call(Pool, {checkout_h2, Key}, ConnectTimeout)
+    catch
+        exit:{timeout, _} -> none;
+        _:_ -> none
+    end.
+
+%% @doc Register an HTTP/2 connection in the pool for sharing.
+%% Called after ALPN negotiation confirms HTTP/2.
+-spec register_h2(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Pid :: pid(), Options :: list()) -> ok.
+register_h2(Host, Port, Transport, Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {register_h2, Key, Pid}),
+    ok.
+
+%% @doc Remove an HTTP/2 connection from the pool (e.g., on GOAWAY).
+-spec unregister_h2(Pid :: pid(), Options :: list()) -> ok.
+unregister_h2(Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    gen_server:cast(Pool, {unregister_h2, Pid}),
     ok.
 
 get_stats(Pool) ->
@@ -377,7 +425,24 @@ handle_call({checkin_sync, Pid}, _From, State) ->
 handle_call({checkin_sync, Pid, UpgradedSsl}, _From, State) ->
     %% Synchronous checkin with SSL flag - avoids deadlock
     State2 = do_checkin_with_ssl_flag(Pid, UpgradedSsl, State),
-    {reply, ok, State2}.
+    {reply, ok, State2};
+
+handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State) ->
+    %% HTTP/2 checkout - return existing connection if available
+    case maps:get(Key, H2Conns, undefined) of
+        undefined ->
+            {reply, none, State};
+        Pid ->
+            %% Verify connection is still alive
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    {reply, {ok, Pid}, State};
+                false ->
+                    %% Connection died, remove from pool
+                    H2Conns2 = maps:remove(Key, H2Conns),
+                    {reply, none, State#state{h2_connections = H2Conns2}}
+            end
+    end.
 
 handle_cast({checkin, _PoolInfo, Pid}, State) ->
     State2 = do_checkin(Pid, State),
@@ -411,12 +476,32 @@ handle_cast({prewarm_checkin, Pid, Key}, State) ->
     Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
     {noreply, State#state{available=Available2, pid_monitors=PidMonitors2}};
 
+handle_cast({register_h2, Key, Pid}, State) ->
+    %% Register an HTTP/2 connection for sharing
+    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    %% Monitor the connection if not already monitored
+    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+        true -> PidMonitors;
+        false ->
+            MonRef = erlang:monitor(process, Pid),
+            maps:put(Pid, MonRef, PidMonitors)
+    end,
+    %% Store HTTP/2 connection
+    H2Conns2 = maps:put(Key, Pid, H2Conns),
+    {noreply, State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}};
+
+handle_cast({unregister_h2, Pid}, State) ->
+    %% Remove an HTTP/2 connection from the pool
+    State2 = do_unregister_h2(Pid, State),
+    {noreply, State2};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
-    %% Connection process died, remove from available and in_use
-    #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors} = State,
+    %% Connection process died, remove from available, in_use, and h2_connections
+    #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
+           h2_connections=H2Conns} = State,
     ?report_trace("pool: connection DOWN", [{pool, PoolName}, {pid, Pid}, {reason, Reason},
         {was_in_use, maps:is_key(Pid, InUse)}]),
 
@@ -443,8 +528,21 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
             InUse
     end,
 
+    %% Remove from HTTP/2 connections if present
+    H2Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end
+        end,
+        H2Conns,
+        H2Conns
+    ),
+
     PidMonitors2 = maps:remove(Pid, PidMonitors),
-    {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2}};
+    {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2,
+                          h2_connections=H2Conns2}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -452,7 +550,8 @@ handle_info(_Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available, pid_monitors=PidMonitors}) ->
+terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
+                         h2_connections=H2Conns, pid_monitors=PidMonitors}) ->
     %% Stop all available connections
     maps:foreach(
         fun(_Key, Pids) ->
@@ -461,6 +560,14 @@ terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available, pi
             end, Pids)
         end,
         Available
+    ),
+
+    %% Stop all HTTP/2 connections
+    maps:foreach(
+        fun(_Key, Pid) ->
+            catch hackney_conn:stop(Pid)
+        end,
+        H2Conns
     ),
 
     %% Demonitor all
@@ -661,6 +768,29 @@ do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
         error ->
             State
     end.
+
+%% @private Remove an HTTP/2 connection from the pool
+do_unregister_h2(Pid, State) ->
+    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    %% Find and remove the connection
+    H2Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end
+        end,
+        H2Conns,
+        H2Conns
+    ),
+    %% Demonitor if no longer tracked
+    PidMonitors2 = case maps:take(Pid, PidMonitors) of
+        {MonRef, PM} ->
+            erlang:demonitor(MonRef, [flush]),
+            PM;
+        error -> PidMonitors
+    end,
+    State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}.
 
 %% @private Prewarm connections to a host
 %% Creates connections up to Count if there are fewer available.

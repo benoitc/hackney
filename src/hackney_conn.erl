@@ -1653,12 +1653,16 @@ init_h2_connection(Socket, Data, From) ->
     case Transport:send(Socket, Preface) of
         ok ->
             %% Set socket to active mode for receiving server SETTINGS
-            ok = Transport:setopts(Socket, [{active, once}]),
-            NewData = Data#conn_data{
-                h2_machine = H2Machine,
-                h2_streams = #{}
-            },
-            {next_state, connected, NewData, [{reply, From, ok}]};
+            case Transport:setopts(Socket, [{active, once}]) of
+                ok ->
+                    NewData = Data#conn_data{
+                        h2_machine = H2Machine,
+                        h2_streams = #{}
+                    },
+                    {next_state, connected, NewData, [{reply, From, ok}]};
+                {error, SetoptsErr} ->
+                    {stop_and_reply, normal, [{reply, From, {error, SetoptsErr}}]}
+            end;
         {error, Reason} ->
             {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
     end.
@@ -1673,12 +1677,16 @@ init_h2_after_upgrade(SslSocket, Data, From) ->
     case Transport:send(SslSocket, Preface) of
         ok ->
             %% Set socket to active mode for receiving server SETTINGS
-            ok = Transport:setopts(SslSocket, [{active, once}]),
-            NewData = Data#conn_data{
-                h2_machine = H2Machine,
-                h2_streams = #{}
-            },
-            {keep_state, NewData, [{reply, From, ok}]};
+            case Transport:setopts(SslSocket, [{active, once}]) of
+                ok ->
+                    NewData = Data#conn_data{
+                        h2_machine = H2Machine,
+                        h2_streams = #{}
+                    },
+                    {keep_state, NewData, [{reply, From, ok}]};
+                {error, SetoptsErr} ->
+                    {keep_state_and_data, [{reply, From, {error, SetoptsErr}}]}
+            end;
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
@@ -1745,9 +1753,14 @@ do_h2_request(From, Method, Path, Headers, Body, Data) ->
                         request_from = From
                     },
                     %% Set socket to active mode for receiving response
-                    ok = Transport:setopts(Socket, [{active, once}]),
-                    %% Stay in connected state, wait for response via info messages
-                    {keep_state, NewData};
+                    case Transport:setopts(Socket, [{active, once}]) of
+                        ok ->
+                            %% Stay in connected state, wait for response via info messages
+                            {keep_state, NewData};
+                        {error, SetoptsErr} ->
+                            {next_state, closed, NewData#conn_data{socket = undefined},
+                             [{reply, From, {error, SetoptsErr}}]}
+                    end;
                 {error, Reason} ->
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
             end;
@@ -1800,8 +1813,10 @@ handle_h2_data(RecvData, Data) ->
             %% Continue receiving if we have pending streams
             case maps:size(NewData#conn_data.h2_streams) > 0 of
                 true ->
-                    ok = Transport:setopts(Socket, [{active, once}]),
-                    {keep_state, NewData};
+                    case Transport:setopts(Socket, [{active, once}]) of
+                        ok -> {keep_state, NewData};
+                        {error, _} -> {next_state, closed, NewData#conn_data{socket = undefined}}
+                    end;
                 false ->
                     {keep_state, NewData}
             end;
@@ -1811,8 +1826,13 @@ handle_h2_data(RecvData, Data) ->
                 undefined ->
                     {keep_state, NewData};
                 From ->
-                    ok = Transport:setopts(Socket, [{active, once}]),
-                    {keep_state, NewData#conn_data{request_from = undefined}, [{reply, From, Reply}]}
+                    case Transport:setopts(Socket, [{active, once}]) of
+                        ok ->
+                            {keep_state, NewData#conn_data{request_from = undefined}, [{reply, From, Reply}]};
+                        {error, _} ->
+                            {next_state, closed, NewData#conn_data{socket = undefined, request_from = undefined},
+                             [{reply, From, Reply}]}
+                    end
             end;
         {error, Reason, NewData} ->
             %% Error - reply and close
