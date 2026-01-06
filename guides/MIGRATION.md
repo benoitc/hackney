@@ -34,6 +34,20 @@
 
 See [Design Guide](design.md) for detailed architecture documentation.
 
+### HTTP/2 Support (2.x only)
+
+Hackney 2.x adds transparent HTTP/2 support:
+
+```
+- Automatic ALPN negotiation on HTTPS connections
+- Connection multiplexing (single connection, multiple streams)
+- Header compression (HPACK)
+- Server push support
+- Same API for both HTTP/1.1 and HTTP/2
+```
+
+See [HTTP/2 Guide](http2_guide.md) for details.
+
 ### Key Differences
 
 | Aspect | 1.x | 2.x |
@@ -46,6 +60,7 @@ See [Design Guide](design.md) for detailed architecture documentation.
 | Pool scope | Global max_connections | Per-host limits |
 | SSL pooling | Yes | No (security) |
 | Prewarm | No | Yes (default 4 per host) |
+| HTTP/2 | No | Yes (automatic via ALPN) |
 
 ## What Changed
 

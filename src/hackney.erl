@@ -143,9 +143,13 @@ connect_direct(Transport, Host, Port, Options) ->
 connect_pool(Transport, Host, Port, Options) ->
   PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
+  %% Check if HTTP/2 is allowed (default: yes)
+  Protocols = proplists:get_value(protocols, Options, [http2, http1]),
+  H2Allowed = lists:member(http2, Protocols),
+
   %% For SSL connections, check if we can reuse an HTTP/2 connection
   case Transport of
-    hackney_ssl ->
+    hackney_ssl when H2Allowed ->
       case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
         {ok, H2Pid} ->
           %% Reuse existing HTTP/2 connection (multiplexed)
@@ -156,7 +160,7 @@ connect_pool(Transport, Host, Port, Options) ->
           connect_pool_new(Transport, Host, Port, Options, PoolHandler)
       end;
     _ ->
-      %% Non-SSL, use normal pool
+      %% Non-SSL or HTTP/2 not allowed, use normal pool
       connect_pool_new(Transport, Host, Port, Options, PoolHandler)
   end.
 

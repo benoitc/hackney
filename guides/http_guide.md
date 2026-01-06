@@ -67,6 +67,45 @@ stream_body(Ref) ->
     end.
 ```
 
+## HTTP/2 Support
+
+Hackney automatically negotiates HTTP/2 for HTTPS connections via ALPN.
+
+### Automatic HTTP/2
+
+```erlang
+%% HTTP/2 used automatically when server supports it
+{ok, 200, Headers, Body} = hackney:get(
+    <<"https://nghttp2.org/">>,
+    [],
+    <<>>,
+    [with_body]
+).
+```
+
+### Force Protocol
+
+```erlang
+%% HTTP/2 only
+hackney:get(URL, [], <<>>, [{protocols, [http2]}]).
+
+%% HTTP/1.1 only
+hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
+```
+
+### Detect Protocol
+
+HTTP/2 responses have lowercase header names:
+
+```erlang
+case hd(Headers) of
+    {<<"date">>, _} -> http2;
+    {<<"Date">>, _} -> http1
+end.
+```
+
+For details on multiplexing, server push, and architecture, see the [HTTP/2 Guide](http2_guide.md).
+
 ## Async Responses
 
 ```erlang
@@ -177,5 +216,6 @@ hackney:get(URL, [], <<>>, [
 
 ## Next Steps
 
+- [HTTP/2 Guide](http2_guide.md) - Multiplexing, server push, architecture
 - [WebSocket Guide](websocket_guide.md)
 - [Migration Guide](MIGRATION.md)
