@@ -1072,6 +1072,10 @@ closed(EventType, Event, Data) ->
 handle_common(enter, _OldState, _NewState, _Data) ->
     keep_state_and_data;
 
+handle_common(cast, stop, _State, Data) ->
+    %% Async stop - used by pool to avoid deadlock during sync checkin
+    {stop, normal, Data};
+
 handle_common(cast, _Msg, _State, _Data) ->
     keep_state_and_data;
 

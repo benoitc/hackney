@@ -590,7 +590,8 @@ do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
                     case UpgradedSsl of
                         true ->
                             %% SSL upgraded - close instead of storing
-                            catch hackney_conn:stop(Pid),
+                            %% Use cast to avoid deadlock (connection is waiting for our reply)
+                            gen_statem:cast(Pid, stop),
                             %% Remove monitor if exists
                             PidMonitors2 = case maps:take(Pid, PidMonitors) of
                                 {MonRef, PM} ->
