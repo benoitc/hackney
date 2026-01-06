@@ -269,8 +269,10 @@ sockname(Socket) ->
 %%     Order matters - first protocol is preferred
 %%
 %% Example:
-%%   alpn_opts([{protocols, [http2, http1]}]) ->
+%% ```
+%% alpn_opts([{protocols, [http2, http1]}]) ->
 %%     [{alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}]
+%% '''
 -spec alpn_opts(list()) -> list().
 alpn_opts(Opts) ->
   case proplists:get_value(protocols, Opts, [http2, http1]) of
