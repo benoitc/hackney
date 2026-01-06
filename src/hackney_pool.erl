@@ -575,7 +575,10 @@ do_checkin(Pid, State) ->
                                     PM;
                                 error -> PidMonitors
                             end,
-                            State#state{in_use=InUse2, pid_monitors=PidMonitors2};
+                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
+                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
+                            TcpKey = {Host, Port, hackney_tcp},
+                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
                         _ ->
                             %% TCP connection - store in pool
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
@@ -630,7 +633,10 @@ do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
                                     PM;
                                 error -> PidMonitors
                             end,
-                            State#state{in_use=InUse2, pid_monitors=PidMonitors2};
+                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
+                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
+                            TcpKey = {Host, Port, hackney_tcp},
+                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
                         _ ->
                             %% TCP connection - store in pool
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
