@@ -70,7 +70,9 @@
     is_upgraded_ssl/1,
     %% Owner management
     set_owner/2,
-    set_owner_async/2
+    set_owner_async/2,
+    %% Protocol info
+    get_protocol/1
 ]).
 
 %% gen_statem callbacks
@@ -150,7 +152,16 @@
 
     %% SSL upgrade tracking - set when TCP connection is upgraded to SSL
     %% Upgraded connections should NOT be returned to pool
-    upgraded_ssl = false :: boolean()
+    upgraded_ssl = false :: boolean(),
+
+    %% HTTP/2 support
+    %% Protocol negotiated via ALPN (http1 or http2)
+    protocol = http1 :: http1 | http2,
+    %% HTTP/2 connection state machine (from hackney_cow_http2_machine)
+    h2_machine :: tuple() | undefined,
+    %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
+    %% StreamState: waiting_headers | waiting_body | done
+    h2_streams = #{} :: #{pos_integer() => {gen_statem:from() | pid(), atom()}}
 }).
 
 %%====================================================================
@@ -395,6 +406,13 @@ upgrade_to_ssl(Pid, SslOpts) ->
 is_upgraded_ssl(Pid) ->
     gen_statem:call(Pid, is_upgraded_ssl).
 
+%% @doc Get the negotiated protocol for this connection.
+%% Returns http1 or http2 based on ALPN negotiation (SSL connections)
+%% or http1 for plain TCP connections.
+-spec get_protocol(pid()) -> http1 | http2.
+get_protocol(Pid) ->
+    gen_statem:call(Pid, get_protocol).
+
 %%====================================================================
 %% gen_statem callbacks
 %%====================================================================
@@ -476,17 +494,30 @@ idle({call, From}, connect, Data) ->
             DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
             %% Merge user-provided SSL options (they override defaults)
             MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
+            %% Add ALPN options for HTTP/2 negotiation
+            AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+            FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
             %% Pass SSL options under ssl_options key as expected by hackney_ssl
-            ConnectOpts ++ [{ssl_options, MergedSslOpts}];
+            ConnectOpts ++ [{ssl_options, FinalSslOpts}];
         _ -> ConnectOpts
     end,
 
     %% Attempt connection
     case Transport:connect(Host, Port, Opts, Timeout) of
         {ok, Socket} ->
-            %% Connection successful
-            NewData = Data#conn_data{socket = Socket},
-            {next_state, connected, NewData, [{reply, From, ok}]};
+            %% Connection successful - detect protocol for SSL connections
+            Protocol = case Transport of
+                hackney_ssl -> hackney_ssl:get_negotiated_protocol(Socket);
+                _ -> http1
+            end,
+            %% Initialize HTTP/2 if negotiated
+            case Protocol of
+                http2 ->
+                    init_h2_connection(Socket, Data#conn_data{socket = Socket, protocol = http2}, From);
+                http1 ->
+                    NewData = Data#conn_data{socket = Socket, protocol = http1},
+                    {next_state, connected, NewData, [{reply, From, ok}]}
+            end;
         {error, Reason} ->
             %% Connection failed
             {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
@@ -590,21 +621,33 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
 connected({call, From}, {upgrade_to_ssl, _SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
     %% Already SSL - no upgrade needed
     {keep_state_and_data, [{reply, From, ok}]};
-connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host} = Data) ->
-    %% Upgrade TCP socket to SSL
+connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
+    %% Upgrade TCP socket to SSL (e.g., after CONNECT proxy tunnel)
     %% Get default SSL options with hostname verification
     DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
     %% Merge user-provided SSL options (they override defaults)
     MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts),
-    case ssl:connect(Socket, MergedSslOpts) of
+    %% Add ALPN options for HTTP/2 negotiation
+    AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+    FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
+    case ssl:connect(Socket, FinalSslOpts) of
         {ok, SslSocket} ->
+            %% Detect negotiated protocol
+            Protocol = hackney_ssl:get_negotiated_protocol(SslSocket),
             %% Update connection to use SSL
             NewData = Data#conn_data{
                 transport = hackney_ssl,
                 socket = SslSocket,
-                upgraded_ssl = true  % Mark as upgraded - should NOT return to pool
+                upgraded_ssl = true,  % Mark as upgraded - should NOT return to pool
+                protocol = Protocol
             },
-            {keep_state, NewData, [{reply, From, ok}]};
+            %% Initialize HTTP/2 if negotiated
+            case Protocol of
+                http2 ->
+                    init_h2_after_upgrade(SslSocket, NewData, From);
+                http1 ->
+                    {keep_state, NewData, [{reply, From, ok}]}
+            end;
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end;
@@ -1143,6 +1186,9 @@ handle_common({call, From}, {set_location, Location}, _State, Data) ->
 handle_common({call, From}, is_upgraded_ssl, _State, #conn_data{upgraded_ssl = Upgraded}) ->
     {keep_state_and_data, [{reply, From, Upgraded}]};
 
+handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol}) ->
+    {keep_state_and_data, [{reply, From, Protocol}]};
+
 handle_common({call, From}, _, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, invalid_state}}]};
 
@@ -1545,4 +1591,48 @@ skip_response_body(Data) ->
     case read_full_body(Data, <<>>) of
         {ok, _, NewData} -> NewData;
         {error, _} -> Data
+    end.
+
+%%====================================================================
+%% HTTP/2 Support Functions
+%%====================================================================
+
+%% @private Initialize HTTP/2 connection
+%% Sends the connection preface and initializes the h2_machine state
+init_h2_connection(Socket, Data, From) ->
+    #conn_data{transport = Transport} = Data,
+    %% Initialize HTTP/2 state machine in client mode
+    {ok, Preface, H2Machine} = hackney_cow_http2_machine:init(client, #{}),
+    %% Send HTTP/2 connection preface (includes SETTINGS frame)
+    case Transport:send(Socket, Preface) of
+        ok ->
+            %% Set socket to active mode for receiving server SETTINGS
+            ok = Transport:setopts(Socket, [{active, once}]),
+            NewData = Data#conn_data{
+                h2_machine = H2Machine,
+                h2_streams = #{}
+            },
+            {next_state, connected, NewData, [{reply, From, ok}]};
+        {error, Reason} ->
+            {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Initialize HTTP/2 after SSL upgrade (e.g., after CONNECT proxy tunnel)
+%% Similar to init_h2_connection but called from connected state
+init_h2_after_upgrade(SslSocket, Data, From) ->
+    #conn_data{transport = Transport} = Data,
+    %% Initialize HTTP/2 state machine in client mode
+    {ok, Preface, H2Machine} = hackney_cow_http2_machine:init(client, #{}),
+    %% Send HTTP/2 connection preface (includes SETTINGS frame)
+    case Transport:send(SslSocket, Preface) of
+        ok ->
+            %% Set socket to active mode for receiving server SETTINGS
+            ok = Transport:setopts(SslSocket, [{active, once}]),
+            NewData = Data#conn_data{
+                h2_machine = H2Machine,
+                h2_streams = #{}
+            },
+            {keep_state, NewData, [{reply, From, ok}]};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.

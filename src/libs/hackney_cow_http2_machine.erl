@@ -177,7 +177,7 @@
 	encode_state = hackney_cow_hpack:init() :: hackney_cow_hpack:state()
 }).
 
--opaque http2_machine() :: #http2_machine{}.
+-type http2_machine() :: #http2_machine{}.
 -export_type([http2_machine/0]).
 
 -type pseudo_headers() :: #{} %% Trailers
