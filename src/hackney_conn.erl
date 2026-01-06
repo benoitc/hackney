@@ -212,15 +212,15 @@ get_state(Pid) ->
     gen_statem:call(Pid, get_state).
 
 %% @doc Send an HTTP request and wait for the response status and headers.
-%% Returns {ok, Status, Headers, Pid} on success.
-%% After this, use body/1 or stream_body/1 to get the response body.
+%% Returns {ok, Status, Headers} for HTTP/1.1 or {ok, Status, Headers, Body} for HTTP/2.
+%% For HTTP/1.1, use body/1 or stream_body/1 to get the response body.
 -spec request(pid(), binary(), binary(), list(), binary() | iolist()) ->
-    {ok, integer(), list()} | {error, term()}.
+    {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body) ->
     request(Pid, Method, Path, Headers, Body, infinity).
 
 -spec request(pid(), binary(), binary(), list(), binary() | iolist(), timeout()) ->
-    {ok, integer(), list()} | {error, term()}.
+    {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body, Timeout) ->
     gen_statem:call(Pid, {request, Method, Path, Headers, Body}, Timeout).
 
