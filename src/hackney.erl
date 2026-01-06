@@ -134,12 +134,33 @@ connect_direct(Transport, Host, Port, Options) ->
 
 %% @private Pool connection with load regulation
 %% Flow:
-%% 1. Acquire slot from load_regulation (blocks if at per-host limit)
-%% 2. Get TCP connection from pool (always TCP, pool doesn't store SSL)
-%% 3. Upgrade to SSL if needed (in-place upgrade)
-%% 4. Return connection
+%% 1. For SSL: Check if existing HTTP/2 connection can be reused (multiplexing)
+%% 2. Acquire slot from load_regulation (blocks if at per-host limit)
+%% 3. Get TCP connection from pool (always TCP, pool doesn't store SSL)
+%% 4. Upgrade to SSL if needed (in-place upgrade)
+%% 5. If HTTP/2 negotiated, register for multiplexing
 %% Note: load_regulation slot is released when connection is checked in or dies
 connect_pool(Transport, Host, Port, Options) ->
+  PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+
+  %% For SSL connections, check if we can reuse an HTTP/2 connection
+  case Transport of
+    hackney_ssl ->
+      case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
+        {ok, H2Pid} ->
+          %% Reuse existing HTTP/2 connection (multiplexed)
+          hackney_manager:start_request(Host),
+          {ok, H2Pid};
+        none ->
+          %% No HTTP/2 connection, proceed with normal pool checkout
+          connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+      end;
+    _ ->
+      %% Non-SSL, use normal pool
+      connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+  end.
+
+connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
   MaxPerHost = proplists:get_value(max_per_host, Options, 50),
   CheckoutTimeout = proplists:get_value(checkout_timeout, Options,
                       proplists:get_value(connect_timeout, Options, 8000)),
@@ -148,13 +169,14 @@ connect_pool(Transport, Host, Port, Options) ->
   case hackney_load_regulation:acquire(Host, Port, MaxPerHost, CheckoutTimeout) of
     ok ->
       %% Slot acquired - now get connection from pool
-      PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
       %% Always checkout as TCP - pool only stores TCP connections
       case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
         {ok, _PoolRef, ConnPid} ->
           %% Got TCP connection - upgrade to SSL if needed
           case maybe_upgrade_ssl(Transport, ConnPid, Host, Options) of
             ok ->
+              %% Check if HTTP/2 was negotiated, register for multiplexing
+              maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
               hackney_manager:start_request(Host),
               {ok, ConnPid};
             {error, Reason} ->
@@ -170,6 +192,16 @@ connect_pool(Transport, Host, Port, Options) ->
       end;
     {error, timeout} ->
       {error, checkout_timeout}
+  end.
+
+%% @private Register HTTP/2 connection for multiplexing if applicable
+maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
+  case hackney_conn:get_protocol(ConnPid) of
+    http2 ->
+      %% HTTP/2 negotiated - register for connection sharing
+      PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options);
+    http1 ->
+      ok
   end.
 
 %% @private Upgrade TCP connection to SSL if needed
