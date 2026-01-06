@@ -587,7 +587,7 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
         {error, _} -> {keep_state_and_data, [{reply, From, {ok, closed}}]}
     end;
 
-connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
+connected({call, From}, {upgrade_to_ssl, _SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
     %% Already SSL - no upgrade needed
     {keep_state_and_data, [{reply, From, ok}]};
 connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host} = Data) ->
@@ -1492,10 +1492,11 @@ notify_pool_available(#conn_data{pool_pid = PoolPid}) ->
 
 %% @private Notify pool that connection is available for reuse (sync)
 %% This ensures the pool has processed the checkin before returning.
+%% We pass the upgraded_ssl flag to avoid deadlock (pool can't call back to us).
 notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
     ok;
-notify_pool_available_sync(#conn_data{pool_pid = PoolPid}) ->
-    gen_server:call(PoolPid, {checkin_sync, self()}, 5000).
+notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl}) ->
+    gen_server:call(PoolPid, {checkin_sync, self(), UpgradedSsl}, 5000).
 
 %% @private Start an async request
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->

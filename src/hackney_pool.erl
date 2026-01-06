@@ -339,7 +339,13 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
 
 handle_call({checkin_sync, Pid}, _From, State) ->
     %% Synchronous checkin - caller waits for acknowledgement
+    %% Legacy format without SSL flag - need to query connection (may deadlock if called from connection)
     State2 = do_checkin(Pid, State),
+    {reply, ok, State2};
+
+handle_call({checkin_sync, Pid, UpgradedSsl}, _From, State) ->
+    %% Synchronous checkin with SSL flag - avoids deadlock
+    State2 = do_checkin_with_ssl_flag(Pid, UpgradedSsl, State),
     {reply, ok, State2}.
 
 handle_cast({checkin, _PoolInfo, Pid}, State) ->
@@ -543,6 +549,59 @@ do_checkin(Pid, State) ->
                             %% TCP connection - store in pool
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
                             %% Use async version to avoid deadlock when called from checkin_sync
+                            hackney_conn:set_owner_async(Pid, self()),
+                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+
+                            %% Ensure we're monitoring this pid
+                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                                true -> PidMonitors;
+                                false ->
+                                    MonRef = erlang:monitor(process, Pid),
+                                    maps:put(Pid, MonRef, PidMonitors)
+                            end,
+
+                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
+                            %% Maintain prewarm for activated hosts
+                            maybe_maintain_prewarm(Key, State2)
+                    end;
+                false ->
+                    State#state{in_use=InUse2}
+            end;
+        error ->
+            State
+    end.
+
+%% @private Process a checkin with known SSL flag - avoids calling back to connection
+%% Used for sync checkin to prevent deadlock when connection calls pool.
+do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
+    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+
+    %% Get the key from in_use and remove
+    case maps:take(Pid, InUse) of
+        {Key, InUse2} ->
+            %% Release load_regulation slot - connection is no longer in active use
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+
+            %% Check if connection is still alive
+            case is_process_alive(Pid) of
+                true ->
+                    %% Use the provided SSL flag instead of querying connection
+                    case UpgradedSsl of
+                        true ->
+                            %% SSL upgraded - close instead of storing
+                            catch hackney_conn:stop(Pid),
+                            %% Remove monitor if exists
+                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
+                                {MonRef, PM} ->
+                                    erlang:demonitor(MonRef, [flush]),
+                                    PM;
+                                error -> PidMonitors
+                            end,
+                            State#state{in_use=InUse2, pid_monitors=PidMonitors2};
+                        _ ->
+                            %% TCP connection - store in pool
+                            %% Set owner to pool so connection doesn't die if previous requester crashes.
                             hackney_conn:set_owner_async(Pid, self()),
                             Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
 
