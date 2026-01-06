@@ -7,6 +7,20 @@ Process-per-connection architecture. Each connection is a `gen_statem` process.
 
 See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) for details.
 
+### HTTP/2 Support
+
+Full HTTP/2 support with automatic protocol negotiation:
+
+- **ALPN negotiation** - HTTP/2 is automatically negotiated during TLS handshake
+- **Transparent API** - Same `hackney:get/post/request` functions work for both protocols
+- **Multiplexing** - Multiple requests share a single HTTP/2 connection
+- **Header compression** - HPACK compression for reduced overhead
+- **Flow control** - Automatic window management with WINDOW_UPDATE frames
+- **Server push** - Optional support for server-initiated streams
+- **Protocol selection** - Use `{protocols, [http2]}` or `{protocols, [http1]}` to force protocol
+
+See [HTTP/2 Guide](guides/http2_guide.md) for details.
+
 ### Architecture Changes
 
 - Connection handle is now a PID (was opaque reference)

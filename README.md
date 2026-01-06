@@ -7,6 +7,7 @@ An HTTP client for Erlang. Simple, reliable, fast.
 
 ## Why hackney?
 
+- **HTTP/2 support** - Automatic protocol negotiation via ALPN. Multiplexing, header compression, flow control.
 - **Process per connection** - Each connection runs in its own `gen_statem` process. Clean isolation, automatic cleanup on crashes.
 - **Connection pooling** - Reuse connections automatically. Configure pools per host or globally.
 - **Streaming** - Stream request bodies, response bodies, or both. Handle large files without loading them in memory.
@@ -60,6 +61,7 @@ stream_body(Ref) ->
 |-------|-------------|
 | [Getting Started](GETTING_STARTED.md) | Installation, first requests, basic patterns |
 | [HTTP Guide](guides/http_guide.md) | Requests, responses, streaming, async, pools |
+| [HTTP/2 Guide](guides/http2_guide.md) | HTTP/2 protocol, ALPN, multiplexing, server push |
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
 | [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
 | [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x |
@@ -151,6 +153,21 @@ receive_body(Ref) ->
 ok = hackney:ws_send(Conn, {text, <<"hello">>}),
 {ok, {text, <<"hello">>}} = hackney:ws_recv(Conn),
 hackney:ws_close(Conn).
+```
+
+### HTTP/2
+
+HTTP/2 is used automatically when the server supports it:
+
+```erlang
+%% Automatic HTTP/2 via ALPN negotiation
+{ok, 200, Headers, Body} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]).
+
+%% Force HTTP/1.1 only
+hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
+
+%% Force HTTP/2 only
+hackney:get(URL, [], <<>>, [{protocols, [http2]}]).
 ```
 
 ### Multipart
