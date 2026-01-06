@@ -664,7 +664,11 @@ connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, h
     %% Merge user-provided SSL options (they override defaults)
     MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts),
     %% Add ALPN options for HTTP/2 negotiation
-    AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+    %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
+    AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
+        [] -> hackney_ssl:alpn_opts(ConnectOpts);
+        Opts -> Opts
+    end,
     FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
     case ssl:connect(Socket, FinalSslOpts) of
         {ok, SslSocket} ->

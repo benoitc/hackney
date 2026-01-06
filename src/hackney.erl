@@ -102,13 +102,20 @@ connect(Transport, Host, Port, Options) ->
 
 %% @private Direct connection without pool
 connect_direct(Transport, Host, Port, Options) ->
+  %% Build connect_options including protocols for ALPN
+  BaseConnectOpts = proplists:get_value(connect_options, Options, []),
+  Protocols = proplists:get_value(protocols, Options, undefined),
+  ConnectOpts = case Protocols of
+    undefined -> BaseConnectOpts;
+    _ -> [{protocols, Protocols} | BaseConnectOpts]
+  end,
   ConnOpts = #{
     host => Host,
     port => Port,
     transport => Transport,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    connect_options => proplists:get_value(connect_options, Options, []),
+    connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
@@ -168,14 +175,20 @@ connect_pool(Transport, Host, Port, Options) ->
 %% @private Upgrade TCP connection to SSL if needed
 maybe_upgrade_ssl(hackney_ssl, ConnPid, Host, Options) ->
   SslOpts = proplists:get_value(ssl_options, Options, []),
+  %% Add protocols option for ALPN negotiation if specified
+  Protocols = proplists:get_value(protocols, Options, undefined),
+  SslOpts2 = case Protocols of
+    undefined -> SslOpts;
+    _ -> [{protocols, Protocols} | SslOpts]
+  end,
   %% Check if connection is already SSL (e.g., reused SSL connection)
   case catch hackney_conn:is_upgraded_ssl(ConnPid) of
     true ->
       %% Already SSL, no upgrade needed
       ok;
     _ ->
-      %% Upgrade TCP to SSL
-      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts])
+      %% Upgrade TCP to SSL with ALPN
+      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts2])
   end;
 maybe_upgrade_ssl(_, _ConnPid, _Host, _Options) ->
   %% Not SSL, no upgrade needed
@@ -203,6 +216,13 @@ start_conn_with_socket(Host, Port, Transport, Socket, Options) ->
   start_conn_with_socket_internal(Host, Port, ActualTransport, Socket, Options).
 
 start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
+  %% Build connect_options including protocols for ALPN
+  BaseConnectOpts = proplists:get_value(connect_options, Options, []),
+  Protocols = proplists:get_value(protocols, Options, undefined),
+  ConnectOpts = case Protocols of
+    undefined -> BaseConnectOpts;
+    _ -> [{protocols, Protocols} | BaseConnectOpts]
+  end,
   ConnOpts = #{
     host => Host,
     port => Port,
@@ -210,7 +230,7 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     socket => Socket,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    connect_options => proplists:get_value(connect_options, Options, []),
+    connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
