@@ -452,6 +452,7 @@ start_connection(Key, Owner, Opts, State) ->
     end.
 
 %% @private Process a checkin - return connection to pool
+%% Only TCP connections are stored. SSL upgraded connections are closed.
 do_checkin(Pid, State) ->
     #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
@@ -461,21 +462,37 @@ do_checkin(Pid, State) ->
             %% Check if connection is still alive
             case is_process_alive(Pid) of
                 true ->
-                    %% Store in available pool - set owner to pool so connection
-                    %% doesn't die if previous requester crashes.
-                    %% Use async version to avoid deadlock when called from checkin_sync
-                    hackney_conn:set_owner_async(Pid, self()),
-                    Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+                    %% Check if this is an SSL upgraded connection
+                    %% SSL connections should NOT be pooled (security requirement)
+                    case catch hackney_conn:is_upgraded_ssl(Pid) of
+                        true ->
+                            %% SSL upgraded - close instead of storing
+                            catch hackney_conn:stop(Pid),
+                            %% Remove monitor if exists
+                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
+                                {MonRef, PM} ->
+                                    erlang:demonitor(MonRef, [flush]),
+                                    PM;
+                                error -> PidMonitors
+                            end,
+                            State#state{in_use=InUse2, pid_monitors=PidMonitors2};
+                        _ ->
+                            %% TCP connection - store in pool
+                            %% Set owner to pool so connection doesn't die if previous requester crashes.
+                            %% Use async version to avoid deadlock when called from checkin_sync
+                            hackney_conn:set_owner_async(Pid, self()),
+                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
 
-                    %% Ensure we're monitoring this pid
-                    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
-                        true -> PidMonitors;
-                        false ->
-                            MonRef = erlang:monitor(process, Pid),
-                            maps:put(Pid, MonRef, PidMonitors)
-                    end,
+                            %% Ensure we're monitoring this pid
+                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                                true -> PidMonitors;
+                                false ->
+                                    MonRef = erlang:monitor(process, Pid),
+                                    maps:put(Pid, MonRef, PidMonitors)
+                            end,
 
-                    State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2};
+                            State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2}
+                    end;
                 false ->
                     State#state{in_use=InUse2}
             end;

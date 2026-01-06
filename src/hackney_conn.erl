@@ -65,6 +65,9 @@
     release_to_pool/1,
     verify_socket/1,
     is_ready/1,
+    %% SSL upgrade
+    upgrade_to_ssl/2,
+    is_upgraded_ssl/1,
     %% Owner management
     set_owner/2,
     set_owner_async/2
@@ -143,7 +146,11 @@
     async = false :: false | true | once | paused,
     stream_to :: pid() | undefined,
     async_ref :: pid() | undefined,  %% Connection PID used as message correlation ref
-    follow_redirect = false :: boolean()
+    follow_redirect = false :: boolean(),
+
+    %% SSL upgrade tracking - set when TCP connection is upgraded to SSL
+    %% Upgraded connections should NOT be returned to pool
+    upgraded_ssl = false :: boolean()
 }).
 
 %%====================================================================
@@ -374,6 +381,20 @@ verify_socket(Pid) ->
 is_ready(Pid) ->
     gen_statem:call(Pid, is_ready).
 
+%% @doc Upgrade a TCP connection to SSL.
+%% This performs an SSL handshake on the existing TCP socket.
+%% After upgrade, the connection is marked as `upgraded_ssl` and should
+%% NOT be returned to the pool (SSL connections are not pooled for security).
+-spec upgrade_to_ssl(pid(), list()) -> ok | {error, term()}.
+upgrade_to_ssl(Pid, SslOpts) ->
+    gen_statem:call(Pid, {upgrade_to_ssl, SslOpts}, infinity).
+
+%% @doc Check if this connection was upgraded from TCP to SSL.
+%% Upgraded connections should be closed after use, not returned to pool.
+-spec is_upgraded_ssl(pid()) -> boolean().
+is_upgraded_ssl(Pid) ->
+    gen_statem:call(Pid, is_upgraded_ssl).
+
 %%====================================================================
 %% gen_statem callbacks
 %%====================================================================
@@ -565,6 +586,31 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
         ok -> {keep_state_and_data, [{reply, From, {ok, connected}}]};
         {error, _} -> {keep_state_and_data, [{reply, From, {ok, closed}}]}
     end;
+
+connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
+    %% Already SSL - no upgrade needed
+    {keep_state_and_data, [{reply, From, ok}]};
+connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host} = Data) ->
+    %% Upgrade TCP socket to SSL
+    %% Get default SSL options with hostname verification
+    DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
+    %% Merge user-provided SSL options (they override defaults)
+    MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts),
+    case ssl:connect(Socket, MergedSslOpts) of
+        {ok, SslSocket} ->
+            %% Update connection to use SSL
+            NewData = Data#conn_data{
+                transport = hackney_ssl,
+                socket = SslSocket,
+                upgraded_ssl = true  % Mark as upgraded - should NOT return to pool
+            },
+            {keep_state, NewData, [{reply, From, ok}]};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end;
+
+connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
+    {keep_state_and_data, [{reply, From, Upgraded}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
     %% Start a new sync request
@@ -1089,6 +1135,9 @@ handle_common({call, From}, get_location, _State, #conn_data{location = Location
 
 handle_common({call, From}, {set_location, Location}, _State, Data) ->
     {keep_state, Data#conn_data{location = Location}, [{reply, From, ok}]};
+
+handle_common({call, From}, is_upgraded_ssl, _State, #conn_data{upgraded_ssl = Upgraded}) ->
+    {keep_state_and_data, [{reply, From, Upgraded}]};
 
 handle_common({call, From}, _, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, invalid_state}}]};
