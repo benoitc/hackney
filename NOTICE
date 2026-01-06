@@ -29,3 +29,7 @@ Copyright (c) 2024, Enki Multimedia , MIT License
 (https://github.com/ninenines/cowlib) under ISC license.
 Copyright (c) Loïc Hoguin <essen@ninenines.eu>
 Copyright (c) jdamanalo <joshuadavid.agustin@manalo.ph> (cow_deflate)
+
+*) hackney_cow_http2, hackney_cow_hpack, and hackney_cow_hpack_dec_huffman_lookup.hrl
+are vendored from cowlib (https://github.com/ninenines/cowlib) under ISC license.
+Copyright (c) 2015-2023, Loïc Hoguin <essen@ninenines.eu>
