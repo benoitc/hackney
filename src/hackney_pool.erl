@@ -345,8 +345,16 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
         Available
     ),
 
-    %% Remove from in_use (connection might have died while checked out)
-    InUse2 = maps:remove(Pid, InUse),
+    %% Remove from in_use and release load_regulation slot if it was checked out
+    InUse2 = case maps:take(Pid, InUse) of
+        {Key, NewInUse} ->
+            %% Connection died while in use - release the load_regulation slot
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+            NewInUse;
+        error ->
+            InUse
+    end,
 
     PidMonitors2 = maps:remove(Pid, PidMonitors),
     {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2}};
@@ -453,12 +461,17 @@ start_connection(Key, Owner, Opts, State) ->
 
 %% @private Process a checkin - return connection to pool
 %% Only TCP connections are stored. SSL upgraded connections are closed.
+%% Always releases the load_regulation slot since connection is no longer in use.
 do_checkin(Pid, State) ->
     #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
     %% Get the key from in_use and remove
     case maps:take(Pid, InUse) of
         {Key, InUse2} ->
+            %% Release load_regulation slot - connection is no longer in active use
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+
             %% Check if connection is still alive
             case is_process_alive(Pid) of
                 true ->

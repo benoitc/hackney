@@ -94,39 +94,92 @@ connect(Transport, Host, Port, Options) ->
   case UsePool of
     false ->
       %% Direct connection - start a hackney_conn process
-      ConnOpts = #{
-        host => Host,
-        port => Port,
-        transport => Transport,
-        connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
-        recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-        connect_options => proplists:get_value(connect_options, Options, []),
-        ssl_options => proplists:get_value(ssl_options, Options, [])
-      },
-      case hackney_conn_sup:start_conn(ConnOpts) of
-        {ok, ConnPid} ->
-          case hackney_conn:connect(ConnPid) of
+      connect_direct(Transport, Host, Port, Options);
+    _PoolName ->
+      %% Pool mode with per-host load regulation
+      connect_pool(Transport, Host, Port, Options)
+  end.
+
+%% @private Direct connection without pool
+connect_direct(Transport, Host, Port, Options) ->
+  ConnOpts = #{
+    host => Host,
+    port => Port,
+    transport => Transport,
+    connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
+    recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    connect_options => proplists:get_value(connect_options, Options, []),
+    ssl_options => proplists:get_value(ssl_options, Options, [])
+  },
+  case hackney_conn_sup:start_conn(ConnOpts) of
+    {ok, ConnPid} ->
+      case hackney_conn:connect(ConnPid) of
+        ok ->
+          hackney_manager:start_request(Host),
+          {ok, ConnPid};
+        {error, Reason} ->
+          catch hackney_conn:stop(ConnPid),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @private Pool connection with load regulation
+%% Flow:
+%% 1. Acquire slot from load_regulation (blocks if at per-host limit)
+%% 2. Get TCP connection from pool (always TCP, pool doesn't store SSL)
+%% 3. Upgrade to SSL if needed (in-place upgrade)
+%% 4. Return connection
+%% Note: load_regulation slot is released when connection is checked in or dies
+connect_pool(Transport, Host, Port, Options) ->
+  MaxPerHost = proplists:get_value(max_per_host, Options, 50),
+  CheckoutTimeout = proplists:get_value(checkout_timeout, Options,
+                      proplists:get_value(connect_timeout, Options, 8000)),
+
+  %% 1. Acquire per-host slot (blocks with backoff until available)
+  case hackney_load_regulation:acquire(Host, Port, MaxPerHost, CheckoutTimeout) of
+    ok ->
+      %% Slot acquired - now get connection from pool
+      PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
+      %% Always checkout as TCP - pool only stores TCP connections
+      case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
+        {ok, _PoolRef, ConnPid} ->
+          %% Got TCP connection - upgrade to SSL if needed
+          case maybe_upgrade_ssl(Transport, ConnPid, Host, Options) of
             ok ->
               hackney_manager:start_request(Host),
               {ok, ConnPid};
             {error, Reason} ->
+              %% Upgrade failed - release slot and close connection
+              hackney_load_regulation:release(Host, Port),
               catch hackney_conn:stop(ConnPid),
               {error, Reason}
           end;
         {error, Reason} ->
+          %% Checkout failed - release slot
+          hackney_load_regulation:release(Host, Port),
           {error, Reason}
       end;
-    _PoolName ->
-      %% Get connection from pool
-      PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
-      case PoolHandler:checkout(Host, Port, Transport, Options) of
-        {ok, _PoolRef, ConnPid} ->
-          hackney_manager:start_request(Host),
-          {ok, ConnPid};
-        {error, Reason} ->
-          {error, Reason}
-      end
+    {error, timeout} ->
+      {error, checkout_timeout}
   end.
+
+%% @private Upgrade TCP connection to SSL if needed
+maybe_upgrade_ssl(hackney_ssl, ConnPid, Host, Options) ->
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  %% Check if connection is already SSL (e.g., reused SSL connection)
+  case catch hackney_conn:is_upgraded_ssl(ConnPid) of
+    true ->
+      %% Already SSL, no upgrade needed
+      ok;
+    _ ->
+      %% Upgrade TCP to SSL
+      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts])
+  end;
+maybe_upgrade_ssl(_, _ConnPid, _Host, _Options) ->
+  %% Not SSL, no upgrade needed
+  ok.
 
 %% @doc Close a connection.
 -spec close(conn()) -> ok.

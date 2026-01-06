@@ -42,6 +42,9 @@ init([]) ->
   %% initialize the metric engine
   hackney_metrics:init(),
 
+  %% initialize per-host load regulation
+  hackney_load_regulation:init(),
+
   Specs = [
            %% manager
            ?CHILD(hackney_manager, worker),
