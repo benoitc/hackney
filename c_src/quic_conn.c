@@ -992,8 +992,11 @@ int quic_conn_close(QuicConn *conn) {
     return 0;
 }
 
+/* Maximum headers we support in a single send */
+#define MAX_HEADERS 64
+
 int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
-                           ERL_NIF_TERM headers_list, bool fin) {
+                           ErlNifEnv *env, ERL_NIF_TERM headers_list, bool fin) {
     if (!conn || !conn->conn) return -1;
 
     enif_mutex_lock(conn->mutex);
@@ -1013,14 +1016,105 @@ int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
         return -1;  /* Headers already sent */
     }
 
-    /* TODO: Convert Erlang headers_list to lsxpack_header array and call
-     * lsquic_stream_send_headers. For now, just mark headers as sent. */
-    stream->headers_sent = true;
+    /* Count headers and calculate buffer size */
+    unsigned count = 0;
+    size_t total_buf_size = 0;
+    ERL_NIF_TERM list = headers_list;
+    ERL_NIF_TERM head;
+
+    while (enif_get_list_cell(env, list, &head, &list)) {
+        int arity;
+        const ERL_NIF_TERM *tuple;
+        if (!enif_get_tuple(env, head, &arity, &tuple) || arity != 2) {
+            enif_mutex_unlock(conn->mutex);
+            return -1;
+        }
+
+        ErlNifBinary name_bin, value_bin;
+        if (!enif_inspect_binary(env, tuple[0], &name_bin) &&
+            !enif_inspect_iolist_as_binary(env, tuple[0], &name_bin)) {
+            enif_mutex_unlock(conn->mutex);
+            return -1;
+        }
+        if (!enif_inspect_binary(env, tuple[1], &value_bin) &&
+            !enif_inspect_iolist_as_binary(env, tuple[1], &value_bin)) {
+            enif_mutex_unlock(conn->mutex);
+            return -1;
+        }
+
+        total_buf_size += name_bin.size + value_bin.size;
+        count++;
+        if (count >= MAX_HEADERS) break;
+    }
+
+    if (count == 0) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;  /* Empty headers */
+    }
+
+    /* Allocate buffer and headers array */
+    char *buf = enif_alloc(total_buf_size);
+    struct lsxpack_header *headers = enif_alloc(count * sizeof(struct lsxpack_header));
+    if (!buf || !headers) {
+        if (buf) enif_free(buf);
+        if (headers) enif_free(headers);
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    /* Fill in headers */
+    list = headers_list;
+    size_t offset = 0;
+    unsigned i = 0;
+
+    while (enif_get_list_cell(env, list, &head, &list) && i < count) {
+        int arity;
+        const ERL_NIF_TERM *tuple;
+        enif_get_tuple(env, head, &arity, &tuple);
+
+        ErlNifBinary name_bin, value_bin;
+        enif_inspect_iolist_as_binary(env, tuple[0], &name_bin);
+        enif_inspect_iolist_as_binary(env, tuple[1], &value_bin);
+
+        /* Copy name and value to buffer */
+        size_t name_offset = offset;
+        memcpy(buf + offset, name_bin.data, name_bin.size);
+        offset += name_bin.size;
+
+        size_t val_offset = offset;
+        memcpy(buf + offset, value_bin.data, value_bin.size);
+        offset += value_bin.size;
+
+        /* Set up the header */
+        lsxpack_header_set_offset2(&headers[i], buf,
+                                   name_offset, name_bin.size,
+                                   val_offset, value_bin.size);
+        i++;
+    }
+
+    /* Create HTTP headers struct */
+    lsquic_http_headers_t http_headers = {
+        .count = count,
+        .headers = headers
+    };
+
+    /* Send headers */
+    int ret = lsquic_stream_send_headers(stream->stream, &http_headers, fin);
+
+    enif_free(buf);
+    enif_free(headers);
+
+    if (ret == 0) {
+        stream->headers_sent = true;
+        if (fin) {
+            stream->fin_sent = true;
+        }
+    }
 
     lsquic_engine_process_conns(conn->engine);
     enif_mutex_unlock(conn->mutex);
 
-    return 0;
+    return ret;
 }
 
 int quic_conn_send_data(QuicConn *conn, int64_t stream_id,

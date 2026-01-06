@@ -145,7 +145,7 @@ void quic_conn_resource_dtor(ErlNifEnv *env, void *obj);
 /* Stream operations */
 int64_t quic_conn_open_stream(QuicConn *conn);
 int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
-                           ERL_NIF_TERM headers_list, bool fin);
+                           ErlNifEnv *env, ERL_NIF_TERM headers_list, bool fin);
 int quic_conn_send_data(QuicConn *conn, int64_t stream_id,
                         const uint8_t *data, size_t len, bool fin);
 int quic_conn_reset_stream(QuicConn *conn, int64_t stream_id, uint64_t error_code);

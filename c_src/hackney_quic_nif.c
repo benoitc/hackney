@@ -206,8 +206,8 @@ nif_send_headers(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         return enif_make_badarg(env);
     }
 
-    /* Send headers (full implementation needs header conversion) */
-    int ret = quic_conn_send_headers(conn, stream_id, argv[2], fin);
+    /* Send headers */
+    int ret = quic_conn_send_headers(conn, stream_id, env, argv[2], fin);
     if (ret < 0) {
         return make_error(env, ATOM_NOT_CONNECTED);
     }
@@ -282,8 +282,8 @@ nif_reset_stream(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     }
 
     /* Extract error code */
-    uint64_t error_code;
-    if (!enif_get_uint64(env, argv[2], &error_code)) {
+    unsigned long error_code;
+    if (!enif_get_ulong(env, argv[2], &error_code)) {
         return enif_make_badarg(env);
     }
 

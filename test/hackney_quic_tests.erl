@@ -134,6 +134,53 @@ get_fd_test() ->
     end.
 
 %%====================================================================
+%% HTTP/3 Request Tests
+%%====================================================================
+
+%% Test sending HTTP/3 request headers
+test_send_request() ->
+    case hackney_quic:is_available() of
+        false ->
+            {skip, "QUIC NIF not available"};
+        true ->
+            {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+            receive
+                {quic, ConnRef, {connected, _}} ->
+                    %% Open a stream
+                    {ok, StreamId} = hackney_quic:open_stream(ConnRef),
+
+                    %% Send HTTP/3 request headers
+                    Headers = [
+                        {<<":method">>, <<"GET">>},
+                        {<<":path">>, <<"/">>},
+                        {<<":scheme">>, <<"https">>},
+                        {<<":authority">>, <<"cloudflare.com">>},
+                        {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
+                    ],
+                    Result = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
+                    ?assertMatch(ok, Result);
+                {quic, ConnRef, {closed, _}} ->
+                    ?assert(false, "Connection closed unexpectedly")
+            after 15000 ->
+                hackney_quic:close(ConnRef, normal),
+                ?assert(false, "Timeout waiting for connection")
+            end,
+            hackney_quic:close(ConnRef, normal)
+    end.
+
+http3_request_test_() ->
+    {
+        "HTTP/3 request tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"Send HTTP/3 headers", fun test_send_request/0}
+            ]
+        }
+    }.
+
+%%====================================================================
 %% Error Handling Tests
 %%====================================================================
 
