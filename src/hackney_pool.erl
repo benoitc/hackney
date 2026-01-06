@@ -35,6 +35,7 @@
          set_timeout/2,
          prewarm/3,
          prewarm/4,
+         host_stats/3,
          child_spec/2]).
 
 -export([start_link/2]).
@@ -206,6 +207,23 @@ prewarm(PoolName, Host, Port, Count) ->
     Pool = find_pool(PoolName, []),
     gen_server:cast(Pool, {prewarm, Host, Port, Count}).
 
+%% @doc Get per-host connection statistics.
+%% Returns a proplist with:
+%% - active: number of active requests (from load_regulation)
+%% - in_use: connections checked out from pool
+%% - free: connections available in pool
+-spec host_stats(atom(), string() | binary(), inet:port_number()) ->
+    [{atom(), non_neg_integer()}].
+host_stats(PoolName, Host, Port) ->
+    Active = hackney_load_regulation:current(Host, Port),
+    case find_pool(PoolName) of
+        undefined ->
+            [{active, Active}, {in_use, 0}, {free, 0}];
+        Pool ->
+            {InUse, Free} = gen_server:call(Pool, {host_stats, Host, Port}),
+            [{active, Active}, {in_use, InUse}, {free, Free}]
+    end.
+
 to_pool_name(Name) when is_atom(Name) ->
     list_to_atom("hackney_pool_" ++ atom_to_list(Name));
 to_pool_name(Name) when is_list(Name) ->
@@ -302,6 +320,19 @@ handle_call({count, Key}, _From, #state{available=Available}=State) ->
                 error -> 0
             end,
     {reply, Count, State};
+
+handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=InUse}=State) ->
+    %% Count in_use and free for this host (any transport)
+    HostLower = string_compat:to_lower(Host),
+    InUseCount = maps:fold(
+        fun(_Pid, {H, P, _T}, Acc) when H =:= HostLower, P =:= Port -> Acc + 1;
+           (_, _, Acc) -> Acc
+        end, 0, InUse),
+    FreeCount = maps:fold(
+        fun({H, P, _T}, Pids, Acc) when H =:= HostLower, P =:= Port -> Acc + length(Pids);
+           (_, _, Acc) -> Acc
+        end, 0, Available),
+    {reply, {InUseCount, FreeCount}, State};
 
 handle_call({checkout, Key, Requester, Opts}, _From, State) ->
     #state{name=PoolName, metrics=Engine, max_connections=MaxConn,
