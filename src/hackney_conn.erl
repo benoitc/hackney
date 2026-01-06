@@ -160,8 +160,10 @@
     %% HTTP/2 connection state machine (from hackney_cow_http2_machine)
     h2_machine :: tuple() | undefined,
     %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
-    %% StreamState: waiting_headers | waiting_body | done
-    h2_streams = #{} :: #{pos_integer() => {gen_statem:from() | pid(), atom()}}
+    %% StreamState: waiting_headers | waiting_body | done | {push, Headers}
+    h2_streams = #{} :: #{pos_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
+    %% Server push handling: false = reject all (default), pid = send notifications to pid
+    enable_push = false :: false | pid()
 }).
 
 %%====================================================================
@@ -448,7 +450,8 @@ init([DefaultOwner, Opts]) ->
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
-        pool_pid = maps:get(pool_pid, Opts, undefined)
+        pool_pid = maps:get(pool_pid, Opts, undefined),
+        enable_push = maps:get(enable_push, Opts, false)
     },
 
     %% If socket is provided, start in connected state; otherwise start in idle
@@ -1958,18 +1961,15 @@ handle_h2_frame({rst_stream, StreamId, ErrorCode}, Data) ->
 
 handle_h2_frame({push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock}, Data) ->
     %% Server is attempting to push a resource
-    %% First inform h2_machine about the push, then reject with RST_STREAM
-    %% This is valid behavior per RFC 7540 Section 8.2
-    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
+    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket,
+               enable_push = EnablePush, h2_streams = Streams} = Data,
     Frame = {push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock},
     case hackney_cow_http2_machine:frame(Frame, H2Machine) of
-        {ok, {push_promise, _StreamId, PromisedStreamId2, _Headers, _PseudoHeaders}, H2Machine2} ->
-            %% Reject the push with RST_STREAM (REFUSED_STREAM = 0x7)
-            RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId2, refused_stream),
-            Transport:send(Socket, RstFrame),
-            {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {ok, {push_promise, OriginStreamId, PromisedStreamId2, Headers, PseudoHeaders}, H2Machine2} ->
+            handle_push_promise(EnablePush, OriginStreamId, PromisedStreamId2, Headers, PseudoHeaders,
+                                Streams, H2Machine2, Transport, Socket, Data);
         {ok, H2Machine2} ->
-            %% Machine processed it, still reject
+            %% Machine processed but didn't decode headers - reject
             RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId, refused_stream),
             Transport:send(Socket, RstFrame),
             {ok, Data#conn_data{h2_machine = H2Machine2}};
@@ -1981,9 +1981,49 @@ handle_h2_frame(_Frame, Data) ->
     %% Unknown or unhandled frame - ignore
     {ok, Data}.
 
+%% @private Handle PUSH_PROMISE based on enable_push setting
+handle_push_promise(false, _OriginStreamId, PromisedStreamId, _Headers, _PseudoHeaders,
+                    _Streams, H2Machine, Transport, Socket, Data) ->
+    %% Push disabled - reject with RST_STREAM (REFUSED_STREAM = 0x7)
+    RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId, refused_stream),
+    Transport:send(Socket, RstFrame),
+    {ok, Data#conn_data{h2_machine = H2Machine}};
+handle_push_promise(PushHandler, OriginStreamId, PromisedStreamId, Headers, PseudoHeaders,
+                    Streams, H2Machine, _Transport, _Socket, Data) when is_pid(PushHandler) ->
+    %% Push enabled - notify handler and track the promised stream
+    %% PseudoHeaders contains request pseudo-headers: :method, :scheme, :authority, :path
+    Method = maps:get(method, PseudoHeaders, <<>>),
+    Path = maps:get(path, PseudoHeaders, <<>>),
+    Scheme = maps:get(scheme, PseudoHeaders, <<>>),
+    Authority = maps:get(authority, PseudoHeaders, <<>>),
+    %% Build push info
+    PushInfo = #{
+        origin_stream => OriginStreamId,
+        promised_stream => PromisedStreamId,
+        method => Method,
+        path => Path,
+        scheme => Scheme,
+        authority => Authority,
+        headers => Headers
+    },
+    %% Notify push handler
+    %% Message format: {hackney_push, ConnPid, PushInfo}
+    PushHandler ! {hackney_push, self(), PushInfo},
+    %% Track the promised stream - we'll receive headers and data for it
+    Streams2 = maps:put(PromisedStreamId, {PushHandler, {push, PushInfo}}, Streams),
+    {ok, Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2}}.
+
 %% @private Handle DATA frame body after h2_machine processing
-do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine, Data) ->
-    #conn_data{h2_streams = Streams} = Data,
+do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine0, Data) ->
+    #conn_data{h2_streams = Streams, transport = Transport, socket = Socket} = Data,
+    DataLen = byte_size(BodyData),
+    %% Check connection-level flow control
+    {H2Machine1, _} = maybe_send_window_update(connection, DataLen, H2Machine0, Transport, Socket),
+    %% Check stream-level flow control (if stream is still open)
+    {H2Machine, _} = case IsFin of
+        fin -> {H2Machine1, ok};
+        nofin -> maybe_send_window_update(StreamId, DataLen, H2Machine1, Transport, Socket)
+    end,
     %% Update stream with body data
     case maps:get(StreamId, Streams, undefined) of
         {From, {waiting_body, Status, Headers, AccBody}} ->
@@ -2001,8 +2041,47 @@ do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine, Data) ->
                     Streams2 = maps:put(StreamId, {From, {waiting_body, Status, Headers, NewBody}}, Streams),
                     {ok, Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2}}
             end;
+        {PushHandler, {push_body, Status, RespHeaders, AccBody}} when is_pid(PushHandler) ->
+            %% Pushed stream body data
+            NewBody = <<AccBody/binary, BodyData/binary>>,
+            case IsFin of
+                fin ->
+                    %% Push body complete - notify handler
+                    Streams2 = maps:remove(StreamId, Streams),
+                    PushHandler ! {hackney_push_response, self(), StreamId, Status, RespHeaders, NewBody},
+                    {ok, Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2}};
+                nofin ->
+                    %% More body data expected
+                    Streams2 = maps:put(StreamId, {PushHandler, {push_body, Status, RespHeaders, NewBody}}, Streams),
+                    {ok, Data#conn_data{h2_machine = H2Machine, h2_streams = Streams2}}
+            end;
         _ ->
             {ok, Data#conn_data{h2_machine = H2Machine}}
+    end.
+
+%% @private Send WINDOW_UPDATE if needed for flow control
+%% Type can be 'connection' for connection-level or StreamId for stream-level
+maybe_send_window_update(connection, DataLen, H2Machine, Transport, Socket) ->
+    %% Check connection-level window
+    case hackney_cow_http2_machine:ensure_window(DataLen, H2Machine) of
+        ok ->
+            {H2Machine, ok};
+        {ok, Increment, H2Machine2} ->
+            %% Send connection-level WINDOW_UPDATE
+            Frame = hackney_cow_http2:window_update(Increment),
+            _ = Transport:send(Socket, Frame),
+            {H2Machine2, ok}
+    end;
+maybe_send_window_update(StreamId, DataLen, H2Machine, Transport, Socket) when is_integer(StreamId) ->
+    %% Check stream-level window
+    case hackney_cow_http2_machine:ensure_window(StreamId, DataLen, H2Machine) of
+        ok ->
+            {H2Machine, ok};
+        {ok, Increment, H2Machine2} ->
+            %% Send stream-level WINDOW_UPDATE
+            Frame = hackney_cow_http2:window_update(StreamId, Increment),
+            _ = Transport:send(Socket, Frame),
+            {H2Machine2, ok}
     end.
 
 %% @private Handle HTTP/2 headers response
@@ -2028,6 +2107,19 @@ do_handle_h2_headers(StreamId, _IsFin, Frame, Data) ->
                             Streams2 = maps:put(StreamId, {From, {waiting_body, Status, Headers, <<>>}}, Streams),
                             {ok, Data#conn_data{h2_machine = H2Machine2, h2_streams = Streams2,
                                                 request_from = From}}
+                    end;
+                {PushHandler, {push, _PushInfo}} when is_pid(PushHandler) ->
+                    %% Pushed stream response headers received
+                    case RespIsFin of
+                        fin ->
+                            %% No body - notify immediately
+                            Streams2 = maps:remove(StreamId, Streams),
+                            PushHandler ! {hackney_push_response, self(), StreamId, Status, Headers, <<>>},
+                            {ok, Data#conn_data{h2_machine = H2Machine2, h2_streams = Streams2}};
+                        nofin ->
+                            %% Body follows - update stream state
+                            Streams2 = maps:put(StreamId, {PushHandler, {push_body, Status, Headers, <<>>}}, Streams),
+                            {ok, Data#conn_data{h2_machine = H2Machine2, h2_streams = Streams2}}
                     end;
                 _ ->
                     {ok, Data#conn_data{h2_machine = H2Machine2}}
