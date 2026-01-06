@@ -103,40 +103,25 @@ connect(Host, Port) ->
     connect(Host, Port, #{}).
 
 %% @doc Connect to an HTTP/3 server with options.
-%% Uses happy eyeballs algorithm to try IPv6 and IPv4 in parallel.
+%% lsquic handles its own UDP socket creation and DNS resolution.
 -spec connect(binary() | string(), inet:port_number(), map()) -> {ok, reference()} | {error, term()}.
 connect(Host, Port, Opts) when is_list(Host) ->
     connect(list_to_binary(Host), Port, Opts);
 connect(Host, Port, Opts) when is_binary(Host) ->
     Timeout = maps:get(timeout, Opts, 30000),
-    %% Use happy eyeballs to get a UDP socket with resolved address
-    case hackney_happy:connect_udp(binary_to_list(Host), Port, [], Timeout) of
-        {ok, UdpSocket, {_IP, _Port}} ->
-            %% Get the socket FD to pass to QUIC NIF
-            case hackney_quic:get_fd(UdpSocket) of
-                {ok, Fd} ->
-                    %% Connect using the pre-warmed socket
-                    QuicOpts = Opts#{socket_fd => Fd},
-                    case hackney_quic:connect(Host, Port, QuicOpts, self()) of
-                        {ok, ConnRef} ->
-                            receive
-                                {quic, ConnRef, {connected, _Info}} ->
-                                    {ok, ConnRef};
-                                {quic, ConnRef, {closed, Reason}} ->
-                                    {error, {connection_closed, Reason}};
-                                {quic, ConnRef, {transport_error, Code, Msg}} ->
-                                    {error, {transport_error, Code, Msg}}
-                            after Timeout ->
-                                hackney_quic:close(ConnRef, timeout),
-                                {error, timeout}
-                            end;
-                        {error, _} = Error ->
-                            gen_udp:close(UdpSocket),
-                            Error
-                    end;
-                {error, _} = Error ->
-                    gen_udp:close(UdpSocket),
-                    Error
+    %% Let lsquic create its own UDP socket
+    case hackney_quic:connect(Host, Port, Opts, self()) of
+        {ok, ConnRef} ->
+            receive
+                {quic, ConnRef, {connected, _Info}} ->
+                    {ok, ConnRef};
+                {quic, ConnRef, {closed, Reason}} ->
+                    {error, {connection_closed, Reason}};
+                {quic, ConnRef, {transport_error, Code, Msg}} ->
+                    {error, {transport_error, Code, Msg}}
+            after Timeout ->
+                hackney_quic:close(ConnRef, timeout),
+                {error, timeout}
             end;
         {error, _} = Error ->
             Error
@@ -218,20 +203,23 @@ do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
     end.
 
 await_response(ConnRef, StreamId, Timeout, Status, AccBody) ->
+    await_response(ConnRef, StreamId, Timeout, Status, [], AccBody).
+
+await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
     receive
-        {quic, ConnRef, {stream_headers, StreamId, Headers, _Fin}} ->
+        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
             %% Got response headers
-            NewStatus = get_status(Headers),
-            RespHeaders = filter_pseudo_headers(Headers),
-            await_response(ConnRef, StreamId, Timeout, NewStatus, AccBody);
+            NewStatus = get_status(RespHeaders),
+            FilteredHeaders = filter_pseudo_headers(RespHeaders),
+            await_response(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody);
         {quic, ConnRef, {stream_data, StreamId, Data, Fin}} ->
             %% Got response data
             NewBody = <<AccBody/binary, Data/binary>>,
             case Fin of
                 true ->
-                    {ok, Status, [], NewBody};
+                    {ok, Status, Headers, NewBody};
                 false ->
-                    await_response(ConnRef, StreamId, Timeout, Status, NewBody)
+                    await_response(ConnRef, StreamId, Timeout, Status, Headers, NewBody)
             end;
         {quic, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
             {error, stream_reset};

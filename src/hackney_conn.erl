@@ -155,15 +155,23 @@
     upgraded_ssl = false :: boolean(),
 
     %% HTTP/2 support
-    %% Protocol negotiated via ALPN (http1 or http2)
-    protocol = http1 :: http1 | http2,
+    %% Protocol negotiated via ALPN (http1, http2, or http3)
+    protocol = http1 :: http1 | http2 | http3,
     %% HTTP/2 connection state machine (from hackney_cow_http2_machine)
     h2_machine :: tuple() | undefined,
     %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
     %% StreamState: waiting_headers | waiting_body | done | {push, Headers}
     h2_streams = #{} :: #{pos_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
     %% Server push handling: false = reject all (default), pid = send notifications to pid
-    enable_push = false :: false | pid()
+    enable_push = false :: false | pid(),
+
+    %% HTTP/3 support (QUIC)
+    %% QUIC connection reference from hackney_quic NIF
+    h3_conn :: reference() | undefined,
+    %% Map of active HTTP/3 streams: StreamId => {From, StreamState}
+    h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
+    %% Whether to try HTTP/3 (requires UDP)
+    try_http3 = false :: boolean()
 }).
 
 %%====================================================================
@@ -462,9 +470,14 @@ init([DefaultOwner, Opts]) ->
             {ok, connected, Data}
     end.
 
-terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport, h2_machine = H2Machine}) ->
+terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport, h2_machine = H2Machine, h3_conn = H3Conn}) ->
     %% Cancel any HTTP/2 timers to prevent orphaned timer messages
     cancel_h2_timers(H2Machine),
+    %% Close HTTP/3 connection if present
+    case H3Conn of
+        undefined -> ok;
+        _ -> hackney_h3:close(H3Conn)
+    end,
     %% Close socket
     case Socket of
         undefined -> ok;
@@ -520,43 +533,30 @@ idle({call, From}, connect, Data) ->
         transport = Transport,
         connect_timeout = Timeout,
         connect_options = ConnectOpts,
-        ssl_options = SslOpts0
+        try_http3 = TryHttp3
     } = Data,
 
-    %% Build connection options
-    Opts = case Transport of
-        hackney_ssl ->
-            %% Get default SSL options with hostname verification
-            DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
-            %% Merge user-provided SSL options (they override defaults)
-            MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
-            %% Add ALPN options for HTTP/2 negotiation
-            AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
-            FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
-            %% Pass SSL options under ssl_options key as expected by hackney_ssl
-            ConnectOpts ++ [{ssl_options, FinalSslOpts}];
-        _ -> ConnectOpts
-    end,
+    %% Check if we should try HTTP/3 first (SSL transport + http3 in protocols)
+    Protocols = proplists:get_value(protocols, ConnectOpts, [http2, http1]),
+    ShouldTryHttp3 = TryHttp3 orelse (Transport =:= hackney_ssl andalso lists:member(http3, Protocols)),
 
-    %% Attempt connection
-    case Transport:connect(Host, Port, Opts, Timeout) of
-        {ok, Socket} ->
-            %% Connection successful - detect protocol for SSL connections
-            Protocol = case Transport of
-                hackney_ssl -> hackney_ssl:get_negotiated_protocol(Socket);
-                _ -> http1
-            end,
-            %% Initialize HTTP/2 if negotiated
-            case Protocol of
-                http2 ->
-                    init_h2_connection(Socket, Data#conn_data{socket = Socket, protocol = http2}, From);
-                http1 ->
-                    NewData = Data#conn_data{socket = Socket, protocol = http1},
-                    {next_state, connected, NewData, [{reply, From, ok}]}
+    case ShouldTryHttp3 andalso hackney_quic:is_available() of
+        true ->
+            %% Try HTTP/3 first
+            case try_h3_connect(Host, Port, Timeout, ConnectOpts) of
+                {ok, H3Conn} ->
+                    NewData = Data#conn_data{
+                        h3_conn = H3Conn,
+                        protocol = http3
+                    },
+                    {next_state, connected, NewData, [{reply, From, ok}]};
+                {error, _H3Reason} ->
+                    %% HTTP/3 failed, fall back to TCP/TLS
+                    do_tcp_connect(From, Data)
             end;
-        {error, Reason} ->
-            %% Connection failed
-            {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
+        false ->
+            %% Standard TCP/TLS connection
+            do_tcp_connect(From, Data)
     end;
 
 idle({call, From}, get_state, _Data) ->
@@ -699,6 +699,10 @@ connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{proto
     %% HTTP/2 request - use h2_machine
     do_h2_request(From, Method, Path, Headers, Body, Data);
 
+connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 request - use hackney_h3
+    do_h3_request(From, Method, Path, Headers, Body, Data);
+
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
     %% HTTP/1.1 request
     NewData = Data#conn_data{
@@ -761,6 +765,29 @@ connected(info, {tcp_error, Socket, _Reason}, #conn_data{socket = Socket} = Data
 
 connected(info, {ssl_error, Socket, _Reason}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
+
+%% HTTP/3 QUIC message handling
+connected(info, {quic, ConnRef, {stream_headers, StreamId, Headers, _Fin}},
+          #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    handle_h3_headers(StreamId, Headers, Streams, Data);
+
+connected(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
+          #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
+
+connected(info, {quic, ConnRef, {stream_reset, StreamId, ErrorCode}},
+          #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
+
+connected(info, {quic, ConnRef, {closed, Reason}},
+          #conn_data{h3_conn = ConnRef} = Data) ->
+    %% QUIC connection closed
+    handle_h3_conn_closed(Reason, Data);
+
+connected(info, {quic, ConnRef, {transport_error, Code, Msg}},
+          #conn_data{h3_conn = ConnRef} = Data) ->
+    %% QUIC transport error
+    handle_h3_error({transport_error, Code, Msg}, Data);
 
 connected(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
@@ -1647,6 +1674,63 @@ skip_response_body(Data) ->
 %% HTTP/2 Support Functions
 %%====================================================================
 
+%% @private Try HTTP/3 connection via QUIC
+%% lsquic handles its own UDP socket creation and DNS resolution.
+try_h3_connect(Host, Port, Timeout, _ConnectOpts) ->
+    HostBin = if is_list(Host) -> list_to_binary(Host); true -> Host end,
+    case hackney_quic:connect(HostBin, Port, #{}, self()) of
+        {ok, ConnRef} ->
+            receive
+                {quic, ConnRef, {connected, _Info}} ->
+                    {ok, ConnRef};
+                {quic, ConnRef, {closed, Reason}} ->
+                    {error, {quic_closed, Reason}};
+                {quic, ConnRef, {transport_error, Code, Msg}} ->
+                    {error, {quic_error, Code, Msg}}
+            after Timeout ->
+                hackney_quic:close(ConnRef, timeout),
+                {error, timeout}
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private Standard TCP/TLS connection
+do_tcp_connect(From, Data) ->
+    #conn_data{
+        host = Host,
+        port = Port,
+        transport = Transport,
+        connect_timeout = Timeout,
+        connect_options = ConnectOpts,
+        ssl_options = SslOpts0
+    } = Data,
+    Opts = case Transport of
+        hackney_ssl ->
+            DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
+            MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
+            AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+            FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
+            ConnectOpts ++ [{ssl_options, FinalSslOpts}];
+        _ -> ConnectOpts
+    end,
+    case Transport:connect(Host, Port, Opts, Timeout) of
+        {ok, Socket} ->
+            Protocol = case Transport of
+                hackney_ssl -> hackney_ssl:get_negotiated_protocol(Socket);
+                _ -> http1
+            end,
+            case Protocol of
+                http2 ->
+                    init_h2_connection(Socket, Data#conn_data{socket = Socket, protocol = http2}, From);
+                http1 ->
+                    NewData = Data#conn_data{socket = Socket, protocol = http1},
+                    {next_state, connected, NewData, [{reply, From, ok}]}
+            end;
+        {error, Reason} ->
+            {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
+    end.
+
 %% @private Initialize HTTP/2 connection
 %% Sends the connection preface and initializes the h2_machine state
 init_h2_connection(Socket, Data, From) ->
@@ -2155,4 +2239,157 @@ do_handle_h2_headers(StreamId, _IsFin, Frame, Data) ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
             {error, Reason, Data}
+    end.
+
+%%====================================================================
+%% HTTP/3 Support Functions
+%%====================================================================
+
+%% @private Send an HTTP/3 request
+%% Opens a stream, sends headers and optionally body
+do_h3_request(From, Method, Path, Headers, Body, Data) ->
+    #conn_data{
+        host = Host,
+        h3_conn = ConnRef,
+        h3_streams = Streams
+    } = Data,
+
+    MethodBin = to_binary(Method),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> to_binary(Path)
+    end,
+    HostBin = to_binary(Host),
+
+    %% Use hackney_h3 to send request
+    case hackney_h3:send_request(ConnRef, MethodBin, HostBin, PathBin, normalize_headers(Headers), Body) of
+        {ok, StreamId, _NewStreams} ->
+            %% Track stream for response
+            UpdatedStreams = maps:put(StreamId, {From, waiting_headers}, Streams),
+            NewData = Data#conn_data{
+                h3_streams = UpdatedStreams,
+                method = MethodBin,
+                path = PathBin,
+                request_from = From
+            },
+            %% Stay in connected state, wait for response via QUIC messages
+            {keep_state, NewData};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Handle HTTP/3 response headers
+handle_h3_headers(StreamId, Headers, Streams, Data) ->
+    case hackney_h3:parse_response_headers(Headers) of
+        {ok, Status, RespHeaders} ->
+            case maps:get(StreamId, Streams, undefined) of
+                {From, waiting_headers} ->
+                    %% Update stream state to receiving body
+                    UpdatedStreams = maps:put(StreamId,
+                        {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
+                    {keep_state, Data#conn_data{
+                        h3_streams = UpdatedStreams,
+                        status = Status,
+                        response_headers = RespHeaders
+                    }};
+                _ ->
+                    %% Unknown stream or wrong state
+                    {keep_state, Data}
+            end;
+        {error, Reason} ->
+            %% Failed to parse headers
+            case maps:get(StreamId, Streams, undefined) of
+                {From, _} ->
+                    UpdatedStreams = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams},
+                     [{reply, From, {error, Reason}}]};
+                _ ->
+                    {keep_state, Data}
+            end
+    end.
+
+%% @private Handle HTTP/3 response body data
+handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
+    case maps:get(StreamId, Streams, undefined) of
+        {From, {receiving_body, Status, Headers, AccBody}} ->
+            NewBody = <<AccBody/binary, RecvData/binary>>,
+            case Fin of
+                true ->
+                    %% Stream complete - reply with full response
+                    UpdatedStreams = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
+                     [{reply, From, {ok, Status, Headers, NewBody}}]};
+                false ->
+                    %% More data expected
+                    UpdatedStreams = maps:put(StreamId,
+                        {From, {receiving_body, Status, Headers, NewBody}}, Streams),
+                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}
+            end;
+        {From, waiting_headers} ->
+            %% Got data before headers - unusual but handle it
+            {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
+                {From, {receiving_body, 0, [], RecvData}}, Streams)}};
+        _ ->
+            %% Unknown stream
+            {keep_state, Data}
+    end.
+
+%% @private Handle HTTP/3 stream reset
+handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
+    case maps:get(StreamId, Streams, undefined) of
+        {From, _State} ->
+            UpdatedStreams = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
+             [{reply, From, {error, {stream_reset, ErrorCode}}}]};
+        _ ->
+            {keep_state, Data}
+    end.
+
+%% @private Handle HTTP/3 connection closed
+handle_h3_conn_closed(Reason, Data) ->
+    #conn_data{h3_streams = Streams, request_from = From} = Data,
+    %% Notify all pending streams
+    Actions = maps:fold(fun(_StreamId, {StreamFrom, _State}, Acc) ->
+        [{reply, StreamFrom, {error, {connection_closed, Reason}}} | Acc]
+    end, [], Streams),
+    %% Clear connection state
+    NewData = Data#conn_data{
+        h3_conn = undefined,
+        h3_streams = #{},
+        request_from = undefined
+    },
+    case From of
+        undefined ->
+            {next_state, closed, NewData, Actions};
+        _ ->
+            %% Don't duplicate reply if From is already in Actions
+            case lists:any(fun({reply, F, _}) -> F =:= From end, Actions) of
+                true -> {next_state, closed, NewData, Actions};
+                false ->
+                    {next_state, closed, NewData, [{reply, From, {error, {connection_closed, Reason}}} | Actions]}
+            end
+    end.
+
+%% @private Handle HTTP/3 transport error
+handle_h3_error(Error, Data) ->
+    #conn_data{h3_streams = Streams, request_from = From} = Data,
+    %% Notify all pending streams
+    Actions = maps:fold(fun(_StreamId, {StreamFrom, _State}, Acc) ->
+        [{reply, StreamFrom, {error, Error}} | Acc]
+    end, [], Streams),
+    %% Clear connection state
+    NewData = Data#conn_data{
+        h3_conn = undefined,
+        h3_streams = #{},
+        request_from = undefined
+    },
+    case From of
+        undefined ->
+            {next_state, closed, NewData, Actions};
+        _ ->
+            case lists:any(fun({reply, F, _}) -> F =:= From end, Actions) of
+                true -> {next_state, closed, NewData, Actions};
+                false ->
+                    {next_state, closed, NewData, [{reply, From, {error, Error}} | Actions]}
+            end
     end.

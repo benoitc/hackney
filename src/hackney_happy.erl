@@ -263,15 +263,24 @@ do_udp_race({Pid4, MRef4}, {Pid6, MRef6}, Timeout) ->
     {error, connect_timeout}
   end.
 
-try_udp_list(Addrs, Port, Opts, _ServerPid) ->
-  try_udp_list_1(Addrs, Port, Opts, {error, nxdomain}).
+try_udp_list(Addrs, Port, Opts, ServerPid) ->
+  try_udp_list_1(Addrs, Port, Opts, ServerPid, {error, nxdomain}).
 
-try_udp_list_1([], _Port, _Opts, LastError) ->
+try_udp_list_1([], _Port, _Opts, _ServerPid, LastError) ->
   exit(LastError);
-try_udp_list_1([{IP, Type} | Rest], Port, Opts, _LastError) ->
+try_udp_list_1([{IP, Type} | Rest], Port, Opts, ServerPid, _LastError) ->
   case try_udp_connect(IP, Port, Type, Opts) of
-    {ok, _, _} = OK -> exit({happy_connect, OK});
-    Error -> try_udp_list_1(Rest, Port, Opts, Error)
+    {ok, Socket, RemoteAddr} ->
+      %% Transfer socket ownership to parent process before exiting
+      case gen_udp:controlling_process(Socket, ServerPid) of
+        ok ->
+          exit({happy_connect, {ok, Socket, RemoteAddr}});
+        {error, Reason} ->
+          gen_udp:close(Socket),
+          try_udp_list_1(Rest, Port, Opts, ServerPid, {error, Reason})
+      end;
+    Error ->
+      try_udp_list_1(Rest, Port, Opts, ServerPid, Error)
   end.
 
 try_udp_connect(IP, Port, Type, Opts) ->
