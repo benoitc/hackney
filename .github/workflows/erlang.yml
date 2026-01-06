@@ -7,24 +7,30 @@ on:
   pull_request:
     branches:
       - master
+
+permissions:
+  contents: read
+
 jobs:
-  ci:
-    name: Run checks and tests over ${{matrix.otp_vsn}} and ${{matrix.os}}
-    runs-on: ${{matrix.os}}
+  # Linux x86_64 - main CI
+  linux:
+    name: Linux x86_64 OTP-${{matrix.otp}}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: ["27.3", "28.0"]
-        rebar3: ['3.25.0']
-        os: [ubuntu-22.04]
+        otp: ["27.2", "28.0"]
+        rebar3: ['3.24.0']
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           rebar3-version: ${{matrix.rebar3}}
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: python3 python3-httpbin python3-pip
+          packages: python3 python3-httpbin python3-pip cmake
           version: 1.1
       - run: |
           pip3 install gunicorn
@@ -32,14 +38,115 @@ jobs:
       - run: rebar3 xref
       - run: rebar3 eunit
       - run: rebar3 dialyzer
+
+  # Linux x86_64 with QUIC support
+  linux-quic:
+    name: Linux x86_64 OTP-${{matrix.otp}} (QUIC)
+    runs-on: ubuntu-latest
+    if: ${{ false }}  # Disabled until QUIC deps are vendored
+    strategy:
+      matrix:
+        otp: ["27.2"]
+        rebar3: ['3.24.0']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          rebar3-version: ${{matrix.rebar3}}
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: cmake libssl-dev
+          version: 1.1
+      - name: Build with QUIC
+        run: |
+          make quic-deps || true
+          rebar3 compile
+      - run: rebar3 eunit
+
+  # Linux ARM64
+  linux-arm64:
+    name: Linux ARM64 OTP-${{matrix.otp}}
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        otp: ["27.2"]
+        rebar3: ['3.24.0']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          rebar3-version: ${{matrix.rebar3}}
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: cmake
+          version: 1.1
+      - run: rebar3 xref
+      - run: rebar3 eunit
+
+  # macOS ARM64 (Apple Silicon)
+  macos:
+    name: macOS ARM64 OTP-${{matrix.otp}}
+    runs-on: macos-15
+    strategy:
+      matrix:
+        otp: ["27"]
+        rebar3: ['3.24.0']
+    steps:
+      - name: Install Erlang
+        env:
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+        run: |
+          brew update
+          brew install erlang@${{ matrix.otp }}
+          echo "$(brew --prefix erlang@${{ matrix.otp }})/bin" >> $GITHUB_PATH
+      - name: Install rebar3
+        run: |
+          wget https://github.com/erlang/rebar3/releases/download/${{ matrix.rebar3 }}/rebar3 && chmod +x rebar3
+          sudo mv rebar3 /usr/local/bin/ && sudo chmod +x /usr/local/bin/rebar3
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: make test
+
+  # FreeBSD
+  freebsd:
+    name: FreeBSD 14.2 OTP-28
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          prepare: |
+            pkg install -y erlang-runtime28 rebar3 cmake git gmake
+          run: |
+            # Ensure Erlang 28 is in PATH
+            export PATH="/usr/local/lib/erlang28/bin:$PATH"
+            echo "Erlang version:"
+            erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+            echo "Architecture:"
+            uname -m
+            git config --global --add safe.directory $GITHUB_WORKSPACE
+            rebar3 eunit
+
+  # Legacy OTP versions (without QUIC)
   legacy:
-    name: Run checks and tests over ${{matrix.otp_vsn}} and ${{matrix.os}}
-    runs-on: ${{matrix.os}}
+    name: Linux x86_64 OTP-${{matrix.otp}} (legacy)
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         otp: ["24.3", "25.3", "26.2"]
         rebar3: ['3.22.1']
-        os: [ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -56,5 +163,3 @@ jobs:
       - run: rebar3 xref
       - run: rebar3 eunit
       - run: rebar3 dialyzer
-
-
