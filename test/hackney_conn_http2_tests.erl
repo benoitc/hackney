@@ -409,12 +409,12 @@ multiplexing_test_() ->
         {
             setup,
             fun setup/0, fun cleanup/1,
-            [
+            {timeout, 60, [
                 {"Sequential requests on same connection", fun h2_sequential_requests_test/0},
                 {"Connection reuse (same PID)", fun h2_connection_reuse_test/0},
                 {"Pool registration", fun h2_pool_registration_test/0},
                 {"High-level API reuse", fun h2_high_level_api_reuse_test/0}
-            ]
+            ]}
         }
     }.
 
