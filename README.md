@@ -7,6 +7,7 @@ An HTTP client for Erlang. Simple, reliable, fast.
 
 ## Why hackney?
 
+- **HTTP/3 support** - Experimental QUIC/HTTP3 via lsquic. Opt-in with `{protocols, [http3, http2, http1]}`.
 - **HTTP/2 support** - Automatic protocol negotiation via ALPN. Multiplexing, header compression, flow control.
 - **Process per connection** - Each connection runs in its own `gen_statem` process. Clean isolation, automatic cleanup on crashes.
 - **Connection pooling** - Reuse connections automatically. Configure pools per host or globally.
