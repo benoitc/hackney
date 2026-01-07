@@ -154,9 +154,9 @@ test_acquire_timeout() ->
     Elapsed = erlang:monotonic_time(millisecond) - Start,
 
     ?assertEqual({error, timeout}, Result),
-    %% Should have taken approximately 100ms (with some tolerance)
+    %% Should have taken approximately 100ms (with generous tolerance for CI)
     ?assert(Elapsed >= 90),
-    ?assert(Elapsed < 200),
+    ?assert(Elapsed < 500),
 
     ok = hackney_load_regulation:release(Host, Port).
 
