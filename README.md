@@ -170,6 +170,20 @@ hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
 hackney:get(URL, [], <<>>, [{protocols, [http2]}]).
 ```
 
+### HTTP/3 (Experimental)
+
+HTTP/3 support is **opt-in**. Enable it per-request or globally:
+
+```erlang
+%% Enable HTTP/3 for a single request
+hackney:get(URL, [], <<>>, [{protocols, [http3, http2, http1]}]).
+
+%% Enable HTTP/3 globally (application-wide)
+application:set_env(hackney, default_protocols, [http3, http2, http1]).
+```
+
+**Note:** HTTP/3 uses QUIC (UDP transport). Some networks may block UDP traffic.
+
 ### Multipart
 
 Upload files and form data:

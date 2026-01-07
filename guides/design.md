@@ -15,9 +15,15 @@ Hackney 2.x uses a **process-per-connection** architecture where each HTTP conne
 hackney_sup
 ├── hackney_manager          (connection registry)
 ├── hackney_conn_sup         (connection supervisor)
-│   └── hackney_conn [1..N]  (connection processes)
-└── hackney_pools_sup        (pool supervisor)
-    └── hackney_pool [1..N]  (pool processes)
+│   └── hackney_conn [1..N]  (connection processes for HTTP/1.1, HTTP/2)
+├── hackney_pools_sup        (pool supervisor)
+│   └── hackney_pool [1..N]  (pool processes)
+└── hackney_altsvc           (Alt-Svc cache for HTTP/3 discovery)
+
+QUIC connections (HTTP/3):
+├── hackney_quic.erl         (Erlang interface to NIF)
+└── hackney_quic NIF         (lsquic + BoringSSL, no supervision needed)
+    └── QuicConn resources   (GC-managed, one per QUIC connection)
 ```
 
 ## Connection Process (hackney_conn)
@@ -221,6 +227,236 @@ connect_pool(Host, Port, Transport, Opts) ->
         ...
     end.
 ```
+
+## Protocol Selection
+
+Hackney supports three HTTP protocols: HTTP/1.1, HTTP/2, and HTTP/3 (experimental). The protocol selection is controlled via the `protocols` option.
+
+### Default Protocols
+
+By default, hackney uses `[http2, http1]`:
+
+```erlang
+%% Default behavior - HTTP/2 preferred, HTTP/1.1 fallback
+hackney:get("https://example.com/")
+```
+
+The default can be changed via application environment:
+
+```erlang
+%% In sys.config or at runtime
+application:set_env(hackney, default_protocols, [http2, http1]).
+```
+
+### Enabling HTTP/3 (Experimental)
+
+HTTP/3 uses QUIC (UDP transport). To enable HTTP/3:
+
+```erlang
+%% Per-request: opt-in to HTTP/3
+hackney:get("https://example.com/", [], <<>>, [
+    {protocols, [http3, http2, http1]}
+]).
+
+%% Application-wide: enable HTTP/3 by default
+application:set_env(hackney, default_protocols, [http3, http2, http1]).
+```
+
+**Important considerations for HTTP/3:**
+
+- **Experimental** - QUIC support is still maturing
+- **UDP may be blocked** - Corporate firewalls often block UDP
+
+### Protocol Priority
+
+Protocols are tried in order. With `[http3, http2, http1]`:
+
+1. If QUIC NIF is available and server supports HTTP/3: use HTTP/3
+2. Otherwise, ALPN negotiates HTTP/2 or HTTP/1.1 over TLS
+3. Server chooses the highest protocol it supports
+
+### Forcing a Single Protocol
+
+```erlang
+%% Force HTTP/1.1 only (no HTTP/2 negotiation)
+hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
+
+%% Force HTTP/2 only
+hackney:get(URL, [], <<>>, [{protocols, [http2]}]).
+
+%% HTTP/3 only (will fail if QUIC unavailable or server doesn't support it)
+hackney:get(URL, [], <<>>, [{protocols, [http3]}]).
+```
+
+## HTTP/3 and QUIC Architecture
+
+HTTP/3 connections use QUIC (UDP-based transport) via a NIF implementation built on lsquic and BoringSSL.
+
+### Event-Driven Architecture
+
+Unlike TCP connections which use one process per connection, QUIC uses an **event-driven architecture** with Erlang's dirty schedulers:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Owner Process (Erlang)                       │
+│                                                                  │
+│  1. connect() → Creates QUIC connection, arms enif_select()     │
+│                                                                  │
+│  2. Receives {select, Resource, Ref, ready_input}               │
+│     └── Socket has data ready                                   │
+│                                                                  │
+│  3. Calls hackney_quic:process(ConnRef)                         │
+│     └── Runs on dirty I/O scheduler                             │
+│     └── Receives UDP packets                                    │
+│     └── Processes lsquic engine                                 │
+│     └── Triggers callbacks (headers, data, etc.)                │
+│     └── Returns next timeout in ms                              │
+│                                                                  │
+│  4. Receives {quic, ConnRef, Event}                             │
+│     └── {connected, Info}                                       │
+│     └── {stream_headers, StreamId, Headers, Fin}                │
+│     └── {stream_data, StreamId, Data, Fin}                      │
+│     └── {closed, Reason}                                        │
+│                                                                  │
+│  5. Schedules timer: erlang:send_after(TimeoutMs, self(), ...)  │
+│     └── Calls process() again when timer fires                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Event-Driven (Not Thread-Per-Connection)?
+
+The QUIC NIF originally used a dedicated I/O thread per connection, but this caused race conditions between thread shutdown and Erlang GC. The event-driven approach eliminates this:
+
+| Aspect | Thread-per-Connection | Event-Driven (Current) |
+|--------|----------------------|------------------------|
+| Synchronization | Complex (atomics, mutexes) | None needed |
+| Race conditions | Possible at shutdown | Eliminated |
+| GC interaction | Thread must be joined | Resource auto-cleanup |
+| Scheduling | OS thread scheduler | Erlang dirty scheduler |
+| Resource usage | One thread per conn | Shared dirty schedulers |
+
+### NIF Components
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      hackney_quic.erl                            │
+│  - connect/4: Start QUIC connection                             │
+│  - process/1: Process pending I/O (dirty NIF)                   │
+│  - open_stream/1: Create new HTTP/3 stream                      │
+│  - send_headers/4: Send HTTP/3 request headers                  │
+│  - send_data/4: Send request body                               │
+│  - close/2: Close connection                                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   hackney_quic_nif.c                             │
+│  - nif_connect: Creates QuicConn resource, arms enif_select()   │
+│  - nif_process: Dirty NIF, calls quic_conn_process()            │
+│  - nif_open_stream: Opens bidirectional stream                  │
+│  - nif_send_headers: Encodes and sends QPACK headers            │
+│  - nif_send_data: Sends DATA frames on stream                   │
+│  - nif_close: Initiates graceful shutdown                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      quic_conn.c                                 │
+│  QuicConn resource:                                             │
+│  - lsquic_engine_t *engine   (one engine per connection)        │
+│  - lsquic_conn_t *conn       (QUIC connection handle)           │
+│  - SSL_CTX *ssl_ctx          (BoringSSL TLS context)            │
+│  - int sockfd                (UDP socket)                       │
+│  - QuicStream *streams       (linked list of active streams)    │
+│  - ErlNifMutex *mutex        (protects engine access)           │
+│                                                                  │
+│  quic_conn_process():                                           │
+│  1. recvfrom() all pending packets                              │
+│  2. lsquic_engine_packet_in() feeds to lsquic                   │
+│  3. lsquic_engine_process_conns() triggers callbacks            │
+│  4. lsquic_engine_send_unsent_packets() sends responses         │
+│  5. Returns next timeout from lsquic_engine_earliest_adv_tick() │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      lsquic (C library)                          │
+│  - QUIC protocol implementation (RFC 9000)                      │
+│  - HTTP/3 framing (RFC 9114)                                    │
+│  - QPACK header compression (RFC 9204)                          │
+│  - Uses BoringSSL for TLS 1.3                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Connection Lifecycle
+
+```
+Owner Process                         NIF/lsquic
+     │                                     │
+     │  hackney_quic:connect(...)          │
+     ├────────────────────────────────────►│ Create UDP socket
+     │                                     │ Create SSL_CTX
+     │                                     │ Create lsquic engine
+     │                                     │ lsquic_engine_connect()
+     │                                     │ lsquic_engine_process_conns()
+     │                                     │ enif_select(READ)
+     │◄────────────────────────────────────┤ {ok, ConnRef}
+     │                                     │
+     │  {select, _, _, ready_input}        │
+     │◄────────────────────────────────────┤ UDP packet received
+     │                                     │
+     │  hackney_quic:process(ConnRef)      │
+     ├────────────────────────────────────►│ [dirty scheduler]
+     │                                     │ recvfrom() packets
+     │                                     │ lsquic_engine_packet_in()
+     │                                     │ lsquic_engine_process_conns()
+     │                                     │   └─► on_hsk_done callback
+     │  {quic, ConnRef, {connected, Info}} │       └─► enif_send()
+     │◄────────────────────────────────────┤
+     │                                     │ enif_select(READ)
+     │◄────────────────────────────────────┤ TimeoutMs
+     │                                     │
+     │  erlang:send_after(TimeoutMs, ...)  │
+     │                                     │
+     │  ... (request/response cycle) ...   │
+     │                                     │
+     │  hackney_quic:close(ConnRef, ...)   │
+     ├────────────────────────────────────►│ lsquic_conn_close()
+     │                                     │ enif_select(STOP)
+     │  {quic, ConnRef, {closed, normal}}  │
+     │◄────────────────────────────────────┤
+     │                                     │
+     │  (ConnRef garbage collected)        │
+     │                                     │ quic_conn_destroy()
+     │                                     │ lsquic_engine_destroy()
+     │                                     │ SSL_CTX_free()
+     │                                     │ close(sockfd)
+     │                                     │
+```
+
+### Thread Safety
+
+The QUIC NIF uses minimal synchronization:
+
+| Component | Protection | Reason |
+|-----------|-----------|--------|
+| `conn->engine` | Mutex | lsquic is not thread-safe |
+| `conn->destroyed` | Atomic CAS | Prevent double-free |
+| `conn->streams` | Mutex (via engine) | Modified in callbacks |
+| Socket I/O | None | Single caller via dirty scheduler |
+
+The key insight is that `process()` is always called from the same Erlang process (the owner), and runs on a dirty scheduler. This serializes access naturally.
+
+### Resource Cleanup
+
+When the owner process dies or the connection is closed:
+
+1. Erlang GC detects no more references to `ConnRef`
+2. `quic_conn_resource_dtor()` is called
+3. `quic_conn_destroy()` closes lsquic and frees resources
+4. No thread joining needed (no I/O thread)
+
+This automatic cleanup prevents resource leaks even if the owner crashes.
 
 ## HTTP/2 Multiplexing
 

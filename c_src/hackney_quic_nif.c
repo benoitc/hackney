@@ -158,6 +158,21 @@ nif_connect(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         return make_error_str(env, "connect_failed");
     }
 
+    /* Create a reference for select messages */
+    conn->select_ref = enif_make_ref(env);
+
+    /* Arm enif_select for incoming packets */
+    if (conn->sockfd >= 0) {
+        int sel_ret = enif_select(env, (ErlNifEvent)conn->sockfd,
+                                  ERL_NIF_SELECT_READ,
+                                  conn,     /* resource object */
+                                  NULL,     /* pid - use calling process */
+                                  conn->select_ref);
+        if (sel_ret >= 0) {
+            conn->select_armed = true;
+        }
+    }
+
     ERL_NIF_TERM conn_ref = enif_make_resource(env, conn);
     enif_release_resource(conn); /* Erlang now owns it */
 
@@ -421,6 +436,49 @@ nif_setopts(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     return ATOM_OK;
 }
 
+/*
+ * NIF: process(ConnRef) -> NextTimeoutMs | infinity
+ *
+ * Processes pending QUIC events (reads packets, handles timeouts).
+ * This is a dirty I/O NIF that should be called when:
+ *   1. The socket has data ready (after receiving {select, _, _, ready_input})
+ *   2. A timer has expired
+ *
+ * Returns the next timeout in milliseconds, or 'infinity' if no timeout needed.
+ * The caller should re-arm enif_select after this returns.
+ */
+static ERL_NIF_TERM
+nif_process(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+
+    QuicConn *conn;
+    if (!enif_get_resource(env, argv[0], QUIC_CONN_RESOURCE, (void **)&conn)) {
+        return enif_make_badarg(env);
+    }
+
+    /* Process pending I/O */
+    int timeout_ms = quic_conn_process(conn, env);
+
+    /* Re-arm enif_select for next packet (if socket still valid) */
+    if (conn->sockfd >= 0 &&
+        !__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) {
+        int sel_ret = enif_select(env, (ErlNifEvent)conn->sockfd,
+                                  ERL_NIF_SELECT_READ,
+                                  conn,
+                                  NULL,
+                                  conn->select_ref);
+        if (sel_ret >= 0) {
+            conn->select_armed = true;
+        }
+    }
+
+    if (timeout_ms < 0) {
+        return enif_make_atom(env, "infinity");
+    }
+    return enif_make_int(env, timeout_ms);
+}
+
 /* NIF function table - names must match Erlang _nif function names */
 static ErlNifFunc nif_funcs[] = {
     /* {name, arity, function, flags} */
@@ -431,6 +489,7 @@ static ErlNifFunc nif_funcs[] = {
     {"send_data_nif", 4, nif_send_data, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"reset_stream_nif", 3, nif_reset_stream, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"handle_timeout_nif", 2, nif_handle_timeout, ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"process_nif", 1, nif_process, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"peername_nif", 1, nif_peername, 0},
     {"sockname_nif", 1, nif_sockname, 0},
     {"setopts_nif", 2, nif_setopts, 0}

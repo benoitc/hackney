@@ -816,6 +816,12 @@ connected(info, {quic, ConnRef, {transport_error, Code, Msg}},
     %% QUIC transport error
     handle_h3_error({transport_error, Code, Msg}, Data);
 
+%% QUIC socket ready - drive event loop
+connected(info, {select, _Resource, _Ref, ready_input},
+          #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
+    _ = hackney_quic:process(ConnRef),
+    keep_state_and_data;
+
 connected(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
 
@@ -982,6 +988,12 @@ streaming_body(info, {quic, ConnRef, {closed, Reason}},
 streaming_body(info, {quic, ConnRef, {transport_error, Code, Msg}},
                #conn_data{h3_conn = ConnRef} = Data) ->
     handle_h3_error({transport_error, Code, Msg}, Data);
+
+%% QUIC socket ready - drive event loop
+streaming_body(info, {select, _Resource, _Ref, ready_input},
+               #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
+    _ = hackney_quic:process(ConnRef),
+    keep_state_and_data;
 
 streaming_body(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
@@ -1347,6 +1359,12 @@ handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol
 
 handle_common({call, From}, _, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, invalid_state}}]};
+
+%% QUIC socket ready - drive event loop (common handler for all states)
+handle_common(info, {select, _Resource, _Ref, ready_input},
+              _State, #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
+    _ = hackney_quic:process(ConnRef),
+    keep_state_and_data;
 
 handle_common(info, _Msg, _State, _Data) ->
     keep_state_and_data.
@@ -1759,19 +1777,29 @@ try_h3_connect(Host, Port, Timeout, _ConnectOpts) ->
     HostBin = if is_list(Host) -> list_to_binary(Host); true -> Host end,
     case hackney_quic:connect(HostBin, Port, #{}, self()) of
         {ok, ConnRef} ->
-            receive
-                {quic, ConnRef, {connected, _Info}} ->
-                    {ok, ConnRef};
-                {quic, ConnRef, {closed, Reason}} ->
-                    {error, {quic_closed, Reason}};
-                {quic, ConnRef, {transport_error, Code, Msg}} ->
-                    {error, {quic_error, Code, Msg}}
-            after Timeout ->
-                hackney_quic:close(ConnRef, timeout),
-                {error, timeout}
-            end;
+            %% Drive event loop until connected
+            wait_h3_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
         {error, _} = Error ->
             Error
+    end.
+
+%% @private Drive QUIC event loop until connected
+wait_h3_connected(ConnRef, Timeout, StartTime) ->
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
+    receive
+        {select, _Resource, _Ref, ready_input} ->
+            _ = hackney_quic:process(ConnRef),
+            wait_h3_connected(ConnRef, Timeout, StartTime);
+        {quic, ConnRef, {connected, _Info}} ->
+            {ok, ConnRef};
+        {quic, ConnRef, {closed, Reason}} ->
+            {error, {quic_closed, Reason}};
+        {quic, ConnRef, {transport_error, Code, Msg}} ->
+            {error, {quic_error, Code, Msg}}
+    after Remaining ->
+        hackney_quic:close(ConnRef, timeout),
+        {error, timeout}
     end.
 
 %% @private Standard TCP/TLS connection

@@ -98,13 +98,12 @@ struct QuicConn {
     /* Self-reference for lsquic callbacks */
     ERL_NIF_TERM self_ref;
 
-    /* Flag for whether we're in the event loop */
+    /* Flag for whether we're currently processing */
     bool processing;
 
-    /* Thread for packet I/O */
-    ErlNifTid io_thread;
-    bool io_thread_running;
-    volatile int should_stop;  /* Atomic flag for thread termination */
+    /* Select mode support (replaces I/O thread) */
+    ERL_NIF_TERM select_ref;    /* Reference for enif_select messages */
+    bool select_armed;          /* True if waiting for select notification */
 
     /* Flag to prevent double-destroy */
     volatile int destroyed;
@@ -156,6 +155,10 @@ int quic_conn_close(QuicConn *conn);
 
 /* Process timeouts - returns next timeout in ms or -1 for infinity */
 int64_t quic_conn_handle_timeout(QuicConn *conn);
+
+/* Process pending I/O - called from dirty scheduler
+ * Returns next timeout in ms, or -1 for infinity */
+int quic_conn_process(QuicConn *conn, ErlNifEnv *env);
 
 /* Get peer/local addresses */
 int quic_conn_peername(QuicConn *conn, struct sockaddr_storage *addr, socklen_t *addrlen);

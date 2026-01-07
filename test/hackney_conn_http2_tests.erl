@@ -309,9 +309,11 @@ h2_high_level_api_reuse_test() ->
             gen_tcp:close(TestSock),
 
             %% Make multiple requests via high-level API
-            {ok, 200, H1, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]),
-            {ok, 200, H2, _} = hackney:get(<<"https://nghttp2.org/blog/">>, [], <<>>, [with_body]),
-            {ok, 200, H3, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]),
+            %% Explicitly request HTTP/2 to avoid HTTP/3 fallback messages in test mailbox
+            Opts = [with_body, {protocols, [http2, http1]}],
+            {ok, 200, H1, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, Opts),
+            {ok, 200, H2, _} = hackney:get(<<"https://nghttp2.org/blog/">>, [], <<>>, Opts),
+            {ok, 200, H3, _} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, Opts),
 
             %% All should have lowercase headers (HTTP/2)
             ?assertMatch({<<"date">>, _}, hd(H1)),

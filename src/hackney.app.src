@@ -27,7 +27,7 @@
       {shutdown, 10000},
       {maxr, 10},
       {maxt, 1},
-      {default_protocols, [http3, http2, http1]}]},
+      {default_protocols, [http2, http1]}]},
 
     {licenses, ["Apache-2.0"]},
     {links, [{"Github", "https://github.com/benoitc/hackney"}]},

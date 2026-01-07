@@ -16,7 +16,6 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
-#include <sys/select.h>
 #include <lsxpack_header.h>
 
 /* Maximum UDP packet size */
@@ -533,7 +532,7 @@ static void *hsi_create_header_set(void *ctx, lsquic_stream_t *s, int is_push) {
 
     hset->headers_list = enif_make_list(hset->env, 0);
     hset->conn = conn;
-    hset->stream_id = s ? lsquic_stream_id(s) : -1;
+    hset->stream_id = s ? (int64_t)lsquic_stream_id(s) : (int64_t)-1;
 
     return hset;
 }
@@ -646,92 +645,62 @@ static int packets_out(void *ctx, const struct lsquic_out_spec *specs,
 }
 
 /*===========================================================================
- * I/O thread
+ * Connection processing (called from dirty scheduler)
  *===========================================================================*/
 
-static void *io_thread_func(void *arg) {
-    QuicConn *conn = (QuicConn *)arg;
+int quic_conn_process(QuicConn *conn, ErlNifEnv *env) {
+    UNUSED(env);
+
+    if (!conn || __atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) {
+        return -1;
+    }
+
+    /* Mark select as not armed (since enif_select is one-shot) */
+    conn->select_armed = false;
+
+    enif_mutex_lock(conn->mutex);
+
+    if (!conn->engine) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
+    /* Receive any pending packets */
     unsigned char buf[RECV_BUF_SIZE];
     struct sockaddr_storage peer_addr;
     socklen_t peer_addrlen;
+    ssize_t nread;
 
-    while (!__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED) &&
-           !__atomic_load_n(&conn->destroyed, __ATOMIC_RELAXED)) {
-        /* Calculate timeout */
-        int timeout_ms = 50;  /* Default poll interval */
-
-        enif_mutex_lock(conn->mutex);
-        if (conn->next_timeout_us > 0) {
-            uint64_t now = get_time_us();
-            if (conn->next_timeout_us > now) {
-                uint64_t delta = conn->next_timeout_us - now;
-                timeout_ms = (int)(delta / 1000);
-                if (timeout_ms > 1000) timeout_ms = 1000;
-                if (timeout_ms < 1) timeout_ms = 1;
-            } else {
-                timeout_ms = 0;
-            }
-        }
-        enif_mutex_unlock(conn->mutex);
-
-        /* Wait for socket to be readable */
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(conn->sockfd, &rfds);
-
-        struct timeval tv;
-        tv.tv_sec = timeout_ms / 1000;
-        tv.tv_usec = (timeout_ms % 1000) * 1000;
-
-        int ret = select(conn->sockfd + 1, &rfds, NULL, NULL, &tv);
-
-        if (__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED) ||
-            __atomic_load_n(&conn->destroyed, __ATOMIC_RELAXED)) break;
-
-        enif_mutex_lock(conn->mutex);
-
-        /* Verify engine is still valid before processing */
-        if (!conn->engine) {
-            enif_mutex_unlock(conn->mutex);
-            break;
-        }
-
-        if (ret > 0 && FD_ISSET(conn->sockfd, &rfds)) {
-            /* Receive packet */
-            peer_addrlen = sizeof(peer_addr);
-            ssize_t nread = recvfrom(conn->sockfd, buf, sizeof(buf), 0,
-                                     (struct sockaddr *)&peer_addr, &peer_addrlen);
-
-            if (nread > 0) {
-                /* Feed to lsquic */
-                lsquic_engine_packet_in(conn->engine, buf, nread,
-                    (struct sockaddr *)&conn->local_addr,
-                    (struct sockaddr *)&peer_addr,
-                    conn, 0);
-            }
-        }
-
-        /* Process connections (handles timeouts too) */
-        lsquic_engine_process_conns(conn->engine);
-
-
-        /* Update next timeout */
-        int diff = lsquic_engine_earliest_adv_tick(conn->engine, &ret);
-        if (ret) {
-            conn->next_timeout_us = get_time_us() + (uint64_t)diff;
-        } else {
-            conn->next_timeout_us = 0;
-        }
-
-        /* Send any pending packets */
-        if (lsquic_engine_has_unsent_packets(conn->engine)) {
-            lsquic_engine_send_unsent_packets(conn->engine);
-        }
-
-        enif_mutex_unlock(conn->mutex);
+    while ((nread = recvfrom(conn->sockfd, buf, sizeof(buf), MSG_DONTWAIT,
+                             (struct sockaddr *)&peer_addr, &peer_addrlen)) > 0) {
+        peer_addrlen = sizeof(peer_addr);  /* Reset for next iteration */
+        lsquic_engine_packet_in(conn->engine, buf, nread,
+                                (struct sockaddr *)&conn->local_addr,
+                                (struct sockaddr *)&peer_addr,
+                                conn, 0);
     }
 
-    return NULL;
+    /* Process connections - triggers callbacks */
+    lsquic_engine_process_conns(conn->engine);
+
+    /* Get next timeout */
+    int diff = 0;
+    int has_tick = lsquic_engine_earliest_adv_tick(conn->engine, &diff);
+    if (has_tick) {
+        conn->next_timeout_us = get_time_us() + (uint64_t)diff;
+    } else {
+        conn->next_timeout_us = 0;
+    }
+
+    /* Send any pending packets */
+    if (lsquic_engine_has_unsent_packets(conn->engine)) {
+        lsquic_engine_send_unsent_packets(conn->engine);
+    }
+
+    enif_mutex_unlock(conn->mutex);
+
+    /* Return timeout in ms, or -1 for infinity */
+    return has_tick ? (diff / 1000) : -1;
 }
 
 /*===========================================================================
@@ -889,19 +858,8 @@ int quic_conn_connect(QuicConn *conn, const char *hostname, uint16_t port,
     /* Process to send initial packets */
     lsquic_engine_process_conns(conn->engine);
 
-    /* Start I/O thread */
-    __atomic_store_n(&conn->should_stop, 0, __ATOMIC_RELAXED);
-    if (enif_thread_create("quic_io", &conn->io_thread, io_thread_func, conn, NULL) != 0) {
-        lsquic_engine_destroy(conn->engine);
-        conn->engine = NULL;
-        SSL_CTX_free(conn->ssl_ctx);
-        conn->ssl_ctx = NULL;
-        close(conn->sockfd);
-        conn->sockfd = -1;
-        conn->state = QUIC_CONN_IDLE;
-        return -1;
-    }
-    conn->io_thread_running = true;
+    /* Connection is ready - caller will use enif_select() for I/O notifications */
+    /* and call quic_conn_process() from a dirty scheduler */
 
     return 0;
 }
@@ -951,11 +909,11 @@ void quic_conn_destroy(QuicConn *conn) {
         return;
     }
 
-    /* Stop I/O thread */
-    if (conn->io_thread_running) {
-        __atomic_store_n(&conn->should_stop, 1, __ATOMIC_RELAXED);
-        enif_thread_join(conn->io_thread, NULL);
-        conn->io_thread_running = false;
+    /* Stop select notifications if armed */
+    if (conn->select_armed && conn->sockfd >= 0) {
+        /* Note: enif_select with STOP flag cancels notifications */
+        /* This is called from destructor, so env may not be valid */
+        conn->select_armed = false;
     }
 
     /* Close lsquic connection */

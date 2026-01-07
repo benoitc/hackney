@@ -24,6 +24,67 @@ cleanup(_) ->
     ok.
 
 %%====================================================================
+%% Helper Functions
+%%====================================================================
+
+%% Helper to drive the QUIC event loop until a condition is met or timeout
+%% Condition is a fun that receives {quic, ConnRef, Event} and returns:
+%%   {done, Result} - Stop and return Result
+%%   continue - Keep waiting
+quic_loop(ConnRef, Condition, Timeout) ->
+    quic_loop(ConnRef, Condition, Timeout, undefined, erlang:monotonic_time(millisecond)).
+
+quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime) ->
+    %% Cancel old timer
+    case TimerRef of
+        undefined -> ok;
+        _ -> erlang:cancel_timer(TimerRef)
+    end,
+
+    %% Calculate remaining timeout
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
+
+    receive
+        %% Socket ready - process and continue
+        {select, _Resource, _Ref, ready_input} ->
+            NextTimeout = hackney_quic:process(ConnRef),
+            NewTimer = schedule_timer(ConnRef, NextTimeout),
+            quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
+
+        %% Timer fired - process timeouts
+        {quic_timer, ConnRef} ->
+            NextTimeout = hackney_quic:process(ConnRef),
+            NewTimer = schedule_timer(ConnRef, NextTimeout),
+            quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
+
+        %% QUIC events - check condition
+        {quic, ConnRef, Event} ->
+            case Condition(Event) of
+                {done, Result} -> Result;
+                continue -> quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime)
+            end
+    after Remaining ->
+        {error, timeout}
+    end.
+
+schedule_timer(_ConnRef, infinity) ->
+    undefined;
+schedule_timer(ConnRef, TimeoutMs) when is_integer(TimeoutMs), TimeoutMs >= 0 ->
+    erlang:send_after(TimeoutMs, self(), {quic_timer, ConnRef});
+schedule_timer(_ConnRef, _) ->
+    undefined.
+
+%% Wait for connection to be established
+wait_connected(ConnRef) ->
+    Result = quic_loop(ConnRef, fun
+        ({connected, Info}) -> {done, {ok, Info}};
+        ({closed, Reason}) -> {done, {error, Reason}};
+        (_) -> continue
+    end, 15000),
+    Result.
+
+%%====================================================================
 %% NIF Availability Tests
 %%====================================================================
 
@@ -59,16 +120,16 @@ test_cloudflare_connect() ->
             Result = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
             ?assertMatch({ok, _}, Result),
             {ok, ConnRef} = Result,
-            receive
-                {quic, ConnRef, {connected, Info}} ->
+
+            ConnResult = wait_connected(ConnRef),
+            hackney_quic:close(ConnRef, normal),
+
+            case ConnResult of
+                {ok, Info} ->
                     ?assertMatch(#{resumed := _}, Info);
-                {quic, ConnRef, {closed, Reason}} ->
+                {error, Reason} ->
                     ?assertEqual(unexpected_close, Reason)
-            after 15000 ->
-                hackney_quic:close(ConnRef, normal),
-                ?assert(false, "Timeout waiting for connection")
-            end,
-            hackney_quic:close(ConnRef, normal)
+            end
     end.
 
 test_addresses() ->
@@ -77,8 +138,9 @@ test_addresses() ->
             {skip, "QUIC NIF not available"};
         true ->
             {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-            receive
-                {quic, ConnRef, {connected, _}} ->
+
+            case wait_connected(ConnRef) of
+                {ok, _} ->
                     %% Test peername
                     {ok, {PeerIP, PeerPort}} = hackney_quic:peername(ConnRef),
                     ?assert(is_tuple(PeerIP)),
@@ -86,12 +148,12 @@ test_addresses() ->
                     %% Test sockname
                     {ok, {LocalIP, LocalPort}} = hackney_quic:sockname(ConnRef),
                     ?assert(is_tuple(LocalIP)),
-                    ?assert(is_integer(LocalPort))
-            after 15000 ->
-                hackney_quic:close(ConnRef, normal),
-                ?assert(false, "Timeout waiting for connection")
-            end,
-            hackney_quic:close(ConnRef, normal)
+                    ?assert(is_integer(LocalPort)),
+                    hackney_quic:close(ConnRef, normal);
+                {error, timeout} ->
+                    hackney_quic:close(ConnRef, normal),
+                    ?assert(false, "Timeout waiting for connection")
+            end
     end.
 
 test_open_stream() ->
@@ -100,18 +162,17 @@ test_open_stream() ->
             {skip, "QUIC NIF not available"};
         true ->
             {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-            receive
-                {quic, ConnRef, {connected, _}} ->
+
+            case wait_connected(ConnRef) of
+                {ok, _} ->
                     %% Test opening a stream
                     Result = hackney_quic:open_stream(ConnRef),
-                    ?assertMatch({ok, _}, Result);
-                {quic, ConnRef, {closed, _}} ->
+                    ?assertMatch({ok, _}, Result),
+                    hackney_quic:close(ConnRef, normal);
+                {error, _} ->
+                    hackney_quic:close(ConnRef, normal),
                     ?assert(false, "Connection closed unexpectedly")
-            after 15000 ->
-                hackney_quic:close(ConnRef, normal),
-                ?assert(false, "Timeout waiting for connection")
-            end,
-            hackney_quic:close(ConnRef, normal)
+            end
     end.
 
 %%====================================================================
@@ -144,8 +205,9 @@ test_send_request() ->
             {skip, "QUIC NIF not available"};
         true ->
             {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-            receive
-                {quic, ConnRef, {connected, _}} ->
+
+            case wait_connected(ConnRef) of
+                {ok, _} ->
                     %% Open a stream
                     {ok, StreamId} = hackney_quic:open_stream(ConnRef),
 
@@ -158,14 +220,12 @@ test_send_request() ->
                         {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
                     ],
                     Result = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
-                    ?assertMatch(ok, Result);
-                {quic, ConnRef, {closed, _}} ->
+                    ?assertMatch(ok, Result),
+                    hackney_quic:close(ConnRef, normal);
+                {error, _} ->
+                    hackney_quic:close(ConnRef, normal),
                     ?assert(false, "Connection closed unexpectedly")
-            after 15000 ->
-                hackney_quic:close(ConnRef, normal),
-                ?assert(false, "Timeout waiting for connection")
-            end,
-            hackney_quic:close(ConnRef, normal)
+            end
     end.
 
 http3_request_test_() ->
@@ -188,19 +248,21 @@ test_full_request_response() ->
             {skip, "QUIC NIF not available"};
         true ->
             {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-            receive
-                {quic, ConnRef, {connected, _}} ->
-                    %% Wait for H3 control streams to be established
+
+            case wait_connected(ConnRef) of
+                {ok, _} ->
+                    %% Process a bit to let H3 control streams be established
+                    _ = hackney_quic:process(ConnRef),
                     timer:sleep(100),
 
                     %% Open a stream
                     {ok, StreamId} = hackney_quic:open_stream(ConnRef),
 
-                    %% Wait for stream_opened notification
-                    receive
-                        {quic, ConnRef, {stream_opened, StreamId}} -> ok
-                    after 1000 -> ok
-                    end,
+                    %% Wait for stream_opened notification (optional)
+                    quic_loop(ConnRef, fun
+                        ({stream_opened, _SId}) -> {done, ok};
+                        (_) -> continue
+                    end, 1000),
 
                     %% Send HTTP/3 request headers
                     Headers = [
@@ -213,29 +275,36 @@ test_full_request_response() ->
                     ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
 
                     %% Wait for response headers
-                    receive
-                        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
-                            %% Check we got a valid status
-                            ?assert(lists:keymember(<<":status">>, 1, RespHeaders))
-                    after 10000 ->
-                        hackney_quic:close(ConnRef, normal),
-                        ?assert(false, "Timeout waiting for response headers")
+                    HeaderResult = quic_loop(ConnRef, fun
+                        ({stream_headers, _SId, RespHeaders, _Fin}) ->
+                            {done, {ok, RespHeaders}};
+                        ({closed, Reason}) ->
+                            {done, {error, Reason}};
+                        (_) -> continue
+                    end, 10000),
+
+                    case HeaderResult of
+                        {ok, RespHeaders} ->
+                            ?assert(lists:keymember(<<":status">>, 1, RespHeaders));
+                        {error, timeout} ->
+                            hackney_quic:close(ConnRef, normal),
+                            ?assert(false, "Timeout waiting for response headers")
                     end,
 
-                    %% Wait for response body
-                    receive
-                        {quic, ConnRef, {stream_data, StreamId, Body, _BodyFin}} ->
-                            ?assert(byte_size(Body) > 0)
-                    after 10000 ->
-                        ok  %% Body might be empty for redirects
-                    end;
-                {quic, ConnRef, {closed, _}} ->
+                    %% Wait for response body (optional - might be empty for redirects)
+                    _ = quic_loop(ConnRef, fun
+                        ({stream_data, _SId, Body, _BodyFin}) when byte_size(Body) > 0 ->
+                            {done, {ok, Body}};
+                        ({closed, _}) ->
+                            {done, ok};
+                        (_) -> continue
+                    end, 10000),
+
+                    hackney_quic:close(ConnRef, normal);
+                {error, _} ->
+                    hackney_quic:close(ConnRef, normal),
                     ?assert(false, "Connection closed unexpectedly")
-            after 15000 ->
-                hackney_quic:close(ConnRef, normal),
-                ?assert(false, "Timeout waiting for connection")
-            end,
-            hackney_quic:close(ConnRef, normal)
+            end
     end.
 
 %%====================================================================

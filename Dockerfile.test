@@ -4,7 +4,7 @@
 #   docker run --rm -it hackney-test
 #   docker run --rm -it hackney-test bash  # for interactive debugging
 
-FROM erlang:28
+FROM erlang:27
 
 ENV DEBIAN_FRONTEND=noninteractive
 

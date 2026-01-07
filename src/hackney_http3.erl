@@ -112,19 +112,29 @@ connect(Host, Port, Opts) when is_binary(Host) ->
     %% Let lsquic create its own UDP socket
     case hackney_quic:connect(Host, Port, Opts, self()) of
         {ok, ConnRef} ->
-            receive
-                {quic, ConnRef, {connected, _Info}} ->
-                    {ok, ConnRef};
-                {quic, ConnRef, {closed, Reason}} ->
-                    {error, {connection_closed, Reason}};
-                {quic, ConnRef, {transport_error, Code, Msg}} ->
-                    {error, {transport_error, Code, Msg}}
-            after Timeout ->
-                hackney_quic:close(ConnRef, timeout),
-                {error, timeout}
-            end;
+            %% Drive event loop until connected or error
+            wait_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
         {error, _} = Error ->
             Error
+    end.
+
+%% Drive QUIC event loop until connected
+wait_connected(ConnRef, Timeout, StartTime) ->
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
+    receive
+        {select, _Resource, _Ref, ready_input} ->
+            _ = hackney_quic:process(ConnRef),
+            wait_connected(ConnRef, Timeout, StartTime);
+        {quic, ConnRef, {connected, _Info}} ->
+            {ok, ConnRef};
+        {quic, ConnRef, {closed, Reason}} ->
+            {error, {connection_closed, Reason}};
+        {quic, ConnRef, {transport_error, Code, Msg}} ->
+            {error, {transport_error, Code, Msg}}
+    after Remaining ->
+        hackney_quic:close(ConnRef, timeout),
+        {error, timeout}
     end.
 
 %% @doc Close an HTTP/3 connection.
@@ -206,12 +216,21 @@ await_response(ConnRef, StreamId, Timeout, Status, AccBody) ->
     await_response(ConnRef, StreamId, Timeout, Status, [], AccBody).
 
 await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
+    await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody, erlang:monotonic_time(millisecond)).
+
+await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody, StartTime) ->
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
     receive
+        {select, _Resource, _Ref, ready_input} ->
+            %% Drive the event loop
+            _ = hackney_quic:process(ConnRef),
+            await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody, StartTime);
         {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
             %% Got response headers
             NewStatus = get_status(RespHeaders),
             FilteredHeaders = filter_pseudo_headers(RespHeaders),
-            await_response(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody);
+            await_response(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody, StartTime);
         {quic, ConnRef, {stream_data, StreamId, Data, Fin}} ->
             %% Got response data
             NewBody = <<AccBody/binary, Data/binary>>,
@@ -219,13 +238,13 @@ await_response(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
                 true ->
                     {ok, Status, Headers, NewBody};
                 false ->
-                    await_response(ConnRef, StreamId, Timeout, Status, Headers, NewBody)
+                    await_response(ConnRef, StreamId, Timeout, Status, Headers, NewBody, StartTime)
             end;
         {quic, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
             {error, stream_reset};
         {quic, ConnRef, {closed, Reason}} ->
             {error, {connection_closed, Reason}}
-    after Timeout ->
+    after Remaining ->
         {error, timeout}
     end.
 

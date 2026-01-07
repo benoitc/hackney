@@ -113,20 +113,19 @@ mod_metrics() ->
 
 %% @doc Get the default protocols for HTTP connections.
 %% Returns the value of the `default_protocols` application env,
-%% or `[http3, http2, http1]' if not set.
+%% or `[http2, http1]' if not set.
 %%
-%% The order determines preference: HTTP/3 is tried first if available,
-%% then HTTP/2, then HTTP/1.1.
+%% The order determines preference: HTTP/2 is preferred, then HTTP/1.1.
 %%
-%% To disable HTTP/3 by default:
+%% To enable HTTP/3 (experimental):
 %% ```
-%% application:set_env(hackney, default_protocols, [http2, http1]).
+%% application:set_env(hackney, default_protocols, [http3, http2, http1]).
 %% '''
 -spec default_protocols() -> [http3 | http2 | http1].
 default_protocols() ->
   case application:get_env(hackney, default_protocols) of
     {ok, Protocols} when is_list(Protocols) -> Protocols;
-    _ -> [http3, http2, http1]
+    _ -> [http2, http1]
   end.
 
 to_atom(V) when is_list(V) ->

@@ -51,6 +51,7 @@
     send_data/4,
     reset_stream/3,
     handle_timeout/2,
+    process/1,
     peername/1,
     sockname/1,
     setopts/2
@@ -237,6 +238,31 @@ handle_timeout(_ConnRef, _NowMs) ->
     infinity.
 
 handle_timeout_nif(_ConnRef, _NowMs) ->
+    ?NIF_NOT_LOADED.
+
+%% @doc Process pending QUIC events.
+%% This should be called when:
+%% <ul>
+%%   <li>The socket has data ready (after receiving `{select, _, _, ready_input}')</li>
+%%   <li>A timer has expired</li>
+%% </ul>
+%% Returns the next timeout in milliseconds, or 'infinity' if no timeout needed.
+%% The caller should use `erlang:send_after/3' to schedule the next call.
+%%
+%% Example usage:
+%% ```
+%% receive
+%%     {select, _Resource, _Ref, ready_input} ->
+%%         NextTimeout = hackney_quic:process(ConnRef),
+%%         schedule_timer(NextTimeout)
+%% end
+%% '''
+-spec process(ConnRef) -> non_neg_integer() | infinity
+    when ConnRef :: reference().
+process(ConnRef) ->
+    process_nif(ConnRef).
+
+process_nif(_ConnRef) ->
     ?NIF_NOT_LOADED.
 
 %% @doc Get the remote address of the connection.
