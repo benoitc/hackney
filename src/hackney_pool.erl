@@ -25,6 +25,11 @@
          register_h2/5,
          unregister_h2/2]).
 
+%% HTTP/3 connection pooling
+-export([checkout_h3/4,
+         register_h3/5,
+         unregister_h3/2]).
+
 -export([
          get_stats/1,
          start_pool/2,
@@ -71,7 +76,10 @@
     activated_hosts = sets:new(),
     %% HTTP/2 connections: #{Key => Pid} - one multiplexed connection per host
     %% These connections are shared across callers (not checked out exclusively)
-    h2_connections = #{}
+    h2_connections = #{},
+    %% HTTP/3 connections: #{Key => Pid} - one multiplexed QUIC connection per host
+    %% These connections are shared across callers (not checked out exclusively)
+    h3_connections = #{}
 }).
 
 -define(DEFAULT_MAX_CONNECTIONS, 50).
@@ -163,6 +171,46 @@ unregister_h2(Pid, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
     gen_server:cast(Pool, {unregister_h2, Pid}),
+    ok.
+
+%%====================================================================
+%% HTTP/3 Connection Pooling
+%%====================================================================
+
+%% @doc Get an existing HTTP/3 connection for a host/port, or 'none' if not available.
+%% HTTP/3 connections are shared (multiplexed) across callers via QUIC streams.
+-spec checkout_h3(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Options :: list()) ->
+    {ok, pid()} | none.
+checkout_h3(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    try
+        gen_server:call(Pool, {checkout_h3, Key}, ConnectTimeout)
+    catch
+        exit:{timeout, _} -> none;
+        _:_ -> none
+    end.
+
+%% @doc Register an HTTP/3 connection in the pool for sharing.
+%% Called after QUIC connection is established with HTTP/3.
+-spec register_h3(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Pid :: pid(), Options :: list()) -> ok.
+register_h3(Host, Port, Transport, Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {register_h3, Key, Pid}),
+    ok.
+
+%% @doc Remove an HTTP/3 connection from the pool (e.g., on connection close).
+-spec unregister_h3(Pid :: pid(), Options :: list()) -> ok.
+unregister_h3(Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    gen_server:cast(Pool, {unregister_h3, Pid}),
     ok.
 
 get_stats(Pool) ->
@@ -442,6 +490,23 @@ handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State)
                     H2Conns2 = maps:remove(Key, H2Conns),
                     {reply, none, State#state{h2_connections = H2Conns2}}
             end
+    end;
+
+handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State) ->
+    %% HTTP/3 checkout - return existing connection if available
+    case maps:get(Key, H3Conns, undefined) of
+        undefined ->
+            {reply, none, State};
+        Pid ->
+            %% Verify connection is still alive
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    {reply, {ok, Pid}, State};
+                false ->
+                    %% Connection died, remove from pool
+                    H3Conns2 = maps:remove(Key, H3Conns),
+                    {reply, none, State#state{h3_connections = H3Conns2}}
+            end
     end.
 
 handle_cast({checkin, _PoolInfo, Pid}, State) ->
@@ -495,13 +560,32 @@ handle_cast({unregister_h2, Pid}, State) ->
     State2 = do_unregister_h2(Pid, State),
     {noreply, State2};
 
+handle_cast({register_h3, Key, Pid}, State) ->
+    %% Register an HTTP/3 connection for sharing
+    #state{h3_connections = H3Conns, pid_monitors = PidMonitors} = State,
+    %% Monitor the connection if not already monitored
+    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+        true -> PidMonitors;
+        false ->
+            MonRef = erlang:monitor(process, Pid),
+            maps:put(Pid, MonRef, PidMonitors)
+    end,
+    %% Store HTTP/3 connection
+    H3Conns2 = maps:put(Key, Pid, H3Conns),
+    {noreply, State#state{h3_connections = H3Conns2, pid_monitors = PidMonitors2}};
+
+handle_cast({unregister_h3, Pid}, State) ->
+    %% Remove an HTTP/3 connection from the pool
+    State2 = do_unregister_h3(Pid, State),
+    {noreply, State2};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
-    %% Connection process died, remove from available, in_use, and h2_connections
+    %% Connection process died, remove from available, in_use, h2_connections, and h3_connections
     #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
-           h2_connections=H2Conns} = State,
+           h2_connections=H2Conns, h3_connections=H3Conns} = State,
     ?report_trace("pool: connection DOWN", [{pool, PoolName}, {pid, Pid}, {reason, Reason},
         {was_in_use, maps:is_key(Pid, InUse)}]),
 
@@ -540,9 +624,22 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
         H2Conns
     ),
 
+    %% Remove from HTTP/3 connections if present
+    H3Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) when is_pid(ConnPid) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end;
+           (_Key, _Val, Acc) -> Acc
+        end,
+        H3Conns,
+        H3Conns
+    ),
+
     PidMonitors2 = maps:remove(Pid, PidMonitors),
     {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2,
-                          h2_connections=H2Conns2}};
+                          h2_connections=H2Conns2, h3_connections=H3Conns2}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -551,7 +648,8 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
-                         h2_connections=H2Conns, pid_monitors=PidMonitors}) ->
+                         h2_connections=H2Conns, h3_connections=H3Conns,
+                         pid_monitors=PidMonitors}) ->
     %% Stop all available connections
     maps:foreach(
         fun(_Key, Pids) ->
@@ -568,6 +666,14 @@ terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
             catch hackney_conn:stop(Pid)
         end,
         H2Conns
+    ),
+
+    %% Stop all HTTP/3 connections
+    maps:foreach(
+        fun(_Key, Pid) ->
+            catch hackney_conn:stop(Pid)
+        end,
+        H3Conns
     ),
 
     %% Demonitor all
@@ -791,6 +897,30 @@ do_unregister_h2(Pid, State) ->
         error -> PidMonitors
     end,
     State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}.
+
+%% @private Remove an HTTP/3 connection from the pool
+do_unregister_h3(Pid, State) ->
+    #state{h3_connections = H3Conns, pid_monitors = PidMonitors} = State,
+    %% Find and remove the connection
+    H3Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) when is_pid(ConnPid) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end;
+           (_Key, _Val, Acc) -> Acc
+        end,
+        H3Conns,
+        H3Conns
+    ),
+    %% Demonitor if no longer tracked
+    PidMonitors2 = case maps:take(Pid, PidMonitors) of
+        {MonRef, PM} ->
+            erlang:demonitor(MonRef, [flush]),
+            PM;
+        error -> PidMonitors
+    end,
+    State#state{h3_connections = H3Conns2, pid_monitors = PidMonitors2}.
 
 %% @private Prewarm connections to a host
 %% Creates connections up to Count if there are fewer available.
