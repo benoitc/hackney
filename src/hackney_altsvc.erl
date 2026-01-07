@@ -69,8 +69,9 @@ init() ->
 
 %% @doc Parse an Alt-Svc header value.
 %% Returns list of {Protocol, Host, Port, MaxAge} tuples.
+%% Protocol is h3 atom for HTTP/3 variants, or binary for other protocols.
 %% Host is 'same' if not specified (use origin host).
--spec parse(binary() | string()) -> [{atom(), same | binary(), inet:port_number(), non_neg_integer()}].
+-spec parse(binary() | string()) -> [{h3 | binary(), same | binary(), inet:port_number(), non_neg_integer()}].
 parse(<<"clear">>) -> [];
 parse("clear") -> [];
 parse(Header) when is_list(Header) ->
@@ -189,8 +190,8 @@ find_h3_entry([{Protocol, _Host, Port, MaxAge} | Rest]) ->
         false -> find_h3_entry(Rest)
     end.
 
+%% Protocol is already normalized to h3 atom by normalize_protocol/1
 is_h3_protocol(h3) -> true;
-is_h3_protocol(<<"h3">>) -> true;
 is_h3_protocol(_) -> false.
 
 %% Parse comma-separated Alt-Svc entries
@@ -284,7 +285,7 @@ parse_params(<<$;, Rest/binary>>, MaxAge) ->
             case Key of
                 <<"ma">> ->
                     NewMaxAge = try binary_to_integer(Value)
-                                catch _:_ -> MaxAge end,
+                                catch error:badarg -> MaxAge end,
                     parse_params(Rest4, NewMaxAge);
                 _ ->
                     parse_params(Rest4, MaxAge)

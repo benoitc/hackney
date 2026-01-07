@@ -428,9 +428,9 @@ is_upgraded_ssl(Pid) ->
     gen_statem:call(Pid, is_upgraded_ssl).
 
 %% @doc Get the negotiated protocol for this connection.
-%% Returns http1 or http2 based on ALPN negotiation (SSL connections)
-%% or http1 for plain TCP connections.
--spec get_protocol(pid()) -> http1 | http2.
+%% Returns http1, http2, or http3 based on ALPN negotiation (SSL connections),
+%% QUIC (HTTP/3), or http1 for plain TCP connections.
+-spec get_protocol(pid()) -> http1 | http2 | http3.
 get_protocol(Pid) ->
     gen_statem:call(Pid, get_protocol).
 
@@ -2631,7 +2631,7 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
             end;
         {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, Status, Headers}} ->
             %% Async mode - send chunk to StreamTo
-            case byte_size(RecvData) > 0 of
+            _ = case byte_size(RecvData) > 0 of
                 true -> StreamTo ! {hackney_response, Ref, RecvData};
                 false -> ok
             end,
@@ -2742,20 +2742,29 @@ handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
 
 %% @private Handle HTTP/3 connection closed
 handle_h3_conn_closed(Reason, Data) ->
+    handle_h3_termination({connection_closed, Reason}, Data).
+
+%% @private Handle HTTP/3 transport error
+handle_h3_error(Error, Data) ->
+    handle_h3_termination(Error, Data).
+
+%% @private Shared helper for HTTP/3 connection termination.
+%% Notifies all pending streams and transitions to closed state.
+handle_h3_termination(Error, Data) ->
     #conn_data{h3_streams = Streams, request_from = From} = Data,
     %% Notify all pending streams (sync and async)
     Actions = maps:fold(fun(_StreamId, StreamState, Acc) ->
         case StreamState of
             {StreamFrom, _State} when is_pid(StreamFrom) ->
                 %% Sync stream
-                [{reply, StreamFrom, {error, {connection_closed, Reason}}} | Acc];
+                [{reply, StreamFrom, {error, Error}} | Acc];
             {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
                 %% Async stream - send error to StreamTo (not gen_statem action)
-                StreamTo ! {hackney_response, Ref, {error, {connection_closed, Reason}}},
+                StreamTo ! {hackney_response, Ref, {error, Error}},
                 Acc;
             {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
                 %% Async stream waiting for headers
-                StreamTo ! {hackney_response, Ref, {error, {connection_closed, Reason}}},
+                StreamTo ! {hackney_response, Ref, {error, Error}},
                 Acc;
             _ ->
                 Acc
@@ -2775,47 +2784,6 @@ handle_h3_conn_closed(Reason, Data) ->
             {next_state, closed, NewData, Actions};
         _ ->
             %% Don't duplicate reply if From is already in Actions
-            case lists:any(fun({reply, F, _}) -> F =:= From end, Actions) of
-                true -> {next_state, closed, NewData, Actions};
-                false ->
-                    {next_state, closed, NewData, [{reply, From, {error, {connection_closed, Reason}}} | Actions]}
-            end
-    end.
-
-%% @private Handle HTTP/3 transport error
-handle_h3_error(Error, Data) ->
-    #conn_data{h3_streams = Streams, request_from = From} = Data,
-    %% Notify all pending streams (sync and async)
-    Actions = maps:fold(fun(_StreamId, StreamState, Acc) ->
-        case StreamState of
-            {StreamFrom, _State} when is_pid(StreamFrom) ->
-                %% Sync stream
-                [{reply, StreamFrom, {error, Error}} | Acc];
-            {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
-                %% Async stream - send error to StreamTo
-                StreamTo ! {hackney_response, Ref, {error, Error}},
-                Acc;
-            {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
-                %% Async stream waiting for headers
-                StreamTo ! {hackney_response, Ref, {error, Error}},
-                Acc;
-            _ ->
-                Acc
-        end
-    end, [], Streams),
-    %% Clear connection state
-    NewData = Data#conn_data{
-        h3_conn = undefined,
-        h3_streams = #{},
-        request_from = undefined,
-        async = false,
-        async_ref = undefined,
-        stream_to = undefined
-    },
-    case From of
-        undefined ->
-            {next_state, closed, NewData, Actions};
-        _ ->
             case lists:any(fun({reply, F, _}) -> F =:= From end, Actions) of
                 true -> {next_state, closed, NewData, Actions};
                 false ->

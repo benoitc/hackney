@@ -198,11 +198,15 @@ ensure_binary(L) when is_list(L) -> list_to_binary(L);
 ensure_binary(A) when is_atom(A) -> atom_to_binary(A).
 
 %% @private Extract status from HTTP/3 response headers.
--spec get_status_from_headers(headers()) -> {ok, integer()} | {error, no_status}.
+-spec get_status_from_headers(headers()) -> {ok, integer()} | {error, no_status | {invalid_status, binary()}}.
 get_status_from_headers(Headers) ->
     case lists:keyfind(<<":status">>, 1, Headers) of
         {_, StatusBin} ->
-            {ok, binary_to_integer(StatusBin)};
+            try
+                {ok, binary_to_integer(StatusBin)}
+            catch
+                error:badarg -> {error, {invalid_status, StatusBin}}
+            end;
         false ->
             {error, no_status}
     end.
