@@ -12,6 +12,7 @@
 -export([is_ipv6/1]).
 -export([privdir/0]).
 -export([mod_metrics/0]).
+-export([default_protocols/0]).
 -export([to_atom/1]).
 
 -export([merge_opts/2]).
@@ -110,6 +111,23 @@ mod_metrics() ->
     _ -> metrics_dummy
   end.
 
+%% @doc Get the default protocols for HTTP connections.
+%% Returns the value of the `default_protocols` application env,
+%% or `[http3, http2, http1]' if not set.
+%%
+%% The order determines preference: HTTP/3 is tried first if available,
+%% then HTTP/2, then HTTP/1.1.
+%%
+%% To disable HTTP/3 by default:
+%% ```
+%% application:set_env(hackney, default_protocols, [http2, http1]).
+%% '''
+-spec default_protocols() -> [http3 | http2 | http1].
+default_protocols() ->
+  case application:get_env(hackney, default_protocols) of
+    {ok, Protocols} when is_list(Protocols) -> Protocols;
+    _ -> [http3, http2, http1]
+  end.
 
 to_atom(V) when is_list(V) ->
   try

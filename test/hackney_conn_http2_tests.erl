@@ -112,11 +112,13 @@ connect_http2_server() ->
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
             %% Network available, run the test
+            %% Explicitly request HTTP/2 (default now includes HTTP/3)
             {ok, Pid} = hackney_conn:start_link(#{
                 host => "nghttp2.org",
                 port => 443,
                 transport => hackney_ssl,
-                connect_timeout => 10000
+                connect_timeout => 10000,
+                connect_options => [{protocols, [http2, http1]}]
             }),
             case hackney_conn:connect(Pid, 10000) of
                 ok ->
@@ -140,12 +142,14 @@ h2_get_request() ->
     case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
+            %% Explicitly request HTTP/2 (default now includes HTTP/3)
             {ok, Pid} = hackney_conn:start_link(#{
                 host => "nghttp2.org",
                 port => 443,
                 transport => hackney_ssl,
                 connect_timeout => 10000,
-                recv_timeout => 10000
+                recv_timeout => 10000,
+                connect_options => [{protocols, [http2, http1]}]
             }),
             case hackney_conn:connect(Pid, 10000) of
                 ok ->
@@ -177,12 +181,14 @@ h2_post_request() ->
     case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
+            %% Explicitly request HTTP/2 (default now includes HTTP/3)
             {ok, Pid} = hackney_conn:start_link(#{
                 host => "nghttp2.org",
                 port => 443,
                 transport => hackney_ssl,
                 connect_timeout => 10000,
-                recv_timeout => 10000
+                recv_timeout => 10000,
+                connect_options => [{protocols, [http2, http1]}]
             }),
             case hackney_conn:connect(Pid, 10000) of
                 ok ->
@@ -221,11 +227,13 @@ h2_sequential_requests_test() ->
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
             %% Create a fresh connection (not from pool) for this test
+            %% Explicitly request HTTP/2 (default now includes HTTP/3)
             {ok, Conn} = hackney_conn:start_link(#{
                 host => "nghttp2.org",
                 port => 443,
                 transport => hackney_ssl,
-                connect_timeout => 10000
+                connect_timeout => 10000,
+                connect_options => [{protocols, [http2, http1]}]
             }),
             ok = hackney_conn:connect(Conn, 10000),
             ?assertEqual(http2, hackney_conn:get_protocol(Conn)),
@@ -349,17 +357,19 @@ h1_forced_protocol_test() ->
             ?debugMsg("Skipping - network not available")
     end.
 
-%% Test that default ALPN prefers HTTP/2
+%% Test that explicit HTTP/2 protocol selection works via ALPN
 h2_default_alpn_test() ->
     case gen_tcp:connect("nghttp2.org", 443, [], 5000) of
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
-            %% Default: ALPN advertises [h2, http/1.1], server chooses h2
+            %% Explicitly request HTTP/2 - ALPN advertises [h2, http/1.1], server chooses h2
+            %% Note: Default now includes HTTP/3, so we explicitly request [http2, http1]
             {ok, Conn} = hackney_conn:start_link(#{
                 host => "nghttp2.org",
                 port => 443,
                 transport => hackney_ssl,
-                connect_timeout => 10000
+                connect_timeout => 10000,
+                connect_options => [{protocols, [http2, http1]}]
             }),
             ok = hackney_conn:connect(Conn, 10000),
             %% Should negotiate HTTP/2

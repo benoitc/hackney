@@ -277,7 +277,7 @@ sockname(Socket) ->
 %% '''
 -spec alpn_opts(list()) -> list().
 alpn_opts(Opts) ->
-  case proplists:get_value(protocols, Opts, [http2, http1]) of
+  case proplists:get_value(protocols, Opts, hackney_util:default_protocols()) of
     Protos when is_list(Protos), Protos =/= [] ->
       %% Filter out http3 - it doesn't use TLS ALPN
       TlsProtos = [P || P <- Protos, P =/= http3],

@@ -548,7 +548,7 @@ idle({call, From}, connect, Data) ->
     } = Data,
 
     %% Check if we should try HTTP/3 first (SSL transport + http3 in protocols)
-    Protocols = proplists:get_value(protocols, ConnectOpts, [http2, http1]),
+    Protocols = proplists:get_value(protocols, ConnectOpts, hackney_util:default_protocols()),
     ShouldTryHttp3 = TryHttp3 orelse (Transport =:= hackney_ssl andalso lists:member(http3, Protocols)),
 
     case ShouldTryHttp3 andalso hackney_quic:is_available() of
@@ -1784,14 +1784,16 @@ do_tcp_connect(From, Data) ->
         connect_options = ConnectOpts,
         ssl_options = SslOpts0
     } = Data,
+    %% Filter out hackney-specific options that are not valid for transport
+    TransportOpts = proplists:delete(protocols, ConnectOpts),
     Opts = case Transport of
         hackney_ssl ->
             DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
             MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
             AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
             FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
-            ConnectOpts ++ [{ssl_options, FinalSslOpts}];
-        _ -> ConnectOpts
+            TransportOpts ++ [{ssl_options, FinalSslOpts}];
+        _ -> TransportOpts
     end,
     case Transport:connect(Host, Port, Opts, Timeout) of
         {ok, Socket} ->

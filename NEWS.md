@@ -60,12 +60,17 @@ The connection pool has been completely redesigned:
 
 ### New Options
 
+- `default_protocols` - Default protocol preference order (default: `[http3, http2, http1]`). Set via application env to change globally:
+  ```erlang
+  application:set_env(hackney, default_protocols, [http2, http1]).
+  ```
 - `max_per_host` - Maximum concurrent connections per host (default 50)
 - `checkout_timeout` - Timeout to acquire connection slot (default 8000ms)
 - `prewarm_count` - Warm connections per host (default 4)
 
 ### New Functions
 
+- `hackney_util:default_protocols/0` - Get the default protocol preference list
 - `hackney:get_version/0` - Get hackney version
 - `hackney_pool:host_stats/3` - Get per-host connection stats
 - `hackney_pool:prewarm/3,4` - Explicitly prewarm connections to a host

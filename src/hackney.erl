@@ -144,8 +144,8 @@ connect_direct(Transport, Host, Port, Options) ->
 connect_pool(Transport, Host, Port, Options) ->
   PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
-  %% Check which protocols are allowed (default: http2 and http1)
-  Protocols = proplists:get_value(protocols, Options, [http2, http1]),
+  %% Check which protocols are allowed (default from application env)
+  Protocols = proplists:get_value(protocols, Options, hackney_util:default_protocols()),
   H3Allowed = lists:member(http3, Protocols),
   H2Allowed = lists:member(http2, Protocols),
 
