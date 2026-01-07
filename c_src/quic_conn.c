@@ -621,7 +621,7 @@ static void *io_thread_func(void *arg) {
     struct sockaddr_storage peer_addr;
     socklen_t peer_addrlen;
 
-    while (!conn->should_stop) {
+    while (!__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED)) {
         /* Calculate timeout */
         int timeout_ms = 50;  /* Default poll interval */
 
@@ -650,7 +650,7 @@ static void *io_thread_func(void *arg) {
 
         int ret = select(conn->sockfd + 1, &rfds, NULL, NULL, &tv);
 
-        if (conn->should_stop) break;
+        if (__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED)) break;
 
         enif_mutex_lock(conn->mutex);
 
@@ -732,15 +732,8 @@ QuicConn *quic_conn_create(ErlNifEnv *env, ErlNifPid owner_pid) {
     conn->state = QUIC_CONN_IDLE;
     conn->ref_count = 1;
 
-    conn->msg_env = enif_alloc_env();
-    if (!conn->msg_env) {
-        enif_release_resource(conn);
-        return NULL;
-    }
-
     conn->mutex = enif_mutex_create("quic_conn_mutex");
     if (!conn->mutex) {
-        enif_free_env(conn->msg_env);
         enif_release_resource(conn);
         return NULL;
     }
@@ -855,7 +848,7 @@ int quic_conn_connect(QuicConn *conn, const char *hostname, uint16_t port,
     lsquic_engine_process_conns(conn->engine);
 
     /* Start I/O thread */
-    conn->should_stop = false;
+    __atomic_store_n(&conn->should_stop, 0, __ATOMIC_RELAXED);
     if (enif_thread_create("quic_io", &conn->io_thread, io_thread_func, conn, NULL) != 0) {
         lsquic_engine_destroy(conn->engine);
         conn->engine = NULL;
@@ -895,7 +888,7 @@ void quic_conn_destroy(QuicConn *conn) {
 
     /* Stop I/O thread */
     if (conn->io_thread_running) {
-        conn->should_stop = true;
+        __atomic_store_n(&conn->should_stop, 1, __ATOMIC_RELAXED);
         enif_thread_join(conn->io_thread, NULL);
         conn->io_thread_running = false;
     }
@@ -945,12 +938,6 @@ void quic_conn_destroy(QuicConn *conn) {
         stream = next;
     }
     conn->streams = NULL;
-
-    /* Free message environment */
-    if (conn->msg_env) {
-        enif_free_env(conn->msg_env);
-        conn->msg_env = NULL;
-    }
 
     /* Free mutex */
     if (conn->mutex) {
@@ -1246,9 +1233,4 @@ int quic_conn_sockname(QuicConn *conn, struct sockaddr_storage *addr, socklen_t 
     enif_mutex_unlock(conn->mutex);
 
     return 0;
-}
-
-void quic_conn_send_to_owner(QuicConn *conn, ERL_NIF_TERM msg) {
-    if (!conn || !conn->msg_env) return;
-    enif_send(NULL, &conn->owner_pid, conn->msg_env, msg);
 }

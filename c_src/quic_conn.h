@@ -62,9 +62,6 @@ struct QuicConn {
     /* Owner Erlang process */
     ErlNifPid owner_pid;
 
-    /* Environment for sending messages to owner */
-    ErlNifEnv *msg_env;
-
     /* Mutex for thread safety */
     ErlNifMutex *mutex;
 
@@ -107,7 +104,7 @@ struct QuicConn {
     /* Thread for packet I/O */
     ErlNifTid io_thread;
     bool io_thread_running;
-    bool should_stop;
+    volatile int should_stop;  /* Atomic flag for thread termination */
 
 };
 
@@ -160,8 +157,5 @@ int64_t quic_conn_handle_timeout(QuicConn *conn);
 /* Get peer/local addresses */
 int quic_conn_peername(QuicConn *conn, struct sockaddr_storage *addr, socklen_t *addrlen);
 int quic_conn_sockname(QuicConn *conn, struct sockaddr_storage *addr, socklen_t *addrlen);
-
-/* Send message to owner process */
-void quic_conn_send_to_owner(QuicConn *conn, ERL_NIF_TERM msg);
 
 #endif /* QUIC_CONN_H */
