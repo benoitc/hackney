@@ -3,7 +3,7 @@
 %%% This file is part of hackney released under the Apache 2 license.
 %%% See the NOTICE for more information.
 %%%
-%%% Copyright (c) 2024-2025 Benoit Chesneau
+%%% Copyright (c) 2024-2026 Benoit Chesneau
 %%%
 %%% @doc Tests for HTTP/3 async streaming support.
 

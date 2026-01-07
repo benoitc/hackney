@@ -1,7 +1,7 @@
 # NEWS
 
-2.0.0 - UNRELEASED
-------------------
+2.0.0-beta.1 - 2026-01-07
+-------------------------
 
 Process-per-connection architecture. Each connection is a `gen_statem` process.
 
@@ -82,6 +82,10 @@ The connection pool has been completely redesigned:
 - `controlling_process/2` - not needed
 - `send_multipart_body/2` - use `send_body/2`
 - SOCKS5 and HTTP CONNECT proxy (planned 2.1.0)
+
+### Bug Fixes
+
+- fix: validate connection state on pool checkout for HTTP/2 and HTTP/3. On FreeBSD + OTP 28, pooled connections could be in `closed` state when checked out due to SSL timing differences, causing `{error, invalid_state}` errors. Now connections are verified to be in `connected` state after checkout.
 
 ### Requirements
 

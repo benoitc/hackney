@@ -265,8 +265,12 @@ Run tests:
 rebar3 eunit
 ```
 
+## Support
+
+Professional support is available via Enki Multimedia. Contact [sales@enki-multimedia.eu](mailto:sales@enki-multimedia.eu).
+
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE)
 
-Copyright (c) 2012-2025 Benoit Chesneau
+Copyright (c) 2012-2026 Benoit Chesneau
