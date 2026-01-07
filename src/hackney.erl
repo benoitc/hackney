@@ -134,34 +134,120 @@ connect_direct(Transport, Host, Port, Options) ->
 
 %% @private Pool connection with load regulation
 %% Flow:
-%% 1. For SSL: Check if existing HTTP/2 connection can be reused (multiplexing)
-%% 2. Acquire slot from load_regulation (blocks if at per-host limit)
-%% 3. Get TCP connection from pool (always TCP, pool doesn't store SSL)
-%% 4. Upgrade to SSL if needed (in-place upgrade)
-%% 5. If HTTP/2 negotiated, register for multiplexing
+%% 1. For SSL: Check if existing HTTP/3 or HTTP/2 connection can be reused (multiplexing)
+%% 2. If HTTP/3 allowed and available (via Alt-Svc), try HTTP/3 first
+%% 3. Acquire slot from load_regulation (blocks if at per-host limit)
+%% 4. Get TCP connection from pool (always TCP, pool doesn't store SSL)
+%% 5. Upgrade to SSL if needed (in-place upgrade)
+%% 6. If HTTP/2 negotiated, register for multiplexing
 %% Note: load_regulation slot is released when connection is checked in or dies
 connect_pool(Transport, Host, Port, Options) ->
   PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
 
-  %% Check if HTTP/2 is allowed (default: yes)
+  %% Check which protocols are allowed (default: http2 and http1)
   Protocols = proplists:get_value(protocols, Options, [http2, http1]),
+  H3Allowed = lists:member(http3, Protocols),
   H2Allowed = lists:member(http2, Protocols),
 
-  %% For SSL connections, check if we can reuse an HTTP/2 connection
+  %% For SSL connections, try multiplexed protocols (HTTP/3 first, then HTTP/2)
   case Transport of
-    hackney_ssl when H2Allowed ->
-      case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
-        {ok, H2Pid} ->
-          %% Reuse existing HTTP/2 connection (multiplexed)
+    hackney_ssl ->
+      %% Check HTTP/3 first if allowed
+      case H3Allowed andalso try_h3_connection(Host, Port, Transport, Options, PoolHandler) of
+        {ok, H3Pid} ->
           hackney_manager:start_request(Host),
-          {ok, H2Pid};
-        none ->
-          %% No HTTP/2 connection, proceed with normal pool checkout
+          {ok, H3Pid};
+        _ when H2Allowed ->
+          %% Try HTTP/2 multiplexing
+          case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
+            {ok, H2Pid} ->
+              hackney_manager:start_request(Host),
+              {ok, H2Pid};
+            none ->
+              connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+          end;
+        _ ->
+          %% No multiplexed protocols allowed or available
           connect_pool_new(Transport, Host, Port, Options, PoolHandler)
       end;
     _ ->
-      %% Non-SSL or HTTP/2 not allowed, use normal pool
+      %% Non-SSL, use normal pool
       connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+  end.
+
+%% @private Try to get or establish an HTTP/3 connection
+try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
+  %% Check if HTTP/3 is blocked for this host (negative cache)
+  case hackney_altsvc:is_h3_blocked(Host, Port) of
+    true ->
+      false;
+    false ->
+      %% Check if we have an existing HTTP/3 connection
+      case PoolHandler:checkout_h3(Host, Port, Transport, Options) of
+        {ok, H3Pid} ->
+          {ok, H3Pid};
+        none ->
+          %% Check Alt-Svc cache for known HTTP/3 endpoint
+          case hackney_altsvc:lookup(Host, Port) of
+            {ok, h3, H3Port} ->
+              %% Alt-Svc says HTTP/3 is available, try connecting
+              try_new_h3_connection(Host, H3Port, Transport, Options, PoolHandler);
+            none ->
+              %% No Alt-Svc cached, only try H3 if explicitly requested
+              case lists:member(http3, proplists:get_value(protocols, Options, [])) of
+                true ->
+                  %% User explicitly wants HTTP/3, try it
+                  try_new_h3_connection(Host, Port, Transport, Options, PoolHandler);
+                false ->
+                  false
+              end
+          end
+      end
+  end.
+
+%% @private Establish a new HTTP/3 connection
+try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
+  %% Check if QUIC is available
+  case hackney_quic:is_available() of
+    false ->
+      false;
+    true ->
+      %% Start HTTP/3 connection via hackney_conn
+      ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+      ConnOpts = #{
+        host => Host,
+        port => Port,
+        transport => Transport,
+        connect_timeout => ConnectTimeout,
+        recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+        connect_options => [{protocols, [http3]}],
+        ssl_options => proplists:get_value(ssl_options, Options, [])
+      },
+      case hackney_conn_sup:start_conn(ConnOpts) of
+        {ok, ConnPid} ->
+          case hackney_conn:connect(ConnPid, ConnectTimeout) of
+            ok ->
+              %% Verify it's HTTP/3
+              case hackney_conn:get_protocol(ConnPid) of
+                http3 ->
+                  %% Register for multiplexing
+                  PoolHandler:register_h3(Host, Port, Transport, ConnPid, Options),
+                  {ok, ConnPid};
+                _ ->
+                  %% Not HTTP/3, close and fail
+                  catch hackney_conn:stop(ConnPid),
+                  hackney_altsvc:mark_h3_blocked(Host, Port),
+                  false
+              end;
+            {error, _Reason} ->
+              catch hackney_conn:stop(ConnPid),
+              hackney_altsvc:mark_h3_blocked(Host, Port),
+              false
+          end;
+        {error, _Reason} ->
+          hackney_altsvc:mark_h3_blocked(Host, Port),
+          false
+      end
   end.
 
 connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
