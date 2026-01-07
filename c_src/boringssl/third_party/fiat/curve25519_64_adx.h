@@ -1,7 +1,9 @@
+#include <openssl/base.h>
+#include "../../crypto/internal.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <immintrin.h>
-#include <string.h>
 
 typedef uint64_t fe4[4];
 typedef uint8_t fiat_uint1;
@@ -400,10 +402,10 @@ static void fe4_cswap(uint64_t out1[4], uint64_t out2[4], fiat_uint1 arg1, const
   out2[3] = x8;
 }
 
-// The following functions are adaped from crypto/curve25519/curve25519.c
+// The following functions are adapted from crypto/curve25519/curve25519.c
 // It would be desirable to share the code, but with the current field
 // implementations both 4-limb and 5-limb versions of the curve-level code need
-// to be included in builds targetting an unknown variant of x86_64.
+// to be included in builds targeting an unknown variant of x86_64.
 
 __attribute__((target("adx,bmi2")))
 static void fe4_invert(fe4 out, const fe4 z) {
@@ -468,7 +470,7 @@ __attribute__((target("adx,bmi2")))
 void x25519_scalar_mult_adx(uint8_t out[32], const uint8_t scalar[32],
                             const uint8_t point[32]) {
   uint8_t e[32];
-  memcpy(e, scalar, 32);
+  OPENSSL_memcpy(e, scalar, 32);
   e[0] &= 248;
   e[31] &= 127;
   e[31] |= 64;
@@ -609,7 +611,10 @@ static inline void table_select_4(ge_precomp_4 *t, const int pos,
   uint8_t babs = b - ((bnegative & b) << 1);
 
   uint8_t t_bytes[3][32] = {
-      {constant_time_is_zero_w(b) & 1}, {constant_time_is_zero_w(b) & 1}, {0}};
+    {static_cast<uint8_t>(constant_time_is_zero_w(b) & 1)},
+    {static_cast<uint8_t>(constant_time_is_zero_w(b) & 1)},
+    {0},
+  };
 #if defined(__clang__)
   __asm__("" : "+m" (t_bytes) : /*no inputs*/);
 #endif

@@ -1,10 +1,17 @@
 #! /usr/bin/env perl
 # Copyright 2005-2016 The OpenSSL Project Authors. All Rights Reserved.
 #
-# Licensed under the OpenSSL license (the "License").  You may not use
-# this file except in compliance with the License.  You can obtain a copy
-# in the file LICENSE in the source distribution or at
-# https://www.openssl.org/source/license.html
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 
 # Ascetic x86_64 AT&T to MASM/NASM assembler translator by <appro>.
@@ -47,7 +54,6 @@
 #    (sorry about latter).
 # 6. Don't use [or hand-code with .byte] "rep ret." "ret" mnemonic is
 #    required to identify the spots, where to inject Win64 epilogue!
-#    But on the pros, it's then prefixed with rep automatically:-)
 # 7. Stick to explicit ip-relative addressing. If you have to use
 #    GOTPCREL addressing, stick to mov symbol@GOTPCREL(%rip),%r??.
 #    Both are recognized and translated to proper Win64 addressing
@@ -121,7 +127,7 @@ my %globals;
 	    if ($self->{op} =~ /^(movz)x?([bw]).*/) {	# movz is pain...
 		$self->{op} = $1;
 		$self->{sz} = $2;
-	    } elsif ($self->{op} =~ /call|jmp/) {
+	    } elsif ($self->{op} =~ /call|jmp|^rdrand$/) {
 		$self->{sz} = "";
 	    } elsif ($self->{op} =~ /^p/ && $' !~ /^(ush|op|insrw)/) { # SSEn
 		$self->{sz} = "";
@@ -157,7 +163,7 @@ my %globals;
 		    $epilogue = "movq	8(%rsp),%rdi\n\t" .
 				"movq	16(%rsp),%rsi\n\t";
 		}
-	    	$epilogue . ".byte	0xf3,0xc3";
+	    	$epilogue . "ret";
 	    } elsif ($self->{op} eq "call" && !$elf && $current_segment eq ".init") {
 		".p2align\t3\n\t.quad";
 	    } else {
@@ -171,7 +177,7 @@ my %globals;
 		    $self->{op} = "mov	rdi,QWORD$PTR\[8+rsp\]\t;WIN64 epilogue\n\t".
 				  "mov	rsi,QWORD$PTR\[16+rsp\]\n\t";
 	    	}
-		$self->{op} .= "DB\t0F3h,0C3h\t\t;repret";
+		$self->{op} .= "ret";
 	    } elsif ($self->{op} =~ /^(pop|push)f/) {
 		$self->{op} .= $self->{sz};
 	    } elsif ($self->{op} eq "call" && $current_segment eq ".CRT\$XCU") {
@@ -715,16 +721,21 @@ my %globals;
     }
 }
 { package seh_directive;
-    # This implements directives, like MASM's, for specifying Windows unwind
-    # codes. See https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170
-    # for details on the Windows unwind mechanism. Unlike MASM's directives, we
-    # have no .seh_endprolog directive. Instead, the last prolog directive is
-    # implicitly the end of the prolog.
+    # This implements directives, like MASM, gas, and clang-assembler for
+    # specifying Windows unwind codes. See
+    # https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170
+    # for details on the Windows unwind mechanism. As perlasm generally uses gas
+    # syntax, the syntax is patterned after the gas spelling, described in
+    # https://sourceware.org/legacy-ml/binutils/2009-08/msg00193.html
+    #
+    # TODO(https://crbug.com/boringssl/571): Translate to the MASM directives
+    # when using the MASM output. Emit as-is when using "mingw64" output, which
+    # is Windows with gas syntax.
     #
     # TODO(https://crbug.com/boringssl/259): For now, SEH directives are ignored
     # on non-Windows platforms. This means functions need to specify both CFI
     # and SEH directives, often redundantly. Ideally we'd abstract between the
-    # two. E.g., we can synthesize CFI from SEH prologs, but SEH does not
+    # two. E.g., we can synthesize CFI from SEH prologues, but SEH does not
     # annotate epilogs, so we'd need to combine parts from both. Or we can
     # restrict ourselves to a subset of CFI and synthesize SEH from CFI.
     #
@@ -733,7 +744,7 @@ my %globals;
     # complication is the current scheme modifies RDI and RSI (non-volatile on
     # Windows) at the start of the function, and saves them in the parameter
     # stack area. This can be expressed with .seh_savereg, but .seh_savereg is
-    # only usable late in the prolog. However, unwind information gives enough
+    # only usable late in the prologue. However, unwind information gives enough
     # information to locate the parameter stack area at any point in the
     # function, so we can defer conversion or implement other schemes.
 
@@ -778,6 +789,11 @@ my %globals;
 	die "Missing .seh_startproc directive" unless %info;
     }
 
+    sub _check_in_prologue {
+	_check_in_proc();
+	die "Invalid SEH directive after .seh_endprologue" if defined($info{endprologue});
+    }
+
     sub _check_not_in_proc {
 	die "Missing .seh_endproc directive" if %info;
     }
@@ -795,8 +811,8 @@ my %globals;
 	    info_label => $info_label,
 	    # start_label is the start of the function.
 	    start_label => $start_label,
-	    # endprolog is the label of the last unwind code in the function.
-	    endprolog => $start_label,
+	    # endprologue is the label of the end of the prologue.
+	    endprologue => undef,
 	    # unwind_codes contains the textual representation of the
 	    # unwind codes in the function so far.
 	    unwind_codes => "",
@@ -822,14 +838,14 @@ my %globals;
 
     sub _add_unwind_code {
 	my ($op, $value, @extra) = @_;
-	_check_in_proc();
+	_check_in_prologue();
 	if ($op != $UWOP_PUSH_NONVOL) {
 	    $info{has_nonpushreg} = 1;
 	} elsif ($info{has_nonpushreg}) {
-	    die ".seh_pushreg directives must appear first in the prolog";
+	    die ".seh_pushreg directives must appear first in the prologue";
 	}
 
-	my $label = _new_unwind_label("prolog");
+	my $label = _new_unwind_label("prologue");
 	# Encode an UNWIND_CODE structure. See
 	# https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170#struct-unwind_code
 	my $encoded = $op | ($value << 4);
@@ -845,17 +861,13 @@ ____
 	$info{num_codes} += 1 + scalar(@extra);
 	# Unwind codes are listed in reverse order.
 	$info{unwind_codes} = $codes . $info{unwind_codes};
-	# Track the label of the last unwind code. It implicitly is the end of
-	# the prolog. MASM has an endprolog directive, but it seems to be
-	# unnecessary.
-	$info{endprolog} = $label;
 	return $label;
     }
 
     sub _updating_fixed_allocation {
-	_check_in_proc();
+	_check_in_prologue();
 	if ($info{frame_reg} != 0) {
-	    # Windows documentation does not explicitly forbid .seh_allocstack
+	    # Windows documentation does not explicitly forbid .seh_stackalloc
 	    # after .seh_setframe, but it appears to have no effect. Offsets are
 	    # still relative to the fixed allocation when the frame register was
 	    # established.
@@ -863,7 +875,7 @@ ____
 	}
 	if ($info{has_offset}) {
 	    # Windows documentation does not explicitly forbid .seh_savereg
-	    # before .seh_allocstack, but it does not work very well. Offsets
+	    # before .seh_stackalloc, but it does not work very well. Offsets
 	    # are relative to the top of the final fixed allocation, not where
 	    # RSP currently is.
 	    die "directives with an offset must come after the fixed allocation is established.";
@@ -872,11 +884,8 @@ ____
 
     sub _endproc {
 	_check_in_proc();
-	if ($info{num_codes} == 0) {
-	    # If a Windows function has no directives (i.e. it doesn't touch the
-	    # stack), it is a leaf function and is not expected to appear in
-	    # .pdata or .xdata.
-	    die ".seh_endproc found with no unwind codes";
+	if (!defined($info{endprologue})) {
+	    die "Missing .seh_endprologue";
 	}
 
 	my $end_label = _new_unwind_label("end");
@@ -895,11 +904,21 @@ ____
 	$xdata .= <<____;
 $info{info_label}:
 	.byte	1	# version 1, no flags
-	.byte	$info{endprolog}-$info{start_label}
+	.byte	$info{endprologue}-$info{start_label}
 	.byte	$info{num_codes}
 	.byte	$frame_encoded
 $info{unwind_codes}
 ____
+
+	# UNWIND_INFOs must be 4-byte aligned. If needed, we must add an extra
+	# unwind code. This does not change the unwind code count. Windows
+	# documentation says "For alignment purposes, this array always has an
+	# even number of entries, and the final entry is potentially unused. In
+	# that case, the array is one longer than indicated by the count of
+	# unwind codes field."
+	if ($info{num_codes} & 1) {
+	    $xdata .= "\t.value\t0\n";
+	}
 
 	%info = ();
 	return $end_label;
@@ -917,7 +936,7 @@ ____
 	    my $label;
 	    SWITCH: for ($dir) {
 		/^startproc$/ && do {
-		    $label = _startproc();
+		    $label = _startproc($1);
 		    last;
 		};
 		/^pushreg$/ && do {
@@ -927,7 +946,7 @@ ____
 		    $label = _add_unwind_code($UWOP_PUSH_NONVOL, $reg_num);
 		    last;
 		};
-		/^allocstack$/ && do {
+		/^stackalloc$/ && do {
 		    my $num = eval($$line);
 		    if ($num <= 0 || $num % 8 != 0) {
 			die "invalid stack allocation: $num";
@@ -977,7 +996,7 @@ ____
 		    $info{has_offset} = 1;
 		    last;
 		};
-		/^savexmm128$/ && do {
+		/^savexmm$/ && do {
 		    $$line =~ /%xmm(\d+)\s*,\s*(.+)/ or die "could not parse .seh_$dir";
 		    my $reg_num = $1;
 		    my $offset = eval($2);
@@ -990,6 +1009,19 @@ ____
 			$label = _add_unwind_code($UWOP_SAVE_XMM128_FAR, $reg_num, $offset >> 16, $offset & 0xffff);
 		    }
 		    $info{has_offset} = 1;
+		    last;
+		};
+		/^endprologue$/ && do {
+		    _check_in_prologue();
+		    if ($info{num_codes} == 0) {
+			# If a Windows function has no directives (i.e. it
+			# doesn't touch the stack), it is a leaf function and is
+			# not expected to appear in .pdata or .xdata.
+			die ".seh_endprologue found with no unwind codes";
+		    }
+
+		    $label = _new_unwind_label("endprologue");
+		    $info{endprologue} = $label;
 		    last;
 		};
 		/^endproc$/ && do {
@@ -1286,198 +1318,6 @@ ____
 	$self->{value};
     }
 }
-
-# Upon initial x86_64 introduction SSE>2 extensions were not introduced
-# yet. In order not to be bothered by tracing exact assembler versions,
-# but at the same time to provide a bare security minimum of AES-NI, we
-# hard-code some instructions. Extensions past AES-NI on the other hand
-# are traced by examining assembler version in individual perlasm
-# modules...
-
-my %regrm = (	"%eax"=>0, "%ecx"=>1, "%edx"=>2, "%ebx"=>3,
-		"%esp"=>4, "%ebp"=>5, "%esi"=>6, "%edi"=>7	);
-
-sub rex {
- my $opcode=shift;
- my ($dst,$src,$rex)=@_;
-
-   $rex|=0x04 if($dst>=8);
-   $rex|=0x01 if($src>=8);
-   push @$opcode,($rex|0x40) if ($rex);
-}
-
-my $movq = sub {	# elderly gas can't handle inter-register movq
-  my $arg = shift;
-  my @opcode=(0x66);
-    if ($arg =~ /%xmm([0-9]+),\s*%r(\w+)/) {
-	my ($src,$dst)=($1,$2);
-	if ($dst !~ /[0-9]+/)	{ $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,$src,$dst,0x8);
-	push @opcode,0x0f,0x7e;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	@opcode;
-    } elsif ($arg =~ /%r(\w+),\s*%xmm([0-9]+)/) {
-	my ($src,$dst)=($2,$1);
-	if ($dst !~ /[0-9]+/)	{ $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,$src,$dst,0x8);
-	push @opcode,0x0f,0x6e;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pextrd = sub {
-    if (shift =~ /\$([0-9]+),\s*%xmm([0-9]+),\s*(%\w+)/) {
-      my @opcode=(0x66);
-	my $imm=$1;
-	my $src=$2;
-	my $dst=$3;
-	if ($dst =~ /%r([0-9]+)d/)	{ $dst = $1; }
-	elsif ($dst =~ /%e/)		{ $dst = $regrm{$dst}; }
-	rex(\@opcode,$src,$dst);
-	push @opcode,0x0f,0x3a,0x16;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	push @opcode,$imm;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pinsrd = sub {
-    if (shift =~ /\$([0-9]+),\s*(%\w+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	my $imm=$1;
-	my $src=$2;
-	my $dst=$3;
-	if ($src =~ /%r([0-9]+)/)	{ $src = $1; }
-	elsif ($src =~ /%e/)		{ $src = $regrm{$src}; }
-	rex(\@opcode,$dst,$src);
-	push @opcode,0x0f,0x3a,0x22;
-	push @opcode,0xc0|(($dst&7)<<3)|($src&7);	# ModR/M
-	push @opcode,$imm;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pshufb = sub {
-    if (shift =~ /%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$2,$1);
-	push @opcode,0x0f,0x38,0x00;
-	push @opcode,0xc0|($1&7)|(($2&7)<<3);		# ModR/M
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $palignr = sub {
-    if (shift =~ /\$([0-9]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$3,$2);
-	push @opcode,0x0f,0x3a,0x0f;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	push @opcode,$1;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pclmulqdq = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$3,$2);
-	push @opcode,0x0f,0x3a,0x44;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $rdrand = sub {
-    if (shift =~ /%[er](\w+)/) {
-      my @opcode=();
-      my $dst=$1;
-	if ($dst !~ /[0-9]+/) { $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,0,$dst,8);
-	push @opcode,0x0f,0xc7,0xf0|($dst&7);
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $rdseed = sub {
-    if (shift =~ /%[er](\w+)/) {
-      my @opcode=();
-      my $dst=$1;
-	if ($dst !~ /[0-9]+/) { $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,0,$dst,8);
-	push @opcode,0x0f,0xc7,0xf8|($dst&7);
-	@opcode;
-    } else {
-	();
-    }
-};
-
-# Not all AVX-capable assemblers recognize AMD XOP extension. Since we
-# are using only two instructions hand-code them in order to be excused
-# from chasing assembler versions...
-
-sub rxb {
- my $opcode=shift;
- my ($dst,$src1,$src2,$rxb)=@_;
-
-   $rxb|=0x7<<5;
-   $rxb&=~(0x04<<5) if($dst>=8);
-   $rxb&=~(0x01<<5) if($src1>=8);
-   $rxb&=~(0x02<<5) if($src2>=8);
-   push @$opcode,$rxb;
-}
-
-my $vprotd = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x8f);
-	rxb(\@opcode,$3,$2,-1,0x08);
-	push @opcode,0x78,0xc2;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $vprotq = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x8f);
-	rxb(\@opcode,$3,$2,-1,0x08);
-	push @opcode,0x78,0xc3;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-# Intel Control-flow Enforcement Technology extension. All functions and
-# indirect branch targets will have to start with this instruction...
-
-my $endbranch = sub {
-    (0xf3,0x0f,0x1e,0xfa);
-};
 
 ########################################################################
 

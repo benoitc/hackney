@@ -1,18 +1,21 @@
 #! /usr/bin/env perl
 # Copyright 2014-2020 The OpenSSL Project Authors. All Rights Reserved.
 #
-# Licensed under the OpenSSL license (the "License").  You may not use
-# this file except in compliance with the License.  You can obtain a copy
-# in the file LICENSE in the source distribution or at
-# https://www.openssl.org/source/license.html
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 # ====================================================================
 # Written by Andy Polyakov <appro@openssl.org> for the OpenSSL
-# project. The module is, however, dual licensed under OpenSSL and
-# CRYPTOGAMS licenses depending on where you obtain it. For further
-# details see http://www.openssl.org/~appro/cryptogams/.
-#
-# Permission to use under GPLv2 terms is granted.
+# project.
 # ====================================================================
 #
 # SHA256/512 for ARMv8.
@@ -39,8 +42,29 @@
 #	generated with -mgeneral-regs-only is significantly faster
 #	and the gap is only 40-90%.
 
-$output=pop;
-$flavour=pop;
+my ($flavour, $hash, $output) = @ARGV;
+
+if ($hash eq "sha512") {
+	$BITS=512;
+	$SZ=8;
+	@Sigma0=(28,34,39);
+	@Sigma1=(14,18,41);
+	@sigma0=(1,  8, 7);
+	@sigma1=(19,61, 6);
+	$rounds=80;
+	$reg_t="x";
+} elsif ($hash eq "sha256") {
+	$BITS=256;
+	$SZ=4;
+	@Sigma0=( 2,13,22);
+	@Sigma1=( 6,11,25);
+	@sigma0=( 7,18, 3);
+	@sigma1=(17,19,10);
+	$rounds=64;
+	$reg_t="w";
+} else {
+	die "unknown hash: $hash";
+}
 
 if ($flavour && $flavour ne "void") {
     $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
@@ -55,27 +79,7 @@ if ($flavour && $flavour ne "void") {
     *STDOUT=*OUT;
 }
 
-if ($output =~ /512/) {
-	$BITS=512;
-	$SZ=8;
-	@Sigma0=(28,34,39);
-	@Sigma1=(14,18,41);
-	@sigma0=(1,  8, 7);
-	@sigma1=(19,61, 6);
-	$rounds=80;
-	$reg_t="x";
-} else {
-	$BITS=256;
-	$SZ=4;
-	@Sigma0=( 2,13,22);
-	@Sigma1=( 6,11,25);
-	@sigma0=( 7,18, 3);
-	@sigma1=(17,19,10);
-	$rounds=64;
-	$reg_t="w";
-}
-
-$func="sha${BITS}_block_data_order";
+$func="sha${BITS}_block_data_order_nohw";
 
 ($ctx,$inp,$num,$Ktbl)=map("x$_",(0..2,30));
 
@@ -173,37 +177,12 @@ ___
 }
 
 $code.=<<___;
-#ifndef	__KERNEL__
-# include <openssl/arm_arch.h>
-#endif
-
 .text
 
-.extern	OPENSSL_armcap_P
-.hidden	OPENSSL_armcap_P
 .globl	$func
 .type	$func,%function
 .align	6
 $func:
-	AARCH64_VALID_CALL_TARGET
-#ifndef	__KERNEL__
-#if __has_feature(hwaddress_sanitizer) && __clang_major__ >= 10
-	adrp	x16,:pg_hi21_nc:OPENSSL_armcap_P
-#else
-	adrp	x16,:pg_hi21:OPENSSL_armcap_P
-#endif
-	ldr	w16,[x16,:lo12:OPENSSL_armcap_P]
-___
-$code.=<<___	if ($SZ==4);
-	tst	w16,#ARMV8_SHA256
-	b.ne	.Lv8_entry
-___
-$code.=<<___	if ($SZ==8);
-	tst	w16,#ARMV8_SHA512
-	b.ne	.Lv8_entry
-___
-$code.=<<___;
-#endif
 	AARCH64_SIGN_LINK_REGISTER
 	stp	x29,x30,[sp,#-128]!
 	add	x29,sp,#0
@@ -355,11 +334,12 @@ my ($ABCD_SAVE,$EFGH_SAVE)=("v18.16b","v19.16b");
 $code.=<<___;
 .text
 #ifndef	__KERNEL__
-.type	sha256_block_armv8,%function
+.globl	sha256_block_data_order_hw
+.type	sha256_block_data_order_hw,%function
 .align	6
-sha256_block_armv8:
-.Lv8_entry:
+sha256_block_data_order_hw:
 	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
+	AARCH64_VALID_CALL_TARGET
 	stp		x29,x30,[sp,#-16]!
 	add		x29,sp,#0
 
@@ -424,7 +404,7 @@ $code.=<<___;
 
 	ldr		x29,[sp],#16
 	ret
-.size	sha256_block_armv8,.-sha256_block_armv8
+.size	sha256_block_data_order_hw,.-sha256_block_data_order_hw
 #endif
 ___
 }
@@ -441,10 +421,12 @@ my ($AB,$CD,$EF,$GH)=map("v$_.16b",(26..29));
 $code.=<<___;
 .text
 #ifndef	__KERNEL__
-.type	sha512_block_armv8,%function
+.globl	sha512_block_data_order_hw
+.type	sha512_block_data_order_hw,%function
 .align	6
-sha512_block_armv8:
-.Lv8_entry:
+sha512_block_data_order_hw:
+	// Armv8.3-A PAuth: even though x30 is pushed to stack it is not popped later.
+	AARCH64_VALID_CALL_TARGET
 	stp		x29,x30,[sp,#-16]!
 	add		x29,sp,#0
 
@@ -528,7 +510,7 @@ $code.=<<___;
 
 	ldr		x29,[sp],#16
 	ret
-.size	sha512_block_armv8,.-sha512_block_armv8
+.size	sha512_block_data_order_hw,.-sha512_block_data_order_hw
 #endif
 ___
 }

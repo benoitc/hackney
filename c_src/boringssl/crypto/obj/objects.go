@@ -1,16 +1,16 @@
-// Copyright (c) 2016, Google Inc.
+// Copyright 2016 The BoringSSL Authors
 //
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 //go:build ignore
 
@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/asn1"
 	"errors"
 	"fmt"
 	"os"
@@ -42,7 +43,7 @@ type object struct {
 	// corresponding SN_foo or LN_foo macro is not defined.
 	shortName, longName       string
 	hasShortName, hasLongName bool
-	oid                       []int
+	oid                       asn1.ObjectIdentifier
 	encoded                   []byte
 }
 
@@ -123,7 +124,7 @@ func readNumbers(path string) (nameToNID map[string]int, numNIDs int, err error)
 	return nameToNID, numNIDs, nil
 }
 
-func parseOID(aliases map[string][]int, in []string) (oid []int, err error) {
+func parseOID(aliases map[string]asn1.ObjectIdentifier, in []string) (oid asn1.ObjectIdentifier, err error) {
 	if len(in) == 0 {
 		return
 	}
@@ -212,7 +213,7 @@ func readObjects(numPath, objectsPath string) (*objects, error) {
 	var lineNo int
 	longNamesSeen := make(map[string]struct{})
 	shortNamesSeen := make(map[string]struct{})
-	aliases := make(map[string][]int)
+	aliases := make(map[string]asn1.ObjectIdentifier)
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -388,86 +389,55 @@ func clangFormat(input string) (string, error) {
 
 func writeHeader(path string, objs *objects) error {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, `/* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
- * All rights reserved.
- *
- * This package is an SSL implementation written
- * by Eric Young (eay@cryptsoft.com).
- * The implementation was written so as to conform with Netscapes SSL.
- *
- * This library is free for commercial and non-commercial use as long as
- * the following conditions are aheared to.  The following conditions
- * apply to all code found in this distribution, be it the RC4, RSA,
- * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
- * included with this distribution is covered by the same copyright terms
- * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- *
- * Copyright remains Eric Young's, and as such any Copyright notices in
- * the code are not to be removed.
- * If this package is used in a product, Eric Young should be given attribution
- * as the author of the parts of the library used.
- * This can be in the form of a textual message at program startup or
- * in documentation (online or textual) provided with the package.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    "This product includes cryptographic software written by
- *     Eric Young (eay@cryptsoft.com)"
- *    The word 'cryptographic' can be left out if the rouines from the library
- *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from
- *    the apps directory (application code) you must include an acknowledgement:
- *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- *
- * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG `+"``"+`AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The licence and distribution terms for any publically available version or
- * derivative of this code cannot be changed.  i.e. this code cannot simply be
- * copied and put under another distribution licence
- * [including the GNU Public Licence.] */
+	fmt.Fprintf(&b, `// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-/* This file is generated by crypto/obj/objects.go. */
+// This file is generated by crypto/obj/objects.go.
 
 #ifndef OPENSSL_HEADER_NID_H
 #define OPENSSL_HEADER_NID_H
 
-#include <openssl/base.h>
+#include <openssl/base.h>  // IWYU pragma: export
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
 
-/* The nid library provides numbered values for ASN.1 object identifiers and
- * other symbols. These values are used by other libraries to identify
- * cryptographic primitives.
- *
- * A separate objects library, obj.h, provides functions for converting between
- * nids and object identifiers. However it depends on large internal tables with
- * the encodings of every nid defined. Consumers concerned with binary size
- * should instead embed the encodings of the few consumed OIDs and compare
- * against those.
- *
- * These values should not be used outside of a single process; they are not
- * stable identifiers. */
+// The nid library provides numbered values for ASN.1 object identifiers and
+// other symbols. These values are used by other libraries to identify
+// cryptographic primitives.
+//
+// A separate objects library, obj.h, provides functions for converting between
+// nids and object identifiers. However it depends on large internal tables with
+// the encodings of every nid defined. Consumers concerned with binary size
+// should instead embed the encodings of the few consumed OIDs and compare
+// against those.
+//
+// Constants are defined as follows:
+//
+// - NID_foo is the integer NID of foo.
+// - SN_foo is the "short name" of foo, omitted if there is no short name.
+// - LN_foo is the "long name" of foo, omitted if there is no long name.
+// - OBJ_foo expands to a comma-separated sequence of integers for foo's OID,
+//   omitted if foo has no OID.
+// - OBJ_ENC_foo expands to a comma-separated sequence of bytes for foo's OID
+//   encoded in DER, excluding the tag and length. This is omitted if foo has
+//   no OID.
+//
+// NID values should not be used outside of a single process; they are not
+// stable identifiers.
 
 
 `)
@@ -489,18 +459,29 @@ extern "C" {
 		// OBJ_undef as if it were zero.
 		oid := obj.oid
 		if nid == 0 {
-			oid = []int{0}
+			oid = asn1.ObjectIdentifier{0}
 		}
 		if len(oid) != 0 {
-			var oidStr string
+			var oidStr strings.Builder
 			for _, val := range oid {
-				if len(oidStr) != 0 {
-					oidStr += ","
+				if oidStr.Len() != 0 {
+					oidStr.WriteString(", ")
 				}
-				oidStr += fmt.Sprintf("%dL", val)
+				fmt.Fprintf(&oidStr, "%dL", val)
 			}
-
-			fmt.Fprintf(&b, "#define OBJ_%s %s\n", obj.name, oidStr)
+			fmt.Fprintf(&b, "#define OBJ_%s %s\n", obj.name, oidStr.String())
+		}
+		// Some NIDs refer to the top-level OID arcs, which cannot be encoded
+		// as OIDs. (The encoding can only represent two or more components.)
+		if len(oid) > 1 {
+			var oidEncStr strings.Builder
+			for _, val := range encodeOID(oid) {
+				if oidEncStr.Len() != 0 {
+					oidEncStr.WriteString(", ")
+				}
+				fmt.Fprintf(&oidEncStr, "0x%02x", val)
+			}
+			fmt.Fprintf(&b, "#define OBJ_ENC_%s %s\n", obj.name, oidEncStr.String())
 		}
 
 		fmt.Fprintf(&b, "\n")
@@ -528,63 +509,21 @@ func sortNIDs(nids []int, objs *objects, cmp func(a, b object) bool) {
 
 func writeData(path string, objs *objects) error {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, `/* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
- * All rights reserved.
- *
- * This package is an SSL implementation written
- * by Eric Young (eay@cryptsoft.com).
- * The implementation was written so as to conform with Netscapes SSL.
- *
- * This library is free for commercial and non-commercial use as long as
- * the following conditions are aheared to.  The following conditions
- * apply to all code found in this distribution, be it the RC4, RSA,
- * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
- * included with this distribution is covered by the same copyright terms
- * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- *
- * Copyright remains Eric Young's, and as such any Copyright notices in
- * the code are not to be removed.
- * If this package is used in a product, Eric Young should be given attribution
- * as the author of the parts of the library used.
- * This can be in the form of a textual message at program startup or
- * in documentation (online or textual) provided with the package.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    "This product includes cryptographic software written by
- *     Eric Young (eay@cryptsoft.com)"
- *    The word 'cryptographic' can be left out if the rouines from the library
- *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from
- *    the apps directory (application code) you must include an acknowledgement:
- *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- *
- * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG `+"``"+`AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The licence and distribution terms for any publically available version or
- * derivative of this code cannot be changed.  i.e. this code cannot simply be
- * copied and put under another distribution licence
- * [including the GNU Public Licence.] */
+	fmt.Fprintf(&b, `// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-/* This file is generated by crypto/obj/objects.go. */
+// This file is generated by crypto/obj/objects.go.
 
 
 `)
@@ -614,6 +553,12 @@ func writeData(path string, objs *objects) error {
 	// Emit an ASN1_OBJECT for each object.
 	fmt.Fprintf(&b, "\nstatic const ASN1_OBJECT kObjects[NUM_NID] = {\n")
 	for nid, obj := range objs.byNID {
+		// Skip the entry for NID_undef. It is stored separately, so that
+		// OBJ_get_undef avoids pulling in the table.
+		if nid == 0 {
+			continue
+		}
+
 		if len(obj.name) == 0 {
 			fmt.Fprintf(&b, "{NULL, NULL, NID_undef, 0, NULL, 0},\n")
 			continue
@@ -640,7 +585,11 @@ func writeData(path string, objs *objects) error {
 
 	fmt.Fprintf(&b, "\nstatic const uint16_t kNIDsInShortNameOrder[] = {\n")
 	for _, nid := range nids {
-		fmt.Fprintf(&b, "%d /* %s */,\n", nid, objs.byNID[nid].shortName)
+		// Including NID_undef in the table does not do anything. Whether OBJ_sn2nid
+		// finds the object or not, it will return NID_undef.
+		if nid != 0 {
+			fmt.Fprintf(&b, "%d /* %s */,\n", nid, objs.byNID[nid].shortName)
+		}
 	}
 	fmt.Fprintf(&b, "};\n")
 
@@ -656,7 +605,11 @@ func writeData(path string, objs *objects) error {
 
 	fmt.Fprintf(&b, "\nstatic const uint16_t kNIDsInLongNameOrder[] = {\n")
 	for _, nid := range nids {
-		fmt.Fprintf(&b, "%d /* %s */,\n", nid, objs.byNID[nid].longName)
+		// Including NID_undef in the table does not do anything. Whether OBJ_ln2nid
+		// finds the object or not, it will return NID_undef.
+		if nid != 0 {
+			fmt.Fprintf(&b, "%d /* %s */,\n", nid, objs.byNID[nid].longName)
+		}
 	}
 	fmt.Fprintf(&b, "};\n")
 

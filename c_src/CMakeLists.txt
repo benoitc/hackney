@@ -104,6 +104,7 @@ message(STATUS "Building BoringSSL from: ${BORINGSSL_DIR}")
 # BoringSSL build options
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(OPENSSL_NO_ASM OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
 # GCC compatibility: define __has_feature as 0 for non-Clang compilers
 # BoringSSL's generated assembly uses __has_feature(hwaddress_sanitizer) which is Clang-only

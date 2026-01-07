@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # coding=utf-8
-# Copyright (c) 2020, Google Inc.
+# Copyright 2020 The BoringSSL Authors
 #
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-# SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-# OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-# CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """This script translates JSON test vectors to BoringSSL's "FileTest" format.
 
@@ -30,6 +30,7 @@ import sys
 HPKE_MODE_BASE = 0
 HPKE_MODE_PSK = 1
 HPKE_MODE_AUTH = 2
+HPKE_DHKEM_P256_SHA256 = 0x0010
 HPKE_DHKEM_X25519_SHA256 = 0x0020
 HPKE_HKDF_SHA256 = 0x0001
 HPKE_AEAD_EXPORT_ONLY = 0xffff
@@ -51,12 +52,13 @@ def read_test_vectors_and_generate_code(json_file_in_path, test_file_out_path):
   for test in test_vecs:
     # Filter out test cases that we don't use.
     if (test["mode"] not in (HPKE_MODE_BASE, HPKE_MODE_AUTH) or
-        test["kem_id"] != HPKE_DHKEM_X25519_SHA256 or
+        test["kem_id"] not in (HPKE_DHKEM_X25519_SHA256,
+                               HPKE_DHKEM_P256_SHA256) or
         test["aead_id"] == HPKE_AEAD_EXPORT_ONLY or
         test["kdf_id"] != HPKE_HKDF_SHA256):
       continue
 
-    keys = ["mode", "kdf_id", "aead_id", "info", "skRm", "skEm", "pkRm", "pkEm"]
+    keys = ["mode", "kem_id", "kdf_id", "aead_id", "info", "skRm", "skEm", "pkRm", "pkEm", "ikmE", "ikmR"]
 
     if test["mode"] == HPKE_MODE_AUTH:
       keys.append("pkSm")

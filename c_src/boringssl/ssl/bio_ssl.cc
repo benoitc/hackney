@@ -1,24 +1,29 @@
-/*
- * Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
- *
- * Licensed under the OpenSSL license (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
+// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <openssl/ssl.h>
 
 #include <openssl/bio.h>
 
+#include "../crypto/bio/internal.h"
 
-static SSL *get_ssl(BIO *bio) {
-  return reinterpret_cast<SSL *>(bio->ptr);
-}
+
+static SSL *get_ssl(BIO *bio) { return reinterpret_cast<SSL *>(bio->ptr); }
 
 static int ssl_read(BIO *bio, char *out, int outl) {
   SSL *ssl = get_ssl(bio);
-  if (ssl == NULL) {
+  if (ssl == nullptr) {
     return 0;
   }
 
@@ -58,7 +63,7 @@ static int ssl_read(BIO *bio, char *out, int outl) {
 
 static int ssl_write(BIO *bio, const char *out, int outl) {
   SSL *ssl = get_ssl(bio);
-  if (ssl == NULL) {
+  if (ssl == nullptr) {
     return 0;
   }
 
@@ -92,13 +97,13 @@ static int ssl_write(BIO *bio, const char *out, int outl) {
 
 static long ssl_ctrl(BIO *bio, int cmd, long num, void *ptr) {
   SSL *ssl = get_ssl(bio);
-  if (ssl == NULL && cmd != BIO_C_SET_SSL) {
+  if (ssl == nullptr && cmd != BIO_C_SET_SSL) {
     return 0;
   }
 
   switch (cmd) {
     case BIO_C_SET_SSL:
-      if (ssl != NULL) {
+      if (ssl != nullptr) {
         // OpenSSL allows reusing an SSL BIO with a different SSL object. We do
         // not support this.
         OPENSSL_PUT_ERROR(SSL, ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
@@ -146,14 +151,12 @@ static long ssl_ctrl(BIO *bio, int cmd, long num, void *ptr) {
   }
 }
 
-static int ssl_new(BIO *bio) {
-  return 1;
-}
+static int ssl_new(BIO *bio) { return 1; }
 
 static int ssl_free(BIO *bio) {
   SSL *ssl = get_ssl(bio);
 
-  if (ssl == NULL) {
+  if (ssl == nullptr) {
     return 1;
   }
 
@@ -165,9 +168,9 @@ static int ssl_free(BIO *bio) {
   return 1;
 }
 
-static long ssl_callback_ctrl(BIO *bio, int cmd, bio_info_cb fp) {
+static long ssl_callback_ctrl(BIO *bio, int cmd, BIO_info_cb *fp) {
   SSL *ssl = get_ssl(bio);
-  if (ssl == NULL) {
+  if (ssl == nullptr) {
     return 0;
   }
 
@@ -181,8 +184,8 @@ static long ssl_callback_ctrl(BIO *bio, int cmd, bio_info_cb fp) {
 }
 
 static const BIO_METHOD ssl_method = {
-    BIO_TYPE_SSL, "SSL",    ssl_write, ssl_read, NULL,
-    NULL,         ssl_ctrl, ssl_new,   ssl_free, ssl_callback_ctrl,
+    BIO_TYPE_SSL, "SSL",   ssl_write, ssl_read,          /*bgets=*/nullptr,
+    ssl_ctrl,     ssl_new, ssl_free,  ssl_callback_ctrl,
 };
 
 const BIO_METHOD *BIO_f_ssl(void) { return &ssl_method; }

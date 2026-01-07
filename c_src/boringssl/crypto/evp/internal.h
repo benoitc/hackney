@@ -1,65 +1,27 @@
-/* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
- * All rights reserved.
- *
- * This package is an SSL implementation written
- * by Eric Young (eay@cryptsoft.com).
- * The implementation was written so as to conform with Netscapes SSL.
- *
- * This library is free for commercial and non-commercial use as long as
- * the following conditions are aheared to.  The following conditions
- * apply to all code found in this distribution, be it the RC4, RSA,
- * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
- * included with this distribution is covered by the same copyright terms
- * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- *
- * Copyright remains Eric Young's, and as such any Copyright notices in
- * the code are not to be removed.
- * If this package is used in a product, Eric Young should be given attribution
- * as the author of the parts of the library used.
- * This can be in the form of a textual message at program startup or
- * in documentation (online or textual) provided with the package.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    "This product includes cryptographic software written by
- *     Eric Young (eay@cryptsoft.com)"
- *    The word 'cryptographic' can be left out if the rouines from the library
- *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from
- *    the apps directory (application code) you must include an acknowledgement:
- *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- *
- * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The licence and distribution terms for any publically available version or
- * derivative of this code cannot be changed.  i.e. this code cannot simply be
- * copied and put under another distribution licence
- * [including the GNU Public Licence.] */
+// Copyright 2000-2016 The OpenSSL Project Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-#ifndef OPENSSL_HEADER_EVP_INTERNAL_H
-#define OPENSSL_HEADER_EVP_INTERNAL_H
+#ifndef OPENSSL_HEADER_CRYPTO_EVP_INTERNAL_H
+#define OPENSSL_HEADER_CRYPTO_EVP_INTERNAL_H
 
-#include <openssl/base.h>
+#include <openssl/evp.h>
 
-#include <openssl/rsa.h>
+#include <array>
+
+#include <openssl/span.h>
+
+#include "../internal.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -67,23 +29,42 @@ extern "C" {
 
 
 typedef struct evp_pkey_asn1_method_st EVP_PKEY_ASN1_METHOD;
-typedef struct evp_pkey_method_st EVP_PKEY_METHOD;
+typedef struct evp_pkey_ctx_method_st EVP_PKEY_CTX_METHOD;
+
+struct evp_pkey_alg_st {
+  // method implements operations for this |EVP_PKEY_ALG|.
+  const EVP_PKEY_ASN1_METHOD *method;
+};
+
+enum evp_decode_result_t {
+  evp_decode_error = 0,
+  evp_decode_ok = 1,
+  evp_decode_unsupported = 2,
+};
 
 struct evp_pkey_asn1_method_st {
+  // pkey_id contains one of the |EVP_PKEY_*| values and corresponds to the OID
+  // in the key type's AlgorithmIdentifier.
   int pkey_id;
   uint8_t oid[9];
   uint8_t oid_len;
 
-  const EVP_PKEY_METHOD *pkey_method;
+  const EVP_PKEY_CTX_METHOD *pkey_method;
 
   // pub_decode decodes |params| and |key| as a SubjectPublicKeyInfo
-  // and writes the result into |out|. It returns one on success and zero on
-  // error. |params| is the AlgorithmIdentifier after the OBJECT IDENTIFIER
-  // type field, and |key| is the contents of the subjectPublicKey with the
-  // leading padding byte checked and removed. Although X.509 uses BIT STRINGs
-  // to represent SubjectPublicKeyInfo, every key type defined encodes the key
-  // as a byte string with the same conversion to BIT STRING.
-  int (*pub_decode)(EVP_PKEY *out, CBS *params, CBS *key);
+  // and writes the result into |out|. It returns |evp_decode_ok| on success,
+  // and |evp_decode_error| on error, and |evp_decode_unsupported| if the input
+  // was not supported by this |EVP_PKEY_ALG|. In case of
+  // |evp_decode_unsupported|, it does not add an error to the error queue. May
+  // modify |params| and |key|. Callers must make a copy if calling in a loop.
+  //
+  // |params| is the AlgorithmIdentifier after the OBJECT IDENTIFIER type field,
+  // and |key| is the contents of the subjectPublicKey with the leading padding
+  // byte checked and removed. Although X.509 uses BIT STRINGs to represent
+  // SubjectPublicKeyInfo, every key type defined encodes the key as a byte
+  // string with the same conversion to BIT STRING.
+  evp_decode_result_t (*pub_decode)(const EVP_PKEY_ALG *alg, EVP_PKEY *out,
+                                    CBS *params, CBS *key);
 
   // pub_encode encodes |key| as a SubjectPublicKeyInfo and appends the result
   // to |out|. It returns one on success and zero on error.
@@ -92,18 +73,26 @@ struct evp_pkey_asn1_method_st {
   int (*pub_cmp)(const EVP_PKEY *a, const EVP_PKEY *b);
 
   // priv_decode decodes |params| and |key| as a PrivateKeyInfo and writes the
-  // result into |out|. It returns one on success and zero on error. |params| is
-  // the AlgorithmIdentifier after the OBJECT IDENTIFIER type field, and |key|
-  // is the contents of the OCTET STRING privateKey field.
-  int (*priv_decode)(EVP_PKEY *out, CBS *params, CBS *key);
+  // result into |out|.  It returns |evp_decode_ok| on success, and
+  // |evp_decode_error| on error, and |evp_decode_unsupported| if the key type
+  // was not supported by this |EVP_PKEY_ALG|. In case of
+  // |evp_decode_unsupported|, it does not add an error to the error queue. May
+  // modify |params| and |key|. Callers must make a copy if calling in a loop.
+  //
+  // |params| is the AlgorithmIdentifier after the OBJECT IDENTIFIER type field,
+  // and |key| is the contents of the OCTET STRING privateKey field.
+  evp_decode_result_t (*priv_decode)(const EVP_PKEY_ALG *alg, EVP_PKEY *out,
+                                     CBS *params, CBS *key);
 
   // priv_encode encodes |key| as a PrivateKeyInfo and appends the result to
   // |out|. It returns one on success and zero on error.
   int (*priv_encode)(CBB *out, const EVP_PKEY *key);
 
   int (*set_priv_raw)(EVP_PKEY *pkey, const uint8_t *in, size_t len);
+  int (*set_priv_seed)(EVP_PKEY *pkey, const uint8_t *in, size_t len);
   int (*set_pub_raw)(EVP_PKEY *pkey, const uint8_t *in, size_t len);
   int (*get_priv_raw)(const EVP_PKEY *pkey, uint8_t *out, size_t *out_len);
+  int (*get_priv_seed)(const EVP_PKEY *pkey, uint8_t *out, size_t *out_len);
   int (*get_pub_raw)(const EVP_PKEY *pkey, uint8_t *out, size_t *out_len);
 
   // TODO(davidben): Can these be merged with the functions above? OpenSSL does
@@ -134,15 +123,11 @@ struct evp_pkey_asn1_method_st {
 struct evp_pkey_st {
   CRYPTO_refcount_t references;
 
-  // type contains one of the EVP_PKEY_* values or NID_undef and determines
-  // the type of |pkey|.
-  int type;
-
-  // pkey contains a pointer to a structure dependent on |type|.
+  // pkey contains a pointer to a structure dependent on |ameth|.
   void *pkey;
 
-  // ameth contains a pointer to a method table that contains many ASN.1
-  // methods for the key type.
+  // ameth contains a pointer to a method table that determines the key type, or
+  // nullptr if the key is empty.
   const EVP_PKEY_ASN1_METHOD *ameth;
 } /* EVP_PKEY */;
 
@@ -207,29 +192,33 @@ OPENSSL_EXPORT int EVP_PKEY_CTX_ctrl(EVP_PKEY_CTX *ctx, int keytype, int optype,
 #define EVP_PKEY_CTRL_GET_RSA_MGF1_MD (EVP_PKEY_ALG_CTRL + 10)
 #define EVP_PKEY_CTRL_RSA_OAEP_LABEL (EVP_PKEY_ALG_CTRL + 11)
 #define EVP_PKEY_CTRL_GET_RSA_OAEP_LABEL (EVP_PKEY_ALG_CTRL + 12)
-#define EVP_PKEY_CTRL_EC_PARAMGEN_CURVE_NID (EVP_PKEY_ALG_CTRL + 13)
+#define EVP_PKEY_CTRL_EC_PARAMGEN_GROUP (EVP_PKEY_ALG_CTRL + 13)
 #define EVP_PKEY_CTRL_HKDF_MODE (EVP_PKEY_ALG_CTRL + 14)
 #define EVP_PKEY_CTRL_HKDF_MD (EVP_PKEY_ALG_CTRL + 15)
 #define EVP_PKEY_CTRL_HKDF_KEY (EVP_PKEY_ALG_CTRL + 16)
 #define EVP_PKEY_CTRL_HKDF_SALT (EVP_PKEY_ALG_CTRL + 17)
 #define EVP_PKEY_CTRL_HKDF_INFO (EVP_PKEY_ALG_CTRL + 18)
+#define EVP_PKEY_CTRL_DH_PAD (EVP_PKEY_ALG_CTRL + 19)
 
 struct evp_pkey_ctx_st {
+  ~evp_pkey_ctx_st();
+
   // Method associated with this operation
-  const EVP_PKEY_METHOD *pmeth;
-  // Engine that implements this method or NULL if builtin
-  ENGINE *engine;
-  // Key: may be NULL
-  EVP_PKEY *pkey;
-  // Peer key for key agreement, may be NULL
-  EVP_PKEY *peerkey;
+  const EVP_PKEY_CTX_METHOD *pmeth = nullptr;
+  // Key: may be nullptr
+  bssl::UniquePtr<EVP_PKEY> pkey;
+  // Peer key for key agreement, may be nullptr
+  bssl::UniquePtr<EVP_PKEY> peerkey;
   // operation contains one of the |EVP_PKEY_OP_*| values.
-  int operation;
-  // Algorithm specific data
-  void *data;
+  int operation = EVP_PKEY_OP_UNDEFINED;
+  // Algorithm specific data.
+  // TODO(davidben): Since a |EVP_PKEY_CTX| never has its type change after
+  // creation, this should instead be a base class, with the algorithm-specific
+  // data on the subclass, coming from the same allocation.
+  void *data = nullptr;
 } /* EVP_PKEY_CTX */;
 
-struct evp_pkey_method_st {
+struct evp_pkey_ctx_method_st {
   int pkey_id;
 
   int (*init)(EVP_PKEY_CTX *ctx);
@@ -264,40 +253,44 @@ struct evp_pkey_method_st {
   int (*paramgen)(EVP_PKEY_CTX *ctx, EVP_PKEY *pkey);
 
   int (*ctrl)(EVP_PKEY_CTX *ctx, int type, int p1, void *p2);
-} /* EVP_PKEY_METHOD */;
+} /* EVP_PKEY_CTX_METHOD */;
 
-typedef struct {
-  // key is the concatenation of the private seed and public key. It is stored
-  // as a single 64-bit array to allow passing to |ED25519_sign|. If
-  // |has_private| is false, the first 32 bytes are uninitialized and the public
-  // key is in the last 32 bytes.
-  uint8_t key[64];
-  char has_private;
-} ED25519_KEY;
+extern const EVP_PKEY_CTX_METHOD rsa_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD rsa_pss_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD ec_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD ed25519_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD x25519_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD hkdf_pkey_meth;
+extern const EVP_PKEY_CTX_METHOD dh_pkey_meth;
 
-#define ED25519_PUBLIC_KEY_OFFSET 32
-
-typedef struct {
-  uint8_t pub[32];
-  uint8_t priv[32];
-  char has_private;
-} X25519_KEY;
-
-extern const EVP_PKEY_ASN1_METHOD dsa_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD ec_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD rsa_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD ed25519_asn1_meth;
-extern const EVP_PKEY_ASN1_METHOD x25519_asn1_meth;
-
-extern const EVP_PKEY_METHOD rsa_pkey_meth;
-extern const EVP_PKEY_METHOD ec_pkey_meth;
-extern const EVP_PKEY_METHOD ed25519_pkey_meth;
-extern const EVP_PKEY_METHOD x25519_pkey_meth;
-extern const EVP_PKEY_METHOD hkdf_pkey_meth;
+// evp_pkey_set0 sets |pkey|'s method to |method| and data to |pkey_data|,
+// freeing any key that may previously have been configured. This function takes
+// ownership of |pkey_data|, which must be of the type expected by |method|.
+void evp_pkey_set0(EVP_PKEY *pkey, const EVP_PKEY_ASN1_METHOD *method,
+                   void *pkey_data);
 
 
 #if defined(__cplusplus)
 }  // extern C
 #endif
 
-#endif  // OPENSSL_HEADER_EVP_INTERNAL_H
+BSSL_NAMESPACE_BEGIN
+inline auto GetDefaultEVPAlgorithms() {
+  // A set of algorithms to use by default in |EVP_parse_public_key| and
+  // |EVP_parse_private_key|.
+  return std::array{
+      EVP_pkey_ec_p224(),
+      EVP_pkey_ec_p256(),
+      EVP_pkey_ec_p384(),
+      EVP_pkey_ec_p521(),
+      EVP_pkey_ed25519(),
+      EVP_pkey_rsa(),
+      EVP_pkey_x25519(),
+      // TODO(crbug.com/438761503): Remove DSA from this set, after callers that
+      // need DSA pass in |EVP_pkey_dsa| explicitly.
+      EVP_pkey_dsa(),
+  };
+}
+BSSL_NAMESPACE_END
+
+#endif  // OPENSSL_HEADER_CRYPTO_EVP_INTERNAL_H

@@ -1,134 +1,25 @@
-/* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
- * All rights reserved.
- *
- * This package is an SSL implementation written
- * by Eric Young (eay@cryptsoft.com).
- * The implementation was written so as to conform with Netscapes SSL.
- *
- * This library is free for commercial and non-commercial use as long as
- * the following conditions are aheared to.  The following conditions
- * apply to all code found in this distribution, be it the RC4, RSA,
- * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
- * included with this distribution is covered by the same copyright terms
- * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- *
- * Copyright remains Eric Young's, and as such any Copyright notices in
- * the code are not to be removed.
- * If this package is used in a product, Eric Young should be given attribution
- * as the author of the parts of the library used.
- * This can be in the form of a textual message at program startup or
- * in documentation (online or textual) provided with the package.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    "This product includes cryptographic software written by
- *     Eric Young (eay@cryptsoft.com)"
- *    The word 'cryptographic' can be left out if the rouines from the library
- *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from
- *    the apps directory (application code) you must include an acknowledgement:
- *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- *
- * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The licence and distribution terms for any publically available version or
- * derivative of this code cannot be changed.  i.e. this code cannot simply be
- * copied and put under another distribution licence
- * [including the GNU Public Licence.]
- */
-/* ====================================================================
- * Copyright (c) 1998-2006 The OpenSSL Project.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the OpenSSL Project
- *    for use in the OpenSSL Toolkit. (http://www.openssl.org/)"
- *
- * 4. The names "OpenSSL Toolkit" and "OpenSSL Project" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    openssl-core@openssl.org.
- *
- * 5. Products derived from this software may not be called "OpenSSL"
- *    nor may "OpenSSL" appear in their names without prior written
- *    permission of the OpenSSL Project.
- *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the OpenSSL Project
- *    for use in the OpenSSL Toolkit (http://www.openssl.org/)"
- *
- * THIS SOFTWARE IS PROVIDED BY THE OpenSSL PROJECT ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OpenSSL PROJECT OR
- * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
- * ====================================================================
- *
- * This product includes cryptographic software written by Eric Young
- * (eay@cryptsoft.com).  This product includes software written by Tim
- * Hudson (tjh@cryptsoft.com).
- *
- */
-/* ====================================================================
- * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
- *
- * Portions of the attached software ("Contribution") are developed by
- * SUN MICROSYSTEMS, INC., and are contributed to the OpenSSL project.
- *
- * The Contribution is licensed pursuant to the Eric Young open source
- * license provided above.
- *
- * The binary polynomial arithmetic software is originally written by
- * Sheueling Chang Shantz and Douglas Stebila of Sun Microsystems
- * Laboratories. */
+// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+// Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-#ifndef OPENSSL_HEADER_BN_INTERNAL_H
-#define OPENSSL_HEADER_BN_INTERNAL_H
+#ifndef OPENSSL_HEADER_CRYPTO_FIPSMODULE_BN_INTERNAL_H
+#define OPENSSL_HEADER_CRYPTO_FIPSMODULE_BN_INTERNAL_H
 
 #include <openssl/bn.h>
 
 #if defined(OPENSSL_X86_64) && defined(_MSC_VER)
-OPENSSL_MSVC_PRAGMA(warning(push, 3))
 #include <intrin.h>
-OPENSSL_MSVC_PRAGMA(warning(pop))
 #pragma intrinsic(__umulh, _umul128)
 #endif
 
@@ -149,6 +40,7 @@ extern "C" {
 #endif
 
 #define BN_BITS2 64
+#define BN_BITS2_LG 6
 #define BN_BYTES 8
 #define BN_BITS4 32
 #define BN_MASK2 (0xffffffffffffffffUL)
@@ -165,6 +57,7 @@ extern "C" {
 #define BN_ULLONG uint64_t
 #define BN_CAN_DIVIDE_ULLONG
 #define BN_BITS2 32
+#define BN_BITS2_LG 5
 #define BN_BYTES 4
 #define BN_BITS4 16
 #define BN_MASK2 (0xffffffffUL)
@@ -211,11 +104,6 @@ extern "C" {
     (BN_ULONG *)(x), sizeof(x) / sizeof(BN_ULONG),          \
         sizeof(x) / sizeof(BN_ULONG), 0, BN_FLG_STATIC_DATA \
   }
-
-#if defined(BN_ULLONG)
-#define Lw(t) ((BN_ULONG)(t))
-#define Hw(t) ((BN_ULONG)((t) >> BN_BITS2))
-#endif
 
 // bn_minimal_width returns the minimal number of words needed to represent
 // |bn|.
@@ -269,6 +157,18 @@ int bn_copy_words(BN_ULONG *out, size_t num, const BIGNUM *bn);
 // validation.
 void bn_assert_fits_in_bytes(const BIGNUM *bn, size_t num);
 
+// bn_secret marks |bn|'s contents, but not its width or sign, as secret. See
+// |CONSTTIME_SECRET| for details.
+inline void bn_secret(BIGNUM *bn) {
+  CONSTTIME_SECRET(bn->d, bn->width * sizeof(BN_ULONG));
+}
+
+// bn_declassify marks |bn|'s value as public. See |CONSTTIME_DECLASSIFY| for
+// details.
+inline void bn_declassify(BIGNUM *bn) {
+  CONSTTIME_DECLASSIFY(bn->d, bn->width * sizeof(BN_ULONG));
+}
+
 // bn_mul_add_words multiples |ap| by |w|, adds the result to |rp|, and places
 // the result in |rp|. |ap| and |rp| must both be |num| words long. It returns
 // the carry word of the operation. |ap| and |rp| may be equal but otherwise may
@@ -281,12 +181,14 @@ BN_ULONG bn_mul_add_words(BN_ULONG *rp, const BN_ULONG *ap, size_t num,
 // operation. |ap| and |rp| may be equal but otherwise may not alias.
 BN_ULONG bn_mul_words(BN_ULONG *rp, const BN_ULONG *ap, size_t num, BN_ULONG w);
 
-// bn_sqr_words sets |rp[2*i]| and |rp[2*i+1]| to |ap[i]|'s square, for all |i|
-// up to |num|. |ap| is an array of |num| words and |rp| an array of |2*num|
-// words. |ap| and |rp| may not alias.
+// bn_sqr_add_words computes |tmp| where |tmp[2*i]| and |tmp[2*i+1]| are
+// |ap[i]|'s square, for all |i| up to |num|, and adds the result to |rp|. If
+// the result does not fit in |2*num| words, the final carry bit is truncated.
+// |ap| is an array of |num| words and |rp| an array of |2*num| words. |ap| and
+// |rp| may not alias.
 //
 // This gives the contribution of the |ap[i]*ap[i]| terms when squaring |ap|.
-void bn_sqr_words(BN_ULONG *rp, const BN_ULONG *ap, size_t num);
+void bn_sqr_add_words(BN_ULONG *rp, const BN_ULONG *ap, size_t num);
 
 // bn_add_words adds |ap| to |bp| and places the result in |rp|, each of which
 // are |num| words long. It returns the carry bit, which is one if the operation
@@ -356,26 +258,41 @@ int bn_rand_range_words(BN_ULONG *out, BN_ULONG min_inclusive,
 int bn_rand_secret_range(BIGNUM *r, int *out_is_uniform, BN_ULONG min_inclusive,
                          const BIGNUM *max_exclusive);
 
-// BN_MONTGOMERY_MAX_WORDS is the maximum numer of words allowed in a |BIGNUM|
+// BN_MONTGOMERY_MAX_WORDS is the maximum number of words allowed in a |BIGNUM|
 // used with Montgomery reduction. Ideally this limit would be applied to all
 // |BIGNUM|s, in |bn_wexpand|, but the exactfloat library needs to create 8 MiB
 // values for other operations.
-#define BN_MONTGOMERY_MAX_WORDS (8 * 1024 / sizeof(BN_ULONG))
+//
+// This limit is set so that one number fits within 1 KiB, giving room to
+// allocate a few of them on the stack in |bn_mul_mont_words| without exceeding
+// a page (4 KiB). It is also set to limit the DoS impact of large RSA, DH, and
+// DSA keys, which scale cubically.
+#define BN_MONTGOMERY_MAX_WORDS (8192 / BN_BITS2)
+
+struct bn_mont_ctx_st {
+  // RR is R^2, reduced modulo |N|. It is used to convert to Montgomery form. It
+  // is guaranteed to have the same width as |N|.
+  BIGNUM RR;
+  // N is the modulus. It is always stored in minimal form, so |N.width|
+  // determines R.
+  BIGNUM N;
+  BN_ULONG n0[BN_MONT_CTX_N0_LIMBS];  // least significant words of (R*Ri-1)/N
+};
 
 #if !defined(OPENSSL_NO_ASM) &&                         \
     (defined(OPENSSL_X86) || defined(OPENSSL_X86_64) || \
      defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64))
 #define OPENSSL_BN_ASM_MONT
-// bn_mul_mont writes |ap| * |bp| mod |np| to |rp|, each |num| words
+// bn_mul_mont_words writes |ap| * |bp| mod |np| to |rp|, each |num| words
 // long. Inputs and outputs are in Montgomery form. |n0| is a pointer to the
-// corresponding field in |BN_MONT_CTX|. It returns one if |bn_mul_mont| handles
-// inputs of this size and zero otherwise.
+// corresponding field in |BN_MONT_CTX|.
 //
 // If at least one of |ap| or |bp| is fully reduced, |rp| will be fully reduced.
 // If neither is fully-reduced, the output may not be either.
 //
-// This function allocates |num| words on the stack, so |num| should be at most
-// |BN_MONTGOMERY_MAX_WORDS|.
+// This function allocates up to 2 * |num| words (plus a constant allocation) on
+// the stack, so |num| should be at most |BN_MONTGOMERY_MAX_WORDS|.
+// Additionally, |num| must be at least 128 / |BN_BITS2|.
 //
 // TODO(davidben): The x86_64 implementation expects a 32-bit input and masks
 // off upper bits. The aarch64 implementation expects a 64-bit input and does
@@ -384,25 +301,74 @@ int bn_rand_secret_range(BIGNUM *r, int *out_is_uniform, BN_ULONG min_inclusive,
 //
 // See also discussion in |ToWord| in abi_test.h for notes on smaller-than-word
 // inputs.
-int bn_mul_mont(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
-                const BN_ULONG *np, const BN_ULONG *n0, size_t num);
+void bn_mul_mont_words(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                       const BN_ULONG *np,
+                       const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], size_t num);
+
+#if defined(OPENSSL_X86_64)
+inline int bn_mulx_adx_capable(void) {
+  // MULX is in BMI2.
+  return CRYPTO_is_BMI2_capable() && CRYPTO_is_ADX_capable();
+}
+void bn_mul_mont_nohw(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                      const BN_ULONG *np,
+                      const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], size_t num);
+inline int bn_mul4x_mont_capable(size_t num) {
+  return num >= 8 && (num & 3) == 0;
+}
+void bn_mul4x_mont(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                   const BN_ULONG *np, const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS],
+                   size_t num);
+inline int bn_mulx4x_mont_capable(size_t num) {
+  return bn_mul4x_mont_capable(num) && bn_mulx_adx_capable();
+}
+void bn_mulx4x_mont(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                    const BN_ULONG *np, const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS],
+                    size_t num);
+inline int bn_sqr8x_mont_capable(size_t num) {
+  return num >= 8 && (num & 7) == 0;
+}
+void bn_sqr8x_mont(BN_ULONG *rp, const BN_ULONG *ap, BN_ULONG mulx_adx_capable,
+                   const BN_ULONG *np, const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS],
+                   size_t num);
+#elif defined(OPENSSL_ARM)
+inline int bn_mul8x_mont_neon_capable(size_t num) {
+  return (num & 7) == 0 && CRYPTO_is_NEON_capable();
+}
+void bn_mul8x_mont_neon(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                        const BN_ULONG *np,
+                        const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], size_t num);
+void bn_mul_mont_nohw(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+                      const BN_ULONG *np,
+                      const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], size_t num);
 #endif
+
+#endif  // OPENSSL_BN_ASM_MONT
 
 #if !defined(OPENSSL_NO_ASM) && defined(OPENSSL_X86_64)
 #define OPENSSL_BN_ASM_MONT5
 
-// bn_mul_mont_gather5 multiples loads index |power| of |table|, multiplies it
-// by |ap| modulo |np|, and stores the result in |rp|. The values are |num|
-// words long and represented in Montgomery form. |n0| is a pointer to the
-// corresponding field in |BN_MONT_CTX|. |table| must be aligned to at least
-// 16 bytes. |power| must be less than 32 and is treated as secret.
-//
-// WARNING: This function implements Almost Montgomery Multiplication from
-// https://eprint.iacr.org/2011/239. The inputs do not need to be fully reduced.
-// However, even if they are fully reduced, the output may not be.
-void bn_mul_mont_gather5(BN_ULONG *rp, const BN_ULONG *ap,
-                         const BN_ULONG *table, const BN_ULONG *np,
-                         const BN_ULONG *n0, int num, int power);
+// The following functions implement |bn_mul_mont_gather5|. See
+// |bn_mul_mont_gather5| for details.
+inline int bn_mul4x_mont_gather5_capable(int num) { return (num & 7) == 0; }
+void bn_mul4x_mont_gather5(BN_ULONG *rp, const BN_ULONG *ap,
+                           const BN_ULONG *table, const BN_ULONG *np,
+                           const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], int num,
+                           int power);
+
+inline int bn_mulx4x_mont_gather5_capable(int num) {
+  return bn_mul4x_mont_gather5_capable(num) && CRYPTO_is_ADX_capable() &&
+         CRYPTO_is_BMI1_capable() && CRYPTO_is_BMI2_capable();
+}
+void bn_mulx4x_mont_gather5(BN_ULONG *rp, const BN_ULONG *ap,
+                            const BN_ULONG *table, const BN_ULONG *np,
+                            const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], int num,
+                            int power);
+
+void bn_mul_mont_gather5_nohw(BN_ULONG *rp, const BN_ULONG *ap,
+                              const BN_ULONG *table, const BN_ULONG *np,
+                              const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS], int num,
+                              int power);
 
 // bn_scatter5 stores |inp| to index |power| of |table|. |inp| and each entry of
 // |table| are |num| words long. |power| must be less than 32 and is treated as
@@ -416,17 +382,21 @@ void bn_scatter5(const BN_ULONG *inp, size_t num, BN_ULONG *table,
 // is treated as secret. |table| must be aligned to at least 16 bytes.
 void bn_gather5(BN_ULONG *out, size_t num, const BN_ULONG *table, size_t power);
 
-// bn_power5 squares |ap| five times and multiplies it by the value stored at
-// index |power| of |table|, modulo |np|. It stores the result in |rp|. The
-// values are |num| words long and represented in Montgomery form. |n0| is a
-// pointer to the corresponding field in |BN_MONT_CTX|. |num| must be divisible
-// by 8. |power| must be less than 32 and is treated as secret.
-//
-// WARNING: This function implements Almost Montgomery Multiplication from
-// https://eprint.iacr.org/2011/239. The inputs do not need to be fully reduced.
-// However, even if they are fully reduced, the output may not be.
-void bn_power5(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *table,
-               const BN_ULONG *np, const BN_ULONG *n0, int num, int power);
+// The following functions implement |bn_power5|. See |bn_power5| for details.
+void bn_power5_nohw(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *table,
+                    const BN_ULONG *np, const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS],
+                    int num, int power);
+
+inline int bn_power5_capable(int num) { return (num & 7) == 0; }
+
+inline int bn_powerx5_capable(int num) {
+  return bn_power5_capable(num) && CRYPTO_is_ADX_capable() &&
+         CRYPTO_is_BMI1_capable() && CRYPTO_is_BMI2_capable();
+}
+void bn_powerx5(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *table,
+                const BN_ULONG *np, const BN_ULONG n0[BN_MONT_CTX_N0_LIMBS],
+                int num, int power);
+
 #endif  // !OPENSSL_NO_ASM && OPENSSL_X86_64
 
 uint64_t bn_mont_n0(const BIGNUM *n);
@@ -695,8 +665,8 @@ int BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, CRYPTO_MUTEX *lock,
 void bn_mul_small(BN_ULONG *r, size_t num_r, const BN_ULONG *a, size_t num_a,
                  const BN_ULONG *b, size_t num_b);
 
-// bn_sqr_small sets |r| to |a|^2. |num_a| must be at most |BN_SMALL_MAX_WORDS|.
-// |num_r| must be |num_a|*2. |r| and |a| may not alias.
+// bn_sqr_small sets |r| to |a|^2. |num_r| must be |num_a|*2. |r| and |a| may
+// not alias.
 void bn_sqr_small(BN_ULONG *r, size_t num_r, const BN_ULONG *a, size_t num_a);
 
 // In the following functions, the modulus must be at most |BN_SMALL_MAX_WORDS|
@@ -754,8 +724,8 @@ void bn_mod_inverse0_prime_mont_small(BN_ULONG *r, const BN_ULONG *a,
 
 // bn_big_endian_to_words interprets |in_len| bytes from |in| as a big-endian,
 // unsigned integer and writes the result to |out_len| words in |out|. |out_len|
-// must be large enough to represent any |in_len|-byte value. That is, |out_len|
-// must be at least |BN_BYTES * in_len|.
+// must be large enough to represent any |in_len|-byte value. That is, |in_len|
+// must be at most |BN_BYTES * out_len|.
 void bn_big_endian_to_words(BN_ULONG *out, size_t out_len, const uint8_t *in,
                             size_t in_len);
 
@@ -773,4 +743,4 @@ void bn_words_to_big_endian(uint8_t *out, size_t out_len, const BN_ULONG *in,
 }  // extern C
 #endif
 
-#endif  // OPENSSL_HEADER_BN_INTERNAL_H
+#endif  // OPENSSL_HEADER_CRYPTO_FIPSMODULE_BN_INTERNAL_H

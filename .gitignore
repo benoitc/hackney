@@ -13,3 +13,5 @@ mime.types
 rebar3.crashdump
 .aider*
 doc/
+priv/*.so
+priv/*.dll

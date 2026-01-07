@@ -1,16 +1,16 @@
-/* Copyright (c) 2023, Google Inc.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
+// Copyright 2023 The BoringSSL Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #ifndef OPENSSL_HEADER_ASM_BASE_H
 #define OPENSSL_HEADER_ASM_BASE_H
@@ -34,7 +34,7 @@
 // - The file, on aarch64, uses the macros defined below to be compatible with
 //   BTI and PAC.
 //
-// - The file, on X86_64, requires the progrram to be compatible with Intel IBT
+// - The file, on x86_64, requires the program to be compatible with Intel IBT
 //   and SHSTK
 
 #if defined(__ASSEMBLER__)
@@ -56,7 +56,7 @@
 // https://lpc.events/event/7/contributions/729/attachments/496/903/CET-LPC-2020.pdf
 //
 // cet.h defines _CET_ENDBR which is used to mark function entry points for IBT.
-// and adds the assembly marker. The value of _CET_ENDBR is made dependant on if
+// and adds the assembly marker. The value of _CET_ENDBR is made dependent on if
 // '-fcf-protection' is passed to the compiler. _CET_ENDBR is only required when
 // the function is the target of an indirect jump, but BoringSSL chooses to mark
 // all assembly entry points because it is easier, and allows BoringSSL's ABI
@@ -75,14 +75,13 @@
 #error "ARM assembler must define __ARM_ARCH"
 #endif
 
-// __ARM_ARCH__ is used by OpenSSL assembly to determine the minimum target ARM
-// version.
-//
-// TODO(davidben): Switch the assembly to use |__ARM_ARCH| directly.
-#define __ARM_ARCH__ __ARM_ARCH
-
 // Even when building for 32-bit ARM, support for aarch64 crypto instructions
 // will be included.
+//
+// TODO(davidben): Remove this and the corresponding ifdefs? This is only
+// defined because some OpenSSL assembly files would allow disabling the NEON
+// code entirely. I think we'd prefer to do that by lifting the dispatch to C
+// anyway.
 #define __ARM_MAX_ARCH__ 8
 
 // Support macros for
@@ -153,7 +152,7 @@
 //
 // References:
 // - "ELF for the Arm® 64-bit Architecture"
-//   https://github.com/ARM-software/abi-aa/blob/master/aaelf64/aaelf64.rst
+//   https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
 // - "Providing protection for complex software"
 //   https://developer.arm.com/architectures/learn-the-architecture/providing-protection-for-complex-software
 

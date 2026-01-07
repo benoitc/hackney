@@ -1,18 +1,18 @@
 # coding=utf8
 
-# Copyright (c) 2015, Google Inc.
+# Copyright 2015 The BoringSSL Authors
 #
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-# SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-# OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-# CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Enumerates source files for consumption by various build systems."""
 
@@ -23,64 +23,29 @@ import sys
 import json
 
 
-# OS_ARCH_COMBOS maps from OS and platform to the OpenSSL assembly "style" for
-# that platform and the extension used by asm files.
-#
-# TODO(https://crbug.com/boringssl/524): This probably should be a map, but some
-# downstream scripts import this to find what folders to add/remove from git.
-OS_ARCH_COMBOS = [
-    ('apple', 'arm', 'ios32', [], 'S'),
-    ('apple', 'aarch64', 'ios64', [], 'S'),
-    ('apple', 'x86', 'macosx', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
-    ('apple', 'x86_64', 'macosx', [], 'S'),
-    ('linux', 'arm', 'linux32', [], 'S'),
-    ('linux', 'aarch64', 'linux64', [], 'S'),
-    ('linux', 'x86', 'elf', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
-    ('linux', 'x86_64', 'elf', [], 'S'),
-    ('win', 'x86', 'win32n', ['-DOPENSSL_IA32_SSE2'], 'asm'),
-    ('win', 'x86_64', 'nasm', [], 'asm'),
-    ('win', 'aarch64', 'win64', [], 'S'),
-]
-
-# NON_PERL_FILES enumerates assembly files that are not processed by the
-# perlasm system.
-NON_PERL_FILES = {
-    ('apple', 'x86_64'): [
-        'src/third_party/fiat/asm/fiat_curve25519_adx_mul.S',
-        'src/third_party/fiat/asm/fiat_curve25519_adx_square.S',
-    ],
-    ('linux', 'arm'): [
-        'src/crypto/curve25519/asm/x25519-asm-arm.S',
-        'src/crypto/poly1305/poly1305_arm_asm.S',
-    ],
-    ('linux', 'x86_64'): [
-        'src/crypto/hrss/asm/poly_rq_mul.S',
-        'src/third_party/fiat/asm/fiat_curve25519_adx_mul.S',
-        'src/third_party/fiat/asm/fiat_curve25519_adx_square.S',
-    ],
-}
-
 PREFIX = None
-EMBED_TEST_DATA = True
 
 
 def PathOf(x):
   return x if not PREFIX else os.path.join(PREFIX, x)
 
 
-LICENSE_TEMPLATE = """Copyright (c) 2015, Google Inc.
+TARGET_PREFIX = ''
 
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
 
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.""".split("\n")
+LICENSE_TEMPLATE = """Copyright 2015 The BoringSSL Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.""".split("\n")
 
 def LicenseHeader(comment):
   lines = []
@@ -101,12 +66,13 @@ class Android(object):
 """
 
   def PrintVariableSection(self, out, name, files):
+    name = f'{TARGET_PREFIX}{name}'
     out.write('%s := \\\n' % name)
     for f in sorted(files):
       out.write('  %s\\\n' % f)
     out.write('\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     # New Android.bp format
     with open('sources.bp', 'w+') as blueprint:
       blueprint.write(self.header.replace('#', '//'))
@@ -114,31 +80,36 @@ class Android(object):
       #  Separate out BCM files to allow different compilation rules (specific to Android FIPS)
       bcm_c_files = files['bcm_crypto']
       non_bcm_c_files = [file for file in files['crypto'] if file not in bcm_c_files]
-      non_bcm_asm = self.FilterBcmAsm(asm_outputs, False)
-      bcm_asm = self.FilterBcmAsm(asm_outputs, True)
+      non_bcm_asm = self.FilterBcmAsm(files['crypto_asm'], False)
+      bcm_asm = self.FilterBcmAsm(files['crypto_asm'], True)
 
-      self.PrintDefaults(blueprint, 'libcrypto_sources', non_bcm_c_files, non_bcm_asm)
-      self.PrintDefaults(blueprint, 'libcrypto_bcm_sources', bcm_c_files, bcm_asm)
+      self.PrintDefaults(blueprint, 'libcrypto_sources', non_bcm_c_files, asm_files=non_bcm_asm)
+      self.PrintDefaults(blueprint, 'libcrypto_bcm_sources', bcm_c_files, asm_files=bcm_asm)
       self.PrintDefaults(blueprint, 'libssl_sources', files['ssl'])
       self.PrintDefaults(blueprint, 'bssl_sources', files['tool'])
       self.PrintDefaults(blueprint, 'boringssl_test_support_sources', files['test_support'])
-      self.PrintDefaults(blueprint, 'boringssl_crypto_test_sources', files['crypto_test'])
+      self.PrintDefaults(blueprint, 'boringssl_crypto_test_sources', files['crypto_test'], data=files['crypto_test_data'])
       self.PrintDefaults(blueprint, 'boringssl_ssl_test_sources', files['ssl_test'])
+      self.PrintDefaults(blueprint, 'libpki_sources', files['pki'])
 
     # Legacy Android.mk format, only used by Trusty in new branches
     with open('sources.mk', 'w+') as makefile:
       makefile.write(self.header)
       makefile.write('\n')
       self.PrintVariableSection(makefile, 'crypto_sources', files['crypto'])
+      self.PrintVariableSection(makefile, 'crypto_sources_asm',
+                                files['crypto_asm'])
 
-      for ((osname, arch), asm_files) in asm_outputs:
-        if osname != 'linux':
-          continue
-        self.PrintVariableSection(
-            makefile, '%s_%s_sources' % (osname, arch), asm_files)
-
-  def PrintDefaults(self, blueprint, name, files, asm_outputs={}):
+  def PrintDefaults(self, blueprint, name, files, asm_files=[], data=[]):
     """Print a cc_defaults section from a list of C files and optionally assembly outputs"""
+    name = f'{TARGET_PREFIX}{name}'
+    if asm_files:
+      blueprint.write('\n')
+      blueprint.write('%s_asm = [\n' % name)
+      for f in sorted(asm_files):
+        blueprint.write('    "%s",\n' % f)
+      blueprint.write(']\n')
+
     blueprint.write('\n')
     blueprint.write('cc_defaults {\n')
     blueprint.write('    name: "%s",\n' % name)
@@ -146,21 +117,26 @@ class Android(object):
     for f in sorted(files):
       blueprint.write('        "%s",\n' % f)
     blueprint.write('    ],\n')
+    if data:
+      blueprint.write('    data: [\n')
+      for f in sorted(data):
+        blueprint.write('        "%s",\n' % f)
+      blueprint.write('    ],\n')
 
-    if asm_outputs:
+    if asm_files:
       blueprint.write('    target: {\n')
-      for ((osname, arch), asm_files) in asm_outputs:
-        if osname != 'linux':
-          continue
-        if arch == 'aarch64':
-          arch = 'arm64'
-
-        blueprint.write('        linux_%s: {\n' % arch)
-        blueprint.write('            srcs: [\n')
-        for f in sorted(asm_files):
-          blueprint.write('                "%s",\n' % f)
-        blueprint.write('            ],\n')
-        blueprint.write('        },\n')
+      # Only emit asm for Linux. On Windows, BoringSSL requires NASM, which is
+      # not available in AOSP. On Darwin, the assembly works fine, but it
+      # conflicts with Android's FIPS build. See b/294399371.
+      blueprint.write('        linux: {\n')
+      blueprint.write('            srcs: %s_asm,\n' % name)
+      blueprint.write('        },\n')
+      blueprint.write('        darwin: {\n')
+      blueprint.write('            cflags: ["-DOPENSSL_NO_ASM"],\n')
+      blueprint.write('        },\n')
+      blueprint.write('        windows: {\n')
+      blueprint.write('            cflags: ["-DOPENSSL_NO_ASM"],\n')
+      blueprint.write('        },\n')
       blueprint.write('    },\n')
 
     blueprint.write('}\n')
@@ -169,7 +145,7 @@ class Android(object):
     """Filter a list of assembly outputs based on whether they belong in BCM
 
     Args:
-      asm: Assembly file lists to filter
+      asm: Assembly file list to filter
       want_bcm: If true then include BCM files, otherwise do not
 
     Returns:
@@ -178,8 +154,7 @@ class Android(object):
     # TODO(https://crbug.com/boringssl/542): Rather than filtering by filename,
     # use the variable listed in the CMake perlasm line, available in
     # ExtractPerlAsmFromCMakeFile.
-    return [(archinfo, filter(lambda p: ("/crypto/fipsmodule/" in p) == want_bcm, files))
-            for (archinfo, files) in asm]
+    return filter(lambda p: ("/crypto/fipsmodule/" in p) == want_bcm, asm)
 
 
 class AndroidCMake(object):
@@ -202,26 +177,27 @@ class AndroidCMake(object):
       out.write('  ${BORINGSSL_ROOT}%s\n' % f)
     out.write(')\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     # The Android emulator uses a custom CMake buildsystem.
     #
-    # TODO(davidben): Move our various source lists into sources.cmake and have
-    # Android consume that directly.
+    # TODO(crbug.com/boringssl/542): Move our various source lists into
+    # sources.cmake and have Android consume that directly.
     with open('android-sources.cmake', 'w+') as out:
       out.write(self.header)
 
       self.PrintVariableSection(out, 'crypto_sources', files['crypto'])
+      self.PrintVariableSection(out, 'crypto_sources_asm', files['crypto_asm'])
+      self.PrintVariableSection(out, 'crypto_sources_nasm',
+                                files['crypto_nasm'])
       self.PrintVariableSection(out, 'ssl_sources', files['ssl'])
       self.PrintVariableSection(out, 'tool_sources', files['tool'])
       self.PrintVariableSection(out, 'test_support_sources',
                                 files['test_support'])
       self.PrintVariableSection(out, 'crypto_test_sources',
                                 files['crypto_test'])
+      self.PrintVariableSection(out, 'crypto_test_data',
+                                files['crypto_test_data'])
       self.PrintVariableSection(out, 'ssl_test_sources', files['ssl_test'])
-
-      for ((osname, arch), asm_files) in asm_outputs:
-        self.PrintVariableSection(
-            out, 'crypto_sources_%s_%s' % (osname, arch), asm_files)
 
 
 class Bazel(object):
@@ -244,7 +220,7 @@ class Bazel(object):
       out.write('    "%s",\n' % PathOf(f))
     out.write(']\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     with open('BUILD.generated.bzl', 'w+') as out:
       out.write(self.header)
 
@@ -259,14 +235,14 @@ class Bazel(object):
       self.PrintVariableSection(out, 'crypto_sources', files['crypto'])
       self.PrintVariableSection(out, 'crypto_sources_asm', files['crypto_asm'])
       self.PrintVariableSection(out, 'crypto_sources_nasm', files['crypto_nasm'])
+      self.PrintVariableSection(out, 'pki_headers', files['pki_headers'])
+      self.PrintVariableSection(
+          out, 'pki_internal_headers', files['pki_internal_headers'])
+      self.PrintVariableSection(out, 'pki_sources', files['pki'])
+      self.PrintVariableSection(out, 'rust_bssl_sys', files['rust_bssl_sys'])
+      self.PrintVariableSection(out, 'rust_bssl_crypto', files['rust_bssl_crypto'])
       self.PrintVariableSection(out, 'tool_sources', files['tool'])
       self.PrintVariableSection(out, 'tool_headers', files['tool_headers'])
-
-      # TODO(crbug.com/boringssl/542): Migrate everyone to the combined asm
-      # source lists, so we don't need to generate both sets.
-      for ((osname, arch), asm_files) in asm_outputs:
-        self.PrintVariableSection(
-            out, 'crypto_sources_%s_%s' % (osname, arch), asm_files)
 
     with open('BUILD.generated_tests.bzl', 'w+') as out:
       out.write(self.header)
@@ -275,6 +251,7 @@ class Bazel(object):
       for filename in sorted(files['test_support'] +
                              files['test_support_headers'] +
                              files['crypto_internal_headers'] +
+                             files['pki_internal_headers'] +
                              files['ssl_internal_headers']):
         out.write('    "%s",\n' % PathOf(filename))
 
@@ -283,8 +260,12 @@ class Bazel(object):
       self.PrintVariableSection(out, 'crypto_test_sources',
                                 files['crypto_test'])
       self.PrintVariableSection(out, 'ssl_test_sources', files['ssl_test'])
+      self.PrintVariableSection(out, 'pki_test_sources',
+                                files['pki_test'])
       self.PrintVariableSection(out, 'crypto_test_data',
                                 files['crypto_test_data'])
+      self.PrintVariableSection(out, 'pki_test_data',
+                                files['pki_test_data'])
       self.PrintVariableSection(out, 'urandom_test_sources',
                                 files['urandom_test'])
 
@@ -303,20 +284,18 @@ class Eureka(object):
       out.write('  %s\\\n' % f)
     out.write('\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     # Legacy Android.mk format
     with open('eureka.mk', 'w+') as makefile:
       makefile.write(self.header)
 
       self.PrintVariableSection(makefile, 'crypto_sources', files['crypto'])
+      self.PrintVariableSection(makefile, 'crypto_sources_asm',
+                                files['crypto_asm'])
+      self.PrintVariableSection(makefile, 'crypto_sources_nasm',
+                                files['crypto_nasm'])
       self.PrintVariableSection(makefile, 'ssl_sources', files['ssl'])
       self.PrintVariableSection(makefile, 'tool_sources', files['tool'])
-
-      for ((osname, arch), asm_files) in asm_outputs:
-        if osname != 'linux':
-          continue
-        self.PrintVariableSection(
-            makefile, '%s_%s_sources' % (osname, arch), asm_files)
 
 
 class GN(object):
@@ -333,12 +312,17 @@ class GN(object):
       out.write('\n')
     self.firstSection = False
 
-    out.write('%s = [\n' % name)
-    for f in sorted(files):
-      out.write('  "%s",\n' % f)
-    out.write(']\n')
+    if len(files) == 0:
+      out.write('%s = []\n' % name)
+    elif len(files) == 1:
+      out.write('%s = [ "%s" ]\n' % (name, files[0]))
+    else:
+      out.write('%s = [\n' % name)
+      for f in sorted(files):
+        out.write('  "%s",\n' % f)
+      out.write(']\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     with open('BUILD.generated.gni', 'w+') as out:
       out.write(self.header)
 
@@ -348,17 +332,19 @@ class GN(object):
       self.PrintVariableSection(out, 'crypto_sources_asm', files['crypto_asm'])
       self.PrintVariableSection(out, 'crypto_sources_nasm',
                                 files['crypto_nasm'])
-      self.PrintVariableSection(out, 'crypto_headers',
-                                files['crypto_headers'])
+      self.PrintVariableSection(out, 'crypto_headers', files['crypto_headers'])
+      self.PrintVariableSection(out, 'rust_bssl_sys', files['rust_bssl_sys'])
+      self.PrintVariableSection(out, 'rust_bssl_crypto',
+                                files['rust_bssl_crypto'])
       self.PrintVariableSection(out, 'ssl_sources',
                                 files['ssl'] + files['ssl_internal_headers'])
       self.PrintVariableSection(out, 'ssl_headers', files['ssl_headers'])
+      self.PrintVariableSection(out, 'pki_sources', files['pki'])
+      self.PrintVariableSection(out, 'pki_internal_headers',
+                                files['pki_internal_headers'])
+      self.PrintVariableSection(out, 'pki_headers', files['pki_headers'])
       self.PrintVariableSection(out, 'tool_sources',
                                 files['tool'] + files['tool_headers'])
-
-      for ((osname, arch), asm_files) in asm_outputs:
-        self.PrintVariableSection(
-            out, 'crypto_sources_%s_%s' % (osname, arch), asm_files)
 
       fuzzers = [os.path.splitext(os.path.basename(fuzzer))[0]
                  for fuzzer in files['fuzz']]
@@ -375,7 +361,10 @@ class GN(object):
                                 files['crypto_test'])
       self.PrintVariableSection(out, 'crypto_test_data',
                                 files['crypto_test_data'])
+      self.PrintVariableSection(out, 'pki_test_data',
+                                files['pki_test_data'])
       self.PrintVariableSection(out, 'ssl_test_sources', files['ssl_test'])
+      self.PrintVariableSection(out, 'pki_test_sources', files['pki_test'])
 
 
 class GYP(object):
@@ -392,7 +381,7 @@ class GYP(object):
       out.write('      \'%s\',\n' % f)
     out.write('    ],\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     with open('boringssl.gypi', 'w+') as gypi:
       gypi.write(self.header + '{\n  \'variables\': {\n')
 
@@ -402,10 +391,10 @@ class GYP(object):
       self.PrintVariableSection(gypi, 'boringssl_crypto_sources',
                                 files['crypto'] + files['crypto_headers'] +
                                 files['crypto_internal_headers'])
-
-      for ((osname, arch), asm_files) in asm_outputs:
-        self.PrintVariableSection(gypi, 'boringssl_%s_%s_sources' %
-                                  (osname, arch), asm_files)
+      self.PrintVariableSection(gypi, 'boringssl_crypto_asm_sources',
+                                files['crypto_asm'])
+      self.PrintVariableSection(gypi, 'boringssl_crypto_nasm_sources',
+                                files['crypto_nasm'])
 
       gypi.write('  }\n}\n')
 
@@ -415,11 +404,11 @@ class CMake(object):
     self.header = LicenseHeader("#") + R'''
 # This file is created by generate_build_files.py. Do not edit manually.
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 project(BoringSSL LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -467,7 +456,7 @@ else()
     if(NOT WIN32)
       set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,--noexecstack")
     endif()
-    # Clang's integerated assembler does not support debug symbols.
+    # Clang's integrated assembler does not support debug symbols.
     if(NOT CMAKE_ASM_COMPILER_ID MATCHES "Clang")
       set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,-g")
     endif()
@@ -511,7 +500,7 @@ endif()
       out.write('  %s\n' % PathOf(f))
     out.write(')\n\n')
 
-  def WriteFiles(self, files, asm_outputs):
+  def WriteFiles(self, files):
     with open('CMakeLists.txt', 'w+') as cmake:
       cmake.write(self.header)
 
@@ -535,7 +524,7 @@ endif()
       self.PrintExe(cmake, 'bssl', files['tool'], ['ssl', 'crypto'])
 
       cmake.write(
-R'''if(NOT ANDROID)
+R'''if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
   find_package(Threads REQUIRED)
   target_link_libraries(crypto Threads::Threads)
 endif()
@@ -547,28 +536,9 @@ endif()
 ''')
 
 class JSON(object):
-  def WriteFiles(self, files, asm_outputs):
-    sources = dict(files)
-    for ((osname, arch), asm_files) in asm_outputs:
-      sources['crypto_%s_%s' % (osname, arch)] = asm_files
+  def WriteFiles(self, files):
     with open('sources.json', 'w+') as f:
-      json.dump(sources, f, sort_keys=True, indent=2)
-
-def FindCMakeFiles(directory):
-  """Returns list of all CMakeLists.txt files recursively in directory."""
-  cmakefiles = []
-
-  for (path, _, filenames) in os.walk(directory):
-    for filename in filenames:
-      if filename == 'CMakeLists.txt':
-        cmakefiles.append(os.path.join(path, filename))
-
-  return cmakefiles
-
-def OnlyFIPSFragments(path, dent, is_dir):
-  return is_dir or (path.startswith(
-      os.path.join('src', 'crypto', 'fipsmodule', '')) and
-      NoTests(path, dent, is_dir))
+      json.dump(files, f, sort_keys=True, indent=2)
 
 def NoTestsNorFIPSFragments(path, dent, is_dir):
   return (NoTests(path, dent, is_dir) and
@@ -594,10 +564,6 @@ def NoTestRunnerFiles(path, dent, is_dir):
   # NOTE(martinkr): This prevents .h/.cc files in src/ssl/test/runner, which
   # are in their own subpackage, from being included in boringssl/BUILD files.
   return not is_dir or dent != 'runner'
-
-
-def SSLHeaderFiles(path, dent, is_dir):
-  return dent in ['ssl.h', 'tls1.h', 'ssl23.h', 'ssl3.h', 'dtls1.h', 'srtp.h']
 
 
 def FindCFiles(directory, filter_func):
@@ -641,208 +607,56 @@ def FindHeaderFiles(directory, filter_func):
   return hfiles
 
 
-def ExtractPerlAsmFromCMakeFile(cmakefile):
-  """Parses the contents of the CMakeLists.txt file passed as an argument and
-  returns a list of all the perlasm() directives found in the file."""
-  perlasms = []
-  with open(cmakefile) as f:
-    for line in f:
-      line = line.strip()
-      if not line.startswith('perlasm('):
-        continue
-      if not line.endswith(')'):
-        raise ValueError('Bad perlasm line in %s' % cmakefile)
-      # Remove "perlasm(" from start and ")" from end
-      params = line[8:-1].split()
-      if len(params) != 4:
-        raise ValueError('Bad perlasm line in %s' % cmakefile)
-      perlasms.append({
-          'arch': params[1],
-          'output': os.path.join(os.path.dirname(cmakefile), params[2]),
-          'input': os.path.join(os.path.dirname(cmakefile), params[3]),
-      })
-
-  return perlasms
-
-
-def ReadPerlAsmOperations():
-  """Returns a list of all perlasm() directives found in CMake config files in
-  src/."""
-  perlasms = []
-  cmakefiles = FindCMakeFiles('src')
-
-  for cmakefile in cmakefiles:
-    perlasms.extend(ExtractPerlAsmFromCMakeFile(cmakefile))
-
-  return perlasms
-
-
-def PerlAsm(output_filename, input_filename, perlasm_style, extra_args):
-  """Runs the a perlasm script and puts the output into output_filename."""
-  base_dir = os.path.dirname(output_filename)
-  if not os.path.isdir(base_dir):
-    os.makedirs(base_dir)
-  subprocess.check_call(
-      ['perl', input_filename, perlasm_style] + extra_args + [output_filename])
-
-
-def WriteAsmFiles(perlasms):
-  """Generates asm files from perlasm directives for each supported OS x
-  platform combination."""
-  asmfiles = {}
-
-  for perlasm in perlasms:
-    for (osname, arch, perlasm_style, extra_args, asm_ext) in OS_ARCH_COMBOS:
-      if arch != perlasm['arch']:
-        continue
-      # TODO(https://crbug.com/boringssl/524): Now that we incorporate osname in
-      # the output filename, the asm files can just go in a single directory.
-      # For now, we keep them in target-specific directories to avoid breaking
-      # downstream scripts.
-      key = (osname, arch)
-      outDir = '%s-%s' % key
-      output = perlasm['output']
-      if not output.startswith('src'):
-        raise ValueError('output missing src: %s' % output)
-      output = os.path.join(outDir, output[4:])
-      output = '%s-%s.%s' % (output, osname, asm_ext)
-      PerlAsm(output, perlasm['input'], perlasm_style, extra_args)
-      asmfiles.setdefault(key, []).append(output)
-
-  for (key, non_perl_asm_files) in NON_PERL_FILES.items():
-    asmfiles.setdefault(key, []).extend(non_perl_asm_files)
-
-  for files in asmfiles.values():
-    files.sort()
-
-  return asmfiles
-
-
-def ExtractVariablesFromCMakeFile(cmakefile):
-  """Parses the contents of the CMakeLists.txt file passed as an argument and
-  returns a dictionary of exported source lists."""
-  variables = {}
-  in_set_command = False
-  set_command = []
-  with open(cmakefile) as f:
-    for line in f:
-      if '#' in line:
-        line = line[:line.index('#')]
-      line = line.strip()
-
-      if not in_set_command:
-        if line.startswith('set('):
-          in_set_command = True
-          set_command = []
-      elif line == ')':
-        in_set_command = False
-        if not set_command:
-          raise ValueError('Empty set command')
-        variables[set_command[0]] = set_command[1:]
-      else:
-        set_command.extend([c for c in line.split(' ') if c])
-
-  if in_set_command:
-    raise ValueError('Unfinished set command')
-  return variables
-
-
 def PrefixWithSrc(files):
   return ['src/' + x for x in files]
 
 
 def main(platforms):
-  cmake = ExtractVariablesFromCMakeFile(os.path.join('src', 'sources.cmake'))
-  crypto_c_files = (FindCFiles(os.path.join('src', 'crypto'), NoTestsNorFIPSFragments) +
-                    FindCFiles(os.path.join('src', 'third_party', 'fiat'), NoTestsNorFIPSFragments))
-  fips_fragments = FindCFiles(os.path.join('src', 'crypto', 'fipsmodule'), OnlyFIPSFragments)
-  ssl_source_files = FindCFiles(os.path.join('src', 'ssl'), NoTests)
-  tool_h_files = FindHeaderFiles(os.path.join('src', 'tool'), AllFiles)
+  with open(os.path.join('src', 'gen', 'sources.json')) as f:
+    sources = json.load(f)
 
-  # BCM shared library C files
-  bcm_crypto_c_files = [
-      os.path.join('src', 'crypto', 'fipsmodule', 'bcm.c')
-  ]
-
-  # Generate err_data.c
-  with open('err_data.c', 'w+') as err_data:
-    subprocess.check_call(['go', 'run', 'err_data_generate.go'],
-                          cwd=os.path.join('src', 'crypto', 'err'),
-                          stdout=err_data)
-  crypto_c_files.append('err_data.c')
-  crypto_c_files.sort()
-
-  test_support_h_files = (
-      FindHeaderFiles(os.path.join('src', 'crypto', 'test'), AllFiles) +
-      FindHeaderFiles(os.path.join('src', 'ssl', 'test'), NoTestRunnerFiles))
-
-  crypto_test_files = []
-  if EMBED_TEST_DATA:
-    # Generate crypto_test_data.cc
-    with open('crypto_test_data.cc', 'w+') as out:
-      subprocess.check_call(
-          ['go', 'run', 'util/embed_test_data.go'] + cmake['CRYPTO_TEST_DATA'],
-          cwd='src',
-          stdout=out)
-    crypto_test_files.append('crypto_test_data.cc')
-
-  crypto_test_files += PrefixWithSrc(cmake['CRYPTO_TEST_SOURCES'])
-  crypto_test_files.sort()
-
-  fuzz_c_files = FindCFiles(os.path.join('src', 'fuzz'), NoTests)
-
-  ssl_h_files = FindHeaderFiles(os.path.join('src', 'include', 'openssl'),
-                                SSLHeaderFiles)
-
-  def NotSSLHeaderFiles(path, filename, is_dir):
-    return not SSLHeaderFiles(path, filename, is_dir)
-  crypto_h_files = FindHeaderFiles(os.path.join('src', 'include', 'openssl'),
-                                   NotSSLHeaderFiles)
-
-  ssl_internal_h_files = FindHeaderFiles(os.path.join('src', 'ssl'), NoTests)
-  crypto_internal_h_files = (
-      FindHeaderFiles(os.path.join('src', 'crypto'), NoTests) +
-      FindHeaderFiles(os.path.join('src', 'third_party', 'fiat'), NoTests))
-
-  asm_outputs = sorted(WriteAsmFiles(ReadPerlAsmOperations()).items())
-
-  # Generate combined source lists for gas and nasm. Build files have a choice
-  # of using the per-platform ones or the combined ones. In the combined mode,
-  # Windows x86 and Windows x86_64 must still be special-cased, but otherwise
-  # all assembly files can be linked together. Some files appear in multiple
-  # per-platform lists, so we duplicate.
-  asm_sources = set()
-  nasm_sources = set()
-  for ((osname, arch), asm_files) in asm_outputs:
-    if (osname, arch) in (('win', 'x86'), ('win', 'x86_64')):
-      nasm_sources.update(asm_files)
-    else:
-      asm_sources.update(asm_files)
+  # TODO(crbug.com/boringssl/542): generate_build_files.py historically reported
+  # all the assembly files as part of libcrypto. Merge them for now, but we
+  # should split them out later.
+  crypto = sorted(sources['bcm']['srcs'] + sources['crypto']['srcs'])
+  crypto_asm = sorted(sources['bcm']['asm'] + sources['crypto']['asm'] +
+                      sources['test_support']['asm'])
+  crypto_nasm = sorted(sources['bcm']['nasm'] + sources['crypto']['nasm'] +
+                       sources['test_support']['nasm'])
 
   files = {
-      'bcm_crypto': bcm_crypto_c_files,
-      'crypto': crypto_c_files,
-      'crypto_asm': sorted(list(asm_sources)),
-      'crypto_nasm': sorted(list(nasm_sources)),
-      'crypto_headers': crypto_h_files,
-      'crypto_internal_headers': crypto_internal_h_files,
-      'crypto_test': crypto_test_files,
-      'crypto_test_data': sorted(PrefixWithSrc(cmake['CRYPTO_TEST_DATA'])),
-      'fips_fragments': fips_fragments,
-      'fuzz': fuzz_c_files,
-      'ssl': ssl_source_files,
-      'ssl_headers': ssl_h_files,
-      'ssl_internal_headers': ssl_internal_h_files,
-      'ssl_test': PrefixWithSrc(cmake['SSL_TEST_SOURCES']),
-      'tool': PrefixWithSrc(cmake['BSSL_SOURCES']),
-      'tool_headers': tool_h_files,
-      'test_support': PrefixWithSrc(cmake['TEST_SUPPORT_SOURCES']),
-      'test_support_headers': test_support_h_files,
-      'urandom_test': PrefixWithSrc(cmake['URANDOM_TEST_SOURCES']),
+      'bcm_crypto': PrefixWithSrc(sources['bcm']['srcs']),
+      'crypto': PrefixWithSrc(crypto),
+      'crypto_asm': PrefixWithSrc(crypto_asm),
+      'crypto_nasm': PrefixWithSrc(crypto_nasm),
+      'crypto_headers': PrefixWithSrc(sources['crypto']['hdrs']),
+      'crypto_internal_headers':
+          PrefixWithSrc(sources['crypto']['internal_hdrs']),
+      'crypto_test': PrefixWithSrc(sources['crypto_test']['srcs']),
+      'crypto_test_data': PrefixWithSrc(sources['crypto_test']['data']),
+      'fips_fragments': PrefixWithSrc(sources['bcm']['internal_hdrs']),
+      'fuzz': PrefixWithSrc(sources['fuzz']['srcs']),
+      'pki': PrefixWithSrc(sources['pki']['srcs']),
+      'pki_headers': PrefixWithSrc(sources['pki']['hdrs']),
+      'pki_internal_headers': PrefixWithSrc(sources['pki']['internal_hdrs']),
+      'pki_test': PrefixWithSrc(sources['pki_test']['srcs']),
+      'pki_test_data': PrefixWithSrc(sources['pki_test']['data']),
+      'rust_bssl_crypto': PrefixWithSrc(sources['rust_bssl_crypto']['srcs']),
+      'rust_bssl_sys': PrefixWithSrc(sources['rust_bssl_sys']['srcs']),
+      'ssl': PrefixWithSrc(sources['ssl']['srcs']),
+      'ssl_headers': PrefixWithSrc(sources['ssl']['hdrs']),
+      'ssl_internal_headers': PrefixWithSrc(sources['ssl']['internal_hdrs']),
+      'ssl_test': PrefixWithSrc(sources['ssl_test']['srcs']),
+      'tool': PrefixWithSrc(sources['bssl']['srcs']),
+      'tool_headers': PrefixWithSrc(sources['bssl']['internal_hdrs']),
+      'test_support': PrefixWithSrc(sources['test_support']['srcs']),
+      'test_support_headers':
+          PrefixWithSrc(sources['test_support']['internal_hdrs']),
+      'urandom_test': PrefixWithSrc(sources['urandom_test']['srcs']),
   }
 
   for platform in platforms:
-    platform.WriteFiles(files, asm_outputs)
+    platform.WriteFiles(files)
 
   return 0
 
@@ -859,17 +673,15 @@ ALL_PLATFORMS = {
 
 if __name__ == '__main__':
   parser = optparse.OptionParser(
-      usage='Usage: %%prog [--prefix=<path>] [all|%s]' %
+      usage='Usage: %%prog [--prefix=<path>] [--target-prefix=<prefix>] [all|%s]' %
       '|'.join(sorted(ALL_PLATFORMS.keys())))
   parser.add_option('--prefix', dest='prefix',
       help='For Bazel, prepend argument to all source files')
-  parser.add_option(
-      '--embed_test_data', type='choice', dest='embed_test_data',
-      action='store', default="true", choices=["true", "false"],
-      help='For Bazel or GN, don\'t embed data files in crypto_test_data.cc')
+  parser.add_option('--target-prefix', dest='target_prefix', default='',
+      help='For Android, prepend argument to all target names')
   options, args = parser.parse_args(sys.argv[1:])
   PREFIX = options.prefix
-  EMBED_TEST_DATA = (options.embed_test_data == "true")
+  TARGET_PREFIX = options.target_prefix
 
   if not args:
     parser.print_help()
