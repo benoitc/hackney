@@ -224,7 +224,7 @@ nif_send_headers(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     }
 
     /* Extract stream ID */
-    int64_t stream_id;
+    ErlNifSInt64 stream_id;
     if (!enif_get_int64(env, argv[1], &stream_id)) {
         return enif_make_badarg(env);
     }
@@ -263,7 +263,7 @@ nif_send_data(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     }
 
     /* Extract stream ID */
-    int64_t stream_id;
+    ErlNifSInt64 stream_id;
     if (!enif_get_int64(env, argv[1], &stream_id)) {
         return enif_make_badarg(env);
     }
@@ -308,7 +308,7 @@ nif_reset_stream(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     }
 
     /* Extract stream ID */
-    int64_t stream_id;
+    ErlNifSInt64 stream_id;
     if (!enif_get_int64(env, argv[1], &stream_id)) {
         return enif_make_badarg(env);
     }

@@ -176,7 +176,7 @@ endif()
 # Linker flags
 if(APPLE)
     set_target_properties(${NIF_TARGET} PROPERTIES
-        LINK_FLAGS "-flat_namespace -undefined suppress"
+        LINK_FLAGS "-undefined dynamic_lookup"
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set_target_properties(${NIF_TARGET} PROPERTIES
