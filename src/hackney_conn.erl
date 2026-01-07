@@ -171,6 +171,8 @@
     h3_conn :: reference() | undefined,
     %% Map of active HTTP/3 streams: StreamId => {From, StreamState}
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
+    %% Current HTTP/3 stream ID for streaming body mode
+    h3_stream_id :: non_neg_integer() | undefined,
     %% Whether to try HTTP/3 (requires UDP)
     try_http3 = false :: boolean()
 }).
@@ -750,8 +752,12 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
     %% Start a new async request with redirect option
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data);
 
+connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 streaming body - send headers only via QUIC
+    do_h3_send_headers(From, Method, Path, Headers, Data);
+
 connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
-    %% Send only headers for streaming body mode
+    %% Send only headers for streaming body mode (HTTP/1.1)
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -893,9 +899,19 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 - send body chunk via QUIC
+    #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId} = Data,
+    case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(BodyData), false) of
+        ok ->
+            {keep_state_and_data, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
-    %% Send as chunked encoding
+    %% Send as chunked encoding (HTTP/1.1)
     ChunkData = encode_chunk(BodyData),
     case Transport:send(Socket, ChunkData) of
         ok ->
@@ -904,9 +920,19 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 - finish sending body (send empty data with Fin=true)
+    #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId, h3_streams = Streams} = Data,
+    case hackney_h3:finish_send_body(ConnRef, StreamId, Streams) of
+        {ok, _} ->
+            {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
 streaming_body({call, From}, finish_send_body, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
-    %% Send final chunk marker
+    %% Send final chunk marker (HTTP/1.1)
     case Transport:send(Socket, <<"0\r\n\r\n">>) of
         ok ->
             {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
@@ -914,8 +940,14 @@ streaming_body({call, From}, finish_send_body, Data) ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, start_response, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 - wait for response headers via QUIC messages
+    %% Transition to connected and wait for QUIC stream_headers message
+    NewData = Data#conn_data{request_from = From},
+    {next_state, connected, NewData};
+
 streaming_body({call, From}, start_response, Data) ->
-    %% Transition to receiving state and get response
+    %% Transition to receiving state and get response (HTTP/1.1)
     %% Use {do_recv_response, include_pid} to include pid in response
     NewData = Data#conn_data{request_from = From},
     {next_state, receiving, NewData, [{next_event, internal, {do_recv_response, include_pid}}]};
@@ -928,6 +960,28 @@ streaming_body(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) -
 
 streaming_body(info, {ssl_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
+
+%% HTTP/3 QUIC message handling in streaming_body state
+streaming_body(info, {quic, ConnRef, {stream_headers, StreamId, Headers, _Fin}},
+               #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    %% Early response headers while still sending body
+    handle_h3_headers(StreamId, Headers, Streams, Data);
+
+streaming_body(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
+               #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
+
+streaming_body(info, {quic, ConnRef, {stream_reset, StreamId, ErrorCode}},
+               #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
+
+streaming_body(info, {quic, ConnRef, {closed, Reason}},
+               #conn_data{h3_conn = ConnRef} = Data) ->
+    handle_h3_conn_closed(Reason, Data);
+
+streaming_body(info, {quic, ConnRef, {transport_error, Code, Msg}},
+               #conn_data{h3_conn = ConnRef} = Data) ->
+    handle_h3_error({transport_error, Code, Msg}, Data);
 
 streaming_body(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
@@ -2377,6 +2431,41 @@ do_h3_request_streaming(From, Method, Path, Headers, Body, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
+%% @private Send HTTP/3 request headers only (for streaming body mode)
+%% Returns ok and transitions to streaming_body state
+do_h3_send_headers(From, Method, Path, Headers, Data) ->
+    #conn_data{
+        host = Host,
+        h3_conn = ConnRef,
+        h3_streams = Streams
+    } = Data,
+
+    MethodBin = to_binary(Method),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> to_binary(Path)
+    end,
+    HostBin = to_binary(Host),
+
+    %% Use hackney_h3 to send headers only (Fin=false)
+    case hackney_h3:send_request_headers(ConnRef, MethodBin, HostBin, PathBin, normalize_headers(Headers)) of
+        {ok, StreamId, _NewStreams} ->
+            %% Track stream for response (will wait after body is sent)
+            StreamState = {sending_body, From},
+            UpdatedStreams = maps:put(StreamId, {From, StreamState}, Streams),
+            NewData = Data#conn_data{
+                h3_streams = UpdatedStreams,
+                h3_stream_id = StreamId,
+                method = MethodBin,
+                path = PathBin,
+                request_from = undefined
+            },
+            %% Transition to streaming_body state
+            {next_state, streaming_body, NewData, [{reply, From, ok}]};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
 %% @private Handle HTTP/3 stream_body call
 %% Returns buffered chunk, waits for data, or returns done
 handle_h3_stream_body(From, Streams, Data) ->
@@ -2475,6 +2564,30 @@ handle_h3_headers(StreamId, Headers, Streams, Data) ->
                         status = Status,
                         response_headers = RespHeaders
                     }, [{reply, From, {ok, Status, HeadersList}}]};
+                {From, {sending_body, From}} ->
+                    %% Response arrived while sending body - update state
+                    %% If request_from is set (from start_response), reply to it
+                    case Data#conn_data.request_from of
+                        undefined ->
+                            %% No one waiting yet - just update state
+                            UpdatedStreams = maps:put(StreamId,
+                                {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
+                            {keep_state, Data#conn_data{
+                                h3_streams = UpdatedStreams,
+                                status = Status,
+                                response_headers = RespHeaders
+                            }};
+                        WaitingFrom ->
+                            %% Someone called start_response - reply with status/headers
+                            UpdatedStreams = maps:put(StreamId,
+                                {WaitingFrom, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
+                            {keep_state, Data#conn_data{
+                                h3_streams = UpdatedStreams,
+                                status = Status,
+                                response_headers = RespHeaders,
+                                request_from = undefined
+                            }, [{reply, WaitingFrom, {ok, Status, HeadersList, self()}}]}
+                    end;
                 _ ->
                     %% Unknown stream or wrong state
                     {keep_state, Data}

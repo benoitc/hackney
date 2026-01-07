@@ -128,6 +128,64 @@ read_all_chunks(ConnPid, Acc) ->
             Acc
     end.
 
+%%====================================================================
+%% HTTP/3 Body Sending Tests (streaming uploads)
+%%====================================================================
+
+h3_send_body_test_() ->
+    {
+        "HTTP/3 send_body tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"send body in chunks", fun test_h3_send_body_chunks/0}
+            ]
+        }
+    }.
+
+test_h3_send_body_chunks() ->
+    case hackney_quic:is_available() of
+        false ->
+            {skip, "QUIC NIF not available"};
+        true ->
+            %% Connect with HTTP/3 to cloudflare (supports H3)
+            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
+            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
+                {ok, ConnPid} ->
+                    %% Send headers for POST request (will get redirect, but tests the mechanism)
+                    Headers = [{<<"content-type">>, <<"text/plain">>}],
+                    case hackney_conn:send_request_headers(ConnPid, <<"POST">>, <<"/">>, Headers) of
+                        ok ->
+                            ?debugFmt("send_request_headers ok", []),
+                            %% Send body in chunks
+                            ok = hackney_conn:send_body_chunk(ConnPid, <<"Hello ">>),
+                            ?debugFmt("send_body_chunk 1 ok", []),
+                            ok = hackney_conn:send_body_chunk(ConnPid, <<"World!">>),
+                            ?debugFmt("send_body_chunk 2 ok", []),
+                            ok = hackney_conn:finish_send_body(ConnPid),
+                            ?debugFmt("finish_send_body ok", []),
+                            %% Get response
+                            case hackney_conn:start_response(ConnPid) of
+                                {ok, Status, RespHeaders, _Pid} ->
+                                    ?debugFmt("send_body: Status=~p", [Status]),
+                                    %% Cloudflare returns redirect (301/302) for POST to /
+                                    ?assert(is_integer(Status)),
+                                    ?assert(is_list(RespHeaders)),
+                                    hackney:close(ConnPid);
+                                {error, Reason} ->
+                                    hackney:close(ConnPid),
+                                    ?debugFmt("start_response failed: ~p", [Reason])
+                            end;
+                        {error, Reason} ->
+                            hackney:close(ConnPid),
+                            ?debugFmt("send_request_headers failed: ~p", [Reason])
+                    end;
+                {error, Reason} ->
+                    ?debugFmt("H3 connect failed: ~p", [Reason])
+            end
+    end.
+
 test_h3_async_true() ->
     case hackney_quic:is_available() of
         false ->
