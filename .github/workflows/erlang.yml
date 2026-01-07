@@ -30,7 +30,7 @@ jobs:
           rebar3-version: ${{matrix.rebar3}}
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: python3 python3-httpbin python3-pip cmake
+          packages: python3 python3-httpbin python3-pip cmake golang
           version: 1.1
       - run: |
           pip3 install gunicorn
@@ -58,7 +58,7 @@ jobs:
           rebar3-version: ${{matrix.rebar3}}
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: cmake libssl-dev
+          packages: cmake libssl-dev golang
           version: 1.1
       - name: Build with QUIC
         run: |
@@ -84,7 +84,7 @@ jobs:
           rebar3-version: ${{matrix.rebar3}}
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: cmake
+          packages: cmake golang
           version: 1.1
       - run: rebar3 xref
       - run: rebar3 eunit
@@ -98,12 +98,12 @@ jobs:
         otp: ["27"]
         rebar3: ['3.24.0']
     steps:
-      - name: Install Erlang
+      - name: Install Erlang and Go
         env:
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
         run: |
           brew update
-          brew install erlang@${{ matrix.otp }}
+          brew install erlang@${{ matrix.otp }} go
           echo "$(brew --prefix erlang@${{ matrix.otp }})/bin" >> $GITHUB_PATH
       - name: Install rebar3
         run: |
@@ -139,27 +139,3 @@ jobs:
             git config --global --add safe.directory $GITHUB_WORKSPACE
             rebar3 eunit
 
-  # Legacy OTP versions (without QUIC)
-  legacy:
-    name: Linux x86_64 OTP-${{matrix.otp}} (legacy)
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        otp: ["24.3", "25.3", "26.2"]
-        rebar3: ['3.22.1']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{matrix.otp}}
-          rebar3-version: ${{matrix.rebar3}}
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: python3 python3-httpbin python3-pip
-          version: 1.1
-      - run: |
-          pip3 install gunicorn
-          gunicorn -b 127.0.0.1:8000 -b unix:httpbin.sock httpbin:app&
-      - run: rebar3 xref
-      - run: rebar3 eunit
-      - run: rebar3 dialyzer

@@ -516,7 +516,7 @@ int CBS_get_asn1_int64(CBS *cbs, int64_t *out) {
   }
   const uint8_t *data = CBS_data(&bytes);
   const size_t len = CBS_len(&bytes);
-  if (len > sizeof(int64_t)) {
+  if (len == 0 || len > sizeof(int64_t)) {
     return 0;
   }
   uint8_t sign_extend[sizeof(int64_t)];
