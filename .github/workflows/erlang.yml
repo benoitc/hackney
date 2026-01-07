@@ -101,7 +101,7 @@ jobs:
           release: "14.2"
           usesh: true
           prepare: |
-            pkg install -y erlang-runtime28 rebar3 cmake git gmake go
+            pkg install -y erlang-runtime28 rebar3 cmake git gmake go llvm18
           run: |
             # Ensure Erlang 28 is in PATH
             export PATH="/usr/local/lib/erlang28/bin:$PATH"
@@ -109,6 +109,11 @@ jobs:
             erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
             echo "Architecture:"
             uname -m
+            # Use LLVM 18 clang which fully supports C++20
+            export CC=/usr/local/bin/clang18
+            export CXX=/usr/local/bin/clang++18
+            echo "Using CC=$CC CXX=$CXX"
+            $CXX --version
             git config --global --add safe.directory $GITHUB_WORKSPACE
             rebar3 eunit
 
