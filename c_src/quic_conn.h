@@ -106,6 +106,9 @@ struct QuicConn {
     bool io_thread_running;
     volatile int should_stop;  /* Atomic flag for thread termination */
 
+    /* Flag to prevent double-destroy */
+    volatile int destroyed;
+
 };
 
 /* Global initialization (call once at NIF load) */

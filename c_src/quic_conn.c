@@ -28,8 +28,9 @@
 /* Global resource type for QUIC connections */
 ErlNifResourceType *QUIC_CONN_RESOURCE = NULL;
 
-/* Global initialization flag */
-static int g_lsquic_initialized = 0;
+/* Global initialization flag - use atomic to prevent race conditions */
+static volatile int g_lsquic_initialized = 0;
+static ErlNifMutex *g_init_mutex = NULL;
 
 /* Forward declarations for lsquic callbacks */
 static lsquic_conn_ctx_t *on_new_conn(void *stream_if_ctx, lsquic_conn_t *conn);
@@ -170,20 +171,46 @@ static int resolve_hostname(const char *hostname, uint16_t port,
  *===========================================================================*/
 
 int quic_global_init(void) {
-    if (g_lsquic_initialized) return 0;
+    /* Fast path - already initialized */
+    if (__atomic_load_n(&g_lsquic_initialized, __ATOMIC_ACQUIRE)) return 0;
+
+    /* Create mutex on first call - this is safe because NIF load is single-threaded */
+    if (!g_init_mutex) {
+        g_init_mutex = enif_mutex_create("quic_global_init_mutex");
+        if (!g_init_mutex) return -1;
+    }
+
+    /* Double-checked locking */
+    enif_mutex_lock(g_init_mutex);
+    if (__atomic_load_n(&g_lsquic_initialized, __ATOMIC_RELAXED)) {
+        enif_mutex_unlock(g_init_mutex);
+        return 0;
+    }
 
     if (lsquic_global_init(LSQUIC_GLOBAL_CLIENT) != 0) {
+        enif_mutex_unlock(g_init_mutex);
         return -1;
     }
 
-    g_lsquic_initialized = 1;
+    __atomic_store_n(&g_lsquic_initialized, 1, __ATOMIC_RELEASE);
+    enif_mutex_unlock(g_init_mutex);
     return 0;
 }
 
 void quic_global_cleanup(void) {
-    if (g_lsquic_initialized) {
-        lsquic_global_cleanup();
-        g_lsquic_initialized = 0;
+    if (__atomic_load_n(&g_lsquic_initialized, __ATOMIC_ACQUIRE)) {
+        if (g_init_mutex) {
+            enif_mutex_lock(g_init_mutex);
+        }
+        if (__atomic_load_n(&g_lsquic_initialized, __ATOMIC_RELAXED)) {
+            lsquic_global_cleanup();
+            __atomic_store_n(&g_lsquic_initialized, 0, __ATOMIC_RELEASE);
+        }
+        if (g_init_mutex) {
+            enif_mutex_unlock(g_init_mutex);
+            enif_mutex_destroy(g_init_mutex);
+            g_init_mutex = NULL;
+        }
     }
 }
 
@@ -517,22 +544,29 @@ static struct lsxpack_header *hsi_prepare_decode(void *hdr_set,
     UNUSED(hdr_set);
 
     if (hdr) {
-        /* Resize existing header */
+        /* Resize existing header - use enif_alloc since we can't realloc */
         if (space > LSXPACK_MAX_STRLEN) return NULL;
-        hdr->buf = realloc(hdr->buf, space);
-        if (!hdr->buf) return NULL;
+        char *new_buf = enif_alloc(space);
+        if (!new_buf) return NULL;
+        /* Copy existing data if any */
+        if (hdr->buf && hdr->val_len > 0) {
+            size_t copy_len = hdr->val_len < space ? hdr->val_len : space;
+            memcpy(new_buf, hdr->buf, copy_len);
+            enif_free(hdr->buf);
+        }
+        hdr->buf = new_buf;
         hdr->val_len = space;
         return hdr;
     }
 
     /* Create new header */
-    struct lsxpack_header *new_hdr = malloc(sizeof(struct lsxpack_header));
+    struct lsxpack_header *new_hdr = enif_alloc(sizeof(struct lsxpack_header));
     if (!new_hdr) return NULL;
 
     memset(new_hdr, 0, sizeof(*new_hdr));
-    new_hdr->buf = malloc(space);
+    new_hdr->buf = enif_alloc(space);
     if (!new_hdr->buf) {
-        free(new_hdr);
+        enif_free(new_hdr);
         return NULL;
     }
     lsxpack_header_prepare_decode(new_hdr, new_hdr->buf, 0, space);
@@ -568,8 +602,8 @@ static int hsi_process_header(void *hdr_set, struct lsxpack_header *hdr) {
     hs->headers_list = enif_make_list_cell(hs->env, tuple, hs->headers_list);
 
     /* Free the header buffer */
-    free(hdr->buf);
-    free(hdr);
+    enif_free(hdr->buf);
+    enif_free(hdr);
 
     return 0;
 }
@@ -621,7 +655,8 @@ static void *io_thread_func(void *arg) {
     struct sockaddr_storage peer_addr;
     socklen_t peer_addrlen;
 
-    while (!__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED)) {
+    while (!__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED) &&
+           !__atomic_load_n(&conn->destroyed, __ATOMIC_RELAXED)) {
         /* Calculate timeout */
         int timeout_ms = 50;  /* Default poll interval */
 
@@ -650,9 +685,16 @@ static void *io_thread_func(void *arg) {
 
         int ret = select(conn->sockfd + 1, &rfds, NULL, NULL, &tv);
 
-        if (__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED)) break;
+        if (__atomic_load_n(&conn->should_stop, __ATOMIC_RELAXED) ||
+            __atomic_load_n(&conn->destroyed, __ATOMIC_RELAXED)) break;
 
         enif_mutex_lock(conn->mutex);
+
+        /* Verify engine is still valid before processing */
+        if (!conn->engine) {
+            enif_mutex_unlock(conn->mutex);
+            break;
+        }
 
         if (ret > 0 && FD_ISSET(conn->sockfd, &rfds)) {
             /* Receive packet */
@@ -866,6 +908,12 @@ int quic_conn_connect(QuicConn *conn, const char *hostname, uint16_t port,
 
 void quic_conn_keep(QuicConn *conn) {
     if (!conn) return;
+
+    /* Don't keep a destroyed connection */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+
     enif_mutex_lock(conn->mutex);
     conn->ref_count++;
     enif_mutex_unlock(conn->mutex);
@@ -874,17 +922,34 @@ void quic_conn_keep(QuicConn *conn) {
 
 void quic_conn_release(QuicConn *conn) {
     if (!conn) return;
+
+    /* Check if already destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) {
+        enif_release_resource(conn);
+        return;
+    }
+
     enif_mutex_lock(conn->mutex);
     int ref = --conn->ref_count;
     enif_mutex_unlock(conn->mutex);
+
     if (ref <= 0) {
-        quic_conn_destroy(conn);
+        /* Don't call destroy here - let the Erlang GC call the destructor */
+        /* The destructor will call quic_conn_destroy */
     }
     enif_release_resource(conn);
 }
 
 void quic_conn_destroy(QuicConn *conn) {
     if (!conn) return;
+
+    /* Atomically check and set destroyed flag to prevent double-free */
+    int expected = 0;
+    if (!__atomic_compare_exchange_n(&conn->destroyed, &expected, 1,
+                                      0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        /* Already destroyed or being destroyed */
+        return;
+    }
 
     /* Stop I/O thread */
     if (conn->io_thread_running) {
@@ -965,8 +1030,11 @@ static QuicStream *find_stream(QuicConn *conn, int64_t stream_id) {
 int64_t quic_conn_open_stream(QuicConn *conn) {
     if (!conn || !conn->conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
-    if (conn->state != QUIC_CONN_CONNECTED) {
+    if (conn->state != QUIC_CONN_CONNECTED || !conn->engine) {
         enif_mutex_unlock(conn->mutex);
         return -1;
     }
@@ -991,8 +1059,11 @@ int64_t quic_conn_open_stream(QuicConn *conn) {
 int quic_conn_close(QuicConn *conn) {
     if (!conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
-    if (conn->conn && conn->state != QUIC_CONN_CLOSED) {
+    if (conn->conn && conn->engine && conn->state != QUIC_CONN_CLOSED) {
         conn->state = QUIC_CONN_DRAINING;
         lsquic_conn_close(conn->conn);
         lsquic_engine_process_conns(conn->engine);
@@ -1009,8 +1080,11 @@ int quic_conn_send_headers(QuicConn *conn, int64_t stream_id,
                            ErlNifEnv *env, ERL_NIF_TERM headers_list, bool fin) {
     if (!conn || !conn->conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
-    if (conn->state != QUIC_CONN_CONNECTED) {
+    if (conn->state != QUIC_CONN_CONNECTED || !conn->engine) {
         enif_mutex_unlock(conn->mutex);
         return -1;
     }
@@ -1145,8 +1219,11 @@ int quic_conn_send_data(QuicConn *conn, int64_t stream_id,
                         const uint8_t *data, size_t len, bool fin) {
     if (!conn || !conn->conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
-    if (conn->state != QUIC_CONN_CONNECTED) {
+    if (conn->state != QUIC_CONN_CONNECTED || !conn->engine) {
         enif_mutex_unlock(conn->mutex);
         return -1;
     }
@@ -1178,8 +1255,11 @@ int quic_conn_reset_stream(QuicConn *conn, int64_t stream_id, uint64_t error_cod
     UNUSED(error_code);  /* lsquic doesn't have a reset with error code API */
     if (!conn || !conn->conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
-    if (conn->state != QUIC_CONN_CONNECTED) {
+    if (conn->state != QUIC_CONN_CONNECTED || !conn->engine) {
         enif_mutex_unlock(conn->mutex);
         return -1;
     }
@@ -1201,7 +1281,17 @@ int quic_conn_reset_stream(QuicConn *conn, int64_t stream_id, uint64_t error_cod
 int64_t quic_conn_handle_timeout(QuicConn *conn) {
     if (!conn || !conn->engine) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
+
+    /* Double-check engine after acquiring mutex */
+    if (!conn->engine) {
+        enif_mutex_unlock(conn->mutex);
+        return -1;
+    }
+
     lsquic_engine_process_conns(conn->engine);
 
     int diff;
@@ -1216,6 +1306,9 @@ int64_t quic_conn_handle_timeout(QuicConn *conn) {
 int quic_conn_peername(QuicConn *conn, struct sockaddr_storage *addr, socklen_t *addrlen) {
     if (!conn) return -1;
 
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
+
     enif_mutex_lock(conn->mutex);
     memcpy(addr, &conn->remote_addr, conn->remote_addrlen);
     *addrlen = conn->remote_addrlen;
@@ -1226,6 +1319,9 @@ int quic_conn_peername(QuicConn *conn, struct sockaddr_storage *addr, socklen_t 
 
 int quic_conn_sockname(QuicConn *conn, struct sockaddr_storage *addr, socklen_t *addrlen) {
     if (!conn) return -1;
+
+    /* Check if connection is destroyed */
+    if (__atomic_load_n(&conn->destroyed, __ATOMIC_ACQUIRE)) return -1;
 
     enif_mutex_lock(conn->mutex);
     memcpy(addr, &conn->local_addr, conn->local_addrlen);

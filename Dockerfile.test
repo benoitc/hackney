@@ -1,0 +1,40 @@
+# Dockerfile for local testing - mirrors GitHub CI environment
+# Usage:
+#   docker build -f Dockerfile.test -t hackney-test .
+#   docker run --rm -it hackney-test
+#   docker run --rm -it hackney-test bash  # for interactive debugging
+
+FROM erlang:28
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies (matching CI workflow)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    golang \
+    python3 \
+    python3-pip \
+    python3-venv \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install rebar3 (same version as CI)
+RUN wget https://github.com/erlang/rebar3/releases/download/3.24.0/rebar3 \
+    && chmod +x rebar3 \
+    && mv rebar3 /usr/local/bin/
+
+# Install httpbin via pip for tests
+RUN pip3 install --break-system-packages httpbin gunicorn
+
+# Set up working directory
+WORKDIR /hackney
+
+# Copy source code (uses .dockerignore if present)
+COPY . .
+
+# Clean any previous build artifacts
+RUN rm -rf _build priv/*.so priv/*.dll
+
+# Build and test
+CMD bash -c "gunicorn -b 127.0.0.1:8000 httpbin:app & sleep 2 && rebar3 eunit"
