@@ -1,0 +1,6 @@
+freebsd_instance:
+    image: freebsd-13-3-release-amd64
+
+task:
+    install_script: pkg install -y cmake bash perl5 p5-PkgConfig-LibPkgConf devel/xxhash
+    script: cmake -DLSQPACK_TESTS=ON -DLSQPACK_XXH=OFF . && make && make test
