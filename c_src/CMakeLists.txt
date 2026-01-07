@@ -101,6 +101,13 @@ message(STATUS "Building BoringSSL from: ${BORINGSSL_DIR}")
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(OPENSSL_NO_ASM OFF CACHE BOOL "" FORCE)
 
+# GCC compatibility: define __has_feature as 0 for non-Clang compilers
+# BoringSSL's generated assembly uses __has_feature(hwaddress_sanitizer) which is Clang-only
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    add_compile_definitions(__has_feature\(x\)=0)
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -D__has_feature\(x\)=0")
+endif()
+
 # Add BoringSSL subdirectory
 add_subdirectory(${BORINGSSL_DIR} ${CMAKE_BINARY_DIR}/boringssl EXCLUDE_FROM_ALL)
 
