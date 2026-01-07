@@ -161,8 +161,17 @@ connect_pool(Transport, Host, Port, Options) ->
           %% Try HTTP/2 multiplexing
           case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
             {ok, H2Pid} ->
-              hackney_manager:start_request(Host),
-              {ok, H2Pid};
+              %% Verify connection is actually in connected state
+              %% (OTP 28 on FreeBSD may have timing issues with SSL connections)
+              case hackney_conn:get_state(H2Pid) of
+                {ok, connected} ->
+                  hackney_manager:start_request(Host),
+                  {ok, H2Pid};
+                _ ->
+                  %% Connection not ready, unregister and create new
+                  PoolHandler:unregister_h2(H2Pid, Options),
+                  connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+              end;
             none ->
               connect_pool_new(Transport, Host, Port, Options, PoolHandler)
           end;
@@ -185,7 +194,15 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
       %% Check if we have an existing HTTP/3 connection
       case PoolHandler:checkout_h3(Host, Port, Transport, Options) of
         {ok, H3Pid} ->
-          {ok, H3Pid};
+          %% Verify connection is actually in connected state
+          case hackney_conn:get_state(H3Pid) of
+            {ok, connected} ->
+              {ok, H3Pid};
+            _ ->
+              %% Connection not ready, unregister and try new connection
+              PoolHandler:unregister_h3(H3Pid, Options),
+              try_new_h3_connection(Host, Port, Transport, Options, PoolHandler)
+          end;
         none ->
           %% Check Alt-Svc cache for known HTTP/3 endpoint
           case hackney_altsvc:lookup(Host, Port) of
