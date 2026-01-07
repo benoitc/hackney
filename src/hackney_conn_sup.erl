@@ -18,6 +18,7 @@
 -export([start_link/0]).
 -export([start_conn/1]).
 -export([stop_conn/1]).
+-export([stop_all/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -43,6 +44,26 @@ start_conn(Opts) ->
 -spec stop_conn(pid()) -> ok.
 stop_conn(Pid) ->
     hackney_conn:stop(Pid).
+
+%% @doc Stop all connection processes gracefully.
+%% Useful for test cleanup.
+-spec stop_all() -> ok.
+stop_all() ->
+    try
+        Children = supervisor:which_children(?SERVER),
+        lists:foreach(fun({_, Pid, _, _}) when is_pid(Pid) ->
+            try
+                hackney_conn:stop(Pid)
+            catch
+                _:_ -> ok
+            end;
+        (_) -> ok
+        end, Children),
+        ok
+    catch
+        exit:{noproc, _} -> ok;
+        _:_ -> ok
+    end.
 
 %%====================================================================
 %% Supervisor callbacks

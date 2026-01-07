@@ -21,6 +21,7 @@ setup() ->
     ok.
 
 cleanup(_) ->
+    hackney_conn_sup:stop_all(),
     hackney_altsvc:clear_all(),
     ok.
 

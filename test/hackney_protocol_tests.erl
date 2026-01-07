@@ -21,6 +21,7 @@ setup() ->
     ok.
 
 cleanup(_) ->
+    hackney_conn_sup:stop_all(),
     %% Reset to default after tests
     application:set_env(hackney, default_protocols, [http2, http1]),
     ok.
