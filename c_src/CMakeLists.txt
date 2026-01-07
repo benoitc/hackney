@@ -203,8 +203,10 @@ if(MSVC)
     target_link_libraries(${NIF_TARGET} PRIVATE ws2_32)
 endif()
 
-# Output name
+# Output name and linker settings
+# Use C++ linker since BoringSSL is C++ (prevents C++ runtime initialization issues)
 set_target_properties(${NIF_TARGET} PROPERTIES
     PREFIX ""
     OUTPUT_NAME "${NIF_TARGET}"
+    LINKER_LANGUAGE CXX
 )
