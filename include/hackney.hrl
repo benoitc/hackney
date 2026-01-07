@@ -16,6 +16,7 @@
   options = [],
   socket = nil,
   socket_ref = nil,
+  conn_pid = nil,  %% hackney_conn process pid (new architecture)
   request_ref = nil,
   dynamic = true,
   pool_handler = hackney_pool,
@@ -27,7 +28,7 @@
   redirect = nil,
   location=nil,
   parser=nil,
-  headers=hackney_headers_new:new(),
+  headers=hackney_headers:new(),
   state,
   response_state = start,
   mp_boundary = nil,

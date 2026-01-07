@@ -4,7 +4,7 @@
 {application, hackney,
   [
     {description, "simple HTTP client"},
-    {vsn, "1.25.0"},
+    {vsn, "2.0.0-beta.1"},
     {registered, [hackney_pool]},
     {applications, [kernel,
       stdlib,
@@ -26,7 +26,8 @@
       {restart, permanent},
       {shutdown, 10000},
       {maxr, 10},
-      {maxt, 1}]},
+      {maxt, 1},
+      {default_protocols, [http2, http1]}]},
 
     {licenses, ["Apache-2.0"]},
     {links, [{"Github", "https://github.com/benoitc/hackney"}]},

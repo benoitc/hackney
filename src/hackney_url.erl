@@ -46,8 +46,16 @@ parse_url(<<"http://", Rest/binary>>) ->
 parse_url(<<"https://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_ssl,
     scheme=https});
+parse_url(<<"ws://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_tcp,
+    scheme=ws});
+parse_url(<<"wss://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_ssl,
+    scheme=wss});
 parse_url(<<"http+unix://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_local_tcp, scheme=http_unix});
+parse_url(<<"socks5://", Rest/binary>>) ->
+  parse_url(Rest, #hackney_url{transport=hackney_socks5, scheme=socks5});
 parse_url(URL) ->
   parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
 
@@ -135,6 +143,8 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                        Netloc1 = case {Scheme, Port} of
                                    {http, 80} -> list_to_binary(Host2);
                                    {https, 443} -> list_to_binary(Host2);
+                                   {ws, 80} -> list_to_binary(Host2);
+                                   {wss, 443} -> list_to_binary(Host2);
                                    {http_unix, _} -> list_to_binary(Host2);
                                    _ ->
                                      iolist_to_binary([Host2, ":", integer_to_list(Port)])
@@ -174,6 +184,8 @@ unparse_url(#hackney_url{}=Url) ->
   Scheme1 = case Scheme of
               http -> <<"http://">>;
               https -> <<"https://">>;
+              ws -> <<"ws://">>;
+              wss -> <<"wss://">>;
               http_unix -> <<"http+unix://">>
             end,
 
@@ -241,6 +253,8 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
       S#hackney_url{host=binary_to_list(Host), port=80};
     [Host] when Transport =:= hackney_ssl ->
       S#hackney_url{host=binary_to_list(Host), port=443};
+    [Host] when Transport =:= hackney_socks5 ->
+      S#hackney_url{host=binary_to_list(Host), port=1080};
     [Host, <<":", Port/binary>>] when Port /= <<>> ->
       S#hackney_url{host=binary_to_list(Host),
                     port=list_to_integer(binary_to_list(Port))};
@@ -259,6 +273,9 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
     [Host] when Transport =:= hackney_local_tcp ->
       S#hackney_url{host=unicode:characters_to_list(urldecode(Host)),
                     port=0};
+    [Host] when Transport =:= hackney_socks5 ->
+      S#hackney_url{host=unicode:characters_to_list(Host),
+                    port=1080};
     [Host, Port] ->
       S#hackney_url{host=unicode:characters_to_list(Host),
                     port=list_to_integer(binary_to_list(Port))}

@@ -1,5 +1,96 @@
 # NEWS
 
+2.0.0-beta.1 - 2026-01-07
+-------------------------
+
+Process-per-connection architecture. Each connection is a `gen_statem` process.
+
+See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) for details.
+
+### HTTP/3 Support
+
+Full HTTP/3 support via QUIC (requires QUIC NIF to be built):
+
+- **QUIC transport** - UDP-based, encrypted by default with TLS 1.3
+- **Transparent API** - Same `hackney:get/post/request` functions work for HTTP/3
+- **Multiplexing** - Multiple streams without head-of-line blocking
+- **Alt-Svc discovery** - Automatic HTTP/3 endpoint detection from Alt-Svc headers
+- **Connection pooling** - HTTP/3 connections shared across callers
+- **Negative caching** - Failed H3 attempts cached to avoid repeated failures
+- **Async streaming** - `{async, true/once}` for push-based streaming
+- **Pull-based streaming** - `hackney:stream_body/1` for chunked reads
+- **Streaming uploads** - `send_body/2` for chunked uploads
+- **Protocol selection** - Use `{protocols, [http3]}` to force HTTP/3
+
+Check availability with `hackney_quic:is_available()`.
+
+See [HTTP/3 Guide](guides/http3_guide.md) for details.
+
+### HTTP/2 Support
+
+Full HTTP/2 support with automatic protocol negotiation:
+
+- **ALPN negotiation** - HTTP/2 is automatically negotiated during TLS handshake
+- **Transparent API** - Same `hackney:get/post/request` functions work for both protocols
+- **Multiplexing** - Multiple requests share a single HTTP/2 connection
+- **Header compression** - HPACK compression for reduced overhead
+- **Flow control** - Automatic window management with WINDOW_UPDATE frames
+- **Server push** - Optional support for server-initiated streams
+- **Protocol selection** - Use `{protocols, [http2]}` or `{protocols, [http1]}` to force protocol
+
+See [HTTP/2 Guide](guides/http2_guide.md) for details.
+
+### Architecture Changes
+
+- Connection handle is now a PID (was opaque reference)
+- `hackney_conn` manages connections (replaces hackney_connect, hackney_connection, hackney_request, hackney_response, hackney_stream)
+- `hackney_headers` renamed from `hackney_headers_new`
+- Clean OTP supervision tree with `hackney_conn_sup`
+
+### Pool Redesign
+
+The connection pool has been completely redesigned:
+
+- **Per-host connection limits** - Each host gets up to `max_per_host` concurrent connections (default 50), replacing the global pool limit
+- **TCP-only pooling** - SSL connections are never pooled (security improvement). HTTPS requests upgrade pooled TCP connections to SSL
+- **Connection prewarm** - Pool maintains warm TCP connections per host (default 4) after first use
+- **Load regulation** - New `hackney_load_regulation` module provides lock-free per-host backpressure using ETS counting semaphore
+- **Keepalive timeout capped** - Maximum 2 seconds idle time to prevent stale connections
+- **Host stats API** - New `hackney_pool:host_stats/3` for per-host monitoring
+
+### New Options
+
+- `default_protocols` - Default protocol preference order (default: `[http3, http2, http1]`). Set via application env to change globally:
+  ```erlang
+  application:set_env(hackney, default_protocols, [http2, http1]).
+  ```
+- `max_per_host` - Maximum concurrent connections per host (default 50)
+- `checkout_timeout` - Timeout to acquire connection slot (default 8000ms)
+- `prewarm_count` - Warm connections per host (default 4)
+
+### New Functions
+
+- `hackney_util:default_protocols/0` - Get the default protocol preference list
+- `hackney:get_version/0` - Get hackney version
+- `hackney_pool:host_stats/3` - Get per-host connection stats
+- `hackney_pool:prewarm/3,4` - Explicitly prewarm connections to a host
+- `hackney_load_regulation:current/2` - Get current connection count for host
+
+### Removed
+
+- `cancel_request/1` - use `close/1`
+- `controlling_process/2` - not needed
+- `send_multipart_body/2` - use `send_body/2`
+- SOCKS5 and HTTP CONNECT proxy (planned 2.1.0)
+
+### Bug Fixes
+
+- fix: validate connection state on pool checkout for HTTP/2 and HTTP/3. On FreeBSD + OTP 28, pooled connections could be in `closed` state when checked out due to SSL timing differences, causing `{error, invalid_state}` errors. Now connections are verified to be in `connected` state after checkout.
+
+### Requirements
+
+- Erlang/OTP 27+
+
 1.25.0 - 2025-07-24
 -------------------
 
@@ -187,7 +278,7 @@ systems using URL as signature or in an hash.
 - doc: document self-signed certificate usage
 - bump `ssl_verify_fun` to 1.1.5
 - fix: don't use default pool if set to false
-- fix: `hackney_headers_new:store/3`  fix value appending to a list
+- fix: `hackney_headers:store/3`  fix value appending to a list
 - fix: miscellaneous specs
 - doc: miscellaneous improvements
 

@@ -4,9 +4,13 @@
 %%% See the NOTICE for more information.
 %%%
 %%% Copyright (c) 2009, Erlang Training and Consulting Ltd.
-%%% Copyright (c) 2012-2021, Benoît Chesneau <benoitc@e-engura.org>
+%%% Copyright (c) 2012-2024, Benoît Chesneau <benoitc@e-engura.org>
 
-%% @doc pool of sockets connections
+%% @doc Pool of connection processes.
+%%
+%% This module manages hackney_conn processes in a pool. Instead of storing
+%% raw sockets, it tracks connection process pids. Idle timeout is handled
+%% by the connection processes themselves (gen_statem state_timeout).
 %%
 -module(hackney_pool).
 -behaviour(gen_server).
@@ -16,6 +20,16 @@
          checkout/4,
          checkin/2]).
 
+%% HTTP/2 connection pooling
+-export([checkout_h2/4,
+         register_h2/5,
+         unregister_h2/2]).
+
+%% HTTP/3 connection pooling
+-export([checkout_h3/4,
+         register_h3/5,
+         unregister_h3/2]).
+
 -export([
          get_stats/1,
          start_pool/2,
@@ -24,612 +38,998 @@
          notify/2
         ]).
 
-
 -export([count/1, count/2,
          max_connections/1,
          set_max_connections/2,
          timeout/1,
          set_timeout/2,
+         prewarm/3,
+         prewarm/4,
+         host_stats/3,
          child_spec/2]).
 
 -export([start_link/2]).
 
-%% gen_server callbacks
+%% For internal use
+-export([to_pool_name/1]).
 
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          code_change/3, terminate/2]).
 
 -include("hackney.hrl").
 -include_lib("hackney_internal.hrl").
 
--record(state, {name,
-                metrics,
-                max_connections,
-                timeout,
-                clients = dict:new(),
-                queues = dict:new(),      % Dest => queue of {From, Ref, Requester}
-                pending = dict:new(),     % Ref  => {From, Dest, Requester}
-                connections = dict:new(),
-                sockets = dict:new()}).
+-record(state, {
+    name,
+    metrics,
+    max_connections,
+    keepalive_timeout,
+    prewarm_count,
+    %% Available connection processes: #{Key => [Pid]}
+    available = #{},
+    %% In-use connections: #{Pid => Key}
+    in_use = #{},
+    %% Pid to monitor ref mapping: #{Pid => MonitorRef}
+    pid_monitors = #{},
+    %% Hosts that have been activated (prewarm triggered): sets:set(Key)
+    activated_hosts = sets:new(),
+    %% HTTP/2 connections: #{Key => Pid} - one multiplexed connection per host
+    %% These connections are shared across callers (not checked out exclusively)
+    h2_connections = #{},
+    %% HTTP/3 connections: #{Key => Pid} - one multiplexed QUIC connection per host
+    %% These connections are shared across callers (not checked out exclusively)
+    h3_connections = #{}
+}).
 
+-define(DEFAULT_MAX_CONNECTIONS, 50).
+-define(DEFAULT_KEEPALIVE_TIMEOUT, 2000).  % 2 seconds max idle
+-define(DEFAULT_PREWARM_COUNT, 4).         % Connections to maintain per host
 
 start() ->
-  %% NB this is first called from hackney_sup:start_link
-  %%    BEFORE the hackney_pool ETS table exists
-  ok.
+    %% Create ETS table to store pool pid by name
+    _ = ets:new(?MODULE, [set, public, named_table, {read_concurrency, true}]),
+    ok.
 
-%% @doc fetch a socket from the pool
-checkout(Host, Port, Transport, Client) ->
-  Requester = self(),
-  try
-    do_checkout(Requester, Host, Port, Transport, Client)
-  catch _:Error ->
-    ?report_trace("pool: checkout failure", [{error, Error}]),
-    {error, checkout_failure}
-  end.
+%% @doc Checkout a connection process from the pool.
+%% Returns {ok, PoolInfo, Pid} where Pid is a hackney_conn process.
+-spec checkout(Host :: string(), Port :: non_neg_integer(),
+               Transport :: module(), Options :: list()) ->
+    {ok, term(), pid()} | {error, term()}.
+checkout(Host, Port, Transport, Options) ->
+    Requester = self(),
+    try
+        do_checkout(Requester, Host, Port, Transport, Options)
+    catch
+        exit:{timeout, _} ->
+            ?report_trace("pool: checkout timeout", []),
+            {error, checkout_timeout};
+        _:Error ->
+            ?report_trace("pool: checkout failure", [{error, Error}]),
+            {error, checkout_failure}
+    end.
 
-do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
-                                                       mod_metrics=Metrics}=Client) ->
-  ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
-  %% Fall back to using connect_timeout if checkout_timeout is not set
-  CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
-  {Connection, ConnectOptions} = hackney_connection:new(Client),
-  RequestRef = Client#client.request_ref,
-  PoolName = proplists:get_value(pool, Opts, default),
-  Pool = find_pool(PoolName, Opts),
-  case catch gen_server:call(Pool, {checkout, Connection, Requester, RequestRef}, CheckoutTimeout) of
-    {ok, Socket, Owner} ->
-      %% stats
-      ?report_debug("reuse a connection", [{pool, PoolName}]),
-      _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
-      _ = metrics:increment_counter(Metrics, [hackney_pool, Host, reuse_connection]),
-      {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
-    {error, no_socket, Owner} ->
-      ?report_trace("no socket in the pool", [{pool, PoolName}]),
-      Begin = os:timestamp(),
-      case hackney_connection:connect(Connection, ConnectOptions, ConnectTimeout) of
-        {ok, Socket} ->
-          case hackney_connection:controlling_process(Connection, Socket, Requester) of
-            ok ->
-              ?report_trace("new connection", []),
-              ConnectTime = timer:now_diff(os:timestamp(), Begin)/1000,
-              _ = metrics:update_histogram(Metrics, [hackney, Host, connect_time], ConnectTime),
-              _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
-              {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
-            Error ->
-              %% Ensure socket is properly closed on controlling_process error
-              _ = catch hackney_connection:close(Connection, Socket),
-              _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
-              Error
-           end;
-        {error, timeout} ->
-          _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
-          {error, timeout};
-        Error ->
-          ?report_trace("connect error", [{pool, PoolName}, {error, Error}]),
-          _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
-          Error
-      end;
-    {error, Reason} ->
-      {error, Reason};
-    {'EXIT', {timeout, _}} ->
-      %% checkout should be canceled by the caller via hackney_manager
-      {error, checkout_timeout}
-  end.
+do_checkout(Requester, Host, Port, Transport, Opts) ->
+    ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+    CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
+    PoolName = proplists:get_value(pool, Opts, default),
+    Pool = find_pool(PoolName, Opts),
+    Key = connection_key(Host, Port, Transport),
 
-%% @doc release a socket in the pool
-checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
-  hackney_connection:setopts(Connection, Socket, [{active, false}]),
-  case hackney_connection:sync_socket(Connection, Socket) of
-    true ->
-      case hackney_connection:controlling_process(Connection, Socket, Owner) of
-        ok ->
-          gen_server:call(Owner, {checkin, Ref, Connection, Socket, Transport}, infinity);
-        _Error ->
-          %% Ensure socket is properly closed on controlling_process error
-          _ = catch hackney_connection:close(Connection, Socket),
-          ok
-      end;
-    false ->
-      catch hackney_connection:close(Connection, Socket),
-      ok
-  end.
+    case gen_server:call(Pool, {checkout, Key, Requester, Opts}, CheckoutTimeout) of
+        {ok, Pid} ->
+            %% Return pool info for later checkin
+            PoolInfo = {PoolName, Key, Pool, Transport},
+            {ok, PoolInfo, Pid};
+        {error, _} = Error ->
+            Error;
+        {'EXIT', {timeout, _}} ->
+            {error, checkout_timeout}
+    end.
+
+%% @doc Return a connection process to the pool.
+-spec checkin(PoolInfo :: term(), Pid :: pid()) -> ok.
+checkin({_PoolName, _Key, Pool, _Transport}, Pid) ->
+    gen_server:cast(Pool, {checkin, nil, Pid}),
+    ok.
+
+%%====================================================================
+%% HTTP/2 Connection Pooling
+%%====================================================================
+
+%% @doc Get an existing HTTP/2 connection for a host/port, or 'none' if not available.
+%% HTTP/2 connections are shared (multiplexed) across callers.
+-spec checkout_h2(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Options :: list()) ->
+    {ok, pid()} | none.
+checkout_h2(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    try
+        gen_server:call(Pool, {checkout_h2, Key}, ConnectTimeout)
+    catch
+        exit:{timeout, _} -> none;
+        _:_ -> none
+    end.
+
+%% @doc Register an HTTP/2 connection in the pool for sharing.
+%% Called after ALPN negotiation confirms HTTP/2.
+-spec register_h2(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Pid :: pid(), Options :: list()) -> ok.
+register_h2(Host, Port, Transport, Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {register_h2, Key, Pid}),
+    ok.
+
+%% @doc Remove an HTTP/2 connection from the pool (e.g., on GOAWAY).
+-spec unregister_h2(Pid :: pid(), Options :: list()) -> ok.
+unregister_h2(Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    gen_server:cast(Pool, {unregister_h2, Pid}),
+    ok.
+
+%%====================================================================
+%% HTTP/3 Connection Pooling
+%%====================================================================
+
+%% @doc Get an existing HTTP/3 connection for a host/port, or 'none' if not available.
+%% HTTP/3 connections are shared (multiplexed) across callers via QUIC streams.
+-spec checkout_h3(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Options :: list()) ->
+    {ok, pid()} | none.
+checkout_h3(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    try
+        gen_server:call(Pool, {checkout_h3, Key}, ConnectTimeout)
+    catch
+        exit:{timeout, _} -> none;
+        _:_ -> none
+    end.
+
+%% @doc Register an HTTP/3 connection in the pool for sharing.
+%% Called after QUIC connection is established with HTTP/3.
+-spec register_h3(Host :: string(), Port :: non_neg_integer(),
+                  Transport :: module(), Pid :: pid(), Options :: list()) -> ok.
+register_h3(Host, Port, Transport, Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {register_h3, Key, Pid}),
+    ok.
+
+%% @doc Remove an HTTP/3 connection from the pool (e.g., on connection close).
+-spec unregister_h3(Pid :: pid(), Options :: list()) -> ok.
+unregister_h3(Pid, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    gen_server:cast(Pool, {unregister_h3, Pid}),
+    ok.
 
 get_stats(Pool) ->
-  gen_server:call(find_pool(Pool), stats).
-
+    gen_server:call(find_pool(Pool), stats).
 
 %% @doc start a pool
 start_pool(Name, Options) ->
-  case find_pool(Name, Options) of
-    Pid when is_pid(Pid) ->
-      ok;
-    Error ->
-      Error
-  end.
-
+    case find_pool(Name, Options) of
+        Pid when is_pid(Pid) ->
+            ok;
+        Error ->
+            Error
+    end.
 
 %% @doc stop a pool
 stop_pool(Name) ->
-  case find_pool(Name) of
-    undefined ->
-      ok;
-    _Pid ->
-      case supervisor:terminate_child(hackney_sup, Name) of
-        ok ->
-          _= supervisor:delete_child(hackney_sup, Name),
-          ets:delete(hackney_pool, Name),
-          ok;
-        Error ->
-          Error
-      end
-  end.
-
+    case find_pool(Name) of
+        undefined ->
+            ok;
+        _Pid ->
+            case supervisor:terminate_child(hackney_sup, Name) of
+                ok ->
+                    _ = supervisor:delete_child(hackney_sup, Name),
+                    ets:delete(hackney_pool, Name),
+                    ok;
+                Error ->
+                    Error
+            end
+    end.
 
 notify(Pool, Msg) ->
-  case find_pool(Pool) of
-    undefined -> ok;
-    Pid -> Pid ! Msg
-  end.
+    case find_pool(Pool) of
+        undefined -> ok;
+        Pid -> Pid ! Msg
+    end.
 
-
-
-%%
-%%  util functions for this pool
-%%
-
-%% @doc return a child spec suitable for embeding your pool in the
-%% supervisor
+%% @doc return a child spec suitable for embedding your pool in the supervisor
 child_spec(Name, Options0) ->
-  Options = [{name, Name} | Options0],
-  {Name, {hackney_pool, start_link, [Name, Options]},
-   permanent, 10000, worker, [hackney_pool]}.
-
+    Options = [{name, Name} | Options0],
+    {Name, {hackney_pool, start_link, [Name, Options]},
+     permanent, 10000, worker, [hackney_pool]}.
 
 %% @doc get the number of connections in the pool
 count(Name) ->
-  gen_server:call(find_pool(Name), count).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, count)
+    end.
 
-%% @doc get the number of connections in the pool for `{Host0, Port, Transport}'
-count(Name, {Host0, Port, Transport}) ->
-  Host = string:to_lower(Host0),
-  gen_server:call(find_pool(Name), {count, {Host, Port, Transport}}).
+%% @doc get the number of connections in the pool for `{Host, Port, Transport}'
+count(Name, Key) ->
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, {count, Key})
+    end.
 
 %% @doc get max pool size
 max_connections(Name) ->
-  gen_server:call(find_pool(Name), max_connections).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, max_connections)
+    end.
 
 %% @doc change the pool size
 set_max_connections(Name, NewSize) ->
-  gen_server:cast(find_pool(Name), {set_maxconn, NewSize}).
+    gen_server:cast(find_pool(Name), {set_maxconn, NewSize}).
 
 %% @doc get timeout
 timeout(Name) ->
-  gen_server:call(find_pool(Name), timeout).
+    case find_pool(Name) of
+        undefined -> 0;
+        Pid -> gen_server:call(Pid, timeout)
+    end.
 
 %% @doc change the connection timeout
-%%
 set_timeout(Name, NewTimeout) ->
-  gen_server:cast(find_pool(Name), {set_timeout, NewTimeout}).
+    gen_server:cast(find_pool(Name), {set_timeout, NewTimeout}).
+
+%% @doc Prewarm connections to a host (default count from pool settings)
+%% Starts the pool if it doesn't exist.
+-spec prewarm(atom(), string() | binary(), inet:port_number()) -> ok.
+prewarm(PoolName, Host, Port) ->
+    Pool = find_pool(PoolName, []),
+    gen_server:cast(Pool, {prewarm, Host, Port}).
+
+%% @doc Prewarm a specific number of connections to a host
+%% Starts the pool if it doesn't exist.
+-spec prewarm(atom(), string() | binary(), inet:port_number(), non_neg_integer()) -> ok.
+prewarm(PoolName, Host, Port, Count) ->
+    Pool = find_pool(PoolName, []),
+    gen_server:cast(Pool, {prewarm, Host, Port, Count}).
+
+%% @doc Get per-host connection statistics.
+%% Returns a proplist with:
+%% - active: number of active requests (from load_regulation)
+%% - in_use: connections checked out from pool
+%% - free: connections available in pool
+-spec host_stats(atom(), string() | binary(), inet:port_number()) ->
+    [{atom(), non_neg_integer()}].
+host_stats(PoolName, Host, Port) ->
+    Active = hackney_load_regulation:current(Host, Port),
+    case find_pool(PoolName) of
+        undefined ->
+            [{active, Active}, {in_use, 0}, {free, 0}];
+        Pool ->
+            {InUse, Free} = gen_server:call(Pool, {host_stats, Host, Port}),
+            [{active, Active}, {in_use, InUse}, {free, Free}]
+    end.
+
+to_pool_name(Name) when is_atom(Name) ->
+    list_to_atom("hackney_pool_" ++ atom_to_list(Name));
+to_pool_name(Name) when is_list(Name) ->
+    list_to_atom("hackney_pool_" ++ Name);
+to_pool_name(Name) when is_binary(Name) ->
+    to_pool_name(binary_to_list(Name)).
 
 %% @private
-%%
-%%
 do_start_pool(Name, Options) ->
-  Spec = child_spec(Name, Options),
-  case supervisor:start_child(hackney_sup, Spec) of
-    {ok, Pid} ->
-      Pid;
-    {error, {already_started, _}} ->
-      find_pool(Name, Options)
-  end.
-
+    Spec = child_spec(Name, Options),
+    case supervisor:start_child(hackney_sup, Spec) of
+        {ok, Pid} ->
+            Pid;
+        {error, {already_started, _}} ->
+            find_pool(Name, Options)
+    end.
 
 find_pool(Name) ->
-  case ets:lookup(?MODULE, Name) of
-    [] ->
-      undefined;
-    [{_, Pid}] ->
-      Pid
-  end.
+    case ets:lookup(?MODULE, Name) of
+        [] ->
+            undefined;
+        [{_, Pid}] ->
+            Pid
+    end.
 
 find_pool(Name, Options) ->
-  case ets:lookup(?MODULE, Name) of
-    [] ->
-      do_start_pool(Name, Options);
-    [{_, Pid}] ->
-      Pid
-  end.
-
+    case ets:lookup(?MODULE, Name) of
+        [] ->
+            do_start_pool(Name, Options);
+        [{_, Pid}] ->
+            Pid
+    end.
 
 start_link(Name, Options0) ->
-  Options = hackney_util:maybe_apply_defaults([max_connections, timeout],
-                                              Options0),
-  gen_server:start_link(?MODULE, [Name, Options], []).
+    Options = hackney_util:maybe_apply_defaults([max_connections, timeout],
+                                                Options0),
+    gen_server:start_link(?MODULE, [Name, Options], []).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
 
 init([Name, Options]) ->
-  MaxConn = case proplists:get_value(pool_size, Options) of
-              undefined ->
-                proplists:get_value(max_connections, Options);
-              Size ->
-                Size
-            end,
-  Timeout = proplists:get_value(timeout, Options),
+    MaxConn = case proplists:get_value(pool_size, Options) of
+                  undefined ->
+                      proplists:get_value(max_connections, Options, ?DEFAULT_MAX_CONNECTIONS);
+                  Size ->
+                      Size
+              end,
+    %% keepalive_timeout: max idle time for pooled connections (capped at 2s)
+    %% Also accept 'timeout' for backward compatibility
+    RawTimeout = case proplists:get_value(keepalive_timeout, Options) of
+                     undefined ->
+                         proplists:get_value(timeout, Options, ?DEFAULT_KEEPALIVE_TIMEOUT);
+                     KT ->
+                         KT
+                 end,
+    KeepaliveTimeout = min(RawTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
 
-  %% register the module
-  ets:insert(?MODULE, {Name, self()}),
+    %% prewarm_count: number of TCP connections to maintain per host
+    %% Check pool options first, then app env, then default
+    PrewarmCount = case proplists:get_value(prewarm_count, Options) of
+                       undefined ->
+                           hackney_app:get_app_env(prewarm_count, ?DEFAULT_PREWARM_COUNT);
+                       PC ->
+                           PC
+                   end,
 
-  %% initialize metrics
-  Engine = init_metrics(Name),
+    %% register the module
+    ets:insert(?MODULE, {Name, self()}),
 
-  {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
-              timeout=Timeout}}.
+    %% initialize metrics
+    Engine = init_metrics(Name),
+
+    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
+                keepalive_timeout=KeepaliveTimeout, prewarm_count=PrewarmCount}}.
 
 handle_call(stats, _From, State) ->
-  {reply, handle_stats(State), State};
-handle_call(count, _From, #state{sockets=Sockets}=State) ->
-  {reply, dict:size(Sockets), State};
-handle_call(timeout, _From, #state{timeout=Timeout}=State) ->
-  {reply, Timeout, State};
+    {reply, handle_stats(State), State};
+
+handle_call(count, _From, #state{available=Available, in_use=InUse}=State) ->
+    AvailCount = maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available),
+    {reply, AvailCount + maps:size(InUse), State};
+
+handle_call(timeout, _From, #state{keepalive_timeout=Timeout}=State) ->
+    {reply, Timeout, State};
+
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
-  {reply, MaxConn, State};
-handle_call({checkout, Dest, Requester, RequestRef}, From, State) ->
-  #state{name=PoolName,
-         metrics = Engine,
-         max_connections=MaxConn,
-         clients=Clients,
-         queues = Queues,
-         pending = Pending} = State,
+    {reply, MaxConn, State};
 
-  {Reply, State2} = find_connection(Dest, Requester, State),
-  case Reply of
-    {ok, _Socket, _Owner} ->
-      State3 = monitor_client(Dest, RequestRef, State2),
-      ok = update_usage(State3),
-      {reply, Reply, State3};
-    no_socket ->
-      case dict:size(Clients) >= MaxConn of
-        true ->
-          Queues2 = add_to_queue(Dest, From, RequestRef, Requester, Queues),
-          Pending2 = add_pending(RequestRef, From, Dest, Requester, Pending),
-          _ = metrics:update_histogram(
-                Engine, [hackney_pool, PoolName, queue_count], dict:size(Pending2)
-               ),
-          {noreply, State2#state{queues = Queues2, pending = Pending2}};
-        false ->
-          State3 = monitor_client(Dest, RequestRef, State2),
-          ok = update_usage(State3),
-          {reply, {error, no_socket, self()}, State3}
-      end
-  end;
-handle_call({checkin, Ref, Dest, Socket, Transport}, From, State) ->
-  reply_if_alive(From, ok),
-  Clients2 = case dict:find(Ref, State#state.clients) of
-               {ok, Dest} ->
-                 dict:erase(Ref, State#state.clients);
-               error ->
-                 State#state.clients
-             end,
-  State2 = case Transport:peername(Socket) of
-             {ok, {_Adress, _Port}} ->
-               %% socket is not closed, try to deliver it or store it
-               deliver_socket(Socket, Dest, State#state{clients=Clients2});
-             Error ->
-               %% socket may be half-closed, close it and return
-               catch Transport:close(Socket),
-               ?report_trace("checkin: socket is not ok~n", [{socket, Socket}, {peername, Error}]),
-               State#state{clients=Clients2}
-           end,
-  ok = update_usage(State2),
-  {noreply, State2};
+handle_call({count, Key}, _From, #state{available=Available}=State) ->
+    Count = case maps:find(Key, Available) of
+                {ok, Pids} -> length(Pids);
+                error -> 0
+            end,
+    {reply, Count, State};
 
-handle_call({count, Key}, _From, #state{connections=Conns}=State) ->
-  Size = case dict:find(Key, Conns) of
-           {ok, Sockets} ->
-             length(Sockets);
-           error ->
-             0
-         end,
-  {reply, Size, State}.
+handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=InUse}=State) ->
+    %% Count in_use and free for this host (any transport)
+    HostLower = string_compat:to_lower(Host),
+    InUseCount = maps:fold(
+        fun(_Pid, {H, P, _T}, Acc) when H =:= HostLower, P =:= Port -> Acc + 1;
+           (_, _, Acc) -> Acc
+        end, 0, InUse),
+    FreeCount = maps:fold(
+        fun({H, P, _T}, Pids, Acc) when H =:= HostLower, P =:= Port -> Acc + length(Pids);
+           (_, _, Acc) -> Acc
+        end, 0, Available),
+    {reply, {InUseCount, FreeCount}, State};
+
+handle_call({checkout, Key, Requester, Opts}, _From, State) ->
+    #state{name=PoolName, metrics=Engine, max_connections=MaxConn,
+           available=Available, in_use=InUse} = State,
+
+    TotalInUse = maps:size(InUse),
+
+    ?report_trace("pool: checkout request", [{pool, PoolName}, {key, Key},
+        {total_in_use, TotalInUse}, {max_conn, MaxConn}]),
+
+    case find_available(Key, Available) of
+        {ok, Pid, Available2} ->
+            %% Found an available connection - update owner to new requester
+            ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
+            ok = hackney_conn:set_owner(Pid, Requester),
+            _ = metrics:update_meter(Engine, [hackney_pool, PoolName, take_rate], 1),
+            InUse2 = maps:put(Pid, Key, InUse),
+            {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
+        none when TotalInUse >= MaxConn ->
+            %% At max connections - return error immediately (no queue)
+            %% Note: In the new architecture, load_regulation handles waiting
+            ?report_trace("pool: at max connections", [{pool, PoolName}, {in_use, TotalInUse}]),
+            {reply, {error, checkout_timeout}, State};
+        none ->
+            %% No available connection, start a new one
+            ?report_trace("pool: starting new connection", [{pool, PoolName}]),
+            case start_connection(Key, Requester, Opts, State) of
+                {ok, Pid, State2} ->
+                    InUse2 = maps:put(Pid, Key, State2#state.in_use),
+                    {reply, {ok, Pid}, State2#state{in_use=InUse2}};
+                {error, Reason} ->
+                    {reply, {error, Reason}, State}
+            end
+    end;
+
+handle_call({checkin_sync, Pid}, _From, State) ->
+    %% Synchronous checkin - caller waits for acknowledgement
+    %% Legacy format without SSL flag - need to query connection (may deadlock if called from connection)
+    State2 = do_checkin(Pid, State),
+    {reply, ok, State2};
+
+handle_call({checkin_sync, Pid, UpgradedSsl}, _From, State) ->
+    %% Synchronous checkin with SSL flag - avoids deadlock
+    State2 = do_checkin_with_ssl_flag(Pid, UpgradedSsl, State),
+    {reply, ok, State2};
+
+handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State) ->
+    %% HTTP/2 checkout - return existing connection if available
+    case maps:get(Key, H2Conns, undefined) of
+        undefined ->
+            {reply, none, State};
+        Pid ->
+            %% Verify connection is still alive
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    {reply, {ok, Pid}, State};
+                false ->
+                    %% Connection died, remove from pool
+                    H2Conns2 = maps:remove(Key, H2Conns),
+                    {reply, none, State#state{h2_connections = H2Conns2}}
+            end
+    end;
+
+handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State) ->
+    %% HTTP/3 checkout - return existing connection if available
+    case maps:get(Key, H3Conns, undefined) of
+        undefined ->
+            {reply, none, State};
+        Pid ->
+            %% Verify connection is still alive
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    {reply, {ok, Pid}, State};
+                false ->
+                    %% Connection died, remove from pool
+                    H3Conns2 = maps:remove(Key, H3Conns),
+                    {reply, none, State#state{h3_connections = H3Conns2}}
+            end
+    end.
+
+handle_cast({checkin, _PoolInfo, Pid}, State) ->
+    State2 = do_checkin(Pid, State),
+    {noreply, State2};
 
 handle_cast({set_maxconn, MaxConn}, State) ->
-  {noreply, State#state{max_connections=MaxConn}};
-handle_cast({set_timeout, NewTimeout}, State) ->
-  {noreply, State#state{timeout=NewTimeout}};
-handle_cast(_Msg, State) ->
-  {noreply, State}.
+    {noreply, State#state{max_connections=MaxConn}};
 
-handle_info({timeout, Socket}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({tcp, Socket, _}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({tcp_closed, Socket}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({ssl, Socket, _}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({ssl_closed, Socket}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({tcp_error, Socket, _}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({ssl_error, Socket, _}, State) ->
-  {noreply, remove_socket(Socket, State)};
-handle_info({'DOWN', Ref, request, _Pid, _Reason}, State) ->
-  case dict:find(Ref, State#state.clients) of
-    {ok, Dest} ->
-      {noreply, dequeue(Dest, Ref, State)};
-    error ->
-      NewState = remove_pending(Ref, State),
-      {noreply, NewState}
-  end;
-handle_info(_, State) ->
-  {noreply, State}.
+handle_cast({set_timeout, NewTimeout}, State) ->
+    %% Cap at 2 seconds
+    Capped = min(NewTimeout, ?DEFAULT_KEEPALIVE_TIMEOUT),
+    {noreply, State#state{keepalive_timeout=Capped}};
+
+handle_cast({prewarm, Host, Port}, #state{prewarm_count=Count}=State) ->
+    State2 = do_prewarm(Host, Port, Count, State),
+    {noreply, State2};
+
+handle_cast({prewarm, Host, Port, Count}, State) ->
+    State2 = do_prewarm(Host, Port, Count, State),
+    {noreply, State2};
+
+handle_cast({prewarm_checkin, Pid, Key}, State) ->
+    %% Add a prewarmed connection to the pool
+    #state{available=Available, pid_monitors=PidMonitors} = State,
+    %% Set owner to pool
+    hackney_conn:set_owner_async(Pid, self()),
+    %% Monitor the connection
+    MonRef = erlang:monitor(process, Pid),
+    PidMonitors2 = maps:put(Pid, MonRef, PidMonitors),
+    %% Add to available
+    Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+    {noreply, State#state{available=Available2, pid_monitors=PidMonitors2}};
+
+handle_cast({register_h2, Key, Pid}, State) ->
+    %% Register an HTTP/2 connection for sharing
+    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    %% Monitor the connection if not already monitored
+    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+        true -> PidMonitors;
+        false ->
+            MonRef = erlang:monitor(process, Pid),
+            maps:put(Pid, MonRef, PidMonitors)
+    end,
+    %% Store HTTP/2 connection
+    H2Conns2 = maps:put(Key, Pid, H2Conns),
+    {noreply, State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}};
+
+handle_cast({unregister_h2, Pid}, State) ->
+    %% Remove an HTTP/2 connection from the pool
+    State2 = do_unregister_h2(Pid, State),
+    {noreply, State2};
+
+handle_cast({register_h3, Key, Pid}, State) ->
+    %% Register an HTTP/3 connection for sharing
+    #state{h3_connections = H3Conns, pid_monitors = PidMonitors} = State,
+    %% Monitor the connection if not already monitored
+    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+        true -> PidMonitors;
+        false ->
+            MonRef = erlang:monitor(process, Pid),
+            maps:put(Pid, MonRef, PidMonitors)
+    end,
+    %% Store HTTP/3 connection
+    H3Conns2 = maps:put(Key, Pid, H3Conns),
+    {noreply, State#state{h3_connections = H3Conns2, pid_monitors = PidMonitors2}};
+
+handle_cast({unregister_h3, Pid}, State) ->
+    %% Remove an HTTP/3 connection from the pool
+    State2 = do_unregister_h3(Pid, State),
+    {noreply, State2};
+
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
+    %% Connection process died, remove from available, in_use, h2_connections, and h3_connections
+    #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
+           h2_connections=H2Conns, h3_connections=H3Conns} = State,
+    ?report_trace("pool: connection DOWN", [{pool, PoolName}, {pid, Pid}, {reason, Reason},
+        {was_in_use, maps:is_key(Pid, InUse)}]),
+
+    %% Remove from available pools
+    Available2 = maps:fold(
+        fun(Key, Pids, Acc) ->
+            case lists:delete(Pid, Pids) of
+                [] -> maps:remove(Key, Acc);
+                Pids2 -> maps:put(Key, Pids2, Acc)
+            end
+        end,
+        Available,
+        Available
+    ),
+
+    %% Remove from in_use and release load_regulation slot if it was checked out
+    InUse2 = case maps:take(Pid, InUse) of
+        {Key, NewInUse} ->
+            %% Connection died while in use - release the load_regulation slot
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+            NewInUse;
+        error ->
+            InUse
+    end,
+
+    %% Remove from HTTP/2 connections if present
+    H2Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end
+        end,
+        H2Conns,
+        H2Conns
+    ),
+
+    %% Remove from HTTP/3 connections if present
+    H3Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) when is_pid(ConnPid) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end;
+           (_Key, _Val, Acc) -> Acc
+        end,
+        H3Conns,
+        H3Conns
+    ),
+
+    PidMonitors2 = maps:remove(Pid, PidMonitors),
+    {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2,
+                          h2_connections=H2Conns2, h3_connections=H3Conns2}};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
+    {ok, State}.
 
-terminate(_Reason, #state{name=PoolName, metrics=Engine, sockets=Sockets}) ->
-  %% close any sockets in the pool
-  lists:foreach(fun({Socket, {{_, _, Transport}, Timer}}) ->
-                    cancel_timer(Socket, Timer),
-                    Transport:close(Socket)
-                end, dict:to_list(Sockets)),
+terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
+                         h2_connections=H2Conns, h3_connections=H3Conns,
+                         pid_monitors=PidMonitors}) ->
+    %% Stop all available connections
+    maps:foreach(
+        fun(_Key, Pids) ->
+            lists:foreach(fun(Pid) ->
+                catch hackney_conn:stop(Pid)
+            end, Pids)
+        end,
+        Available
+    ),
 
-  %% delete pool metrics
-  ok = delete_metrics(Engine, PoolName),
-  ok.
+    %% Stop all HTTP/2 connections
+    maps:foreach(
+        fun(_Key, Pid) ->
+            catch hackney_conn:stop(Pid)
+        end,
+        H2Conns
+    ),
 
-%% internals
+    %% Stop all HTTP/3 connections
+    maps:foreach(
+        fun(_Key, Pid) ->
+            catch hackney_conn:stop(Pid)
+        end,
+        H3Conns
+    ),
 
-dequeue(Dest, Ref, State) ->
-  #state{clients=Clients, queues=Queues, pending=Pending} = State,
-  Clients2 = dict:erase(Ref, Clients),
-  case queue_out(Dest, Queues) of
-    empty ->
-      State#state{clients = Clients2};
-    {ok, {From, Ref2, _Requester}, Queues2} ->
-      Pending2 = del_pending(Ref2, Pending),
-      _ = metrics:update_histogram(
-            State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
-           ),
-      reply_if_alive(From, {error, no_socket, self()}),
-      State2 = State#state{queues = Queues2, clients = Clients2, pending=Pending2},
-      monitor_client(Dest, Ref2, State2)
-  end.
+    %% Demonitor all
+    maps:foreach(fun(_Pid, MonRef) -> erlang:demonitor(MonRef, [flush]) end, PidMonitors),
 
-find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=State) ->
-  case dict:find(Connection, Conns) of
-    {ok, [S | Rest]} ->
-      hackney_connection:setopts(Connection, S, [{active, false}]),
-      case hackney_connection:sync_socket(Connection, S) of
-        true ->
-          case hackney_connection:controlling_process(Connection, S, Pid) of
-            ok ->
-              {_, Timer} = dict:fetch(S, Sockets),
-              cancel_timer(S, Timer),
-              NewConns = update_connections(Rest, Connection, Conns),
-              NewSockets = dict:erase(S, Sockets),
-              NewState = State#state{connections=NewConns, sockets=NewSockets},
-              {{ok, S, self()}, NewState};
-            {error, badarg} ->
-              %% something happened here normally the PID died,
-              %% but make sure we still have the control of the
-              %% process
-              case catch hackney_connection:controlling_process(Connection, S, self()) of
+    %% delete pool metrics
+    ok = delete_metrics(Engine, PoolName),
+    ok.
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+connection_key(Host0, Port, Transport) ->
+    Host = string_compat:to_lower(Host0),
+    {Host, Port, Transport}.
+
+find_available(Key, Available) ->
+    case maps:find(Key, Available) of
+        {ok, [Pid | Rest]} ->
+            Available2 = case Rest of
+                [] -> maps:remove(Key, Available);
+                _ -> maps:put(Key, Rest, Available)
+            end,
+            %% Verify connection is still alive and usable
+            case is_process_alive(Pid) of
+                true ->
+                    %% is_ready checks both state and socket health in one call
+                    case hackney_conn:is_ready(Pid) of
+                        {ok, connected} -> {ok, Pid, Available2};
+                        {ok, closed} ->
+                            %% Connection closed, try reconnect
+                            case hackney_conn:connect(Pid) of
+                                ok -> {ok, Pid, Available2};
+                                _ -> find_available(Key, Available2)
+                            end;
+                        _ -> find_available(Key, Available2)
+                    end;
+                false ->
+                    find_available(Key, Available2)
+            end;
+        {ok, []} ->
+            none;
+        error ->
+            none
+    end.
+
+start_connection(Key, Owner, Opts, State) ->
+    {Host, Port, Transport} = Key,
+    ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+    RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
+    IdleTimeout = State#state.keepalive_timeout,
+    SslOpts = proplists:get_value(ssl_options, Opts, []),
+    ConnectOpts = proplists:get_value(connect_options, Opts, []),
+
+    ConnOpts = #{
+        host => Host,
+        port => Port,
+        transport => Transport,
+        connect_timeout => ConnectTimeout,
+        recv_timeout => RecvTimeout,
+        idle_timeout => IdleTimeout,
+        ssl_options => SslOpts,
+        connect_options => ConnectOpts,
+        pool_pid => self(),
+        owner => Owner
+    },
+
+    case hackney_conn_sup:start_conn(ConnOpts) of
+        {ok, Pid} ->
+            %% Connect the connection
+            case hackney_conn:connect(Pid) of
                 ok ->
-                  %% Successfully regained control, now remove the socket
-                  find_connection(Connection, Pid, remove_socket(S, State));
-                _ ->
-                  %% Failed to regain control, force close and remove
-                  _ = catch hackney_connection:close(Connection, S),
-                  find_connection(Connection, Pid, remove_socket(S, State))
-              end;
-            _Else ->
-              find_connection(Connection, Pid, remove_socket(S, State))
-          end;
+                    %% Monitor the process
+                    MonRef = erlang:monitor(process, Pid),
+                    PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
+                    {ok, Pid, State#state{pid_monitors=PidMonitors}};
+                {error, Reason} ->
+                    catch hackney_conn:stop(Pid),
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private Process a checkin - return connection to pool
+%% Only TCP connections are stored. SSL upgraded connections are closed.
+%% Always releases the load_regulation slot since connection is no longer in use.
+do_checkin(Pid, State) ->
+    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+
+    %% Get the key from in_use and remove
+    case maps:take(Pid, InUse) of
+        {Key, InUse2} ->
+            %% Release load_regulation slot - connection is no longer in active use
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+
+            %% Check if connection is still alive
+            case is_process_alive(Pid) of
+                true ->
+                    %% Check if this is an SSL upgraded connection
+                    %% SSL connections should NOT be pooled (security requirement)
+                    case catch hackney_conn:is_upgraded_ssl(Pid) of
+                        true ->
+                            %% SSL upgraded - close instead of storing
+                            catch hackney_conn:stop(Pid),
+                            %% Remove monitor if exists
+                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
+                                {MonRef, PM} ->
+                                    erlang:demonitor(MonRef, [flush]),
+                                    PM;
+                                error -> PidMonitors
+                            end,
+                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
+                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
+                            TcpKey = {Host, Port, hackney_tcp},
+                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
+                        _ ->
+                            %% TCP connection - store in pool
+                            %% Set owner to pool so connection doesn't die if previous requester crashes.
+                            %% Use async version to avoid deadlock when called from checkin_sync
+                            hackney_conn:set_owner_async(Pid, self()),
+                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+
+                            %% Ensure we're monitoring this pid
+                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                                true -> PidMonitors;
+                                false ->
+                                    MonRef = erlang:monitor(process, Pid),
+                                    maps:put(Pid, MonRef, PidMonitors)
+                            end,
+
+                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
+                            %% Maintain prewarm for activated hosts
+                            maybe_maintain_prewarm(Key, State2)
+                    end;
+                false ->
+                    State#state{in_use=InUse2}
+            end;
+        error ->
+            State
+    end.
+
+%% @private Process a checkin with known SSL flag - avoids calling back to connection
+%% Used for sync checkin to prevent deadlock when connection calls pool.
+do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
+    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+
+    %% Get the key from in_use and remove
+    case maps:take(Pid, InUse) of
+        {Key, InUse2} ->
+            %% Release load_regulation slot - connection is no longer in active use
+            {Host, Port, _Transport} = Key,
+            hackney_load_regulation:release(Host, Port),
+
+            %% Check if connection is still alive
+            case is_process_alive(Pid) of
+                true ->
+                    %% Use the provided SSL flag instead of querying connection
+                    case UpgradedSsl of
+                        true ->
+                            %% SSL upgraded - close instead of storing
+                            %% Use cast to avoid deadlock (connection is waiting for our reply)
+                            gen_statem:cast(Pid, stop),
+                            %% Remove monitor if exists
+                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
+                                {MonRef, PM} ->
+                                    erlang:demonitor(MonRef, [flush]),
+                                    PM;
+                                error -> PidMonitors
+                            end,
+                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
+                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
+                            TcpKey = {Host, Port, hackney_tcp},
+                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
+                        _ ->
+                            %% TCP connection - store in pool
+                            %% Set owner to pool so connection doesn't die if previous requester crashes.
+                            hackney_conn:set_owner_async(Pid, self()),
+                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+
+                            %% Ensure we're monitoring this pid
+                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                                true -> PidMonitors;
+                                false ->
+                                    MonRef = erlang:monitor(process, Pid),
+                                    maps:put(Pid, MonRef, PidMonitors)
+                            end,
+
+                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
+                            %% Maintain prewarm for activated hosts
+                            maybe_maintain_prewarm(Key, State2)
+                    end;
+                false ->
+                    State#state{in_use=InUse2}
+            end;
+        error ->
+            State
+    end.
+
+%% @private Remove an HTTP/2 connection from the pool
+do_unregister_h2(Pid, State) ->
+    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    %% Find and remove the connection
+    H2Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end
+        end,
+        H2Conns,
+        H2Conns
+    ),
+    %% Demonitor if no longer tracked
+    PidMonitors2 = case maps:take(Pid, PidMonitors) of
+        {MonRef, PM} ->
+            erlang:demonitor(MonRef, [flush]),
+            PM;
+        error -> PidMonitors
+    end,
+    State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}.
+
+%% @private Remove an HTTP/3 connection from the pool
+do_unregister_h3(Pid, State) ->
+    #state{h3_connections = H3Conns, pid_monitors = PidMonitors} = State,
+    %% Find and remove the connection
+    H3Conns2 = maps:fold(
+        fun(Key, ConnPid, Acc) when is_pid(ConnPid) ->
+            case ConnPid of
+                Pid -> maps:remove(Key, Acc);
+                _ -> Acc
+            end;
+           (_Key, _Val, Acc) -> Acc
+        end,
+        H3Conns,
+        H3Conns
+    ),
+    %% Demonitor if no longer tracked
+    PidMonitors2 = case maps:take(Pid, PidMonitors) of
+        {MonRef, PM} ->
+            erlang:demonitor(MonRef, [flush]),
+            PM;
+        error -> PidMonitors
+    end,
+    State#state{h3_connections = H3Conns2, pid_monitors = PidMonitors2}.
+
+%% @private Prewarm connections to a host
+%% Creates connections up to Count if there are fewer available.
+%% Only creates TCP connections (prewarm doesn't apply to SSL).
+do_prewarm(Host, Port, Count, State) ->
+    #state{name=PoolName, available=Available, keepalive_timeout=IdleTimeout} = State,
+    Key = connection_key(Host, Port, hackney_tcp),
+    CurrentCount = case maps:find(Key, Available) of
+        {ok, Pids} -> length(Pids);
+        error -> 0
+    end,
+    Needed = max(0, Count - CurrentCount),
+    ?report_trace("pool: prewarm", [{pool, PoolName}, {host, Host}, {port, Port},
+                                    {current, CurrentCount}, {needed, Needed}]),
+    case Needed > 0 of
+        true ->
+            %% Mark host as activated
+            State2 = activate_host(Key, State),
+            %% Create connections in background to not block the pool
+            PoolPid = self(),
+            spawn(fun() ->
+                prewarm_connections(PoolPid, Host, Port, Needed, IdleTimeout)
+            end),
+            State2;
         false ->
-          ?report_trace("checkout: socket unsynced~n", []),
-          find_connection(Connection, Pid, remove_socket(S, State))
-      end;
-    _Else ->
-      {no_socket, State}
-  end.
+            State
+    end.
 
-remove_socket(Socket, #state{connections=Conns, sockets=Sockets}=State) ->
-  _ = metrics:update_histogram(State#state.metrics,
-                               [hackney, State#state.name, free_count],
-                               dict:size(Sockets)),
-  case dict:find(Socket, Sockets) of
-    {ok, {Connection, Timer}} ->
-      cancel_timer(Socket, Timer),
-      catch hackney_connection:close(Connection, Socket),
-      ConnSockets = lists:delete(Socket, dict:fetch(Connection, Conns)),
-      NewConns = update_connections(ConnSockets, Connection, Conns),
-      NewSockets = dict:erase(Socket, Sockets),
-      State#state{connections=NewConns, sockets=NewSockets};
-    error ->
-      State
-  end.
+%% @private Mark a host as activated for prewarm
+activate_host(Key, #state{activated_hosts=Activated}=State) ->
+    State#state{activated_hosts=sets:add_element(Key, Activated)}.
 
+%% @private Check if a host has been activated
+is_host_activated(Key, #state{activated_hosts=Activated}) ->
+    sets:is_element(Key, Activated).
 
-store_socket(Connection, Socket, #state{timeout=Timeout, connections=Conns,
-                                        sockets=Sockets}=State) ->
-  Timer = erlang:send_after(Timeout, self(), {timeout, Socket}),
-  %% make sure to close the socket if anything is received while we are in
-  %% the pool.
-  hackney_connection:setopts(Connection, Socket, [{active, once}, {packet, 0}]),
-  ConnSockets = case dict:find(Connection, Conns) of
-                  {ok, OldSockets} ->
-                    [Socket | OldSockets];
-                  error -> [Socket]
-                end,
-  State#state{connections = dict:store(Connection, ConnSockets, Conns),
-              sockets = dict:store(Socket, {Connection, Timer}, Sockets)}.
+%% @private Maintain prewarm count for activated hosts
+maybe_maintain_prewarm(Key, State) ->
+    case is_host_activated(Key, State) of
+        true ->
+            #state{prewarm_count=PrewarmCount, available=Available} = State,
+            CurrentCount = case maps:find(Key, Available) of
+                {ok, Pids} -> length(Pids);
+                error -> 0
+            end,
+            case CurrentCount < PrewarmCount of
+                true ->
+                    {Host, Port, _Transport} = Key,
+                    do_prewarm(Host, Port, PrewarmCount, State);
+                false ->
+                    State
+            end;
+        false ->
+            State
+    end.
 
-update_connections([], Key, Connections) ->
-  dict:erase(Key, Connections);
-update_connections(Sockets, Key, Connections) ->
-  dict:store(Key, Sockets, Connections).
-
-cancel_timer(Socket, Timer) ->
-  case erlang:cancel_timer(Timer) of
-    false ->
-      %% Timer already fired, must drain the timeout message
-      receive
-        {timeout, Socket} -> ok
-      after
-        0 -> 
-          %% No wait - if message doesn't exist, continue immediately
-          ok
-      end;
-    _ -> 
-      %% Timer was successfully cancelled, no message should exist
-      %% Don't drain messages to avoid consuming legitimate timeout messages
-      ok
-  end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-add_to_queue(Connection, From, Ref, Requester, Queues) ->
-  case dict:find(Connection, Queues) of
-    error ->
-      dict:store(Connection, queue:in({From, Ref, Requester}, queue:new()), Queues);
-    {ok, Q} ->
-      dict:store(Connection, queue:in({From, Ref, Requester}, Q), Queues)
-  end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-queue_out(Connection, Queues) ->
-  case dict:find(Connection, Queues) of
-    error ->
-      empty;
-    {ok, Q} ->
-      case queue:out(Q) of
-        {{value, {From, Ref, Requester}}, Q2} ->
-          Queues2 = case queue:is_empty(Q2) of
-                      true ->
-                        dict:erase(Connection, Queues);
-                      false ->
-                        dict:store(Connection, Q2, Queues)
-                    end,
-          {ok, {From, Ref, Requester}, Queues2};
-        {empty, _} ->
-          %% fix race condition
-          empty
-      end
-  end.
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-deliver_socket(Socket, Connection, State) ->
-  #state{queues = Queues, pending=Pending} = State,
-  case queue_out(Connection, Queues) of
-    empty ->
-      store_socket(Connection, Socket, State);
-    {ok, {FromWaiter, Ref, PidWaiter}, Queues2} ->
-      Pending2 = del_pending(Ref, Pending),
-      _ = metrics:update_histogram(
-            State#state.metrics, [hackney_pool, State#state.name, queue_count], dict:size(Pending2)
-           ),
-      case hackney_connection:controlling_process(Connection, Socket, PidWaiter) of
-        ok ->
-          reply_if_alive(FromWaiter, {ok, Socket, self()}),
-          monitor_client(Connection, Ref, State#state{queues = Queues2, pending=Pending2});
-        _Error ->
-          % Something wrong, close the socket
-          _ = (catch hackney_connection:close(Connection, Socket)),
-          %% and let the waiter connect to a new one
-          reply_if_alive(FromWaiter, {error, no_socket, self()}),
-          State#state{queues = Queues2, pending = Pending2}
-      end
-  end.
-
-add_pending(Ref, From, Connection, Requester, Pending) ->
-  dict:store(Ref, {From, Connection, Requester}, Pending).
-
-
-del_pending(Ref, Pending) ->
-  dict:erase(Ref, Pending).
-
-
-remove_pending(Ref, #state{queues=Queues0, pending=Pending0} = State) ->
-  case dict:find(Ref, Pending0) of
-    {ok, {From, Connection, Requester}} ->
-      Pending1 = dict:erase(Ref, Pending0),
-      Queues1 = case dict:find(Connection, Queues0) of
-                  {ok, Q0} ->
-                    Q1 = queue:filter(
-                           fun
-                             (PendingReq) when PendingReq =:= {From, Ref, Requester} -> false;
-                        (_) -> true
-                           end,
-                           Q0
-                          ),
-                    dict:store(Connection, Q1, Queues0);
-                  error ->
-                    Queues0
-                end,
-      State#state{queues=Queues1, pending=Pending1};
-    error ->
-      State
-  end.
-
-
-
-%------------------------------------------------------------------------------
-%% @private
-%%------------------------------------------------------------------------------
-monitor_client(Connection, Ref, State) ->
-  Clients2 = dict:store(Ref, Connection, State#state.clients),
-  State#state{clients = Clients2}.
-
+%% @private Create prewarm connections (runs in separate process)
+prewarm_connections(_PoolPid, _Host, _Port, 0, _IdleTimeout) ->
+    ok;
+prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
+    ConnOpts = #{
+        host => Host,
+        port => Port,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000,
+        idle_timeout => IdleTimeout,
+        ssl_options => [],
+        connect_options => [],
+        pool_pid => PoolPid,
+        owner => PoolPid
+    },
+    case hackney_conn_sup:start_conn(ConnOpts) of
+        {ok, Pid} ->
+            case hackney_conn:connect(Pid) of
+                ok ->
+                    %% Checkin the new connection to the pool
+                    gen_server:cast(PoolPid, {prewarm_checkin, Pid, {Host, Port, hackney_tcp}});
+                {error, _Reason} ->
+                    catch hackney_conn:stop(Pid)
+            end;
+        {error, _Reason} ->
+            ok
+    end,
+    prewarm_connections(PoolPid, Host, Port, Count - 1, IdleTimeout).
 
 init_metrics(PoolName) ->
-  %% get metrics module
-  Engine = hackney_metrics:get_engine(),
-
-  %% initialise metrics
-  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, take_rate]),
-  _ = metrics:new(Engine, counter, [hackney_pool, PoolName, no_socket]),
-  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, in_use_count]),
-  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, free_count]),
-  _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_count]),
-  Engine.
+    Engine = hackney_metrics:get_engine(),
+    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, take_rate]),
+    _ = metrics:new(Engine, counter, [hackney_pool, PoolName, no_socket]),
+    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, in_use_count]),
+    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, free_count]),
+    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_count]),
+    Engine.
 
 delete_metrics(Engine, PoolName) ->
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, take_rate]),
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, no_socket]),
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, in_use_count]),
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, free_count]),
-  _ = metrics:delete(Engine, [hackney_pool, PoolName, queue_count]),
-  ok.
-
-
-update_usage(
-  #state{name=PoolName, metrics=Engine, sockets=Sockets, clients=Clients}
- ) ->
-  _ = metrics:update_histogram(Engine, [hackney_pool, PoolName,in_use_count],
-                               dict:size(Clients) - 1),
-  _ = metrics:update_histogram(Engine, [hackney_pool, PoolName, free_count],
-                               dict:size(Sockets) - 1),
-  ok.
-
+    _ = metrics:delete(Engine, [hackney_pool, PoolName, take_rate]),
+    _ = metrics:delete(Engine, [hackney_pool, PoolName, no_socket]),
+    _ = metrics:delete(Engine, [hackney_pool, PoolName, in_use_count]),
+    _ = metrics:delete(Engine, [hackney_pool, PoolName, free_count]),
+    _ = metrics:delete(Engine, [hackney_pool, PoolName, queue_count]),
+    ok.
 
 handle_stats(State) ->
-  #state{name=PoolName, max_connections=Max, sockets=Sockets, clients=Clients, pending=Pending} = State,
-  [{name, PoolName},
-   {max, Max},
-   {in_use_count,  dict:size(Clients)},
-   {free_count, dict:size(Sockets)},
-   {queue_count, dict:size(Pending)}].
-
-reply_if_alive({Pid, _Tag}=To, Msg) ->
-  case is_process_alive(Pid) of
-    true ->
-      gen_server:reply(To, Msg);
-    false ->
-      ok
-  end.
+    #state{name=PoolName, max_connections=Max, available=Available,
+           in_use=InUse} = State,
+    AvailCount = maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available),
+    [{name, PoolName},
+     {max, Max},
+     {in_use_count, maps:size(InUse)},
+     {free_count, AvailCount},
+     {queue_count, 0}].  % No more queue

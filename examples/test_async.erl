@@ -29,7 +29,7 @@ loop(Ref) ->
 main(_) ->
     application:ensure_all_started(hackney),
 
-    Url = <<"https://httparrot.herokuapp.com/get">>,
+    Url = <<"https://httpbin.org/get">>,
     Opts = [async],
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     loop(Ref).

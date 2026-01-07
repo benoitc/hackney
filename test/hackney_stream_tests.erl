@@ -4,6 +4,8 @@
 
 -export([checkout/4]).
 
+-define(PORT, 8124).
+
 %% This seems necessary to list the tests including the generator
 all_tests() ->
    [
@@ -15,51 +17,62 @@ stream_test_() ->
     {setup,
      fun start/0,
      fun stop/1,
-      fun(ok) ->
+      fun({ok, _}) ->
           {inparallel, all_tests()}
       end}.
 
-
 start() ->
+    error_logger:tty(false),
+    {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(hackney),
+    Host = '_',
+    Routes = [
+        {"/get", test_http_resource, []},
+        {"/connection-close", test_http_resource, []}
+    ],
+    Dispatch = cowboy_router:compile([{Host, Routes}]),
+    cowboy:start_clear(stream_test_server, [{port, ?PORT}], #{env => #{dispatch => Dispatch}}).
+
+stop({ok, _Pid}) ->
+    cowboy:stop_listener(stream_test_server),
+    application:stop(cowboy),
+    application:stop(hackney),
+    error_logger:tty(true),
     ok.
 
-stop(ok) -> ok.
-
-
 async_request() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = <<"http://localhost:", (integer_to_binary(?PORT))/binary, "/get">>,
     Options = [async],
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
-    timer:sleep(100),
-    {mstate, Dict, _} = sys:get_state(hackney_manager),
-    [?_assertEqual(0, dict:size(Dict)),
-     ?_assertEqual(200, StatusCode),
+    %% With process-per-connection model, no ETS/dict tracking needed
+    %% Just verify the async request worked correctly
+    [?_assertEqual(200, StatusCode),
      ?_assertEqual([body, headers, status], Keys)].
 
 receive_response(Ref) ->
-    Dict = receive_response(Ref, orddict:new(), infinity),
+    Dict = receive_response(Ref, orddict:new(), 10000),
     Keys = orddict:fetch_keys(Dict),
     StatusCode = orddict:fetch(status, Dict),
     {StatusCode, Keys}.
 
 checkout(_Host, _Port, _Transport, _Client) -> {error, no_socket, make_ref()}.
+
 handle_connection_close() ->
-    URL = <<"http://localhost:8000/get">>,
+    URL = <<"http://localhost:", (integer_to_binary(?PORT))/binary, "/connection-close">>,
     Options = [async, {pool, false}],
 
-    % Notice that ?MODULE has checkout/4 but not checkin, so if this test
-    % passes, it means that checkin was not called (which is intended for closed
-    % sockets)
-    application:set_env(hackney, pool_handler, ?MODULE),
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
-    application:set_env(hackney, pool_handler, hackney_pool),
-    Dict = receive_response(ClientRef, orddict:new(), 5000),
-    Headers = hackney_headers_new:from_list(orddict:fetch(headers, Dict)),
-    CloseHeader = hackney_headers_new:get_value(<<"connection">>, Headers),
+    Dict = receive_response(ClientRef, orddict:new(), 2000),
+    Headers = hackney_headers:from_list(orddict:fetch(headers, Dict)),
+    CloseHeader = hackney_headers:get_value(<<"connection">>, Headers),
+    %% Verify response completed successfully with Connection: close header
+    %% In process-per-connection model, async returns the connection PID
+    %% After Connection: close, process should terminate
+    timer:sleep(10),
     [?_assertEqual(<<"close">>, CloseHeader),
-     ?_assertEqual({error, req_not_found},  hackney:request_info(ClientRef))
+     ?_assert(is_pid(ClientRef)),
+     ?_assertEqual(false, is_process_alive(ClientRef))
     ].
 
 receive_response(Ref, Dict0, Timeout) ->

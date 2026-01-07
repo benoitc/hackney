@@ -18,6 +18,8 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+  %% Initialize Alt-Svc cache for HTTP/3 discovery
+  hackney_altsvc:init(),
   hackney_sup:start_link().
 
 stop(_State) ->

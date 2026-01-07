@@ -24,17 +24,9 @@
 -type http_socket() :: {atom(), inet:socket()}.
 -export_type([http_socket/0]).
 
--ifdef(no_proxy_sni_support).
-
+%% Use hackney_ssl for SSL options (was hackney_connection)
 ssl_opts(Host, Opts) ->
-  hackney_connection:ssl_opts(Host, Opts).
-
--else.
-
-ssl_opts(Host, Opts) ->
-  [{server_name_indication, Host} | hackney_connection:ssl_opts(Host,Opts)].
-
--endif.
+  hackney_ssl:ssl_opts(Host, Opts).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages({hackney_ssl, _}) ->
@@ -161,7 +153,7 @@ do_handshake(Socket, Host, Port, Options) ->
               _ ->
                 iolist_to_binary([Host, ":", integer_to_list(Port)])
             end,
-  UA =  hackney_request:default_ua(),
+  UA = hackney:default_ua(),
   Headers0 = [<<"Host: ", HostHdr/binary>>,
     <<"User-Agent: ", UA/binary >>],
 
@@ -185,10 +177,23 @@ do_handshake(Socket, Host, Port, Options) ->
       Error
   end.
 
+%% Read the full HTTP response (until \r\n\r\n) before returning.
+%% This fixes issue #536 where partial reads cause SSL handshake failures.
 check_response(Socket) ->
+  check_response(Socket, <<>>).
+
+check_response(Socket, Buffer) ->
   case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
     {ok, Data} ->
-      check_status(Data);
+      NewBuffer = <<Buffer/binary, Data/binary>>,
+      case binary:match(NewBuffer, <<"\r\n\r\n">>) of
+        {_Pos, 4} ->
+          %% Found end of headers, now check the status
+          check_status(NewBuffer);
+        nomatch ->
+          %% Keep reading until we get the full response headers
+          check_response(Socket, NewBuffer)
+      end;
     Error ->
       Error
   end.

@@ -11,3 +11,7 @@ mime.types
 *.plt
 *_plt
 rebar3.crashdump
+.aider*
+doc/
+priv/*.so
+priv/*.dll

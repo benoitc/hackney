@@ -30,7 +30,7 @@ loop(Ref) ->
 main(_) ->
     application:ensure_all_started(hackney),
 
-    Url = <<"https://httparrot.herokuapp.com/get">>,
+    Url = <<"https://httpbin.org/get">>,
     Opts = [{async, once}],
     {ok, Ref} = hackney:get(Url, [], <<>>, Opts),
     io:format("received once~n", []),
