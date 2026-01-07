@@ -703,6 +703,14 @@ connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{proto
     %% HTTP/3 request - use hackney_h3
     do_h3_request(From, Method, Path, Headers, Body, Data);
 
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 async request
+    do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, Data);
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, _FollowRedirect}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 async request (redirect not yet implemented for H3)
+    do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, Data);
+
 connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
     %% HTTP/1.1 request
     NewData = Data#conn_data{
@@ -2278,15 +2286,69 @@ do_h3_request(From, Method, Path, Headers, Body, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
+%% @private Send an HTTP/3 async request
+%% Opens a stream, sends headers and body, sets up async streaming
+do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, Data) ->
+    #conn_data{
+        host = Host,
+        h3_conn = ConnRef,
+        h3_streams = Streams
+    } = Data,
+
+    MethodBin = to_binary(Method),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> to_binary(Path)
+    end,
+    HostBin = to_binary(Host),
+
+    %% Use connection PID as async ref
+    Ref = self(),
+
+    %% Use hackney_h3 to send request
+    case hackney_h3:send_request(ConnRef, MethodBin, HostBin, PathBin, normalize_headers(Headers), Body) of
+        {ok, StreamId, _NewStreams} ->
+            %% Track stream with async info
+            StreamState = {waiting_headers_async, AsyncMode, StreamTo, Ref},
+            UpdatedStreams = maps:put(StreamId, {From, StreamState}, Streams),
+            NewData = Data#conn_data{
+                h3_streams = UpdatedStreams,
+                method = MethodBin,
+                path = PathBin,
+                request_from = From,
+                async = AsyncMode,
+                async_ref = Ref,
+                stream_to = StreamTo
+            },
+            %% Reply immediately with {ok, Ref} for async
+            {keep_state, NewData, [{reply, From, {ok, Ref}}]};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
 %% @private Handle HTTP/3 response headers
 handle_h3_headers(StreamId, Headers, Streams, Data) ->
     case hackney_h3:parse_response_headers(Headers) of
         {ok, Status, RespHeaders} ->
+            %% RespHeaders from hackney_h3:parse_response_headers is already a list
+            HeadersList = RespHeaders,
             case maps:get(StreamId, Streams, undefined) of
                 {From, waiting_headers} ->
-                    %% Update stream state to receiving body
+                    %% Sync mode - update stream state to receiving body
                     UpdatedStreams = maps:put(StreamId,
                         {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
+                    {keep_state, Data#conn_data{
+                        h3_streams = UpdatedStreams,
+                        status = Status,
+                        response_headers = RespHeaders
+                    }};
+                {_From, {waiting_headers_async, AsyncMode, StreamTo, Ref}} ->
+                    %% Async mode - send status and headers to StreamTo
+                    StreamTo ! {hackney_response, Ref, {status, Status, <<"">>}},
+                    StreamTo ! {hackney_response, Ref, {headers, HeadersList}},
+                    %% Update stream state for async body streaming
+                    NewStreamState = {streaming_body_async, AsyncMode, StreamTo, Ref, Status, RespHeaders},
+                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
                     {keep_state, Data#conn_data{
                         h3_streams = UpdatedStreams,
                         status = Status,
@@ -2299,10 +2361,15 @@ handle_h3_headers(StreamId, Headers, Streams, Data) ->
         {error, Reason} ->
             %% Failed to parse headers
             case maps:get(StreamId, Streams, undefined) of
-                {From, _} ->
+                {From, _State} when From =/= undefined ->
                     UpdatedStreams = maps:remove(StreamId, Streams),
                     {keep_state, Data#conn_data{h3_streams = UpdatedStreams},
                      [{reply, From, {error, Reason}}]};
+                {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
+                    %% Async error
+                    StreamTo ! {hackney_response, Ref, {error, Reason}},
+                    UpdatedStreams = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams}};
                 _ ->
                     {keep_state, Data}
             end
@@ -2312,6 +2379,7 @@ handle_h3_headers(StreamId, Headers, Streams, Data) ->
 handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
     case maps:get(StreamId, Streams, undefined) of
         {From, {receiving_body, Status, Headers, AccBody}} ->
+            %% Sync mode - buffer body
             NewBody = <<AccBody/binary, RecvData/binary>>,
             case Fin of
                 true ->
@@ -2323,6 +2391,30 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                     %% More data expected
                     UpdatedStreams = maps:put(StreamId,
                         {From, {receiving_body, Status, Headers, NewBody}}, Streams),
+                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}
+            end;
+        {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, Status, Headers}} ->
+            %% Async mode - send chunk to StreamTo
+            case byte_size(RecvData) > 0 of
+                true -> StreamTo ! {hackney_response, Ref, RecvData};
+                false -> ok
+            end,
+            case Fin of
+                true ->
+                    %% Stream complete - send done
+                    StreamTo ! {hackney_response, Ref, done},
+                    UpdatedStreams = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{
+                        h3_streams = UpdatedStreams,
+                        request_from = undefined,
+                        async = false,
+                        async_ref = undefined,
+                        stream_to = undefined
+                    }};
+                false ->
+                    %% More data expected - keep streaming
+                    NewStreamState = {streaming_body_async, _AsyncMode, StreamTo, Ref, Status, Headers},
+                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
                     {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}
             end;
         {From, waiting_headers} ->
@@ -2337,10 +2429,21 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
 %% @private Handle HTTP/3 stream reset
 handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
     case maps:get(StreamId, Streams, undefined) of
-        {From, _State} ->
+        {From, _State} when is_pid(From) ->
+            %% Sync stream - reply with error
             UpdatedStreams = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
              [{reply, From, {error, {stream_reset, ErrorCode}}}]};
+        {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
+            %% Async stream - send error to StreamTo
+            StreamTo ! {hackney_response, Ref, {error, {stream_reset, ErrorCode}}},
+            UpdatedStreams = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined}};
+        {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
+            %% Async stream waiting for headers
+            StreamTo ! {hackney_response, Ref, {error, {stream_reset, ErrorCode}}},
+            UpdatedStreams = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined}};
         _ ->
             {keep_state, Data}
     end.
@@ -2348,15 +2451,32 @@ handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
 %% @private Handle HTTP/3 connection closed
 handle_h3_conn_closed(Reason, Data) ->
     #conn_data{h3_streams = Streams, request_from = From} = Data,
-    %% Notify all pending streams
-    Actions = maps:fold(fun(_StreamId, {StreamFrom, _State}, Acc) ->
-        [{reply, StreamFrom, {error, {connection_closed, Reason}}} | Acc]
+    %% Notify all pending streams (sync and async)
+    Actions = maps:fold(fun(_StreamId, StreamState, Acc) ->
+        case StreamState of
+            {StreamFrom, _State} when is_pid(StreamFrom) ->
+                %% Sync stream
+                [{reply, StreamFrom, {error, {connection_closed, Reason}}} | Acc];
+            {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
+                %% Async stream - send error to StreamTo (not gen_statem action)
+                StreamTo ! {hackney_response, Ref, {error, {connection_closed, Reason}}},
+                Acc;
+            {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
+                %% Async stream waiting for headers
+                StreamTo ! {hackney_response, Ref, {error, {connection_closed, Reason}}},
+                Acc;
+            _ ->
+                Acc
+        end
     end, [], Streams),
     %% Clear connection state
     NewData = Data#conn_data{
         h3_conn = undefined,
         h3_streams = #{},
-        request_from = undefined
+        request_from = undefined,
+        async = false,
+        async_ref = undefined,
+        stream_to = undefined
     },
     case From of
         undefined ->
@@ -2373,15 +2493,32 @@ handle_h3_conn_closed(Reason, Data) ->
 %% @private Handle HTTP/3 transport error
 handle_h3_error(Error, Data) ->
     #conn_data{h3_streams = Streams, request_from = From} = Data,
-    %% Notify all pending streams
-    Actions = maps:fold(fun(_StreamId, {StreamFrom, _State}, Acc) ->
-        [{reply, StreamFrom, {error, Error}} | Acc]
+    %% Notify all pending streams (sync and async)
+    Actions = maps:fold(fun(_StreamId, StreamState, Acc) ->
+        case StreamState of
+            {StreamFrom, _State} when is_pid(StreamFrom) ->
+                %% Sync stream
+                [{reply, StreamFrom, {error, Error}} | Acc];
+            {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
+                %% Async stream - send error to StreamTo
+                StreamTo ! {hackney_response, Ref, {error, Error}},
+                Acc;
+            {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
+                %% Async stream waiting for headers
+                StreamTo ! {hackney_response, Ref, {error, Error}},
+                Acc;
+            _ ->
+                Acc
+        end
     end, [], Streams),
     %% Clear connection state
     NewData = Data#conn_data{
         h3_conn = undefined,
         h3_streams = #{},
-        request_from = undefined
+        request_from = undefined,
+        async = false,
+        async_ref = undefined,
+        stream_to = undefined
     },
     case From of
         undefined ->
