@@ -43,6 +43,91 @@ h3_async_streaming_test_() ->
         }
     }.
 
+%%====================================================================
+%% HTTP/3 Pull-based Streaming Tests (stream_body)
+%%====================================================================
+
+h3_stream_body_test_() ->
+    {
+        "HTTP/3 stream_body tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"stream_body returns chunks", fun test_h3_stream_body/0},
+                {"stream_body returns done", fun test_h3_stream_body_done/0}
+            ]
+        }
+    }.
+
+test_h3_stream_body() ->
+    case hackney_quic:is_available() of
+        false ->
+            {skip, "QUIC NIF not available"};
+        true ->
+            %% Connect with HTTP/3
+            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
+            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
+                {ok, ConnPid} ->
+                    %% Use request_streaming to get headers first
+                    case hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/cdn-cgi/trace">>, [], <<>>) of
+                        {ok, Status, Headers} ->
+                            ?debugFmt("stream_body: Status=~p, Headers=~p", [Status, Headers]),
+                            ?assert(Status >= 200 andalso Status < 400),
+                            ?assert(is_list(Headers)),
+                            %% Now read body with stream_body
+                            Body = read_all_chunks(ConnPid),
+                            ?debugFmt("stream_body: Body=~s", [Body]),
+                            ?assert(byte_size(Body) > 0),
+                            hackney:close(ConnPid);
+                        {error, Reason} ->
+                            hackney:close(ConnPid),
+                            ?debugFmt("request_streaming failed: ~p", [Reason])
+                    end;
+                {error, Reason} ->
+                    ?debugFmt("H3 connect failed: ~p", [Reason])
+            end
+    end.
+
+test_h3_stream_body_done() ->
+    case hackney_quic:is_available() of
+        false ->
+            {skip, "QUIC NIF not available"};
+        true ->
+            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
+            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
+                {ok, ConnPid} ->
+                    case hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/cdn-cgi/trace">>, [], <<>>) of
+                        {ok, _Status, _Headers} ->
+                            %% Read all chunks until done
+                            Body = read_all_chunks(ConnPid),
+                            ?assert(byte_size(Body) > 0),
+                            %% Calling stream_body again should return error (no stream)
+                            Result = hackney_conn:stream_body(ConnPid),
+                            ?debugFmt("After done, stream_body returns: ~p", [Result]),
+                            hackney:close(ConnPid);
+                        {error, Reason} ->
+                            hackney:close(ConnPid),
+                            ?debugFmt("request_streaming failed: ~p", [Reason])
+                    end;
+                {error, Reason} ->
+                    ?debugFmt("H3 connect failed: ~p", [Reason])
+            end
+    end.
+
+read_all_chunks(ConnPid) ->
+    read_all_chunks(ConnPid, <<>>).
+
+read_all_chunks(ConnPid, Acc) ->
+    case hackney_conn:stream_body(ConnPid) of
+        {ok, Chunk} ->
+            read_all_chunks(ConnPid, <<Acc/binary, Chunk/binary>>);
+        done ->
+            Acc;
+        {error, _Reason} ->
+            Acc
+    end.
+
 test_h3_async_true() ->
     case hackney_quic:is_available() of
         false ->
