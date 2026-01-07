@@ -257,13 +257,9 @@ Erlang/OTP 27+
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on pull requests and development setup.
+
 Issues and pull requests welcome at https://github.com/benoitc/hackney
-
-Run tests:
-
-```sh
-rebar3 eunit
-```
 
 ## Support
 
