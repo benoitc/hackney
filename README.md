@@ -63,6 +63,7 @@ stream_body(Ref) ->
 | [Getting Started](GETTING_STARTED.md) | Installation, first requests, basic patterns |
 | [HTTP Guide](guides/http_guide.md) | Requests, responses, streaming, async, pools |
 | [HTTP/2 Guide](guides/http2_guide.md) | HTTP/2 protocol, ALPN, multiplexing, server push |
+| [HTTP/3 Guide](guides/http3_guide.md) | HTTP/3 over QUIC, opt-in configuration, Alt-Svc |
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
 | [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
 | [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x |
