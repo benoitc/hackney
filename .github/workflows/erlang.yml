@@ -128,7 +128,7 @@ jobs:
           release: "14.2"
           usesh: true
           prepare: |
-            pkg install -y erlang-runtime28 rebar3 cmake git gmake
+            pkg install -y erlang-runtime28 rebar3 cmake git gmake go
           run: |
             # Ensure Erlang 28 is in PATH
             export PATH="/usr/local/lib/erlang28/bin:$PATH"
