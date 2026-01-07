@@ -7,6 +7,25 @@ Process-per-connection architecture. Each connection is a `gen_statem` process.
 
 See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) for details.
 
+### HTTP/3 Support
+
+Full HTTP/3 support via QUIC (requires QUIC NIF to be built):
+
+- **QUIC transport** - UDP-based, encrypted by default with TLS 1.3
+- **Transparent API** - Same `hackney:get/post/request` functions work for HTTP/3
+- **Multiplexing** - Multiple streams without head-of-line blocking
+- **Alt-Svc discovery** - Automatic HTTP/3 endpoint detection from Alt-Svc headers
+- **Connection pooling** - HTTP/3 connections shared across callers
+- **Negative caching** - Failed H3 attempts cached to avoid repeated failures
+- **Async streaming** - `{async, true/once}` for push-based streaming
+- **Pull-based streaming** - `hackney:stream_body/1` for chunked reads
+- **Streaming uploads** - `send_body/2` for chunked uploads
+- **Protocol selection** - Use `{protocols, [http3]}` to force HTTP/3
+
+Check availability with `hackney_quic:is_available()`.
+
+See [HTTP/3 Guide](guides/http3_guide.md) for details.
+
 ### HTTP/2 Support
 
 Full HTTP/2 support with automatic protocol negotiation:

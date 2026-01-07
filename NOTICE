@@ -34,3 +34,12 @@ Copyright (c) jdamanalo <joshuadavid.agustin@manalo.ph> (cow_deflate)
 and hackney_cow_http2_machine are vendored from cowlib
 (https://github.com/ninenines/cowlib) under ISC license.
 Copyright (c) 2015-2024, Loïc Hoguin <essen@ninenines.eu>
+
+*) lsquic (c_src/lsquic) - QUIC and HTTP/3 library
+(https://github.com/litespeedtech/lsquic) under MIT license.
+Copyright (c) 2017-2024 LiteSpeed Technologies Inc
+
+*) BoringSSL (c_src/boringssl) - OpenSSL fork used by lsquic
+(https://github.com/google/boringssl) under OpenSSL/ISC license.
+Copyright (c) 1998-2011 The OpenSSL Project
+Copyright (c) 2014 Google Inc
