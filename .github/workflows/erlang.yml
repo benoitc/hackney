@@ -39,33 +39,6 @@ jobs:
       - run: rebar3 eunit
       - run: rebar3 dialyzer
 
-  # Linux x86_64 with QUIC support
-  linux-quic:
-    name: Linux x86_64 OTP-${{matrix.otp}} (QUIC)
-    runs-on: ubuntu-latest
-    if: ${{ false }}  # Disabled until QUIC deps are vendored
-    strategy:
-      matrix:
-        otp: ["27.2"]
-        rebar3: ['3.24.0']
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{matrix.otp}}
-          rebar3-version: ${{matrix.rebar3}}
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: cmake libssl-dev golang
-          version: 1.1
-      - name: Build with QUIC
-        run: |
-          make quic-deps || true
-          rebar3 compile
-      - run: rebar3 eunit
-
   # Linux ARM64
   linux-arm64:
     name: Linux ARM64 OTP-${{matrix.otp}}
