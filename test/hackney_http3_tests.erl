@@ -25,15 +25,15 @@ cleanup(_) ->
     ok.
 
 %%====================================================================
-%% hackney_http3 module tests
+%% hackney_h3 module tests
 %%====================================================================
 
-%% Test hackney_http3:is_available
+%% Test hackney_h3:is_available
 is_available_test() ->
-    Result = hackney_http3:is_available(),
+    Result = hackney_h3:is_available(),
     ?assert(is_boolean(Result)).
 
-%% Test hackney_http3:request
+%% Test hackney_h3:request
 http3_request_test_() ->
     {
         "HTTP/3 request tests",
@@ -47,17 +47,17 @@ http3_request_test_() ->
     }.
 
 test_http3_direct_request() ->
-    case hackney_http3:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
             %% Test HTTP/3 connection establishment
             %% Note: Full request/response is not yet implemented in the NIF
             %% This test verifies connection works
-            Result = hackney_http3:connect(<<"cloudflare.com">>, 443),
+            Result = hackney_h3:connect(<<"cloudflare.com">>, 443),
             case Result of
                 {ok, ConnRef} ->
-                    hackney_http3:close(ConnRef),
+                    hackney_h3:close(ConnRef),
                     ok;
                 {error, Reason} ->
                     %% Connection issues are acceptable in test environments
@@ -65,10 +65,6 @@ test_http3_direct_request() ->
                     ok
             end
     end.
-
-%%====================================================================
-%% hackney_h3 module tests
-%%====================================================================
 
 %% Test hackney_h3:parse_response_headers
 parse_response_headers_test() ->

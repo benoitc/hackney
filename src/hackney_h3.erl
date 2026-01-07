@@ -5,17 +5,38 @@
 %%%
 %%% Copyright (c) 2024-2026 Benoit Chesneau
 %%%
-%%% @doc HTTP/3 thin wrapper for hackney_conn.
+%%% @doc HTTP/3 support for hackney.
 %%%
-%%% This module provides HTTP/3-specific operations to be used by hackney_conn.
+%%% This module provides HTTP/3 functionality using the QUIC NIF.
 %%% It handles stream management, header encoding, and request/response
 %%% handling for HTTP/3 connections over QUIC.
+%%%
+%%% == Usage ==
+%%%
+%%% ```
+%%% %% Check if HTTP/3 is available
+%%% hackney_h3:is_available() -> boolean()
+%%%
+%%% %% Make a simple GET request
+%%% {ok, Status, Headers, Body} = hackney_h3:request(get, "https://cloudflare.com/")
+%%%
+%%% %% Make a request with options
+%%% {ok, Status, Headers, Body} = hackney_h3:request(get, "https://example.com/",
+%%%     [{<<"user-agent">>, <<"hackney/2.0">>}], <<>>, #{timeout => 30000})
+%%% '''
 %%%
 
 -module(hackney_h3).
 
+-include("hackney_lib.hrl").
+
 -export([
-    %% Request operations
+    %% High-level API
+    is_available/0,
+    request/2, request/3, request/4, request/5,
+    connect/2, connect/3,
+    await_response/2,
+    %% Request operations (used by hackney_conn)
     send_request/6,
     send_request_headers/5,
     send_body_chunk/4,
@@ -35,14 +56,92 @@
 -type h3_conn() :: reference().
 -type stream_id() :: non_neg_integer().
 -type method() :: get | post | put | delete | head | options | patch | atom() | binary().
+-type url() :: binary() | string().
 -type headers() :: [{binary(), binary()}].
+-type body() :: binary() | iodata().
+-type response() :: {ok, integer(), headers(), binary()} | {error, term()}.
 -type stream_state() :: waiting_headers | {receiving_body, integer(), headers(), binary()} | done.
 -type streams_map() :: #{stream_id() => {term(), stream_state()}}.
 
 -export_type([h3_conn/0, stream_id/0, stream_state/0, streams_map/0]).
 
 %%====================================================================
-%% API
+%% High-level API
+%%====================================================================
+
+%% @doc Check if HTTP/3/QUIC support is available.
+-spec is_available() -> boolean().
+is_available() ->
+    hackney_quic:is_available().
+
+%% @doc Make an HTTP/3 request with default options.
+-spec request(method(), url()) -> response().
+request(Method, Url) ->
+    request(Method, Url, [], <<>>, #{}).
+
+%% @doc Make an HTTP/3 request with headers.
+-spec request(method(), url(), headers()) -> response().
+request(Method, Url, Headers) ->
+    request(Method, Url, Headers, <<>>, #{}).
+
+%% @doc Make an HTTP/3 request with headers and body.
+-spec request(method(), url(), headers(), body()) -> response().
+request(Method, Url, Headers, Body) ->
+    request(Method, Url, Headers, Body, #{}).
+
+%% @doc Make an HTTP/3 request with all options.
+%%
+%% Options:
+%%   - timeout: Request timeout in milliseconds (default: 30000)
+%%   - recv_timeout: Response receive timeout (default: 30000)
+%%
+-spec request(method(), url(), headers(), body(), map()) -> response().
+request(Method, Url, Headers, Body, Opts) ->
+    #hackney_url{host = Host, port = Port, path = Path} = hackney_url:parse_url(Url),
+    HostBin = list_to_binary(Host),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> Path
+    end,
+    Timeout = maps:get(timeout, Opts, 30000),
+    case connect(HostBin, Port, Opts) of
+        {ok, Conn} ->
+            try
+                do_request(Conn, Method, HostBin, PathBin, Headers, Body, Timeout)
+            after
+                close(Conn)
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @doc Connect to an HTTP/3 server.
+-spec connect(binary() | string(), inet:port_number()) -> {ok, reference()} | {error, term()}.
+connect(Host, Port) ->
+    connect(Host, Port, #{}).
+
+%% @doc Connect to an HTTP/3 server with options.
+%% lsquic handles its own UDP socket creation and DNS resolution.
+-spec connect(binary() | string(), inet:port_number(), map()) -> {ok, reference()} | {error, term()}.
+connect(Host, Port, Opts) when is_list(Host) ->
+    connect(list_to_binary(Host), Port, Opts);
+connect(Host, Port, Opts) when is_binary(Host) ->
+    Timeout = maps:get(timeout, Opts, 30000),
+    case hackney_quic:connect(Host, Port, Opts, self()) of
+        {ok, ConnRef} ->
+            wait_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @doc Wait for an HTTP/3 response.
+-spec await_response(reference(), non_neg_integer()) ->
+    {ok, integer(), headers(), binary()} | {error, term()}.
+await_response(ConnRef, StreamId) ->
+    await_response_loop(ConnRef, StreamId, 30000, undefined, [], <<>>, erlang:monotonic_time(millisecond)).
+
+%%====================================================================
+%% Request operations (used by hackney_conn)
 %%====================================================================
 
 %% @doc Send a complete HTTP/3 request (headers + body).
@@ -107,6 +206,10 @@ finish_send_body(ConnRef, StreamId, Streams) ->
             Error
     end.
 
+%%====================================================================
+%% Stream management
+%%====================================================================
+
 %% @doc Open a new stream for a request.
 -spec new_stream(h3_conn()) -> {ok, stream_id()} | {error, term()}.
 new_stream(ConnRef) ->
@@ -116,7 +219,6 @@ new_stream(ConnRef) ->
 -spec close_stream(h3_conn(), stream_id()) -> ok.
 close_stream(_ConnRef, _StreamId) ->
     %% HTTP/3 streams are closed when fin is sent/received
-    %% No explicit close needed
     ok.
 
 %% @doc Get the state of a specific stream.
@@ -134,6 +236,10 @@ get_stream_state(StreamId, Streams) ->
 update_stream_state(StreamId, State, Streams) ->
     maps:put(StreamId, State, Streams).
 
+%%====================================================================
+%% Response parsing
+%%====================================================================
+
 %% @doc Parse response headers from a QUIC stream_headers event.
 %% Returns {ok, Status, ResponseHeaders} or {error, Reason}.
 -spec parse_response_headers(headers()) -> {ok, integer(), headers()} | {error, term()}.
@@ -145,6 +251,10 @@ parse_response_headers(Headers) ->
         {error, _} = Error ->
             Error
     end.
+
+%%====================================================================
+%% Connection close
+%%====================================================================
 
 %% @doc Close the HTTP/3 connection.
 -spec close(h3_conn()) -> ok.
@@ -159,6 +269,75 @@ close(ConnRef, Reason) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% Drive QUIC event loop until connected
+wait_connected(ConnRef, Timeout, StartTime) ->
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
+    receive
+        {select, _Resource, _Ref, ready_input} ->
+            _ = hackney_quic:process(ConnRef),
+            wait_connected(ConnRef, Timeout, StartTime);
+        {quic, ConnRef, {connected, _Info}} ->
+            {ok, ConnRef};
+        {quic, ConnRef, {closed, Reason}} ->
+            {error, {connection_closed, Reason}};
+        {quic, ConnRef, {transport_error, Code, Msg}} ->
+            {error, {transport_error, Code, Msg}}
+    after Remaining ->
+        hackney_quic:close(ConnRef, timeout),
+        {error, timeout}
+    end.
+
+do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
+    case hackney_quic:open_stream(ConnRef) of
+        {ok, StreamId} ->
+            AllHeaders = build_request_headers(Method, Host, Path, Headers),
+            HasBody = Body =/= <<>> andalso Body =/= [],
+            Fin = not HasBody,
+            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, Fin) of
+                ok when HasBody ->
+                    case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
+                        ok ->
+                            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>, erlang:monotonic_time(millisecond));
+                        {error, _} = Error ->
+                            Error
+                    end;
+                ok ->
+                    await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>, erlang:monotonic_time(millisecond));
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody, StartTime) ->
+    Elapsed = erlang:monotonic_time(millisecond) - StartTime,
+    Remaining = max(0, Timeout - Elapsed),
+    receive
+        {select, _Resource, _Ref, ready_input} ->
+            _ = hackney_quic:process(ConnRef),
+            await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody, StartTime);
+        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
+            NewStatus = get_status(RespHeaders),
+            FilteredHeaders = filter_pseudo_headers(RespHeaders),
+            await_response_loop(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody, StartTime);
+        {quic, ConnRef, {stream_data, StreamId, Data, Fin}} ->
+            NewBody = <<AccBody/binary, Data/binary>>,
+            case Fin of
+                true ->
+                    {ok, Status, Headers, NewBody};
+                false ->
+                    await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, NewBody, StartTime)
+            end;
+        {quic, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
+            {error, stream_reset};
+        {quic, ConnRef, {closed, Reason}} ->
+            {error, {connection_closed, Reason}}
+    after Remaining ->
+        {error, timeout}
+    end.
 
 %% @private Build HTTP/3 request headers including pseudo-headers.
 -spec build_request_headers(method(), binary(), binary(), headers()) -> headers().
@@ -197,7 +376,17 @@ ensure_binary(B) when is_binary(B) -> B;
 ensure_binary(L) when is_list(L) -> list_to_binary(L);
 ensure_binary(A) when is_atom(A) -> atom_to_binary(A).
 
-%% @private Extract status from HTTP/3 response headers.
+%% @private Extract status from HTTP/3 response headers (returns integer or 0).
+-spec get_status(headers()) -> integer().
+get_status(Headers) ->
+    case lists:keyfind(<<":status">>, 1, Headers) of
+        {_, StatusBin} ->
+            binary_to_integer(StatusBin);
+        false ->
+            0
+    end.
+
+%% @private Extract status from HTTP/3 response headers (returns ok/error tuple).
 -spec get_status_from_headers(headers()) -> {ok, integer()} | {error, no_status | {invalid_status, binary()}}.
 get_status_from_headers(Headers) ->
     case lists:keyfind(<<":status">>, 1, Headers) of
