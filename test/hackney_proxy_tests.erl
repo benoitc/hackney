@@ -492,7 +492,8 @@ proxy_integration_test_() ->
          [
           {"HTTP CONNECT proxy to HTTP target", {timeout, 30, fun() -> test_connect_proxy_http(State) end}},
           {"SOCKS5 proxy to HTTP target", {timeout, 30, fun() -> test_socks5_proxy_http(State) end}},
-          {"Simple HTTP proxy to HTTP target", {timeout, 30, fun() -> test_http_proxy(State) end}}
+          {"Simple HTTP proxy to HTTP target", {timeout, 30, fun() -> test_http_proxy(State) end}},
+          {"Proxy config preserved during redirect", {timeout, 30, fun() -> test_proxy_with_redirect(State) end}}
          ]
      end}.
 
@@ -566,6 +567,30 @@ test_http_proxy(#{http_proxy := {_, ProxyPort}}) ->
         {error, Reason} ->
             ct:pal("HTTP proxy failed: ~p~n", [Reason]),
             error({http_proxy_failed, Reason})
+    end.
+
+test_proxy_with_redirect(#{http_proxy := {_, ProxyPort}}) ->
+    %% Test that proxy configuration is preserved during redirects
+    %% Request a URL that triggers a redirect, and verify the redirect
+    %% is followed successfully through the proxy
+    RedirectTarget = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT),
+                            <<"/redirect-to?url=">>, RedirectTarget]),
+    Options = [
+        {proxy, {"127.0.0.1", ProxyPort}},
+        {follow_redirect, true},
+        {recv_timeout, 10000},
+        with_body
+    ],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, 200, _Headers, Body} ->
+            %% If we got 200, the redirect was followed successfully through the proxy
+            ?assert(byte_size(Body) > 0);
+        {ok, Status, _Headers, _Body} ->
+            error({unexpected_status, Status});
+        {error, Reason} ->
+            ct:pal("Proxy with redirect failed: ~p~n", [Reason]),
+            error({proxy_redirect_failed, Reason})
     end.
 
 %% Test proxy via environment variable
