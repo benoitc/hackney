@@ -19,7 +19,7 @@
   shutdown/2,
   sockname/1]).
 
--define(TIMEOUT, infinity).
+-define(DEFAULT_RECV_TIMEOUT, infinity).
 
 -type http_socket() :: {atom(), inet:socket()}.
 -export_type([http_socket/0]).
@@ -181,6 +181,7 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyUser = proplists:get_value(connect_user, Options),
   ProxyPass = proplists:get_value(connect_pass, Options, <<>>),
   ProxyPort = proplists:get_value(connect_port, Options),
+  RecvTimeout = proplists:get_value(recv_timeout, Options, ?DEFAULT_RECV_TIMEOUT),
 
   %% set defaults headers
   HostHdr = case ProxyPort of
@@ -208,7 +209,7 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
     <<"\r\n\r\n">>],
   case proxy_send(Socket, ProxyTransport, Payload) of
     ok ->
-      check_response(Socket, ProxyTransport);
+      check_response(Socket, ProxyTransport, RecvTimeout);
     Error ->
       Error
   end.
@@ -227,11 +228,12 @@ proxy_recv(Socket, tcp, Length, Timeout) ->
 
 %% Read the full HTTP response (until \r\n\r\n) before returning.
 %% This fixes issue #536 where partial reads cause SSL handshake failures.
-check_response(Socket, ProxyTransport) ->
-  check_response(Socket, ProxyTransport, <<>>).
+%% RecvTimeout is used to respect recv_timeout during proxy handshake (issue #569).
+check_response(Socket, ProxyTransport, RecvTimeout) ->
+  check_response(Socket, ProxyTransport, RecvTimeout, <<>>).
 
-check_response(Socket, ProxyTransport, Buffer) ->
-  case proxy_recv(Socket, ProxyTransport, 0, ?TIMEOUT) of
+check_response(Socket, ProxyTransport, RecvTimeout, Buffer) ->
+  case proxy_recv(Socket, ProxyTransport, 0, RecvTimeout) of
     {ok, Data} ->
       NewBuffer = <<Buffer/binary, Data/binary>>,
       case binary:match(NewBuffer, <<"\r\n\r\n">>) of
@@ -240,8 +242,11 @@ check_response(Socket, ProxyTransport, Buffer) ->
           check_status(NewBuffer);
         nomatch ->
           %% Keep reading until we get the full response headers
-          check_response(Socket, ProxyTransport, NewBuffer)
+          check_response(Socket, ProxyTransport, RecvTimeout, NewBuffer)
       end;
+    {error, timeout} ->
+      %% Return timeout error instead of generic closed error
+      {error, timeout};
     Error ->
       Error
   end.
