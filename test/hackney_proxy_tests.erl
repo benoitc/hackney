@@ -570,7 +570,7 @@ test_http_proxy(#{http_proxy := {_, ProxyPort}}) ->
     end.
 
 test_proxy_with_redirect(#{http_proxy := {_, ProxyPort}}) ->
-    %% Test that proxy configuration is preserved during redirects
+    %% Test that proxy configuration is preserved during redirects (absolute URL)
     %% Request a URL that triggers a redirect, and verify the redirect
     %% is followed successfully through the proxy
     RedirectTarget = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
@@ -580,6 +580,7 @@ test_proxy_with_redirect(#{http_proxy := {_, ProxyPort}}) ->
         {proxy, {"127.0.0.1", ProxyPort}},
         {follow_redirect, true},
         {recv_timeout, 10000},
+        {pool, false},
         with_body
     ],
     case hackney:request(get, Url, [], <<>>, Options) of
@@ -591,6 +592,20 @@ test_proxy_with_redirect(#{http_proxy := {_, ProxyPort}}) ->
         {error, Reason} ->
             ct:pal("Proxy with redirect failed: ~p~n", [Reason]),
             error({proxy_redirect_failed, Reason})
+    end,
+    %% Test relative URL redirect with proxy (issue #376)
+    %% The redirect target is a relative URL like "/get"
+    RelativeUrl = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT),
+                                    <<"/redirect-to?url=/get">>]),
+    case hackney:request(get, RelativeUrl, [], <<>>, Options) of
+        {ok, 200, _Headers2, Body2} ->
+            %% If we got 200, the relative redirect was followed successfully through the proxy
+            ?assert(byte_size(Body2) > 0);
+        {ok, Status2, _Headers2, _Body2} ->
+            error({unexpected_status_relative, Status2});
+        {error, Reason2} ->
+            ct:pal("Proxy with relative redirect failed: ~p~n", [Reason2]),
+            error({proxy_relative_redirect_failed, Reason2})
     end.
 
 %% Test proxy via environment variable
