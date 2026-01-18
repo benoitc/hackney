@@ -220,9 +220,16 @@ params(Data, Fun) ->
 params(Data, Fun, Acc) ->
   whitespace(Data,
     fun (<< $;, Rest/binary >>) ->
-      param(Rest,
-        fun (Rest2, Attr, Value) ->
-          params(Rest2, Fun, [{Attr, Value}|Acc])
+      %% Check for trailing semicolon (no parameter after it)
+      whitespace(Rest,
+        fun (<<>>) ->
+          %% Trailing semicolon with no parameter - just return accumulated params
+          Fun(<<>>, lists:reverse(Acc));
+            (Rest2) ->
+          param(Rest2,
+            fun (Rest3, Attr, Value) ->
+              params(Rest3, Fun, [{Attr, Value}|Acc])
+            end)
         end);
         (Rest) ->
           Fun(Rest, lists:reverse(Acc))
