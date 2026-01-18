@@ -470,9 +470,10 @@ handle_call({checkin_sync, Pid}, _From, State) ->
     State2 = do_checkin(Pid, State),
     {reply, ok, State2};
 
-handle_call({checkin_sync, Pid, UpgradedSsl}, _From, State) ->
-    %% Synchronous checkin with SSL flag - avoids deadlock
-    State2 = do_checkin_with_ssl_flag(Pid, UpgradedSsl, State),
+handle_call({checkin_sync, Pid, ShouldClose}, _From, State) ->
+    %% Synchronous checkin with "should close" flag - avoids deadlock
+    %% ShouldClose is true if connection was SSL upgraded or is a proxy tunnel
+    State2 = do_checkin_with_close_flag(Pid, ShouldClose, State),
     {reply, ok, State2};
 
 handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State) ->
@@ -775,11 +776,14 @@ do_checkin(Pid, State) ->
             %% Check if connection is still alive
             case is_process_alive(Pid) of
                 true ->
-                    %% Check if this is an SSL upgraded connection
-                    %% SSL connections should NOT be pooled (security requirement)
-                    case catch hackney_conn:is_upgraded_ssl(Pid) of
+                    %% Check if this connection should not be reused:
+                    %% - SSL upgraded connections (security requirement)
+                    %% - Proxy tunnel connections (SOCKS5, HTTP CONNECT - issue #283)
+                    ShouldClose = (catch hackney_conn:is_upgraded_ssl(Pid)) =:= true orelse
+                                  (catch hackney_conn:is_no_reuse(Pid)) =:= true,
+                    case ShouldClose of
                         true ->
-                            %% SSL upgraded - close instead of storing
+                            %% Connection should not be reused - close it
                             catch hackney_conn:stop(Pid),
                             %% Remove monitor if exists
                             PidMonitors2 = case maps:take(Pid, PidMonitors) of
@@ -793,7 +797,7 @@ do_checkin(Pid, State) ->
                             TcpKey = {Host, Port, hackney_tcp},
                             maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
                         _ ->
-                            %% TCP connection - store in pool
+                            %% Regular TCP connection - store in pool
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
                             %% Use async version to avoid deadlock when called from checkin_sync
                             hackney_conn:set_owner_async(Pid, self()),
@@ -818,9 +822,10 @@ do_checkin(Pid, State) ->
             State
     end.
 
-%% @private Process a checkin with known SSL flag - avoids calling back to connection
+%% @private Process a checkin with known "should close" flag - avoids calling back to connection
 %% Used for sync checkin to prevent deadlock when connection calls pool.
-do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
+%% ShouldClose is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
+do_checkin_with_close_flag(Pid, ShouldClose, State) ->
     #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
     %% Get the key from in_use and remove
@@ -833,10 +838,10 @@ do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
             %% Check if connection is still alive
             case is_process_alive(Pid) of
                 true ->
-                    %% Use the provided SSL flag instead of querying connection
-                    case UpgradedSsl of
+                    %% Use the provided flag instead of querying connection
+                    case ShouldClose of
                         true ->
-                            %% SSL upgraded - close instead of storing
+                            %% Connection should not be reused - close it
                             %% Use cast to avoid deadlock (connection is waiting for our reply)
                             gen_statem:cast(Pid, stop),
                             %% Remove monitor if exists
@@ -851,7 +856,7 @@ do_checkin_with_ssl_flag(Pid, UpgradedSsl, State) ->
                             TcpKey = {Host, Port, hackney_tcp},
                             maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
                         _ ->
-                            %% TCP connection - store in pool
+                            %% Regular connection - store in pool
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
                             hackney_conn:set_owner_async(Pid, self()),
                             Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),

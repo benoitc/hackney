@@ -699,3 +699,70 @@ test_no_proxy_bypass() ->
         end
     end.
 
+%% Tests for no_reuse flag (issue #283)
+%% Verifies that SOCKS5 and HTTP CONNECT tunnels are not pooled
+no_reuse_test_() ->
+    {setup,
+     fun setup_integration/0,
+     fun teardown_integration/1,
+     fun(State) ->
+         [
+          {"SOCKS5 connection has no_reuse flag", {timeout, 30, fun() -> test_socks5_no_reuse(State) end}},
+          {"HTTP CONNECT tunnel has no_reuse flag", {timeout, 30, fun() -> test_connect_no_reuse(State) end}},
+          {"no_reuse connection is closed on checkin", {timeout, 30, fun() -> test_no_reuse_closes_on_checkin(State) end}}
+         ]
+     end}.
+
+test_socks5_no_reuse(#{socks5_proxy := {_, ProxyPort}}) ->
+    %% Make a request through SOCKS5 proxy
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    Options = [{proxy, {socks5, "127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, _Status, _Headers, ConnPid} ->
+            %% Verify the connection has no_reuse flag set
+            NoReuse = hackney_conn:is_no_reuse(ConnPid),
+            ?assertEqual(true, NoReuse),
+            hackney:close(ConnPid);
+        {error, Reason} ->
+            error({socks5_request_failed, Reason})
+    end.
+
+test_connect_no_reuse(#{connect_proxy := {_, ProxyPort}}) ->
+    %% Make a request through HTTP CONNECT tunnel
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    Options = [{proxy, {connect, "127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, _Status, _Headers, ConnPid} ->
+            %% Verify the connection has no_reuse flag set
+            NoReuse = hackney_conn:is_no_reuse(ConnPid),
+            ?assertEqual(true, NoReuse),
+            hackney:close(ConnPid);
+        {error, Reason} ->
+            error({connect_request_failed, Reason})
+    end.
+
+test_no_reuse_closes_on_checkin(#{socks5_proxy := {_, ProxyPort}}) ->
+    %% Make a request through SOCKS5 proxy with pooling enabled
+    Url = iolist_to_binary([<<"http://127.0.0.1:">>, integer_to_binary(?TEST_PORT), <<"/get">>]),
+    %% Use default pool (don't disable pooling)
+    Options = [{proxy, {socks5, "127.0.0.1", ProxyPort}}, {recv_timeout, 10000}],
+    case hackney:request(get, Url, [], <<>>, Options) of
+        {ok, _Status, _Headers, ConnPid} ->
+            %% Get a reference to the pid
+            ConnRef = erlang:monitor(process, ConnPid),
+            %% Read body and close (this triggers checkin)
+            {ok, _Body} = hackney:body(ConnPid),
+            hackney:close(ConnPid),
+            %% Wait for the connection to be terminated (not pooled)
+            receive
+                {'DOWN', ConnRef, process, ConnPid, _Reason} ->
+                    ok
+            after 2000 ->
+                %% If connection is still alive, it was pooled (wrong!)
+                erlang:demonitor(ConnRef, [flush]),
+                error({connection_was_pooled, ConnPid})
+            end;
+        {error, Reason} ->
+            error({socks5_request_failed, Reason})
+    end.
+
