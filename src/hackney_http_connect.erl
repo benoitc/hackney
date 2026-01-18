@@ -182,6 +182,7 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyPass = proplists:get_value(connect_pass, Options, <<>>),
   ProxyPort = proplists:get_value(connect_port, Options),
   RecvTimeout = proplists:get_value(recv_timeout, Options, ?DEFAULT_RECV_TIMEOUT),
+  OnConnectResponse = proplists:get_value(on_connect_response, Options),
 
   %% set defaults headers
   HostHdr = case ProxyPort of
@@ -209,10 +210,25 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
     <<"\r\n\r\n">>],
   case proxy_send(Socket, ProxyTransport, Payload) of
     ok ->
-      check_response(Socket, ProxyTransport, RecvTimeout);
+      case check_response(Socket, ProxyTransport, RecvTimeout) of
+        {ok, Status, RespHeaders} ->
+          %% Call the callback if provided (issue #438)
+          maybe_call_on_connect_response(OnConnectResponse, Status, RespHeaders),
+          ok;
+        Error ->
+          Error
+      end;
     Error ->
       Error
   end.
+
+%% Call the on_connect_response callback if provided
+maybe_call_on_connect_response(undefined, _Status, _Headers) ->
+  ok;
+maybe_call_on_connect_response(Fun, Status, Headers) when is_function(Fun, 2) ->
+  Fun(Status, Headers);
+maybe_call_on_connect_response(_Invalid, _Status, _Headers) ->
+  ok.
 
 %% Send data over proxy socket (TCP or TLS)
 proxy_send(Socket, ssl, Data) ->
@@ -238,8 +254,8 @@ check_response(Socket, ProxyTransport, RecvTimeout, Buffer) ->
       NewBuffer = <<Buffer/binary, Data/binary>>,
       case binary:match(NewBuffer, <<"\r\n\r\n">>) of
         {_Pos, 4} ->
-          %% Found end of headers, now check the status
-          check_status(NewBuffer);
+          %% Found end of headers, now parse the response
+          parse_response(NewBuffer);
         nomatch ->
           %% Keep reading until we get the full response headers
           check_response(Socket, ProxyTransport, RecvTimeout, NewBuffer)
@@ -251,14 +267,54 @@ check_response(Socket, ProxyTransport, RecvTimeout, Buffer) ->
       Error
   end.
 
-check_status(<< "HTTP/1.1 200", _/bits >>) ->
-  ok;
-check_status(<< "HTTP/1.1 201", _/bits >>) ->
-  ok;
-check_status(<< "HTTP/1.0 200", _/bits >>) ->
-  ok;
-check_status(<< "HTTP/1.0 201", _/bits >>) ->
-  ok;
-check_status(Else) ->
-  error_logger:error_msg("proxy error: ~w~n", [Else]),
+%% Parse the HTTP response and extract status and headers (issue #438)
+parse_response(Response) ->
+  case binary:split(Response, <<"\r\n">>) of
+    [StatusLine, Rest] ->
+      case check_status_code(StatusLine) of
+        ok ->
+          Headers = parse_headers(Rest),
+          {ok, StatusLine, Headers};
+        Error ->
+          Error
+      end;
+    _ ->
+      {error, proxy_error}
+  end.
+
+%% Check if status code indicates success
+check_status_code(<< "HTTP/1.1 200", _/bits >>) -> ok;
+check_status_code(<< "HTTP/1.1 201", _/bits >>) -> ok;
+check_status_code(<< "HTTP/1.0 200", _/bits >>) -> ok;
+check_status_code(<< "HTTP/1.0 201", _/bits >>) -> ok;
+check_status_code(StatusLine) ->
+  error_logger:error_msg("proxy error: ~w~n", [StatusLine]),
   {error, proxy_error}.
+
+%% Parse headers into a list of {Name, Value} tuples
+parse_headers(Data) ->
+  %% Remove trailing \r\n\r\n
+  HeaderData = case binary:split(Data, <<"\r\n\r\n">>) of
+    [H, _] -> H;
+    [H] -> H
+  end,
+  Lines = binary:split(HeaderData, <<"\r\n">>, [global]),
+  parse_header_lines(Lines, []).
+
+parse_header_lines([], Acc) ->
+  lists:reverse(Acc);
+parse_header_lines([<<>> | Rest], Acc) ->
+  parse_header_lines(Rest, Acc);
+parse_header_lines([Line | Rest], Acc) ->
+  case binary:split(Line, <<": ">>) of
+    [Name, Value] ->
+      parse_header_lines(Rest, [{Name, Value} | Acc]);
+    [Name] ->
+      %% Header with no value or malformed, try splitting on just ":"
+      case binary:split(Name, <<":">>) of
+        [N, V] ->
+          parse_header_lines(Rest, [{N, hackney_bstr:trim(V)} | Acc]);
+        _ ->
+          parse_header_lines(Rest, Acc)
+      end
+  end.

@@ -834,3 +834,93 @@ handle_slow_connect(ClientSock, DelayMs) ->
             gen_tcp:close(ClientSock)
     end.
 
+%% Test on_connect_response callback (issue #438)
+%% Verifies that custom headers from proxy CONNECT response can be captured
+on_connect_response_test_() ->
+    {setup,
+     fun() ->
+         error_logger:tty(false),
+         {ok, _} = application:ensure_all_started(hackney),
+         %% Start a mock proxy that returns custom headers
+         {ok, ProxyPid, ProxyPort} = start_custom_header_proxy(),
+         #{proxy => {ProxyPid, ProxyPort}}
+     end,
+     fun(#{proxy := {ProxyPid, _}}) ->
+         ProxyPid ! stop,
+         error_logger:tty(true),
+         ok
+     end,
+     fun(#{proxy := {_, ProxyPort}}) ->
+         [
+          {"on_connect_response captures headers", {timeout, 10, fun() ->
+              Self = self(),
+              Callback = fun(Status, Headers) ->
+                  Self ! {connect_response, Status, Headers}
+              end,
+              Options = [
+                  {proxy, {connect, "127.0.0.1", ProxyPort}},
+                  {recv_timeout, 5000},
+                  {connect_options, [{on_connect_response, Callback}]}
+              ],
+              Url = <<"http://example.com:80/test">>,
+              %% The request will fail because we close the socket after CONNECT,
+              %% but we should still receive the callback
+              _Result = hackney:request(get, Url, [], <<>>, Options),
+              %% Verify we received the callback with custom headers
+              receive
+                  {connect_response, Status, Headers} ->
+                      ?assertMatch(<<"HTTP/1.1 200", _/binary>>, Status),
+                      ?assertEqual(<<"1.2.3.4">>, proplists:get_value(<<"X-Proxy-IP">>, Headers)),
+                      ?assertEqual(<<"test-value">>, proplists:get_value(<<"X-Custom-Header">>, Headers))
+              after 2000 ->
+                  error(callback_not_received)
+              end
+          end}}
+         ]
+     end}.
+
+%% Start a mock CONNECT proxy that returns custom headers in response
+start_custom_header_proxy() ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, ActualPort} = inet:port(ListenSock),
+    Pid = spawn_link(fun() -> custom_header_proxy_loop(ListenSock) end),
+    gen_tcp:controlling_process(ListenSock, Pid),
+    {ok, Pid, ActualPort}.
+
+custom_header_proxy_loop(ListenSock) ->
+    receive
+        stop ->
+            gen_tcp:close(ListenSock),
+            ok
+    after 0 ->
+        case gen_tcp:accept(ListenSock, 100) of
+            {ok, ClientSock} ->
+                Pid = spawn(fun() -> handle_custom_header_connect(ClientSock) end),
+                gen_tcp:controlling_process(ClientSock, Pid),
+                Pid ! socket_ready,
+                custom_header_proxy_loop(ListenSock);
+            {error, timeout} ->
+                custom_header_proxy_loop(ListenSock);
+            {error, closed} ->
+                ok
+        end
+    end.
+
+handle_custom_header_connect(ClientSock) ->
+    receive socket_ready -> ok after 1000 -> ok end,
+    %% Read the CONNECT request
+    case gen_tcp:recv(ClientSock, 0, 5000) of
+        {ok, _Data} ->
+            %% Send 200 with custom headers (like ProxyMesh does)
+            Response = <<"HTTP/1.1 200 Connection Established\r\n",
+                        "X-Proxy-IP: 1.2.3.4\r\n",
+                        "X-Custom-Header: test-value\r\n",
+                        "Connection: keep-alive\r\n",
+                        "\r\n">>,
+            gen_tcp:send(ClientSock, Response),
+            %% Close after sending response (simulates simple proxy)
+            gen_tcp:close(ClientSock);
+        {error, _} ->
+            gen_tcp:close(ClientSock)
+    end.
+
