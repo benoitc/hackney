@@ -69,6 +69,8 @@
     %% SSL upgrade
     upgrade_to_ssl/2,
     is_upgraded_ssl/1,
+    %% Reuse control
+    is_no_reuse/1,
     %% Owner management
     set_owner/2,
     set_owner_async/2,
@@ -154,6 +156,10 @@
     %% SSL upgrade tracking - set when TCP connection is upgraded to SSL
     %% Upgraded connections should NOT be returned to pool
     upgraded_ssl = false :: boolean(),
+
+    %% No-reuse flag - set for connections that should never be pooled
+    %% (e.g., SOCKS5 proxy connections which establish per-request tunnels)
+    no_reuse = false :: boolean(),
 
     %% HTTP/2 support
     %% Protocol negotiated via ALPN (http1, http2, or http3)
@@ -427,6 +433,12 @@ upgrade_to_ssl(Pid, SslOpts) ->
 is_upgraded_ssl(Pid) ->
     gen_statem:call(Pid, is_upgraded_ssl).
 
+%% @doc Check if this connection should not be reused/pooled.
+%% SOCKS5 proxy connections set this flag since each establishes a unique tunnel.
+-spec is_no_reuse(pid()) -> boolean().
+is_no_reuse(Pid) ->
+    gen_statem:call(Pid, is_no_reuse).
+
 %% @doc Get the negotiated protocol for this connection.
 %% Returns http1, http2, or http3 based on ALPN negotiation (SSL connections),
 %% QUIC (HTTP/3), or http1 for plain TCP connections.
@@ -470,7 +482,8 @@ init([DefaultOwner, Opts]) ->
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
         pool_pid = maps:get(pool_pid, Opts, undefined),
-        enable_push = maps:get(enable_push, Opts, false)
+        enable_push = maps:get(enable_push, Opts, false),
+        no_reuse = maps:get(no_reuse, Opts, false)
     },
 
     %% If socket is provided, start in connected state; otherwise start in idle
@@ -705,6 +718,9 @@ connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, h
 
 connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
     {keep_state_and_data, [{reply, From, Upgraded}]};
+
+connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
+    {keep_state_and_data, [{reply, From, NoReuse}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 request - use h2_machine
@@ -1354,6 +1370,9 @@ handle_common({call, From}, {set_location, Location}, _State, Data) ->
 handle_common({call, From}, is_upgraded_ssl, _State, #conn_data{upgraded_ssl = Upgraded}) ->
     {keep_state_and_data, [{reply, From, Upgraded}]};
 
+handle_common({call, From}, is_no_reuse, _State, #conn_data{no_reuse = NoReuse}) ->
+    {keep_state_and_data, [{reply, From, NoReuse}]};
+
 handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol}) ->
     {keep_state_and_data, [{reply, From, Protocol}]};
 
@@ -1716,11 +1735,13 @@ notify_pool_available(#conn_data{pool_pid = PoolPid}) ->
 
 %% @private Notify pool that connection is available for reuse (sync)
 %% This ensures the pool has processed the checkin before returning.
-%% We pass the upgraded_ssl flag to avoid deadlock (pool can't call back to us).
+%% We pass a "should close" flag to avoid deadlock (pool can't call back to us).
+%% The flag is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
 notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
     ok;
-notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl}) ->
-    gen_server:call(PoolPid, {checkin_sync, self(), UpgradedSsl}, 5000).
+notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl, no_reuse = NoReuse}) ->
+    ShouldClose = UpgradedSsl orelse NoReuse,
+    gen_server:call(PoolPid, {checkin_sync, self(), ShouldClose}, 5000).
 
 %% @private Start an async request
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->

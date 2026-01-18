@@ -362,6 +362,8 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     undefined -> BaseConnectOpts;
     _ -> [{protocols, Protocols} | BaseConnectOpts]
   end,
+  %% Check if this is a proxy tunnel connection (should not be reused)
+  NoReuse = proplists:get_value(no_reuse, Options, false),
   ConnOpts = #{
     host => Host,
     port => Port,
@@ -370,7 +372,8 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
     connect_options => ConnectOpts,
-    ssl_options => proplists:get_value(ssl_options, Options, [])
+    ssl_options => proplists:get_value(ssl_options, Options, []),
+    no_reuse => NoReuse
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
     {ok, ConnPid} ->
@@ -1174,7 +1177,8 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
   case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, ProxySocket} ->
       %% Start hackney_conn with the pre-established socket
-      start_conn_with_socket(Host, Port, Transport, ProxySocket, Options);
+      %% HTTP CONNECT tunnels should not be reused/pooled (tunnel is destination-specific)
+      start_conn_with_socket(Host, Port, Transport, ProxySocket, [{no_reuse, true} | Options]);
     {error, Reason} ->
       {error, Reason}
   end.
@@ -1221,7 +1225,8 @@ connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth,
   case hackney_socks5:connect(Host, Port, Socks5Opts, Timeout) of
     {ok, ProxySocket} ->
       %% Start hackney_conn with the pre-established socket
-      start_conn_with_socket(Host, Port, Transport, ProxySocket, Options);
+      %% SOCKS5 tunnels should not be reused/pooled (issue #283)
+      start_conn_with_socket(Host, Port, Transport, ProxySocket, [{no_reuse, true} | Options]);
     {error, Reason} ->
       {error, Reason}
   end.
