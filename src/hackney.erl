@@ -1277,7 +1277,7 @@ add_proxy_auth_header(Headers, {User, Pass}) ->
 %% TargetHost is used to check NO_PROXY for environment variable proxies.
 -spec get_proxy_config(atom(), string() | binary(), list()) ->
   false | {http | connect | socks5, string(), inet:port_number(),
-           undefined | {binary(), binary()}}.
+           undefined | {binary(), binary()}, tcp | ssl}.
 get_proxy_config(Scheme, TargetHost, Options) ->
   case proplists:get_value(proxy, Options) of
     undefined ->
