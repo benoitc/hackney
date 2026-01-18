@@ -90,7 +90,7 @@
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
     proxy = false :: false | {connect | socks5, string(), inet:port_number(),
-                              undefined | {binary(), binary()}},
+                              undefined | {binary(), binary()}, tcp | ssl},
 
     %% WebSocket options
     active = false :: false | true | once,
@@ -268,12 +268,12 @@ idle({call, From}, connect, Data) ->
     ConnectResult = case Proxy of
         false ->
             do_connect(Transport, Host1, Port, ConnectOpts, SSLOpts, ConnectTimeout);
-        {connect, ProxyHost, ProxyPort, ProxyAuth} ->
+        {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
             do_connect_via_http_proxy(Transport, Host1, Port, ProxyHost, ProxyPort,
-                                       ProxyAuth, ConnectOpts, SSLOpts, ConnectTimeout);
-        {socks5, ProxyHost, ProxyPort, ProxyAuth} ->
+                                       ProxyAuth, ProxyTransport, ConnectOpts, SSLOpts, ConnectTimeout);
+        {socks5, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
             do_connect_via_socks5(Transport, Host1, Port, ProxyHost, ProxyPort,
-                                   ProxyAuth, ConnectOpts, SSLOpts, ConnectTimeout)
+                                   ProxyAuth, ProxyTransport, ConnectOpts, SSLOpts, ConnectTimeout)
     end,
 
     case ConnectResult of
@@ -506,13 +506,15 @@ do_connect(hackney_ssl, Host, Port, Opts, SSLOpts, Timeout) ->
     end.
 
 %% @private Connect through HTTP CONNECT proxy
+%% ProxyTransport: tcp for HTTP proxy, ssl for HTTPS proxy
 do_connect_via_http_proxy(Transport, Host, Port, ProxyHost, ProxyPort,
-                          ProxyAuth, _ConnectOpts, SSLOpts, Timeout) ->
+                          ProxyAuth, ProxyTransport, _ConnectOpts, SSLOpts, Timeout) ->
     %% Build options for hackney_http_connect
     ConnectOpts0 = [
         {connect_host, Host},
         {connect_port, Port},
-        {connect_transport, Transport}
+        {connect_transport, Transport},
+        {proxy_transport, ProxyTransport}
     ],
     ConnectOpts1 = case ProxyAuth of
         undefined -> ConnectOpts0;
@@ -526,20 +528,22 @@ do_connect_via_http_proxy(Transport, Host, Port, ProxyHost, ProxyPort,
             ConnectOpts1
     end,
     case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
-        {ok, {_ProxyTransport, Socket}} ->
+        {ok, {_ReturnedTransport, Socket}} ->
             {ok, Socket};
         {error, Reason} ->
             {error, Reason}
     end.
 
 %% @private Connect through SOCKS5 proxy
+%% ProxyTransport: tcp for plain SOCKS5, ssl for SOCKS5 over TLS
 do_connect_via_socks5(Transport, Host, Port, ProxyHost, ProxyPort,
-                      ProxyAuth, _ConnectOpts, SSLOpts, Timeout) ->
+                      ProxyAuth, ProxyTransport, _ConnectOpts, SSLOpts, Timeout) ->
     %% Build options for hackney_socks5
     Socks5Opts0 = [
         {socks5_host, ProxyHost},
         {socks5_port, ProxyPort},
-        {socks5_transport, Transport}
+        {socks5_transport, Transport},
+        {proxy_transport, ProxyTransport}
     ],
     %% Add authentication if provided
     Socks5Opts = case ProxyAuth of
@@ -554,7 +558,7 @@ do_connect_via_socks5(Transport, Host, Port, ProxyHost, ProxyPort,
             Socks5Opts
     end,
     case hackney_socks5:connect(Host, Port, AllOpts, Timeout) of
-        {ok, {_ProxyTransport, Socket}} ->
+        {ok, {_ReturnedTransport, Socket}} ->
             {ok, Socket};
         {error, Reason} ->
             {error, Reason}
