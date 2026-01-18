@@ -183,6 +183,7 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyPort = proplists:get_value(connect_port, Options),
   RecvTimeout = proplists:get_value(recv_timeout, Options, ?DEFAULT_RECV_TIMEOUT),
   OnConnectResponse = proplists:get_value(on_connect_response, Options),
+  ProxyAuthFun = proplists:get_value(proxy_auth_fun, Options),
 
   %% set defaults headers
   HostHdr = case ProxyPort of
@@ -203,8 +204,21 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
                   ProxyPass/binary>>),
                 Headers0 ++ [<< "Proxy-Authorization: Basic ", Credentials/binary >>]
             end,
-  Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
 
+  do_handshake_with_auth(Socket, ProxyTransport, Host, Port, Headers,
+                         RecvTimeout, OnConnectResponse, ProxyAuthFun, 0).
+
+%% Handshake with optional proxy authentication callback (issue #115)
+%% MaxRetries limits challenge-response rounds to prevent infinite loops
+-define(MAX_AUTH_RETRIES, 5).
+
+do_handshake_with_auth(_Socket, _ProxyTransport, _Host, _Port, _Headers,
+                       _RecvTimeout, _OnConnectResponse, _ProxyAuthFun, Retries)
+    when Retries >= ?MAX_AUTH_RETRIES ->
+  {error, proxy_auth_failed};
+do_handshake_with_auth(Socket, ProxyTransport, Host, Port, Headers,
+                       RecvTimeout, OnConnectResponse, ProxyAuthFun, Retries) ->
+  Path = iolist_to_binary([Host, ":", integer_to_list(Port)]),
   Payload = [<< "CONNECT ", Path/binary, " HTTP/1.1", "\r\n" >>,
     hackney_bstr:join(lists:reverse(Headers), <<"\r\n">>),
     <<"\r\n\r\n">>],
@@ -212,15 +226,51 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
     ok ->
       case check_response(Socket, ProxyTransport, RecvTimeout) of
         {ok, Status, RespHeaders} ->
-          %% Call the callback if provided (issue #438)
+          %% Success - call the callback if provided (issue #438)
           maybe_call_on_connect_response(OnConnectResponse, Status, RespHeaders),
           ok;
+        {proxy_auth_required, StatusCode, RespHeaders} when ProxyAuthFun =/= undefined ->
+          %% 407 response - try custom auth callback
+          handle_proxy_auth(Socket, ProxyTransport, Host, Port, Headers,
+                           RecvTimeout, OnConnectResponse, ProxyAuthFun,
+                           StatusCode, RespHeaders, Retries);
+        {proxy_auth_required, _StatusCode, _RespHeaders} ->
+          %% 407 but no auth callback provided
+          {error, proxy_auth_required};
         Error ->
           Error
       end;
     Error ->
       Error
   end.
+
+%% Handle 407 Proxy Authentication Required
+handle_proxy_auth(Socket, ProxyTransport, Host, Port, Headers,
+                  RecvTimeout, OnConnectResponse, ProxyAuthFun,
+                  StatusCode, RespHeaders, Retries) ->
+  %% Call the user's auth function
+  case ProxyAuthFun(StatusCode, RespHeaders) of
+    {ok, AuthHeader} when is_binary(AuthHeader) ->
+      %% Remove any existing Proxy-Authorization and add new one
+      Headers1 = lists:filter(fun(H) -> not is_proxy_auth_header(H) end, Headers),
+      Headers2 = Headers1 ++ [<<"Proxy-Authorization: ", AuthHeader/binary>>],
+      %% Retry with new auth header
+      do_handshake_with_auth(Socket, ProxyTransport, Host, Port, Headers2,
+                            RecvTimeout, OnConnectResponse, ProxyAuthFun, Retries + 1);
+    {error, Reason} ->
+      {error, {proxy_auth_error, Reason}};
+    _ ->
+      {error, proxy_auth_failed}
+  end.
+
+%% Check if a header is a Proxy-Authorization header
+is_proxy_auth_header(Header) when is_binary(Header) ->
+  case binary:match(hackney_bstr:to_lower(Header), <<"proxy-authorization">>) of
+    {0, _} -> true;
+    _ -> false
+  end;
+is_proxy_auth_header(_) ->
+  false.
 
 %% Call the on_connect_response callback if provided
 maybe_call_on_connect_response(undefined, _Status, _Headers) ->
@@ -271,10 +321,13 @@ check_response(Socket, ProxyTransport, RecvTimeout, Buffer) ->
 parse_response(Response) ->
   case binary:split(Response, <<"\r\n">>) of
     [StatusLine, Rest] ->
+      Headers = parse_headers(Rest),
       case check_status_code(StatusLine) of
         ok ->
-          Headers = parse_headers(Rest),
           {ok, StatusLine, Headers};
+        {auth_required, Code} ->
+          %% 407 Proxy Authentication Required - return specially for auth callback
+          {proxy_auth_required, Code, Headers};
         Error ->
           Error
       end;
@@ -282,11 +335,13 @@ parse_response(Response) ->
       {error, proxy_error}
   end.
 
-%% Check if status code indicates success
+%% Check if status code indicates success or auth required
 check_status_code(<< "HTTP/1.1 200", _/bits >>) -> ok;
 check_status_code(<< "HTTP/1.1 201", _/bits >>) -> ok;
 check_status_code(<< "HTTP/1.0 200", _/bits >>) -> ok;
 check_status_code(<< "HTTP/1.0 201", _/bits >>) -> ok;
+check_status_code(<< "HTTP/1.1 407", _/bits >>) -> {auth_required, 407};
+check_status_code(<< "HTTP/1.0 407", _/bits >>) -> {auth_required, 407};
 check_status_code(StatusLine) ->
   error_logger:error_msg("proxy error: ~w~n", [StatusLine]),
   {error, proxy_error}.
