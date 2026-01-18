@@ -1170,8 +1170,11 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
     _ ->
       ConnectOpts2
   end,
+  %% Add recv_timeout for proxy handshake (issue #569)
+  RecvTimeout = proplists:get_value(recv_timeout, Options, infinity),
+  ConnectOpts4 = [{recv_timeout, RecvTimeout} | ConnectOpts3],
   %% Add other connection options
-  ConnectOpts = ConnectOpts3 ++ proplists:get_value(connect_options, Options, []),
+  ConnectOpts = ConnectOpts4 ++ proplists:get_value(connect_options, Options, []),
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of

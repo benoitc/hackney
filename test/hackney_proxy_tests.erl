@@ -766,3 +766,71 @@ test_no_reuse_closes_on_checkin(#{socks5_proxy := {_, ProxyPort}}) ->
             error({socks5_request_failed, Reason})
     end.
 
+%% Test recv_timeout is respected during proxy CONNECT handshake (issue #569)
+proxy_recv_timeout_test_() ->
+    {setup,
+     fun() ->
+         error_logger:tty(false),
+         {ok, _} = application:ensure_all_started(hackney),
+         %% Start a slow mock proxy that delays its CONNECT response
+         {ok, SlowProxyPid, SlowProxyPort} = start_slow_connect_proxy(2000), %% 2 second delay
+         #{slow_proxy => {SlowProxyPid, SlowProxyPort}}
+     end,
+     fun(#{slow_proxy := {SlowProxyPid, _}}) ->
+         SlowProxyPid ! stop,
+         error_logger:tty(true),
+         ok
+     end,
+     fun(#{slow_proxy := {_, ProxyPort}}) ->
+         [
+          {"recv_timeout respected during proxy CONNECT", {timeout, 10, fun() ->
+              %% Use a short recv_timeout that will expire before proxy responds
+              Options = [{proxy, {connect, "127.0.0.1", ProxyPort}}, {recv_timeout, 500}],
+              Url = <<"https://example.com:443/test">>,
+              Result = hackney:request(get, Url, [], <<>>, Options),
+              ?assertMatch({error, timeout}, Result)
+          end}}
+         ]
+     end}.
+
+%% Start a mock CONNECT proxy that delays before responding
+start_slow_connect_proxy(DelayMs) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, ActualPort} = inet:port(ListenSock),
+    Pid = spawn_link(fun() -> slow_proxy_loop(ListenSock, DelayMs) end),
+    gen_tcp:controlling_process(ListenSock, Pid),
+    {ok, Pid, ActualPort}.
+
+slow_proxy_loop(ListenSock, DelayMs) ->
+    receive
+        stop ->
+            gen_tcp:close(ListenSock),
+            ok
+    after 0 ->
+        case gen_tcp:accept(ListenSock, 100) of
+            {ok, ClientSock} ->
+                Pid = spawn(fun() -> handle_slow_connect(ClientSock, DelayMs) end),
+                gen_tcp:controlling_process(ClientSock, Pid),
+                Pid ! socket_ready,
+                slow_proxy_loop(ListenSock, DelayMs);
+            {error, timeout} ->
+                slow_proxy_loop(ListenSock, DelayMs);
+            {error, closed} ->
+                ok
+        end
+    end.
+
+handle_slow_connect(ClientSock, DelayMs) ->
+    receive socket_ready -> ok after 1000 -> ok end,
+    %% Read the CONNECT request
+    case gen_tcp:recv(ClientSock, 0, 5000) of
+        {ok, _Data} ->
+            %% Delay before responding to simulate slow proxy
+            timer:sleep(DelayMs),
+            %% Send 200 Connection Established (but client should have timed out)
+            gen_tcp:send(ClientSock, <<"HTTP/1.1 200 Connection Established\r\n\r\n">>),
+            gen_tcp:close(ClientSock);
+        {error, _} ->
+            gen_tcp:close(ClientSock)
+    end.
+
