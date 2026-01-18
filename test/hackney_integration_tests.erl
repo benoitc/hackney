@@ -29,7 +29,9 @@ all_tests() ->
    fun async_no_content_request/0,
    fun test_frees_manager_ets_when_body_is_in_client/0,
    fun test_frees_manager_ets_when_body_is_in_response/0,
-   fun test_307_redirect_pool_cleanup/0].
+   fun test_307_redirect_pool_cleanup/0,
+   fun iolist_body_request/0,
+   fun json_encode_body_request/0].
 
 http_requests_test_() ->
     {setup,
@@ -268,6 +270,34 @@ basic_auth_app_variable() ->
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, Options),
     application:unset_env(hackney, insecure_basic_auth),
     ?assertEqual(200, StatusCode).
+
+iolist_body_request() ->
+    URL = url(<<"/post">>),
+    Headers = [{<<"Content-Type">>, <<"text/plain">>}],
+    %% Test various iolist formats: strings, binaries, nested lists
+    IolistBody = ["hello", <<" ">>, "world", [" - ", <<"nested">>]],
+    ExpectedBody = <<"hello world - nested">>,
+    Options = [with_body, {pool, false}],
+    {ok, 200, _H, JsonBody} = hackney:post(URL, Headers, IolistBody, Options),
+    Obj = jsx:decode(JsonBody, [return_maps]),
+    ReceivedBody = maps:get(<<"data">>, Obj),
+    ?assertEqual(ExpectedBody, ReceivedBody).
+
+json_encode_body_request() ->
+    URL = url(<<"/post">>),
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    %% json:encode returns an iolist, not a binary
+    Data = #{<<"key">> => <<"value">>, <<"number">> => 42},
+    JsonBody = json:encode(Data),
+    Options = [with_body, {pool, false}],
+    {ok, 200, _H, ResponseBody} = hackney:post(URL, Headers, JsonBody, Options),
+    %% Parse the response and verify the server received valid JSON
+    ResponseObj = jsx:decode(ResponseBody, [return_maps]),
+    %% Test server returns the raw body in "data" field
+    ReceivedRaw = maps:get(<<"data">>, ResponseObj),
+    ReceivedData = json:decode(ReceivedRaw),
+    ?assertEqual(<<"value">>, maps:get(<<"key">>, ReceivedData)),
+    ?assertEqual(42, maps:get(<<"number">>, ReceivedData)).
 
 %% Helpers
 
