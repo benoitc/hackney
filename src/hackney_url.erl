@@ -230,21 +230,27 @@ parse_addr1(Addr, S) ->
   end.
 
 parse_addr(Addr, S) ->
-  case binary:split(Addr, <<"@">>) of
+  %% RFC 3986: userinfo ends at the LAST @ before the host
+  %% Example: user@domain.com:p@ssword@host.com -> userinfo=user@domain.com:p@ssword, host=host.com
+  case binary:split(Addr, <<"@">>, [global]) of
     [Addr] ->
+      %% No @ found - no credentials
       parse_netloc(Addr, S#hackney_url{netloc=Addr});
-    [Credentials, Addr1] ->
-      case binary:split(Credentials, <<":">>) of
+    Parts ->
+      %% Split into credentials (all but last) and netloc (last)
+      {CredParts, [Netloc]} = lists:split(length(Parts) - 1, Parts),
+      Credentials = lists:join(<<"@">>, CredParts),
+      CredentialsBin = iolist_to_binary(Credentials),
+      case binary:split(CredentialsBin, <<":">>) of
         [User, Password] ->
-          parse_netloc(Addr1, S#hackney_url{netloc=Addr1,
+          parse_netloc(Netloc, S#hackney_url{netloc=Netloc,
             user = urldecode(User),
             password = urldecode(Password)});
         [User] ->
-          parse_netloc(Addr1, S#hackney_url{netloc = Addr1,
+          parse_netloc(Netloc, S#hackney_url{netloc = Netloc,
             user = urldecode(User),
             password = <<>> })
       end
-
   end.
 
 parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
