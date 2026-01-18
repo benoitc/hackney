@@ -70,7 +70,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
-                  close_proxy_socket(ProxySocket, ProxyTransport),
+                  _ = close_proxy_socket(ProxySocket, ProxyTransport),
                   Error
               end;
             _ ->
@@ -84,7 +84,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
               end
           end;
         Error ->
-          close_proxy_socket(ProxySocket, ProxyTransport),
+          _ = close_proxy_socket(ProxySocket, ProxyTransport),
           Error
       end;
     Error ->
