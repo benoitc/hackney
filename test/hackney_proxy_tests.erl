@@ -924,3 +924,134 @@ handle_custom_header_connect(ClientSock) ->
             gen_tcp:close(ClientSock)
     end.
 
+%% Test proxy_auth_fun callback for custom authentication (issue #115)
+%% Verifies that 407 responses trigger the auth callback and retry works
+proxy_auth_fun_test_() ->
+    {setup,
+     fun() ->
+         error_logger:tty(false),
+         {ok, _} = application:ensure_all_started(hackney),
+         %% Start a mock proxy that requires authentication
+         {ok, ProxyPid, ProxyPort} = start_auth_proxy(),
+         #{proxy => {ProxyPid, ProxyPort}}
+     end,
+     fun(#{proxy := {ProxyPid, _}}) ->
+         ProxyPid ! stop,
+         error_logger:tty(true),
+         ok
+     end,
+     fun(#{proxy := {_, ProxyPort}}) ->
+         [
+          {"proxy_auth_fun handles 407 and retries", {timeout, 10, fun() ->
+              Self = self(),
+              AuthFun = fun(StatusCode, Headers) ->
+                  Self ! {auth_challenge, StatusCode, Headers},
+                  %% Check for NTLM challenge and return appropriate response
+                  case proplists:get_value(<<"Proxy-Authenticate">>, Headers) of
+                      <<"NTLM ", _Challenge/binary>> ->
+                          %% In real usage, compute NTLM Type 3 response here
+                          {ok, <<"NTLM TlRMTVNTUAADAAAA...">>};
+                      <<"NTLM">> ->
+                          %% Initial challenge - send Type 1 message
+                          {ok, <<"NTLM TlRMTVNTUAABAAAA...">>};
+                      _ ->
+                          {error, unsupported_auth}
+                  end
+              end,
+              Options = [
+                  {proxy, {connect, "127.0.0.1", ProxyPort}},
+                  {recv_timeout, 5000},
+                  {connect_options, [{proxy_auth_fun, AuthFun}]}
+              ],
+              Url = <<"http://example.com:80/test">>,
+              _Result = hackney:request(get, Url, [], <<>>, Options),
+              %% Verify auth callback was called
+              receive
+                  {auth_challenge, 407, Headers} ->
+                      ?assertMatch(<<"NTLM", _/binary>>,
+                                   proplists:get_value(<<"Proxy-Authenticate">>, Headers))
+              after 2000 ->
+                  error(auth_callback_not_called)
+              end
+          end}},
+          {"proxy_auth_required error when no callback", {timeout, 10, fun() ->
+              Options = [
+                  {proxy, {connect, "127.0.0.1", ProxyPort}},
+                  {recv_timeout, 5000}
+                  %% No proxy_auth_fun provided
+              ],
+              Url = <<"http://example.com:80/test">>,
+              Result = hackney:request(get, Url, [], <<>>, Options),
+              ?assertMatch({error, proxy_auth_required}, Result)
+          end}}
+         ]
+     end}.
+
+%% Start a mock proxy that requires NTLM-style authentication
+start_auth_proxy() ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, ActualPort} = inet:port(ListenSock),
+    Pid = spawn_link(fun() -> auth_proxy_loop(ListenSock) end),
+    gen_tcp:controlling_process(ListenSock, Pid),
+    {ok, Pid, ActualPort}.
+
+auth_proxy_loop(ListenSock) ->
+    receive
+        stop ->
+            gen_tcp:close(ListenSock),
+            ok
+    after 0 ->
+        case gen_tcp:accept(ListenSock, 100) of
+            {ok, ClientSock} ->
+                Pid = spawn(fun() -> handle_auth_connect(ClientSock, 0) end),
+                gen_tcp:controlling_process(ClientSock, Pid),
+                Pid ! socket_ready,
+                auth_proxy_loop(ListenSock);
+            {error, timeout} ->
+                auth_proxy_loop(ListenSock);
+            {error, closed} ->
+                ok
+        end
+    end.
+
+handle_auth_connect(ClientSock, Round) ->
+    receive socket_ready -> ok after 1000 -> ok end,
+    case gen_tcp:recv(ClientSock, 0, 5000) of
+        {ok, Data} ->
+            case {Round, has_auth_header(Data)} of
+                {0, false} ->
+                    %% First request without auth - send 407 with NTLM challenge
+                    Response = <<"HTTP/1.1 407 Proxy Authentication Required\r\n",
+                                "Proxy-Authenticate: NTLM\r\n",
+                                "Connection: keep-alive\r\n",
+                                "\r\n">>,
+                    gen_tcp:send(ClientSock, Response),
+                    handle_auth_connect(ClientSock, 1);
+                {1, true} ->
+                    %% Got Type 1, send Type 2 challenge
+                    Response = <<"HTTP/1.1 407 Proxy Authentication Required\r\n",
+                                "Proxy-Authenticate: NTLM TlRMTVNTUAACAAAA...\r\n",
+                                "Connection: keep-alive\r\n",
+                                "\r\n">>,
+                    gen_tcp:send(ClientSock, Response),
+                    handle_auth_connect(ClientSock, 2);
+                {2, true} ->
+                    %% Got Type 3, auth successful
+                    Response = <<"HTTP/1.1 200 Connection Established\r\n",
+                                "\r\n">>,
+                    gen_tcp:send(ClientSock, Response),
+                    gen_tcp:close(ClientSock);
+                _ ->
+                    %% Unexpected state
+                    gen_tcp:close(ClientSock)
+            end;
+        {error, _} ->
+            gen_tcp:close(ClientSock)
+    end.
+
+has_auth_header(Data) ->
+    case binary:match(Data, <<"Proxy-Authorization:">>) of
+        {_, _} -> true;
+        nomatch -> false
+    end.
+
