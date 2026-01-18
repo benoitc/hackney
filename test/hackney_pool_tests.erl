@@ -45,7 +45,8 @@ hackney_pool_integration_test_() ->
       {"checkin resets owner to pool", fun test_checkin_resets_owner/0},
       {"prewarm creates connections", fun test_prewarm/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
-      {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}}
+      {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
+      {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}}
      ]}.
 
 setup_unit() ->
@@ -350,3 +351,62 @@ test_checkout_timeout() ->
             ?assertEqual(Error, checkout_timeout)
     end,
     hackney_pool:stop_pool(pool_test_timeout).
+
+%% Test for issue #544: Server closes idle connection, pool should detect it
+%% This tests that when a server closes a connection while it's idle in the pool,
+%% the connection process receives tcp_closed and terminates, removing itself from pool.
+test_server_close_detected() ->
+    %% Start a simple TCP server that accepts a connection, responds, then closes after delay
+    Self = self(),
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, ServerPort} = inet:port(ListenSock),
+
+    %% Server process
+    ServerPid = spawn_link(fun() ->
+        {ok, ClientSock} = gen_tcp:accept(ListenSock, 5000),
+        Self ! {server, accepted},
+        %% Wait for client to signal ready
+        receive ready -> ok end,
+        %% Close from server side - this triggers tcp_closed on client
+        gen_tcp:close(ClientSock),
+        Self ! {server, closed},
+        gen_tcp:close(ListenSock)
+    end),
+
+    %% Create a pool and checkout a connection to our test server
+    ok = hackney_pool:start_pool(test_pool_server_close, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_server_close}],
+
+    %% Connect to the test server
+    {ok, PoolInfo, ConnPid} = hackney_pool:checkout("127.0.0.1", ServerPort, hackney_tcp, Opts),
+    ?assert(is_process_alive(ConnPid)),
+
+    %% Wait for server to accept
+    receive {server, accepted} -> ok after 5000 -> error(timeout_accept) end,
+
+    %% Check the connection back into the pool
+    ok = hackney_pool:checkin(PoolInfo, ConnPid),
+    timer:sleep(50),
+
+    %% Verify connection is in the pool
+    Stats1 = hackney_pool:get_stats(test_pool_server_close),
+    FreeCount1 = proplists:get_value(free_count, Stats1),
+    ?assertEqual(1, FreeCount1),
+    ?assert(is_process_alive(ConnPid)),
+
+    %% Tell server to close the connection
+    ServerPid ! ready,
+    receive {server, closed} -> ok after 5000 -> error(timeout_close) end,
+
+    %% Give time for tcp_closed to be delivered and processed
+    timer:sleep(150),
+
+    %% Connection process should have terminated (received tcp_closed, transitioned to closed)
+    ?assertNot(is_process_alive(ConnPid)),
+
+    %% Connection should have been removed from pool
+    Stats2 = hackney_pool:get_stats(test_pool_server_close),
+    FreeCount2 = proplists:get_value(free_count, Stats2),
+    ?assertEqual(0, FreeCount2),
+
+    ok = hackney_pool:stop_pool(test_pool_server_close).

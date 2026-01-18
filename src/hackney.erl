@@ -900,13 +900,14 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
       case Method of
         <<"HEAD">> ->
           %% HEAD responses have no body - release connection to pool
-          hackney_conn:release_to_pool(ConnPid),
+          safe_release_to_pool(ConnPid),
           {ok, Status, RespHeaders};
         _ when WithBody ->
           case hackney_conn:body(ConnPid) of
             {ok, RespBody} ->
               %% Body read - release connection to pool
-              hackney_conn:release_to_pool(ConnPid),
+              %% (connection might already be closed if server closed without Content-Length)
+              safe_release_to_pool(ConnPid),
               {ok, Status, RespHeaders, RespBody};
             {error, Reason} ->
               {error, Reason}
@@ -1452,6 +1453,21 @@ proxy_type_for_scheme(_) -> http.
   hackney:request(Method, URL, Headers, Body, Options)).
 -include("hackney_methods.hrl").
 
+
+%% @private Safe release to pool - handles the case where connection
+%% might have already exited (e.g., server closed without Content-Length).
+safe_release_to_pool(ConnPid) when is_pid(ConnPid) ->
+  case is_process_alive(ConnPid) of
+    true ->
+      try
+        hackney_conn:release_to_pool(ConnPid)
+      catch
+        exit:{normal, _} -> ok;
+        exit:{noproc, _} -> ok
+      end;
+    false ->
+      ok
+  end.
 
 %% @doc Parse a proxy URL and extract host, port, and optional credentials.
 %% Supports URLs like:
