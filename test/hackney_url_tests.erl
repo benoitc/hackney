@@ -312,6 +312,20 @@ parse_url_test_() ->
                           port = 80,
                           user = <<>>,
                           password = <<>>}
+            },
+            %% Issue #657: @ in credentials - userinfo ends at LAST @ before host (RFC 3986)
+            {<<"https://user@domain.com:p@ssword@host.com/some/path">>,
+             #hackney_url{transport = hackney_ssl,
+                          scheme = https,
+                          netloc = <<"host.com">>,
+                          raw_path = <<"/some/path">>,
+                          path = <<"/some/path">>,
+                          qs = <<>>,
+                          fragment = <<>>,
+                          host = "host.com",
+                          port = 443,
+                          user = <<"user@domain.com">>,
+                          password = <<"p@ssword">>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
