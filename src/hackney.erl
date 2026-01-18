@@ -966,15 +966,66 @@ resolve_redirect_url(CurrentURL, Location) when is_binary(Location) ->
   case Location of
     <<"http://", _/binary>> -> hackney_url:parse_url(Location);
     <<"https://", _/binary>> -> hackney_url:parse_url(Location);
+    <<"ws://", _/binary>> -> hackney_url:parse_url(Location);
+    <<"wss://", _/binary>> -> hackney_url:parse_url(Location);
+    <<"//", _/binary>> ->
+      %% Network-path reference (RFC 3986 Section 4.2)
+      %% Use the current scheme with the new authority and path
+      Scheme = CurrentURL#hackney_url.scheme,
+      SchemePrefix = atom_to_binary(Scheme, utf8),
+      hackney_url:parse_url(<<SchemePrefix/binary, ":", Location/binary>>);
     <<"/", _/binary>> ->
-      %% Relative path - use current host
-      CurrentURL#hackney_url{path = Location, qs = <<>>};
+      %% Absolute-path reference - parse query string from Location
+      {Path, Qs} = parse_path_qs(Location),
+      CurrentURL#hackney_url{path = Path, qs = Qs};
     _ ->
-      %% Relative path without leading slash
+      %% Relative-path reference (RFC 3986 Section 5.2.3)
+      %% Parse query string from Location first
+      {RelPath, Qs} = parse_path_qs(Location),
       CurrentPath = CurrentURL#hackney_url.path,
-      BasePath = filename:dirname(binary_to_list(CurrentPath)),
-      NewPath = iolist_to_binary([BasePath, "/", Location]),
-      CurrentURL#hackney_url{path = NewPath, qs = <<>>}
+      NewPath = merge_paths(CurrentPath, RelPath),
+      CurrentURL#hackney_url{path = NewPath, qs = Qs}
+  end.
+
+%% @private Parse path and query string from a path-like string
+parse_path_qs(PathLike) ->
+  case binary:split(PathLike, <<"?">>) of
+    [Path] -> {Path, <<>>};
+    [Path, Qs] -> {Path, Qs}
+  end.
+
+%% @private Merge a relative path with a base path per RFC 3986 Section 5.2.3
+merge_paths(BasePath, RelPath) when is_binary(BasePath), is_binary(RelPath) ->
+  case BasePath of
+    <<>> ->
+      %% Empty base path - prepend /
+      <<"/", RelPath/binary>>;
+    <<"/">> ->
+      %% Root path - just prepend /
+      <<"/", RelPath/binary>>;
+    _ ->
+      %% Get directory part of base path (everything up to and including last /)
+      BaseDir = base_directory(BasePath),
+      iolist_to_binary([BaseDir, RelPath])
+  end.
+
+%% @private Get the directory part of a path (up to and including last /)
+%% Example: "/a/b/c" -> "/a/b/", "/a/b/" -> "/a/b/", "/" -> "/", "" -> ""
+base_directory(Path) ->
+  case find_last_slash(Path) of
+    -1 -> <<>>;
+    Pos -> binary:part(Path, 0, Pos + 1)
+  end.
+
+%% @private Find the position of the last "/" in a binary
+find_last_slash(Bin) ->
+  find_last_slash(Bin, byte_size(Bin) - 1).
+
+find_last_slash(_Bin, Pos) when Pos < 0 -> -1;
+find_last_slash(Bin, Pos) ->
+  case binary:at(Bin, Pos) of
+    $/ -> Pos;
+    _ -> find_last_slash(Bin, Pos - 1)
   end.
 
 async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
