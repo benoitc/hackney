@@ -193,7 +193,10 @@ redirect_integration_test_() ->
           fun test_relative_redirect_without_slash/0},
          %% Issue #693: redirect to non-standard port preserves Host header
          {"redirect preserves port in Host header",
-          fun test_redirect_port_in_host/0}
+          fun test_redirect_port_in_host/0},
+         %% Issue #617: long redirect URLs should not crash
+         {"long redirect URL does not crash",
+          fun test_long_redirect_url/0}
      ]}.
 
 test_absolute_redirect_follow() ->
@@ -235,6 +238,24 @@ test_redirect_port_in_host() ->
     hackney:close(Client),
     %% If this works, the Host header was correct
     ?assertEqual(200, Status).
+
+test_long_redirect_url() ->
+    %% This tests issue #617
+    %% Long redirect URLs should not crash the parser
+    %% Generate a very long query string (over 4096 bytes to exceed default max_line_length)
+    LongParam = list_to_binary(lists:duplicate(5000, $x)),
+    RedirectTarget = <<"/get?param=", LongParam/binary>>,
+    URL = url(<<"/redirect-to?url=", (hackney_url:urlencode(RedirectTarget))/binary>>),
+    %% This should not crash - it should either succeed or return an error
+    Result = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
+    case Result of
+        {ok, Status, _Headers, Client} ->
+            hackney:close(Client),
+            ?assertEqual(200, Status);
+        {error, _Reason} ->
+            %% An error is acceptable (e.g., line_too_long), but not a crash
+            ok
+    end.
 
 %% Test that netloc includes port for non-standard ports
 netloc_port_test_() ->
