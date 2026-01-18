@@ -42,10 +42,11 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
   when is_list(ProxyHost), is_integer(ProxyPort),
        (Timeout =:= infinity orelse is_integer(Timeout)) ->
 
-  %% get the  host and port to connect from the options
+  %% get the host and port to connect from the options
   Host = proplists:get_value(connect_host, Opts),
   Port = proplists:get_value(connect_port, Opts),
   Transport = proplists:get_value(connect_transport, Opts),
+  ProxyTransport = proplists:get_value(proxy_transport, Opts, tcp),
 
   %% filter connection options
   AcceptedOpts =  [linger, nodelay, send_timeout,
@@ -54,34 +55,69 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
     {nodelay, true}],
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
-  %% connect to the proxy, and upgrade the socket if needed.
-  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts) of
-    {ok, Socket} ->
-      case do_handshake(Socket, Host, Port, Opts) of
+  %% connect to the proxy (TCP or TLS based on proxy_transport)
+  case connect_to_proxy(ProxyHost, ProxyPort, ProxyTransport, ConnectOpts, Opts) of
+    {ok, ProxySocket} ->
+      case do_handshake(ProxySocket, ProxyTransport, Host, Port, Opts) of
         ok ->
           %% if we are connecting to a remote https source, we
-          %% upgrade the connection socket to handle SSL.
+          %% upgrade the tunnel to handle SSL (end-to-end encryption).
           case Transport of
             hackney_ssl ->
               SSLOpts = ssl_opts(Host, Opts),
-              %% upgrade the tcp connection
-              case ssl:connect(Socket, SSLOpts) of
+              %% upgrade the tunnel to TLS
+              case ssl:connect(ProxySocket, SSLOpts) of
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
-                  gen_tcp:close(Socket),
+                  close_proxy_socket(ProxySocket, ProxyTransport),
                   Error
               end;
             _ ->
-              {ok, {Transport, Socket}}
+              %% For HTTP targets, wrap the socket appropriately
+              case ProxyTransport of
+                ssl ->
+                  %% Proxy connection is TLS, but target is HTTP
+                  {ok, {hackney_ssl, ProxySocket}};
+                _ ->
+                  {ok, {Transport, ProxySocket}}
+              end
           end;
         Error ->
-          gen_tcp:close(Socket),
+          close_proxy_socket(ProxySocket, ProxyTransport),
           Error
       end;
     Error ->
       Error
   end.
+
+%% Connect to proxy using TCP or TLS
+connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts) ->
+  %% HTTPS proxy: connect with TLS
+  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts) of
+    {ok, TcpSocket} ->
+      ProxySslOpts = proplists:get_value(proxy_ssl_options, Opts, []),
+      %% Add SNI for the proxy
+      SslOpts = [{server_name_indication, ProxyHost} | ProxySslOpts],
+      case ssl:connect(TcpSocket, SslOpts) of
+        {ok, SslSocket} ->
+          {ok, SslSocket};
+        Error ->
+          gen_tcp:close(TcpSocket),
+          Error
+      end;
+    Error ->
+      Error
+  end;
+connect_to_proxy(ProxyHost, ProxyPort, tcp, ConnectOpts, _Opts) ->
+  %% HTTP proxy: plain TCP connection
+  hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts).
+
+%% Close proxy socket based on transport type
+close_proxy_socket(Socket, ssl) ->
+  ssl:close(Socket);
+close_proxy_socket(Socket, tcp) ->
+  gen_tcp:close(Socket).
 
 recv(Socket, Length) ->
   recv(Socket, Length, infinity).
@@ -141,7 +177,7 @@ sockname({Transport, Socket}) ->
   Transport:sockname(Socket).
 
 %% private functions
-do_handshake(Socket, Host, Port, Options) ->
+do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyUser = proplists:get_value(connect_user, Options),
   ProxyPass = proplists:get_value(connect_pass, Options, <<>>),
   ProxyPort = proplists:get_value(connect_port, Options),
@@ -170,20 +206,32 @@ do_handshake(Socket, Host, Port, Options) ->
   Payload = [<< "CONNECT ", Path/binary, " HTTP/1.1", "\r\n" >>,
     hackney_bstr:join(lists:reverse(Headers), <<"\r\n">>),
     <<"\r\n\r\n">>],
-  case gen_tcp:send(Socket, Payload) of
+  case proxy_send(Socket, ProxyTransport, Payload) of
     ok ->
-      check_response(Socket);
+      check_response(Socket, ProxyTransport);
     Error ->
       Error
   end.
 
+%% Send data over proxy socket (TCP or TLS)
+proxy_send(Socket, ssl, Data) ->
+  ssl:send(Socket, Data);
+proxy_send(Socket, tcp, Data) ->
+  gen_tcp:send(Socket, Data).
+
+%% Receive data from proxy socket (TCP or TLS)
+proxy_recv(Socket, ssl, Length, Timeout) ->
+  ssl:recv(Socket, Length, Timeout);
+proxy_recv(Socket, tcp, Length, Timeout) ->
+  gen_tcp:recv(Socket, Length, Timeout).
+
 %% Read the full HTTP response (until \r\n\r\n) before returning.
 %% This fixes issue #536 where partial reads cause SSL handshake failures.
-check_response(Socket) ->
-  check_response(Socket, <<>>).
+check_response(Socket, ProxyTransport) ->
+  check_response(Socket, ProxyTransport, <<>>).
 
-check_response(Socket, Buffer) ->
-  case gen_tcp:recv(Socket, 0, ?TIMEOUT) of
+check_response(Socket, ProxyTransport, Buffer) ->
+  case proxy_recv(Socket, ProxyTransport, 0, ?TIMEOUT) of
     {ok, Data} ->
       NewBuffer = <<Buffer/binary, Data/binary>>,
       case binary:match(NewBuffer, <<"\r\n\r\n">>) of
@@ -192,7 +240,7 @@ check_response(Socket, Buffer) ->
           check_status(NewBuffer);
         nomatch ->
           %% Keep reading until we get the full response headers
-          check_response(Socket, NewBuffer)
+          check_response(Socket, ProxyTransport, NewBuffer)
       end;
     Error ->
       Error

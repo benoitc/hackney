@@ -232,22 +232,22 @@ get_proxy_config_test_() ->
      {"Simple tuple proxy for HTTP scheme returns http type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, {"proxy.local", 8080}}]),
-          ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({http, "proxy.local", 8080, undefined, tcp}, Result)
       end},
      {"Simple tuple proxy for HTTPS scheme returns connect type",
       fun() ->
           Result = hackney:get_proxy_config(https, "example.com", [{proxy, {"proxy.local", 8080}}]),
-          ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({connect, "proxy.local", 8080, undefined, tcp}, Result)
       end},
      {"Explicit connect tuple returns connect type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, {connect, "proxy.local", 8080}}]),
-          ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({connect, "proxy.local", 8080, undefined, tcp}, Result)
       end},
      {"SOCKS5 tuple returns socks5 type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, {socks5, "socks.local", 1080}}]),
-          ?assertEqual({socks5, "socks.local", 1080, undefined}, Result)
+          ?assertEqual({socks5, "socks.local", 1080, undefined, tcp}, Result)
       end},
      {"SOCKS5 tuple with auth",
       fun() ->
@@ -256,27 +256,27 @@ get_proxy_config_test_() ->
               {socks5_user, <<"user">>},
               {socks5_pass, <<"pass">>}
           ]),
-          ?assertEqual({socks5, "socks.local", 1080, {<<"user">>, <<"pass">>}}, Result)
+          ?assertEqual({socks5, "socks.local", 1080, {<<"user">>, <<"pass">>}, tcp}, Result)
       end},
      {"HTTP URL proxy for HTTP scheme returns http type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, "http://proxy.local:8080"}]),
-          ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({http, "proxy.local", 8080, undefined, tcp}, Result)
       end},
      {"HTTP URL proxy for HTTPS scheme returns connect type",
       fun() ->
           Result = hackney:get_proxy_config(https, "example.com", [{proxy, "http://proxy.local:8080"}]),
-          ?assertEqual({connect, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({connect, "proxy.local", 8080, undefined, tcp}, Result)
       end},
      {"SOCKS5 URL proxy returns socks5 type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, "socks5://socks.local:1080"}]),
-          ?assertEqual({socks5, "socks.local", 1080, undefined}, Result)
+          ?assertEqual({socks5, "socks.local", 1080, undefined, tcp}, Result)
       end},
      {"Proxy URL with credentials",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, "http://user:pass@proxy.local:8080"}]),
-          ?assertEqual({http, "proxy.local", 8080, {<<"user">>, <<"pass">>}}, Result)
+          ?assertEqual({http, "proxy.local", 8080, {<<"user">>, <<"pass">>}, tcp}, Result)
       end},
      {"Proxy auth option used when URL has no credentials",
       fun() ->
@@ -284,7 +284,7 @@ get_proxy_config_test_() ->
               {proxy, "http://proxy.local:8080"},
               {proxy_auth, {<<"admin">>, <<"secret">>}}
           ]),
-          ?assertEqual({http, "proxy.local", 8080, {<<"admin">>, <<"secret">>}}, Result)
+          ?assertEqual({http, "proxy.local", 8080, {<<"admin">>, <<"secret">>}, tcp}, Result)
       end},
      {"URL credentials override proxy_auth option",
       fun() ->
@@ -292,12 +292,22 @@ get_proxy_config_test_() ->
               {proxy, "http://urluser:urlpass@proxy.local:8080"},
               {proxy_auth, {<<"admin">>, <<"secret">>}}
           ]),
-          ?assertEqual({http, "proxy.local", 8080, {<<"urluser">>, <<"urlpass">>}}, Result)
+          ?assertEqual({http, "proxy.local", 8080, {<<"urluser">>, <<"urlpass">>}, tcp}, Result)
       end},
      {"Binary proxy URL works",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, <<"http://proxy.local:8080">>}]),
-          ?assertEqual({http, "proxy.local", 8080, undefined}, Result)
+          ?assertEqual({http, "proxy.local", 8080, undefined, tcp}, Result)
+      end},
+     {"HTTPS proxy URL returns ssl transport",
+      fun() ->
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, "https://proxy.local:8443"}]),
+          ?assertEqual({http, "proxy.local", 8443, undefined, ssl}, Result)
+      end},
+     {"HTTPS proxy URL for HTTPS target returns connect with ssl transport",
+      fun() ->
+          Result = hackney:get_proxy_config(https, "example.com", [{proxy, "https://proxy.local:8443"}]),
+          ?assertEqual({connect, "proxy.local", 8443, undefined, ssl}, Result)
       end}
     ].
 

@@ -731,12 +731,12 @@ get_ws_proxy_config(Scheme, Host, Options) ->
   case get_proxy_config(HttpScheme, Host, Options) of
     false ->
       false;
-    {http, ProxyHost, ProxyPort, ProxyAuth} ->
+    {http, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
       %% Simple HTTP proxy - convert to CONNECT tunnel for WebSocket
-      {connect, ProxyHost, ProxyPort, ProxyAuth};
-    {connect, _, _, _} = Config ->
+      {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport};
+    {connect, _, _, _, _} = Config ->
       Config;
-    {socks5, _, _, _} = Config ->
+    {socks5, _, _, _, _} = Config ->
       Config
   end.
 
@@ -1125,25 +1125,27 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
     false ->
       %% No proxy configured, direct connection
       connect(Transport, Host, Port, Options);
-    {connect, ProxyHost, ProxyPort, ProxyAuth} ->
-      %% HTTP CONNECT tunnel (for HTTPS through HTTP proxy)
-      connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
-    {socks5, ProxyHost, ProxyPort, ProxyAuth} ->
+    {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
+      %% HTTP CONNECT tunnel (for HTTPS through HTTP/HTTPS proxy)
+      connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options);
+    {socks5, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
       %% SOCKS5 proxy
-      connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options);
-    {http, ProxyHost, ProxyPort, ProxyAuth} ->
+      connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options);
+    {http, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
       %% Simple HTTP proxy - connect to proxy, use absolute URLs
-      connect_via_http_proxy(Scheme, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options)
+      connect_via_http_proxy(Scheme, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options)
   end.
 
 %% @doc Connect through HTTP CONNECT proxy (tunnel).
-%% Used for HTTPS requests through HTTP proxy.
-connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+%% Used for HTTPS requests through HTTP/HTTPS proxy.
+%% ProxyTransport: tcp for HTTP proxy, ssl for HTTPS proxy
+connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options) ->
   %% Build options for hackney_http_connect
   ConnectOpts0 = [
     {connect_host, Host},
     {connect_port, Port},
-    {connect_transport, Transport}
+    {connect_transport, Transport},
+    {proxy_transport, ProxyTransport}
   ],
   ConnectOpts1 = case ProxyAuth of
     undefined -> ConnectOpts0;
@@ -1157,8 +1159,16 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
     _ ->
       ConnectOpts1
   end,
+  %% Add proxy SSL options if connecting to HTTPS proxy
+  ConnectOpts3 = case ProxyTransport of
+    ssl ->
+      ProxySslOpts = proplists:get_value(proxy_ssl_options, Options, []),
+      [{proxy_ssl_options, ProxySslOpts} | ConnectOpts2];
+    _ ->
+      ConnectOpts2
+  end,
   %% Add other connection options
-  ConnectOpts = ConnectOpts2 ++ proplists:get_value(connect_options, Options, []),
+  ConnectOpts = ConnectOpts3 ++ proplists:get_value(connect_options, Options, []),
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
@@ -1170,12 +1180,14 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
   end.
 
 %% @doc Connect through SOCKS5 proxy.
-connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+%% ProxyTransport: tcp for plain SOCKS5, ssl for SOCKS5 over TLS
+connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options) ->
   %% Build options for hackney_socks5
   Socks5Opts0 = [
     {socks5_host, ProxyHost},
     {socks5_port, ProxyPort},
-    {socks5_transport, Transport}
+    {socks5_transport, Transport},
+    {proxy_transport, ProxyTransport}
   ],
   Socks5Opts1 = case ProxyAuth of
     undefined -> Socks5Opts0;
@@ -1189,13 +1201,21 @@ connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth,
     _ ->
       Socks5Opts1
   end,
+  %% Add proxy SSL options if connecting to SOCKS5 over TLS
+  Socks5Opts3 = case ProxyTransport of
+    ssl ->
+      ProxySslOpts = proplists:get_value(proxy_ssl_options, Options, []),
+      [{proxy_ssl_options, ProxySslOpts} | Socks5Opts2];
+    _ ->
+      Socks5Opts2
+  end,
   %% Add socks5_resolve option if specified
-  Socks5Opts3 = case proplists:get_value(socks5_resolve, Options) of
-    undefined -> Socks5Opts2;
-    Resolve -> [{socks5_resolve, Resolve} | Socks5Opts2]
+  Socks5Opts4 = case proplists:get_value(socks5_resolve, Options) of
+    undefined -> Socks5Opts3;
+    Resolve -> [{socks5_resolve, Resolve} | Socks5Opts3]
   end,
   %% Add other connection options
-  Socks5Opts = Socks5Opts3 ++ proplists:get_value(connect_options, Options, []),
+  Socks5Opts = Socks5Opts4 ++ proplists:get_value(connect_options, Options, []),
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_socks5:connect(Host, Port, Socks5Opts, Timeout) of
@@ -1207,10 +1227,22 @@ connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth,
   end.
 
 %% @doc Connect through simple HTTP proxy (no tunneling).
-%% Used for HTTP requests through HTTP proxy. Requests use absolute URLs.
-connect_via_http_proxy(TargetScheme, TargetHost, TargetPort, ProxyHost, ProxyPort, ProxyAuth, Options) ->
+%% Used for HTTP requests through HTTP/HTTPS proxy. Requests use absolute URLs.
+%% ProxyTransport: tcp for HTTP proxy, ssl for HTTPS proxy
+connect_via_http_proxy(TargetScheme, TargetHost, TargetPort, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options) ->
+  %% Determine transport module and options based on proxy transport
+  {ProxyTransportMod, ConnectOpts} = case ProxyTransport of
+    ssl ->
+      %% Use proxy_ssl_options for the proxy connection
+      ProxySslOpts = proplists:get_value(proxy_ssl_options, Options, []),
+      %% Replace ssl_options with proxy_ssl_options for the connection
+      Opts1 = proplists:delete(ssl_options, Options),
+      {hackney_ssl, [{ssl_options, ProxySslOpts} | Opts1]};
+    _ ->
+      {hackney_tcp, Options}
+  end,
   %% Connect directly to the proxy server
-  case connect(hackney_tcp, ProxyHost, ProxyPort, Options) of
+  case connect(ProxyTransportMod, ProxyHost, ProxyPort, ConnectOpts) of
     {ok, ConnPid} ->
       %% Return connection with proxy info for absolute URL mode
       {ok, ConnPid, {http_proxy, TargetScheme, TargetHost, TargetPort, ProxyAuth}};
@@ -1258,11 +1290,13 @@ get_proxy_config(Scheme, TargetHost, Options) ->
     {ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
       %% Simple tuple: use HTTP proxy for http, CONNECT for https
       ProxyAuth = proplists:get_value(proxy_auth, Options),
-      {proxy_type_for_scheme(Scheme), ProxyHost, ProxyPort, ProxyAuth};
+      ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
+      {proxy_type_for_scheme(Scheme), ProxyHost, ProxyPort, ProxyAuth, ProxyTransport};
     {connect, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
       %% Explicit CONNECT tunnel
       ProxyAuth = proplists:get_value(proxy_auth, Options),
-      {connect, ProxyHost, ProxyPort, ProxyAuth};
+      ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
+      {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport};
     {socks5, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
       %% SOCKS5 proxy
       User = proplists:get_value(socks5_user, Options),
@@ -1271,7 +1305,8 @@ get_proxy_config(Scheme, TargetHost, Options) ->
         undefined -> undefined;
         _ -> {User, Pass}
       end,
-      {socks5, ProxyHost, ProxyPort, Auth};
+      ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
+      {socks5, ProxyHost, ProxyPort, Auth, ProxyTransport};
     _ ->
       false
   end.
@@ -1289,7 +1324,12 @@ parse_proxy_option(ProxyUrl, Scheme, Options) ->
         socks5 -> socks5;
         _ -> proxy_type_for_scheme(Scheme)
       end,
-      {Type, ProxyHost, ProxyPort, Auth};
+      %% Determine proxy transport based on proxy URL scheme
+      ProxyTransport = case ProxyScheme of
+        https -> ssl;
+        _ -> tcp
+      end,
+      {Type, ProxyHost, ProxyPort, Auth, ProxyTransport};
     {error, _} ->
       false
   end.
