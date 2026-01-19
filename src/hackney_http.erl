@@ -184,10 +184,9 @@ parse_first_line(Buffer, St=#hparser{type=Type,
     _ when Type =:= response ->
       case parse_response_line(St) of
 	  {error, bad_request} -> {error, bad_request};
-	  {response, Version, StatusInt, Reason, NState} when StatusInt >= 200 ->
-	      {response, Version, StatusInt, Reason, NState};
-	  {response, _Version, _StatusInt, _Reason, _NState} ->
-	      {more, St#hparser{empty_lines=Empty, state=on_junk}}
+	  %% Return all responses including 1xx informational (issue #631)
+	  {response, Version, StatusInt, Reason, NState} ->
+	      {response, Version, StatusInt, Reason, NState}
       end;
     _ when Type =:= request ->
       parse_request_line(St)

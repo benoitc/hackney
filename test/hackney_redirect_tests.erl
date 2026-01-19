@@ -314,6 +314,53 @@ maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
             end
     end.
 
+%% =============================================================================
+%% Tests for HTTP 1xx Informational Responses (issue #631)
+%% =============================================================================
+
+%% Test that 1xx responses are handled correctly with callback
+inform_response_callback_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     [
+         {"1xx response calls inform_fun callback",
+          fun test_inform_callback/0},
+         {"1xx response without callback is silently skipped",
+          fun test_inform_no_callback/0}
+     ]}.
+
+test_inform_callback() ->
+    Self = self(),
+    InformFun = fun(Status, Reason, Headers) ->
+        Self ! {got_inform, Status, Reason, Headers}
+    end,
+    %% Use URL-encoded link value
+    URL = url(<<"/inform?status=103&link=%3C/style.css%3E%3B%20rel%3Dpreload">>),
+    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>,
+        [{inform_fun, InformFun}]),
+    hackney:close(Client),
+    %% Should receive the informational message
+    receive
+        {got_inform, InformStatus, _Reason, InformHeaders} ->
+            ?assertEqual(103, InformStatus),
+            %% Check Link header was received
+            ?assert(proplists:is_defined(<<"link">>, InformHeaders) orelse
+                    proplists:is_defined(<<"Link">>, InformHeaders))
+    after 1000 ->
+        ?assert(false)  %% Timeout - callback not called
+    end,
+    %% Final response should be 200
+    ?assertEqual(200, Status).
+
+test_inform_no_callback() ->
+    %% Without callback, 1xx should be silently skipped
+    URL = url(<<"/inform?status=103">>),
+    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, []),
+    hackney:close(Client),
+    %% Final response should be 200
+    ?assertEqual(200, Status).
+
 %% Test that netloc includes port for non-standard ports
 netloc_port_test_() ->
     [

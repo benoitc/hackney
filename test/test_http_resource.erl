@@ -11,6 +11,7 @@
 %%   GET  /cookies/set      - set cookies from query params
 %%   GET  /cookies          - return cookies as JSON
 %%   GET  /robots.txt       - return fixed robots.txt content
+%%   GET  /inform           - send 1xx informational response before final response
 
 -module(test_http_resource).
 
@@ -116,6 +117,25 @@ handle_request(<<"GET">>, <<"/connection-close">>, Req, State) ->
         <<"connection">> => <<"close">>
     }, <<"{\"connection\": \"close\"}">>, Req),
     {ok, Req2, State};
+
+%% GET /inform - send 1xx informational response before final response
+%% Query params:
+%%   - status: informational status code (default 103)
+%%   - link: value for Link header in informational response
+handle_request(<<"GET">>, <<"/inform">>, Req0, State) ->
+    QS = cowboy_req:parse_qs(Req0),
+    InformStatus = case proplists:get_value(<<"status">>, QS) of
+        undefined -> 103;
+        StatusBin -> binary_to_integer(StatusBin)
+    end,
+    InformHeaders = case proplists:get_value(<<"link">>, QS) of
+        undefined -> #{};
+        LinkValue -> #{<<"link">> => LinkValue}
+    end,
+    %% Send informational response first
+    ok = cowboy_req:inform(InformStatus, InformHeaders, Req0),
+    %% Then send final response
+    reply_json(200, #{<<"informed">> => true, <<"inform_status">> => InformStatus}, Req0, State);
 
 %% Fallback - return 404
 handle_request(_Method, _Path, Req, State) ->
