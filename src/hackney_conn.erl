@@ -2170,9 +2170,15 @@ to_binary(V) when is_list(V) -> list_to_binary(V);
 to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8).
 
 %% @private Normalize headers to binary key-value pairs for HTTP/2
+%% Also filters out Host header since :authority pseudo-header is used instead.
+%% Having both Host and :authority causes protocol_error on strict servers (e.g. Google).
 normalize_headers(Headers) ->
-    lists:map(fun({K, V}) ->
-        {hackney_bstr:to_lower(to_binary(K)), to_binary(V)}
+    lists:filtermap(fun({K, V}) ->
+        KeyLower = hackney_bstr:to_lower(to_binary(K)),
+        case KeyLower of
+            <<"host">> -> false;  %% Skip Host header - use :authority instead
+            _ -> {true, {KeyLower, to_binary(V)}}
+        end
     end, Headers).
 
 %% @private Handle incoming HTTP/2 data
