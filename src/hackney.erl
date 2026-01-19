@@ -441,6 +441,7 @@ request(Method, URL, Headers, Body) ->
 %% - stream_to: PID to receive async messages
 %% - follow_redirect: Follow redirects automatically
 %% - max_redirect: Maximum number of redirects (default 5)
+%% - location_trusted: If true, forward auth credentials on cross-host redirects (default false)
 %% - pool: Pool name or false for no pooling
 %% - connect_timeout: Connection timeout in ms (default 8000)
 %% - recv_timeout: Receive timeout in ms (default 5000)
@@ -945,9 +946,12 @@ follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeade
       %% Make new request to the redirect URL
       %% Remove old redirect_count and add incremented one
       Options1 = proplists:delete(redirect_count, Options),
+      %% CVE-2018-1000007: Strip sensitive auth options when redirecting to different host
+      %% unless force_redirect is set (similar to curl's --location-trusted)
+      Options2 = maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options1),
       case request(NewMethod, NewURL, [], NewBody,
                    [{follow_redirect, true}, {max_redirect, MaxRedirect},
-                    {redirect_count, RedirectCount + 1}, {with_body, WithBody} | Options1]) of
+                    {redirect_count, RedirectCount + 1}, {with_body, WithBody} | Options2]) of
         {ok, Status2, Headers2, NewConnPid} when is_pid(NewConnPid) ->
           %% Store the final location in the connection
           hackney_conn:set_location(NewConnPid, FinalLocation),
@@ -1026,6 +1030,33 @@ find_last_slash(Bin, Pos) ->
   case binary:at(Bin, Pos) of
     $/ -> Pos;
     _ -> find_last_slash(Bin, Pos - 1)
+  end.
+
+%% @private Strip sensitive auth options when redirecting to a different host.
+%% This prevents credential leakage per CVE-2018-1000007.
+%% Use location_trusted option to allow forwarding auth to different hosts (like curl's --location-trusted).
+maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
+  LocationTrusted = proplists:get_value(location_trusted, Options, false),
+  case LocationTrusted of
+    true ->
+      %% User explicitly allows forwarding auth to different hosts
+      Options;
+    false ->
+      %% Check if host changed
+      CurrentHost = CurrentURL#hackney_url.host,
+      NewHost = NewURL#hackney_url.host,
+      case CurrentHost =:= NewHost of
+        true ->
+          %% Same host - keep auth options
+          Options;
+        false ->
+          %% Different host - strip sensitive options
+          lists:filter(fun
+            ({basic_auth, _}) -> false;
+            ({cookie, _}) -> false;
+            (_) -> true
+          end, Options)
+      end
   end.
 
 async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
