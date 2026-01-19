@@ -11,6 +11,7 @@
 -export([connect/1, connect/2, connect/3, connect/4,
          close/1,
          peername/1,
+         peercert/1,
          sockname/1,
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
@@ -400,6 +401,13 @@ normalize_transport(Other) -> Other.
 -spec peername(conn()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 peername(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:peername(ConnPid).
+
+%% @doc Get the peer SSL certificate.
+%% Returns the DER-encoded certificate of the peer, or an error if the connection
+%% is not SSL or the certificate is unavailable.
+-spec peercert(conn()) -> {ok, binary()} | {error, term()}.
+peercert(ConnPid) when is_pid(ConnPid) ->
+  hackney_conn:peercert(ConnPid).
 
 %% @doc Get the local address and port.
 -spec sockname(conn()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.

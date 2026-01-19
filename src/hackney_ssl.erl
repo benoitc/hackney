@@ -15,6 +15,7 @@
   setopts/2,
   controlling_process/2,
   peername/1,
+  peercert/1,
   close/1,
   shutdown/2,
   sockname/1]).
@@ -236,6 +237,13 @@ controlling_process(Socket, Pid) ->
   {ok, {inet:ip_address(), inet:port_number()}} | {error, atom()}.
 peername(Socket) ->
   ssl:peername(Socket).
+
+%% @doc Return the peer certificate of an SSL connection.
+%% @see ssl:peercert/1
+-spec peercert(ssl:sslsocket()) ->
+  {ok, binary()} | {error, atom()}.
+peercert(Socket) ->
+  ssl:peercert(Socket).
 
 %% @doc Close a TCP socket.
 %% @see ssl:close/1
