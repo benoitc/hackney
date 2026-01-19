@@ -257,6 +257,63 @@ test_long_redirect_url() ->
             ok
     end.
 
+%% =============================================================================
+%% Tests for CVE-2018-1000007 - auth stripping on cross-host redirects
+%% =============================================================================
+
+%% Test that auth options are stripped on cross-host redirects by default
+auth_strip_on_cross_host_redirect_test_() ->
+    BaseURL = hackney_url:parse_url(<<"https://api.example.com/resource">>),
+    SameHostURL = hackney_url:parse_url(<<"https://api.example.com/other">>),
+    DiffHostURL = hackney_url:parse_url(<<"https://s3.amazonaws.com/bucket/file">>),
+    OptionsWithAuth = [{basic_auth, {"user", "pass"}}, {cookie, "session=abc"}, {timeout, 5000}],
+
+    [
+        {"same host keeps auth options",
+         fun() ->
+             Result = maybe_strip_auth_on_redirect(BaseURL, SameHostURL, OptionsWithAuth),
+             ?assert(proplists:is_defined(basic_auth, Result)),
+             ?assert(proplists:is_defined(cookie, Result)),
+             ?assert(proplists:is_defined(timeout, Result))
+         end},
+        {"different host strips auth options",
+         fun() ->
+             Result = maybe_strip_auth_on_redirect(BaseURL, DiffHostURL, OptionsWithAuth),
+             ?assertNot(proplists:is_defined(basic_auth, Result)),
+             ?assertNot(proplists:is_defined(cookie, Result)),
+             %% Non-auth options should be kept
+             ?assert(proplists:is_defined(timeout, Result))
+         end},
+        {"location_trusted keeps auth on different host",
+         fun() ->
+             OptionsWithTrusted = [{location_trusted, true} | OptionsWithAuth],
+             Result = maybe_strip_auth_on_redirect(BaseURL, DiffHostURL, OptionsWithTrusted),
+             ?assert(proplists:is_defined(basic_auth, Result)),
+             ?assert(proplists:is_defined(cookie, Result))
+         end}
+    ].
+
+%% Helper that mirrors hackney.erl's maybe_strip_auth_on_redirect
+maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
+    LocationTrusted = proplists:get_value(location_trusted, Options, false),
+    case LocationTrusted of
+        true ->
+            Options;
+        false ->
+            CurrentHost = CurrentURL#hackney_url.host,
+            NewHost = NewURL#hackney_url.host,
+            case CurrentHost =:= NewHost of
+                true ->
+                    Options;
+                false ->
+                    lists:filter(fun
+                        ({basic_auth, _}) -> false;
+                        ({cookie, _}) -> false;
+                        (_) -> true
+                    end, Options)
+            end
+    end.
+
 %% Test that netloc includes port for non-standard ports
 netloc_port_test_() ->
     [

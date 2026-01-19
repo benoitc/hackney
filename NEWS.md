@@ -83,6 +83,10 @@ The connection pool has been completely redesigned:
 - `send_multipart_body/2` - use `send_body/2`
 - SOCKS5 and HTTP CONNECT proxy (planned 2.1.0)
 
+### Security
+
+- **BREAKING**: Authorization credentials and cookies are no longer sent on cross-host redirects by default (CVE-2018-1000007). This prevents credential leakage when a server redirects to a different host (e.g., API redirecting to S3). To restore the old behavior, use `{location_trusted, true}` option (similar to curl's `--location-trusted`).
+
 ### Bug Fixes
 
 - fix: validate connection state on pool checkout for HTTP/2 and HTTP/3. On FreeBSD + OTP 28, pooled connections could be in `closed` state when checked out due to SSL timing differences, causing `{error, invalid_state}` errors. Now connections are verified to be in `connected` state after checkout.
