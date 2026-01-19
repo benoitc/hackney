@@ -32,6 +32,7 @@
     %% Request/Response (sync)
     request/5,
     request/6,
+    request/7,
     request_streaming/5,
     body/1,
     body/2,
@@ -127,6 +128,7 @@
     idle_timeout = ?IDLE_TIMEOUT :: timeout(),
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
+    inform_fun :: fun((integer(), binary(), list()) -> any()) | undefined,
 
     %% Pool integration
     pool_pid :: pid() | undefined,  %% If set, connection is from a pool
@@ -234,12 +236,20 @@ get_state(Pid) ->
 -spec request(pid(), binary(), binary(), list(), binary() | iolist()) ->
     {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body) ->
-    request(Pid, Method, Path, Headers, Body, infinity).
+    request(Pid, Method, Path, Headers, Body, infinity, []).
 
 -spec request(pid(), binary(), binary(), list(), binary() | iolist(), timeout()) ->
     {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body, Timeout) ->
-    gen_statem:call(Pid, {request, Method, Path, Headers, Body}, Timeout).
+    request(Pid, Method, Path, Headers, Body, Timeout, []).
+
+%% @doc Make an HTTP request with additional request options.
+%% Options:
+%%   - inform_fun: fun(Status, Reason, Headers) - callback for 1xx responses
+-spec request(pid(), binary(), binary(), list(), binary() | iolist(), timeout(), list()) ->
+    {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
+request(Pid, Method, Path, Headers, Body, Timeout, ReqOpts) ->
+    gen_statem:call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout).
 
 %% @doc Send an HTTP/3 request and return headers immediately.
 %% Returns {ok, Status, Headers} and allows subsequent stream_body/1 calls.
@@ -483,7 +493,8 @@ init([DefaultOwner, Opts]) ->
         ssl_options = maps:get(ssl_options, Opts, []),
         pool_pid = maps:get(pool_pid, Opts, undefined),
         enable_push = maps:get(enable_push, Opts, false),
-        no_reuse = maps:get(no_reuse, Opts, false)
+        no_reuse = maps:get(no_reuse, Opts, false),
+        inform_fun = maps:get(inform_fun, Opts, undefined)
     },
 
     %% If socket is provided, start in connected state; otherwise start in idle
@@ -761,12 +772,12 @@ connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
 connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
-connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{protocol = http2} = Data) ->
-    %% HTTP/2 request - use h2_machine
+connected({call, From}, {request, Method, Path, Headers, Body, _ReqOpts}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
     do_h2_request(From, Method, Path, Headers, Body, Data);
 
-connected({call, From}, {request, Method, Path, Headers, Body}, #conn_data{protocol = http3} = Data) ->
-    %% HTTP/3 request - use hackney_h3
+connected({call, From}, {request, Method, Path, Headers, Body, _ReqOpts}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 request - use hackney_h3 (1xx not applicable for HTTP/3)
     do_h3_request(From, Method, Path, Headers, Body, Data);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http3} = Data) ->
@@ -781,8 +792,9 @@ connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_
     %% HTTP/3 request with streaming body reads (returns headers, then stream_body for chunks)
     do_h3_request_streaming(From, Method, Path, Headers, Body, Data);
 
-connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
+connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) ->
     %% HTTP/1.1 request
+    InformFun = proplists:get_value(inform_fun, ReqOpts, undefined),
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -795,7 +807,8 @@ connected({call, From}, {request, Method, Path, Headers, Body}, Data) ->
         buffer = <<>>,
         async = false,
         async_ref = undefined,
-        stream_to = undefined
+        stream_to = undefined,
+        inform_fun = InformFun
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
 
@@ -1650,9 +1663,38 @@ send_body(Transport, Socket, Body) when is_binary(Body); is_list(Body) ->
     Transport:send(Socket, Body).
 
 %% @private Receive and parse response status and headers
-%% Note: 1XX informational responses are automatically skipped by the HTTP parser
+%% Handles 1XX informational responses per RFC 7231
 recv_status_and_headers(Data) ->
-    recv_status(Data).
+    recv_status_and_headers_loop(Data).
+
+recv_status_and_headers_loop(Data) ->
+    case recv_status(Data) of
+        {ok, Status, Headers, NewData} when Status >= 100, Status < 200 ->
+            %% 1XX informational response per RFC 7231 Section 6.2
+            #conn_data{inform_fun = InformFun, reason = Reason, parser = OldParser,
+                       stream_to = StreamTo, async_ref = AsyncRef} = NewData,
+            HeadersList = hackney_headers:to_list(Headers),
+            %% Handle differently for sync vs async mode
+            case StreamTo of
+                undefined ->
+                    %% Sync mode - call callback if provided
+                    case InformFun of
+                        undefined -> ok;
+                        Fun when is_function(Fun, 3) ->
+                            Fun(Status, Reason, HeadersList)
+                    end;
+                _ ->
+                    %% Async mode - send message to stream_to
+                    StreamTo ! {hackney_response, AsyncRef, {informational, Status, Reason, HeadersList}}
+            end,
+            %% Reset parser for next response, preserving any buffered data
+            %% The old parser's buffer may contain the start of the next response
+            OldBuffer = hackney_http:get(OldParser, buffer),
+            NewParser = hackney_http:parser([response]),
+            recv_status_and_headers_loop(NewData#conn_data{parser = NewParser, buffer = OldBuffer});
+        Other ->
+            Other
+    end.
 
 recv_status(#conn_data{parser = Parser, buffer = Buffer} = Data) ->
     case hackney_http:execute(Parser, Buffer) of

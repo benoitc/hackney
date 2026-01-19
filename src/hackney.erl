@@ -862,7 +862,12 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
 
 sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
                                 WithBody, Options, URL, FollowRedirect, MaxRedirect, RedirectCount) ->
-  case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody) of
+  %% Extract request options for 1xx informational responses
+  ReqOpts = case proplists:get_value(inform_fun, Options) of
+    undefined -> [];
+    InformFun -> [{inform_fun, InformFun}]
+  end,
+  case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
     %% HTTP/2 returns body directly - handle 4-tuple first
     {ok, Status, RespHeaders, RespBody} when Status >= 301, Status =< 303; Status =:= 307; Status =:= 308 ->
       %% HTTP/2 redirect status
