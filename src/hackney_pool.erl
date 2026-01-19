@@ -63,7 +63,6 @@
 
 -record(state, {
     name,
-    metrics,
     max_connections,
     keepalive_timeout,
     prewarm_count,
@@ -399,10 +398,10 @@ init([Name, Options]) ->
     %% register the module
     ets:insert(?MODULE, {Name, self()}),
 
-    %% initialize metrics
-    Engine = init_metrics(Name),
+    %% initialize pool metrics
+    hackney_metrics:declare_pool_metrics(Name),
 
-    {ok, #state{name=Name, metrics=Engine, max_connections=MaxConn,
+    {ok, #state{name=Name, max_connections=MaxConn,
                 keepalive_timeout=KeepaliveTimeout, prewarm_count=PrewarmCount}}.
 
 handle_call(stats, _From, State) ->
@@ -439,7 +438,7 @@ handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=
     {reply, {InUseCount, FreeCount}, State};
 
 handle_call({checkout, Key, Requester, Opts}, _From, State) ->
-    #state{name=PoolName, metrics=Engine, max_connections=MaxConn,
+    #state{name=PoolName, max_connections=MaxConn,
            available=Available, in_use=InUse} = State,
 
     TotalInUse = maps:size(InUse),
@@ -452,7 +451,10 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
             %% Found an available connection - update owner to new requester
             ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
             ok = hackney_conn:set_owner(Pid, Requester),
-            _ = metrics:update_meter(Engine, [hackney_pool, PoolName, take_rate], 1),
+            Labels = #{pool => PoolName},
+            _ = hackney_metrics:counter_inc(hackney_pool_checkouts_total, Labels),
+            _ = hackney_metrics:gauge_inc(hackney_pool_in_use_count, Labels),
+            _ = hackney_metrics:gauge_dec(hackney_pool_free_count, Labels),
             InUse2 = maps:put(Pid, Key, InUse),
             {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
         none when TotalInUse >= MaxConn ->
@@ -465,6 +467,9 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
             ?report_trace("pool: starting new connection", [{pool, PoolName}]),
             case start_connection(Key, Requester, Opts, State) of
                 {ok, Pid, State2} ->
+                    Labels = #{pool => PoolName},
+                    _ = hackney_metrics:counter_inc(hackney_pool_checkouts_total, Labels),
+                    _ = hackney_metrics:gauge_inc(hackney_pool_in_use_count, Labels),
                     InUse2 = maps:put(Pid, Key, State2#state.in_use),
                     {reply, {ok, Pid}, State2#state{in_use=InUse2}};
                 {error, Reason} ->
@@ -660,7 +665,7 @@ handle_info(_Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
+terminate(_Reason, #state{name=PoolName, available=Available,
                          h2_connections=H2Conns, h3_connections=H3Conns,
                          pid_monitors=PidMonitors}) ->
     %% Stop all available connections
@@ -692,8 +697,10 @@ terminate(_Reason, #state{name=PoolName, metrics=Engine, available=Available,
     %% Demonitor all
     maps:foreach(fun(_Pid, MonRef) -> erlang:demonitor(MonRef, [flush]) end, PidMonitors),
 
-    %% delete pool metrics
-    ok = delete_metrics(Engine, PoolName),
+    %% Reset pool metrics to zero
+    Labels = #{pool => PoolName},
+    _ = hackney_metrics:gauge_set(hackney_pool_in_use_count, Labels, 0),
+    _ = hackney_metrics:gauge_set(hackney_pool_free_count, Labels, 0),
     ok.
 
 %%====================================================================
@@ -776,7 +783,7 @@ start_connection(Key, Owner, Opts, State) ->
 %% Only TCP connections are stored. SSL upgraded connections are closed.
 %% Always releases the load_regulation slot since connection is no longer in use.
 do_checkin(Pid, State) ->
-    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+    #state{name=PoolName, in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
     %% Get the key from in_use and remove
     case maps:take(Pid, InUse) of
@@ -784,6 +791,10 @@ do_checkin(Pid, State) ->
             %% Release load_regulation slot - connection is no longer in active use
             {Host, Port, _Transport} = Key,
             hackney_load_regulation:release(Host, Port),
+
+            %% Update metrics - connection no longer in use
+            Labels = #{pool => PoolName},
+            _ = hackney_metrics:gauge_dec(hackney_pool_in_use_count, Labels),
 
             %% Check if connection is still alive
             case is_process_alive(Pid) of
@@ -815,6 +826,9 @@ do_checkin(Pid, State) ->
                             hackney_conn:set_owner_async(Pid, self()),
                             Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
 
+                            %% Update metrics - connection now free
+                            _ = hackney_metrics:gauge_inc(hackney_pool_free_count, Labels),
+
                             %% Ensure we're monitoring this pid
                             PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
                                 true -> PidMonitors;
@@ -838,7 +852,7 @@ do_checkin(Pid, State) ->
 %% Used for sync checkin to prevent deadlock when connection calls pool.
 %% ShouldClose is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
 do_checkin_with_close_flag(Pid, ShouldClose, State) ->
-    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+    #state{name=PoolName, in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
 
     %% Get the key from in_use and remove
     case maps:take(Pid, InUse) of
@@ -846,6 +860,10 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
             %% Release load_regulation slot - connection is no longer in active use
             {Host, Port, _Transport} = Key,
             hackney_load_regulation:release(Host, Port),
+
+            %% Update metrics - connection no longer in use
+            Labels = #{pool => PoolName},
+            _ = hackney_metrics:gauge_dec(hackney_pool_in_use_count, Labels),
 
             %% Check if connection is still alive
             case is_process_alive(Pid) of
@@ -872,6 +890,9 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
                             %% Set owner to pool so connection doesn't die if previous requester crashes.
                             hackney_conn:set_owner_async(Pid, self()),
                             Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+
+                            %% Update metrics - connection now free
+                            _ = hackney_metrics:gauge_inc(hackney_pool_free_count, Labels),
 
                             %% Ensure we're monitoring this pid
                             PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
@@ -1023,23 +1044,6 @@ prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
             ok
     end,
     prewarm_connections(PoolPid, Host, Port, Count - 1, IdleTimeout).
-
-init_metrics(PoolName) ->
-    Engine = hackney_metrics:get_engine(),
-    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, take_rate]),
-    _ = metrics:new(Engine, counter, [hackney_pool, PoolName, no_socket]),
-    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, in_use_count]),
-    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, free_count]),
-    _ = metrics:new(Engine, histogram, [hackney_pool, PoolName, queue_count]),
-    Engine.
-
-delete_metrics(Engine, PoolName) ->
-    _ = metrics:delete(Engine, [hackney_pool, PoolName, take_rate]),
-    _ = metrics:delete(Engine, [hackney_pool, PoolName, no_socket]),
-    _ = metrics:delete(Engine, [hackney_pool, PoolName, in_use_count]),
-    _ = metrics:delete(Engine, [hackney_pool, PoolName, free_count]),
-    _ = metrics:delete(Engine, [hackney_pool, PoolName, queue_count]),
-    ok.
 
 handle_stats(State) ->
     #state{name=PoolName, max_connections=Max, available=Available,
