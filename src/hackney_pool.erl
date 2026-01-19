@@ -23,7 +23,8 @@
 %% HTTP/2 connection pooling
 -export([checkout_h2/4,
          register_h2/5,
-         unregister_h2/2]).
+         unregister_h2/2,
+         unregister_h2_all/0]).
 
 %% HTTP/3 connection pooling
 -export([checkout_h3/4,
@@ -172,6 +173,13 @@ unregister_h2(Pid, Options) ->
     Pool = find_pool(PoolName, Options),
     gen_server:cast(Pool, {unregister_h2, Pid}),
     ok.
+
+%% @doc Remove all HTTP/2 connections from the default pool.
+%% Used for testing to ensure clean state between tests.
+-spec unregister_h2_all() -> ok.
+unregister_h2_all() ->
+    Pool = find_pool(default, []),
+    gen_server:call(Pool, unregister_h2_all).
 
 %%====================================================================
 %% HTTP/3 Connection Pooling
@@ -508,7 +516,11 @@ handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State)
                     H3Conns2 = maps:remove(Key, H3Conns),
                     {reply, none, State#state{h3_connections = H3Conns2}}
             end
-    end.
+    end;
+
+handle_call(unregister_h2_all, _From, State) ->
+    %% Clear all HTTP/2 connections (for testing)
+    {reply, ok, State#state{h2_connections = #{}}}.
 
 handle_cast({checkin, _PoolInfo, Pid}, State) ->
     State2 = do_checkin(Pid, State),
