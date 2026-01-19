@@ -66,3 +66,18 @@ parse_chunked_response_trailers_test() ->
 	{_, P3} = hackney_http:execute(P2, <<"\r\n">>),
 	{more, P4} = hackney_http:execute(P3, <<"0\r\nFoo: ">>),
 	?assertEqual({done, <<>>}, hackney_http:execute(P4, <<"Bar\r\n\r\n">>)).
+
+%% Issue #697: Handle non-standard decimal status codes (e.g., 401.1 from IIS)
+parse_response_decimal_status_code_test() ->
+	Response = <<"HTTP/1.1 401.1 Access Denied">>,
+	St = #hparser{},
+	{response, _Version, StatusInt, Reason, _NState} = hackney_http:parse_response_version(Response, St),
+	?assertEqual(401, StatusInt),
+	?assertEqual(<<"Access Denied">>, Reason).
+
+parse_response_decimal_status_code_two_digits_test() ->
+	Response = <<"HTTP/1.1 403.14 Forbidden">>,
+	St = #hparser{},
+	{response, _Version, StatusInt, Reason, _NState} = hackney_http:parse_response_version(Response, St),
+	?assertEqual(403, StatusInt),
+	?assertEqual(<<"Forbidden">>, Reason).

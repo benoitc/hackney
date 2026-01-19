@@ -232,7 +232,12 @@ parse_status(<< C, Rest/bits >>, St, Version, Acc) ->
   end.
 
 parse_reason(Reason, St, Version, StatusCode) ->
-  StatusInt = list_to_integer(binary_to_list(StatusCode)),
+  %% Handle non-standard decimal status codes (e.g., 401.1 from IIS) by truncating
+  StatusCodeInt = case binary:split(StatusCode, <<".">>) of
+    [IntPart, _DecPart] -> IntPart;
+    [IntPart] -> IntPart
+  end,
+  StatusInt = list_to_integer(binary_to_list(StatusCodeInt)),
 
   NState = St#hparser{type=response,
     version=Version,
