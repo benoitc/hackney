@@ -145,17 +145,18 @@ test_connect() ->
 
 test_connect_timeout() ->
     %% Use a non-routable IP to trigger timeout
+    %% Use longer timeouts to avoid flakiness on slow CI systems
     Opts = #{
         host => "10.255.255.1",
         port => 12345,
         transport => hackney_tcp,
-        connect_timeout => 100
+        connect_timeout => 500
     },
     {ok, Pid} = hackney_conn:start_link(Opts),
-    Result = hackney_conn:connect(Pid, 200),
+    Result = hackney_conn:connect(Pid, 2000),
     ?assertMatch({error, _}, Result),
     %% Process should have stopped
-    timer:sleep(50),
+    timer:sleep(100),
     ?assertNot(is_process_alive(Pid)).
 
 test_connect_invalid() ->
