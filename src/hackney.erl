@@ -245,13 +245,13 @@ try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
           case hackney_conn:connect(ConnPid, ConnectTimeout) of
             ok ->
               %% Verify it's HTTP/3
-              case hackney_conn:get_protocol(ConnPid) of
+              case catch hackney_conn:get_protocol(ConnPid) of
                 http3 ->
                   %% Register for multiplexing
                   PoolHandler:register_h3(Host, Port, Transport, ConnPid, Options),
                   {ok, ConnPid};
                 _ ->
-                  %% Not HTTP/3, close and fail
+                  %% Not HTTP/3 or connection terminated, close and fail
                   catch hackney_conn:stop(ConnPid),
                   hackney_altsvc:mark_h3_blocked(Host, Port),
                   false
@@ -302,12 +302,18 @@ connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
   end.
 
 %% @private Register HTTP/2 connection for multiplexing if applicable
+%% Uses catch to handle race condition where connection terminates before call
 maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
-  case hackney_conn:get_protocol(ConnPid) of
+  case catch hackney_conn:get_protocol(ConnPid) of
     http2 ->
       %% HTTP/2 negotiated - register for connection sharing
       PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options);
     http1 ->
+      ok;
+    http3 ->
+      ok;
+    {'EXIT', _} ->
+      %% Connection terminated before we could check - ignore
       ok
   end.
 
