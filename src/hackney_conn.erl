@@ -53,6 +53,7 @@
     %% Socket operations
     setopts/2,
     peername/1,
+    peercert/1,
     sockname/1,
     %% Low-level socket operations (for hackney_request/hackney_response)
     send/2,
@@ -351,6 +352,13 @@ setopts(Pid, Opts) ->
 -spec peername(pid()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 peername(Pid) ->
     gen_statem:call(Pid, peername).
+
+%% @doc Get the peer SSL certificate.
+%% Returns {ok, Cert} where Cert is the DER-encoded certificate binary,
+%% or {error, Reason} if the connection is not SSL or the certificate is unavailable.
+-spec peercert(pid()) -> {ok, binary()} | {error, term()}.
+peercert(Pid) ->
+    gen_statem:call(Pid, peercert).
 
 %% @doc Get the local address and port.
 -spec sockname(pid()) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
@@ -1405,6 +1413,14 @@ handle_common({call, From}, peername, _State, #conn_data{transport = Transport, 
     Result = Transport:peername(Socket),
     {keep_state_and_data, [{reply, From, Result}]};
 
+handle_common({call, From}, peercert, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
+  when Socket =/= undefined ->
+    Result = case erlang:function_exported(Transport, peercert, 1) of
+        true -> Transport:peercert(Socket);
+        false -> {error, not_ssl}
+    end,
+    {keep_state_and_data, [{reply, From, Result}]};
+
 handle_common({call, From}, sockname, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
   when Socket =/= undefined ->
     Result = Transport:sockname(Socket),
@@ -1441,6 +1457,9 @@ handle_common({call, From}, {setopts, _Opts}, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_connected}}]};
 
 handle_common({call, From}, peername, _State, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+handle_common({call, From}, peercert, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_connected}}]};
 
 handle_common({call, From}, sockname, _State, _Data) ->
