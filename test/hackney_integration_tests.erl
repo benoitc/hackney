@@ -13,6 +13,8 @@ all_tests() ->
    fun head_request/0,
    fun no_content_response/0,
    fun not_modified_response/0,
+   fun no_content_body_read_then_next_request/0,
+   fun not_modified_body_read_then_next_request/0,
    fun basic_auth_request_failed/0,
    fun basic_auth_request/0,
    fun basic_auth_url_request/0,
@@ -84,6 +86,33 @@ not_modified_response() ->
     URL = url(<<"/status/304">>),
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?assertEqual(304, StatusCode).
+
+%% Test for issue #434: 204 response followed by body read should not corrupt next request
+%% Per RFC 7230 3.3.3, 204 and 304 responses have no body regardless of headers
+no_content_body_read_then_next_request() ->
+    URL204 = url(<<"/status/204">>),
+    URLGet = url(<<"/get">>),
+    %% First request: 204 with explicit body read
+    {ok, Status1, _, Client1} = hackney:request(get, URL204, [], <<>>, []),
+    ?assertEqual(204, Status1),
+    {ok, Body1} = hackney:body(Client1),
+    ?assertEqual(<<>>, Body1),
+    %% Second request: should succeed (connection closed after 204, new connection used)
+    {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
+    ?assertEqual(200, Status2).
+
+%% Same test for 304 Not Modified
+not_modified_body_read_then_next_request() ->
+    URL304 = url(<<"/status/304">>),
+    URLGet = url(<<"/get">>),
+    %% First request: 304 with explicit body read
+    {ok, Status1, _, Client1} = hackney:request(get, URL304, [], <<>>, []),
+    ?assertEqual(304, Status1),
+    {ok, Body1} = hackney:body(Client1),
+    ?assertEqual(<<>>, Body1),
+    %% Second request: should succeed
+    {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
+    ?assertEqual(200, Status2).
 
 basic_auth_request() ->
     URL = url(<<"/basic-auth/username/password">>),
