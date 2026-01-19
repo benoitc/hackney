@@ -103,12 +103,11 @@ privdir() ->
   end.
 
 mod_metrics() ->
-  case application:get_env(hackney, mod_metrics) of
-    {ok, folsom} -> metrics_folsom;
-    {ok, exometer} -> metrics_exometer;
-    {ok, dummy} -> metrics_dummy;
+  case application:get_env(hackney, metrics_backend) of
+    {ok, prometheus} -> hackney_metrics_prometheus;
+    {ok, dummy} -> hackney_metrics_dummy;
     {ok, Mod} -> Mod;
-    _ -> metrics_dummy
+    undefined -> hackney_metrics_dummy
   end.
 
 %% @doc Get the default protocols for HTTP connections.

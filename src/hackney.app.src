@@ -16,7 +16,6 @@
       mimerl,
       certifi,
       ssl_verify_fun,
-      metrics,
       unicode_util_compat]},
     {included_applications, []},
     {mod, { hackney_app, []}},

@@ -16,28 +16,42 @@ metrics_test_() ->
      fun setup/0,
      fun teardown/1,
      [
-        {"init inserts mod_metrics into ETS",
+        {"init inserts metrics_backend into ETS",
          fun() ->
              hackney_metrics:init(),
-             %% Verify that mod_metrics key exists in the ETS table
-             Result = ets:lookup(?CONFIG, mod_metrics),
-             ?assertMatch([{mod_metrics, _}], Result)
+             %% Verify that metrics_backend key exists in the ETS table
+             Result = ets:lookup(?CONFIG, metrics_backend),
+             ?assertMatch([{metrics_backend, _}], Result)
          end},
-        {"get_engine returns the metrics engine",
+        {"get_backend returns the metrics backend module",
          fun() ->
              hackney_metrics:init(),
-             Engine = hackney_metrics:get_engine(),
-             %% Should return a metrics module reference
-             ?assert(is_tuple(Engine) orelse is_atom(Engine))
+             Backend = hackney_metrics:get_backend(),
+             %% Should return a metrics module (atom)
+             ?assert(is_atom(Backend))
          end},
-        {"init with dummy metrics",
+        {"init uses dummy backend by default",
          fun() ->
              %% Ensure we're using dummy metrics (default)
-             application:set_env(hackney, mod_metrics, dummy),
+             application:unset_env(hackney, metrics_backend),
              hackney_metrics:init(),
-             Engine = hackney_metrics:get_engine(),
-             ?assert(is_tuple(Engine) orelse is_atom(Engine)),
-             application:unset_env(hackney, mod_metrics)
+             Backend = hackney_metrics:get_backend(),
+             ?assertEqual(hackney_metrics_dummy, Backend)
+         end},
+        {"dummy backend counter_inc works",
+         fun() ->
+             %% counter_inc should not crash
+             ?assertEqual(ok, hackney_metrics:counter_inc(test_counter, #{host => <<"test">>}))
+         end},
+        {"dummy backend gauge_set works",
+         fun() ->
+             %% gauge_set should not crash
+             ?assertEqual(ok, hackney_metrics:gauge_set(test_gauge, #{pool => default}, 42))
+         end},
+        {"dummy backend histogram_observe works",
+         fun() ->
+             %% histogram_observe should not crash
+             ?assertEqual(ok, hackney_metrics:histogram_observe(test_histogram, #{host => <<"test">>}, 0.5))
          end}
      ]}.
 
@@ -53,5 +67,5 @@ setup() ->
 
 teardown(_) ->
     %% Clean up the ETS table entry
-    catch ets:delete(?CONFIG, mod_metrics),
+    catch ets:delete(?CONFIG, metrics_backend),
     ok.
