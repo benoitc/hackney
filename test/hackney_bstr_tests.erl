@@ -85,7 +85,9 @@ params_test_() ->
             {<<";c=d">>, [<<>>,{<<"c">>,<<"d">>}]},
             {<<";a=b;c=d">>, [<<>>,{<<"a">>,<<"b">>},{<<"c">>,<<"d">>}]},
             {<<";ab">>, {error, badarg}},
-            {<<";a=b;">>, {error, badarg}},
+            %% Issue #618: trailing semicolons should be tolerated
+            {<<";a=b;">>, [<<>>,{<<"a">>,<<"b">>}]},
+            {<<";a=b;c=d;">>, [<<>>,{<<"a">>,<<"b">>},{<<"c">>,<<"d">>}]},
             {<<" ;a=b;c=d">>, [<<>>,{<<"a">>,<<"b">>},{<<"c">>,<<"d">>}]}
             ],
     [{V, fun() -> R = hackney_bstr:params(V, F) end} || {V, R} <- Tests].
