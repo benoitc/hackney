@@ -91,6 +91,37 @@ The connection pool has been completely redesigned:
 
 - fix: validate connection state on pool checkout for HTTP/2 and HTTP/3. On FreeBSD + OTP 28, pooled connections could be in `closed` state when checked out due to SSL timing differences, causing `{error, invalid_state}` errors. Now connections are verified to be in `connected` state after checkout.
 
+### Metrics
+
+Native metrics system with pluggable backends, replacing the external `metrics` library dependency:
+
+- **Pluggable backends** - `hackney_metrics_backend` behaviour for custom implementations
+- **Dummy backend** (default) - Zero-overhead no-op backend when metrics not needed
+- **Prometheus backend** (opt-in) - Full Prometheus integration when enabled
+- **Correct metric types** - Pool counts now use gauges instead of histograms (#560)
+
+#### Prometheus Metrics
+
+When enabled, the following metrics are exported:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `hackney_requests_total` | Counter | host | Total requests started |
+| `hackney_requests_active` | Gauge | host | Currently active requests |
+| `hackney_requests_finished_total` | Counter | host | Completed requests |
+| `hackney_request_duration_seconds` | Histogram | host | Request duration in seconds |
+| `hackney_pool_free_count` | Gauge | pool | Available connections in pool |
+| `hackney_pool_in_use_count` | Gauge | pool | Connections currently in use |
+| `hackney_pool_checkouts_total` | Counter | pool | Total connection checkouts |
+
+#### Configuration
+
+```erlang
+%% Default: dummy backend (zero overhead)
+%% To enable Prometheus metrics:
+{hackney, [{metrics_backend, prometheus}]}
+```
+
 ### Requirements
 
 - Erlang/OTP 27+
