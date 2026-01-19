@@ -43,11 +43,14 @@ connect_proxy_loop(ListenSock) ->
             gen_tcp:close(ListenSock),
             ok
     after 0 ->
-        case gen_tcp:accept(ListenSock, 100) of
+        case gen_tcp:accept(ListenSock, 500) of
             {ok, ClientSock} ->
-                Pid = spawn(fun() -> handle_connect_client(ClientSock) end),
-                gen_tcp:controlling_process(ClientSock, Pid),
-                Pid ! socket_ready,
+                %% Spawn handler that waits for socket
+                Pid = spawn(fun() -> connect_client_init() end),
+                %% Transfer ownership first (handler is blocked waiting)
+                ok = gen_tcp:controlling_process(ClientSock, Pid),
+                %% Now send the socket - handler will receive it after ownership transfer
+                Pid ! {socket, ClientSock},
                 connect_proxy_loop(ListenSock);
             {error, timeout} ->
                 connect_proxy_loop(ListenSock);
@@ -56,14 +59,20 @@ connect_proxy_loop(ListenSock) ->
         end
     end.
 
+%% Handler initialization - waits for socket to be handed off
+connect_client_init() ->
+    receive
+        {socket, ClientSock} -> handle_connect_client(ClientSock)
+    after 10000 -> ok
+    end.
+
 handle_connect_client(ClientSock) ->
-    receive socket_ready -> ok after 1000 -> ok end,
-    case recv_until_headers(ClientSock, <<>>, 5000) of
+    case recv_until_headers(ClientSock, <<>>, 10000) of
         {ok, Data} ->
             case parse_connect_request(Data) of
                 {ok, Host, Port} ->
                     %% Connect to target
-                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 5000) of
+                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 10000) of
                         {ok, TargetSock} ->
                             %% Send 200 Connection Established
                             ok = gen_tcp:send(ClientSock, <<"HTTP/1.1 200 Connection Established\r\n\r\n">>),
@@ -127,11 +136,14 @@ socks5_proxy_loop(ListenSock) ->
             gen_tcp:close(ListenSock),
             ok
     after 0 ->
-        case gen_tcp:accept(ListenSock, 100) of
+        case gen_tcp:accept(ListenSock, 500) of
             {ok, ClientSock} ->
-                Pid = spawn(fun() -> handle_socks5_client(ClientSock) end),
-                gen_tcp:controlling_process(ClientSock, Pid),
-                Pid ! socket_ready,
+                %% Spawn handler that waits for socket
+                Pid = spawn(fun() -> socks5_client_init() end),
+                %% Transfer ownership first (handler is blocked waiting)
+                ok = gen_tcp:controlling_process(ClientSock, Pid),
+                %% Now send the socket - handler will receive it after ownership transfer
+                Pid ! {socket, ClientSock},
                 socks5_proxy_loop(ListenSock);
             {error, timeout} ->
                 socks5_proxy_loop(ListenSock);
@@ -140,9 +152,15 @@ socks5_proxy_loop(ListenSock) ->
         end
     end.
 
+%% Handler initialization - waits for socket to be handed off
+socks5_client_init() ->
+    receive
+        {socket, ClientSock} -> handle_socks5_client(ClientSock)
+    after 10000 -> ok
+    end.
+
 handle_socks5_client(ClientSock) ->
-    receive socket_ready -> ok after 1000 -> ok end,
-    case gen_tcp:recv(ClientSock, 0, 5000) of
+    case gen_tcp:recv(ClientSock, 0, 10000) of
         {ok, <<5, NMethods, Methods/binary>>} when byte_size(Methods) >= NMethods ->
             %% Check for no-auth method (0)
             case binary:match(Methods, <<0>>) of
@@ -162,12 +180,12 @@ handle_socks5_client(ClientSock) ->
     end.
 
 handle_socks5_connect(ClientSock) ->
-    case gen_tcp:recv(ClientSock, 0, 5000) of
+    case gen_tcp:recv(ClientSock, 0, 10000) of
         {ok, <<5, 1, 0, AType, Rest/binary>>} ->
             %% Connect command
             case parse_socks5_address(AType, Rest) of
                 {ok, Host, Port} ->
-                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 5000) of
+                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 10000) of
                         {ok, TargetSock} ->
                             %% Send success reply (bound address 0.0.0.0:0)
                             gen_tcp:send(ClientSock, <<5, 0, 0, 1, 0, 0, 0, 0, 0, 0>>),
@@ -246,11 +264,14 @@ http_proxy_loop(ListenSock) ->
             gen_tcp:close(ListenSock),
             ok
     after 0 ->
-        case gen_tcp:accept(ListenSock, 100) of
+        case gen_tcp:accept(ListenSock, 500) of
             {ok, ClientSock} ->
-                Pid = spawn(fun() -> handle_http_proxy_client(ClientSock) end),
-                gen_tcp:controlling_process(ClientSock, Pid),
-                Pid ! socket_ready,
+                %% Spawn handler that waits for socket
+                Pid = spawn(fun() -> http_proxy_client_init() end),
+                %% Transfer ownership first (handler is blocked waiting)
+                ok = gen_tcp:controlling_process(ClientSock, Pid),
+                %% Now send the socket - handler will receive it after ownership transfer
+                Pid ! {socket, ClientSock},
                 http_proxy_loop(ListenSock);
             {error, timeout} ->
                 http_proxy_loop(ListenSock);
@@ -259,14 +280,20 @@ http_proxy_loop(ListenSock) ->
         end
     end.
 
+%% Handler initialization - waits for socket to be handed off
+http_proxy_client_init() ->
+    receive
+        {socket, ClientSock} -> handle_http_proxy_client(ClientSock)
+    after 10000 -> ok
+    end.
+
 handle_http_proxy_client(ClientSock) ->
-    receive socket_ready -> ok after 1000 -> ok end,
-    case recv_until_headers(ClientSock, <<>>, 5000) of
+    case recv_until_headers(ClientSock, <<>>, 10000) of
         {ok, Data} ->
             case parse_http_request(Data) of
                 {ok, Method, Host, Port, Path, Rest} ->
                     %% Connect to target
-                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 5000) of
+                    case gen_tcp:connect(Host, Port, [binary, {active, false}], 10000) of
                         {ok, TargetSock} ->
                             %% Rebuild request with relative path
                             Request = rebuild_request(Method, Path, Rest),
