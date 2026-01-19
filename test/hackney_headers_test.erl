@@ -92,9 +92,37 @@ lookup_test() ->
   HList = [{<<"a">>, <<"1">>},
            {<<"x-a">>, <<"a, b,c">>},
            {<<"X-a">>, <<"e,f, g">>}],
-  
+
   Headers = hackney_headers:from_list(HList),
   ?assertEqual([{<<"a">>, <<"1">>}], hackney_headers:lookup(<<"a">>, Headers)),
   ?assertEqual([{<<"x-a">>, <<"a, b,c">>},
                 {<<"X-a">>, <<"e,f, g">>}], hackney_headers:lookup(<<"x-a">>, Headers)).
+
+%% Test that newlines in header values are sanitized (issue #506)
+%% This prevents HTTP header injection attacks
+header_injection_sanitization_test() ->
+  %% Header with newline in value - should be stripped
+  HList1 = [{<<"Custom-Header">>, <<"Value\n">>}],
+  Headers1 = hackney_headers:from_list(HList1),
+  Binary1 = hackney_headers:to_binary(Headers1),
+  ?assertEqual(<<"Custom-Header: Value\r\n\r\n">>, Binary1),
+
+  %% Header with CR+LF injection attempt - should be stripped
+  HList2 = [{<<"Custom-Header">>, <<"Value\r\nInjected-Header: malicious">>}],
+  Headers2 = hackney_headers:from_list(HList2),
+  Binary2 = hackney_headers:to_binary(Headers2),
+  ?assertEqual(<<"Custom-Header: ValueInjected-Header: malicious\r\n\r\n">>, Binary2),
+
+  %% Header with only CR - should be stripped
+  HList3 = [{<<"Custom-Header">>, <<"Value\rMore">>}],
+  Headers3 = hackney_headers:from_list(HList3),
+  Binary3 = hackney_headers:to_binary(Headers3),
+  ?assertEqual(<<"Custom-Header: ValueMore\r\n\r\n">>, Binary3),
+
+  %% Multiple headers, one with injection attempt
+  HList4 = [{<<"Normal-Header">>, <<"normal">>},
+            {<<"Bad-Header">>, <<"value\r\n\r\nHTTP/1.1 200 OK">>}],
+  Headers4 = hackney_headers:from_list(HList4),
+  Binary4 = hackney_headers:to_binary(Headers4),
+  ?assertEqual(<<"Normal-Header: normal\r\nBad-Header: valueHTTP/1.1 200 OK\r\n\r\n">>, Binary4).
   

@@ -179,6 +179,7 @@ to_list(Headers) ->
   lists:reverse(Result).
 
 %% @doc convert headers to an iolist. Useful to send them over the wire.
+%% Header values are sanitized to prevent HTTP header injection (issue #506).
 -spec to_iolist(headers()) -> iolist().
 to_iolist(Headers) ->
   L = fold(
@@ -186,11 +187,15 @@ to_iolist(Headers) ->
       case Value0 of
         {Value, Params} ->
           [[
-            hackney_bstr:to_binary(Key),": ",  hackney_bstr:to_binary(Value),
+            sanitize_header_value(hackney_bstr:to_binary(Key)),": ",
+            sanitize_header_value(hackney_bstr:to_binary(Value)),
             params_to_iolist(Params, []), "\r\n"
           ] | L1];
         _ ->
-          [[hackney_bstr:to_binary(Key),": ", hackney_bstr:to_binary(Value0), "\r\n"] | L1]
+          [[
+            sanitize_header_value(hackney_bstr:to_binary(Key)),": ",
+            sanitize_header_value(hackney_bstr:to_binary(Value0)), "\r\n"
+          ] | L1]
       end
     end,
     [],
@@ -198,11 +203,18 @@ to_iolist(Headers) ->
   ),
   lists:reverse(["\r\n" | L ]).
 
+%% @doc Sanitize header value by removing CR and LF characters.
+%% This prevents HTTP header injection attacks (CVE-like vulnerability).
+-spec sanitize_header_value(binary()) -> binary().
+sanitize_header_value(Value) when is_binary(Value) ->
+  << <<C>> || <<C>> <= Value, C =/= $\r, C =/= $\n >>.
+
 params_to_iolist([{K, V} | Rest], List) ->
-  List2 = [[";", hackney_bstr:to_binary(K), "=", hackney_bstr:to_binary(V)] | List],
+  List2 = [[";", sanitize_header_value(hackney_bstr:to_binary(K)), "=",
+            sanitize_header_value(hackney_bstr:to_binary(V))] | List],
   params_to_iolist(Rest, List2);
 params_to_iolist([K | Rest], List) ->
-  List2 = [[";", hackney_bstr:to_binary(K)] | List],
+  List2 = [[";", sanitize_header_value(hackney_bstr:to_binary(K))] | List],
   params_to_iolist(Rest, List2);
 params_to_iolist([], List) ->
   lists:reverse(List).
