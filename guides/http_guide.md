@@ -119,6 +119,23 @@ ok = hackney:finish_send_body(Ref),
 {ok, Body} = hackney:body(Ref).
 ```
 
+### Automatic Decompression
+
+Hackney can automatically decompress gzip and deflate encoded responses:
+
+```erlang
+{ok, 200, Headers, Body} = hackney:get(URL, [], <<>>, [
+    with_body,
+    {auto_decompress, true}
+]).
+```
+
+When `auto_decompress` is enabled:
+- Adds `Accept-Encoding: gzip, deflate` header to requests
+- Automatically decompresses the response body based on `Content-Encoding`
+- Supports gzip, deflate, and x-gzip encodings
+- Non-compressed responses are returned unchanged
+
 ### Stream Response Body
 
 ```erlang
@@ -194,6 +211,24 @@ end.
 receive {hackney_response, Ref, Msg} -> ok end,
 hackney:stream_next(Ref).  %% Request next message
 ```
+
+### Stream to Another Process
+
+Use `stream_to` to send async messages to a different process:
+
+```erlang
+Receiver = spawn(fun() -> receive_loop() end),
+{ok, Ref} = hackney:get(URL, [], <<>>, [
+    async,
+    {stream_to, Receiver}
+]).
+```
+
+When `stream_to` is specified:
+- The connection is owned by the `stream_to` process, not the caller
+- If `stream_to` dies, the connection terminates
+- If the original caller dies, the connection continues as long as `stream_to` is alive
+- This ensures proper cleanup when the message recipient terminates
 
 ## Connection Pooling
 
