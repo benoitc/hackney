@@ -1778,6 +1778,11 @@ recv_headers(#conn_data{parser = Parser} = Data, Headers) ->
 read_full_body(#conn_data{method = <<"HEAD">>} = Data, Acc) ->
     %% HEAD requests have no body
     {ok, Acc, Data};
+read_full_body(#conn_data{status = Status} = Data, Acc) when Status =:= 204; Status =:= 304 ->
+    %% 204 No Content and 304 Not Modified have no body per RFC 7230 3.3.3
+    %% Force connection close to avoid corrupting subsequent requests if
+    %% a misbehaving server sent Content-Length or body data
+    {ok, Acc, Data#conn_data{socket = undefined}};
 read_full_body(Data, Acc) ->
     case stream_body_chunk(Data) of
         {ok, Chunk, NewData} ->
@@ -1791,6 +1796,11 @@ read_full_body(Data, Acc) ->
 %% @private Stream a single body chunk
 stream_body_chunk(#conn_data{method = <<"HEAD">>} = Data) ->
     {done, Data};
+stream_body_chunk(#conn_data{status = Status} = Data) when Status =:= 204; Status =:= 304 ->
+    %% 204 No Content and 304 Not Modified have no body per RFC 7230 3.3.3
+    %% Force connection close to avoid corrupting subsequent requests if
+    %% a misbehaving server sent Content-Length or body data
+    {done, Data#conn_data{socket = undefined}};
 stream_body_chunk(#conn_data{parser = Parser, transport = Transport, socket = Socket, recv_timeout = Timeout} = Data) ->
     case hackney_http:execute(Parser) of
         {more, NewParser, _Buffer} ->
