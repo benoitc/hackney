@@ -160,6 +160,38 @@ handle_request(<<"GET">>, <<"/inform">>, Req0, State) ->
     %% Then send final response
     reply_json(200, #{<<"informed">> => true, <<"inform_status">> => InformStatus}, Req0, State);
 
+%% GET /compressed/gzip - return gzip compressed response
+handle_request(<<"GET">>, <<"/compressed/gzip">>, Req, State) ->
+    Data = <<"Hello, this is gzip compressed data!">>,
+    CompressedData = zlib:gzip(Data),
+    Req2 = cowboy_req:reply(200, #{
+        <<"content-type">> => <<"text/plain">>,
+        <<"content-encoding">> => <<"gzip">>
+    }, CompressedData, Req),
+    {ok, Req2, State};
+
+%% GET /compressed/deflate - return deflate compressed response
+handle_request(<<"GET">>, <<"/compressed/deflate">>, Req, State) ->
+    Data = <<"Hello, this is deflate compressed data!">>,
+    Z = zlib:open(),
+    ok = zlib:deflateInit(Z),
+    CompressedData = iolist_to_binary(zlib:deflate(Z, Data, finish)),
+    ok = zlib:deflateEnd(Z),
+    zlib:close(Z),
+    Req2 = cowboy_req:reply(200, #{
+        <<"content-type">> => <<"text/plain">>,
+        <<"content-encoding">> => <<"deflate">>
+    }, CompressedData, Req),
+    {ok, Req2, State};
+
+%% GET /compressed/none - return uncompressed response
+handle_request(<<"GET">>, <<"/compressed/none">>, Req, State) ->
+    Data = <<"Hello, this is uncompressed data!">>,
+    Req2 = cowboy_req:reply(200, #{
+        <<"content-type">> => <<"text/plain">>
+    }, Data, Req),
+    {ok, Req2, State};
+
 %% Fallback - return 404
 handle_request(_Method, _Path, Req, State) ->
     Req2 = cowboy_req:reply(404, #{

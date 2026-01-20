@@ -130,6 +130,7 @@
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
     inform_fun :: fun((integer(), binary(), list()) -> any()) | undefined,
+    auto_decompress = false :: boolean(),
 
     %% Pool integration
     pool_pid :: pid() | undefined,  %% If set, connection is from a pool
@@ -502,7 +503,8 @@ init([DefaultOwner, Opts]) ->
         pool_pid = maps:get(pool_pid, Opts, undefined),
         enable_push = maps:get(enable_push, Opts, false),
         no_reuse = maps:get(no_reuse, Opts, false),
-        inform_fun = maps:get(inform_fun, Opts, undefined)
+        inform_fun = maps:get(inform_fun, Opts, undefined),
+        auto_decompress = maps:get(auto_decompress, Opts, false)
     },
 
     %% If socket is provided, start in connected state; otherwise start in idle
@@ -803,6 +805,7 @@ connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) ->
     %% HTTP/1.1 request
     InformFun = proplists:get_value(inform_fun, ReqOpts, undefined),
+    AutoDecompress = proplists:get_value(auto_decompress, ReqOpts, false),
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -816,7 +819,8 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         async = false,
         async_ref = undefined,
         stream_to = undefined,
-        inform_fun = InformFun
+        inform_fun = InformFun,
+        auto_decompress = AutoDecompress
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
 
@@ -1788,9 +1792,71 @@ read_full_body(Data, Acc) ->
         {ok, Chunk, NewData} ->
             read_full_body(NewData, <<Acc/binary, Chunk/binary>>);
         {done, NewData} ->
-            {ok, Acc, NewData};
+            %% Body complete - apply decompression if needed
+            maybe_decompress_body(Acc, NewData);
         {error, Reason} ->
             {error, Reason}
+    end.
+
+%% @private Apply decompression if auto_decompress is enabled and Content-Encoding is set
+maybe_decompress_body(Body, #conn_data{auto_decompress = false} = Data) ->
+    {ok, Body, Data};
+maybe_decompress_body(Body, #conn_data{response_headers = undefined} = Data) ->
+    {ok, Body, Data};
+maybe_decompress_body(Body, #conn_data{response_headers = Headers, auto_decompress = true} = Data) ->
+    %% Get Content-Encoding from response headers
+    ContentEncoding = case hackney_headers:get_value(<<"content-encoding">>, Headers) of
+        undefined -> <<>>;
+        CE -> hackney_bstr:to_lower(CE)
+    end,
+    case ContentEncoding of
+        <<"gzip">> ->
+            case decompress_gzip(Body) of
+                {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, Reason} -> {error, {decompress_error, gzip, Reason}}
+            end;
+        <<"deflate">> ->
+            case decompress_deflate(Body) of
+                {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, Reason} -> {error, {decompress_error, deflate, Reason}}
+            end;
+        <<"x-gzip">> ->
+            %% x-gzip is an alias for gzip
+            case decompress_gzip(Body) of
+                {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, Reason} -> {error, {decompress_error, gzip, Reason}}
+            end;
+        _ ->
+            %% No compression or unknown encoding - return as-is
+            {ok, Body, Data}
+    end.
+
+%% @private Decompress gzip-encoded data
+decompress_gzip(Data) ->
+    try
+        {ok, zlib:gunzip(Data)}
+    catch
+        error:Reason -> {error, Reason};
+        exit:Reason -> {error, Reason}
+    end.
+
+%% @private Decompress deflate-encoded data
+%% Note: Some servers send raw deflate, others send zlib-wrapped deflate
+decompress_deflate(Data) ->
+    %% Try zlib-wrapped first (RFC 1950), then raw deflate (RFC 1951)
+    try
+        Z = zlib:open(),
+        try
+            ok = zlib:inflateInit(Z),
+            Decompressed = zlib:inflate(Z, Data),
+            ok = zlib:inflateEnd(Z),
+            {ok, iolist_to_binary(Decompressed)}
+        after
+            zlib:close(Z)
+        end
+    catch
+        error:Reason -> {error, Reason};
+        exit:Reason -> {error, Reason}
     end.
 
 %% @private Stream a single body chunk

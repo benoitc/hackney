@@ -883,10 +883,14 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
 
 sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
                                 WithBody, Options, URL, FollowRedirect, MaxRedirect, RedirectCount) ->
-  %% Extract request options for 1xx informational responses
-  ReqOpts = case proplists:get_value(inform_fun, Options) of
+  %% Extract request options for 1xx informational responses and auto_decompress
+  ReqOpts0 = case proplists:get_value(inform_fun, Options) of
     undefined -> [];
     InformFun -> [{inform_fun, InformFun}]
+  end,
+  ReqOpts = case proplists:get_value(auto_decompress, Options, false) of
+    true -> [{auto_decompress, true} | ReqOpts0];
+    false -> ReqOpts0
   end,
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
     %% HTTP/2 returns body directly - handle 4-tuple first
@@ -1179,10 +1183,19 @@ add_default_headers(Headers, Options, URL) ->
       end
   end,
 
+  %% Add Accept-Encoding if auto_decompress is enabled (issue #155)
+  Headers3 = case proplists:get_value(auto_decompress, Options, false) of
+    true ->
+      {_, H} = hackney_headers:store_new(<<"Accept-Encoding">>, <<"gzip, deflate">>, Headers2),
+      H;
+    false ->
+      Headers2
+  end,
+
   %% Add cookies if present
   case proplists:get_value(cookie, Options, []) of
-    [] -> Headers2;
-    Cookies -> add_cookies_header(Cookies, Headers2)
+    [] -> Headers3;
+    Cookies -> add_cookies_header(Cookies, Headers3)
   end.
 
 add_basic_auth_header(User, Pwd, Headers) ->
