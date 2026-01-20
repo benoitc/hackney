@@ -16,6 +16,7 @@ An HTTP client for Erlang. Simple, reliable, fast.
 - **WebSocket support** - Full WebSocket client with the same process-per-connection model.
 - **IPv6 first** - Happy Eyeballs algorithm tries IPv6 before IPv4 for faster connections on modern networks.
 - **SSL by default** - Secure connections with certificate verification using Mozilla's CA bundle.
+- **Automatic decompression** - Transparently decompress gzip/deflate responses with `{auto_decompress, true}`.
 
 ## Quick Start
 
@@ -226,6 +227,13 @@ hackney:get(URL, [], <<>>, [
     {connect_timeout, 5000},  %% Connection timeout
     {recv_timeout, 30000}     %% Response timeout
 ]).
+```
+
+### Automatic Decompression
+
+```erlang
+%% Automatically decompress gzip/deflate responses
+hackney:get(URL, [], <<>>, [{auto_decompress, true}, with_body]).
 ```
 
 ### SSL Options
