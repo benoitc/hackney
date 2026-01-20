@@ -67,6 +67,12 @@ The connection pool has been completely redesigned:
 - `max_per_host` - Maximum concurrent connections per host (default 50)
 - `checkout_timeout` - Timeout to acquire connection slot (default 8000ms)
 - `prewarm_count` - Warm connections per host (default 4)
+- `auto_decompress` - When `true`, automatically decompresses gzip/deflate responses (#155):
+  ```erlang
+  {ok, Status, Headers, Body} = hackney:request(get, URL, [], [],
+      [{with_body, true}, {auto_decompress, true}]).
+  ```
+- `stream_to` - For async requests, the `stream_to` process is now set as the connection owner (#646). If `stream_to` dies, the connection terminates; if the original caller dies, the connection continues as long as `stream_to` is alive.
 
 ### New Functions
 
