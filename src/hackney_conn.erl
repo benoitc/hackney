@@ -1930,7 +1930,20 @@ notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = Upgrade
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->
     %% Use self() (connection PID) as the async ref for message correlation
     Ref = self(),
-    NewData = Data#conn_data{
+    %% Issue #646: If StreamTo is different from the caller, set StreamTo as owner.
+    %% This way the connection lifecycle is tied to the message recipient.
+    %% If StreamTo dies, the connection will be terminated.
+    {CallerPid, _} = From,
+    Data2 = case StreamTo =:= CallerPid of
+        true ->
+            Data;
+        false ->
+            %% Change owner to StreamTo
+            demonitor(Data#conn_data.owner_mon, [flush]),
+            NewMon = monitor(process, StreamTo),
+            Data#conn_data{owner = StreamTo, owner_mon = NewMon}
+    end,
+    NewData = Data2#conn_data{
         request_from = From,
         method = Method,
         path = Path,

@@ -1095,7 +1095,8 @@ async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
   %% Handle body encoding
   {FinalHeaders, FinalBody} = encode_body(Headers, Body, []),
   HeadersList = hackney_headers:to_list(FinalHeaders),
-
+  %% Note: Issue #646 - ownership transfer to StreamTo (when different from caller)
+  %% is handled atomically inside hackney_conn:do_request_async
   case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode, StreamTo, FollowRedirect) of
     {ok, Ref} ->
       {ok, Ref};
