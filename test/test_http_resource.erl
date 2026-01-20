@@ -110,6 +110,18 @@ handle_request(<<"GET">>, <<"/robots.txt">>, Req, State) ->
     }, Body, Req),
     {ok, Req2, State};
 
+%% GET /chunked/:size - return chunked response with specified body size
+%% For testing issue #403 - file download hangs
+handle_request(<<"GET">>, <<"/chunked/", SizeBin/binary>>, Req, State) ->
+    Size = binary_to_integer(SizeBin),
+    %% Use stream_reply which uses chunked encoding in HTTP/1.1
+    Headers = #{<<"content-type">> => <<"application/octet-stream">>},
+    Req2 = cowboy_req:stream_reply(200, Headers, Req),
+    %% Send body in chunks
+    Body = binary:copy(<<"X">>, Size),
+    ok = cowboy_req:stream_body(Body, fin, Req2),
+    {ok, Req2, State};
+
 %% GET /connection-close - return with Connection: close header
 handle_request(<<"GET">>, <<"/connection-close">>, Req, State) ->
     Req2 = cowboy_req:reply(200, #{

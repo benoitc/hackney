@@ -15,6 +15,8 @@ all_tests() ->
    fun not_modified_response/0,
    fun no_content_body_read_then_next_request/0,
    fun not_modified_body_read_then_next_request/0,
+   fun chunked_body_read_then_next_request/0,
+   fun chunked_large_body_read/0,
    fun basic_auth_request_failed/0,
    fun basic_auth_request/0,
    fun basic_auth_url_request/0,
@@ -113,6 +115,32 @@ not_modified_body_read_then_next_request() ->
     %% Second request: should succeed
     {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
     ?assertEqual(200, Status2).
+
+%% Test for issue #403: Chunked transfer encoding should not hang
+%% Tests that reading body from a chunked response works correctly
+%% and doesn't hang or corrupt subsequent requests
+chunked_body_read_then_next_request() ->
+    URLChunked = url(<<"/chunked/1000">>),
+    URLGet = url(<<"/get">>),
+    %% First request: chunked response with explicit body read
+    {ok, Status1, Headers1, Client1} = hackney:request(get, URLChunked, [], <<>>, []),
+    ?assertEqual(200, Status1),
+    %% Verify it's chunked (no content-length header in Cowboy stream_reply)
+    ?assertEqual(undefined, hackney_headers:get_value(<<"content-length">>, hackney_headers:from_list(Headers1))),
+    {ok, Body1} = hackney:body(Client1),
+    ?assertEqual(1000, byte_size(Body1)),
+    %% Second request: should succeed without hanging
+    {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
+    ?assertEqual(200, Status2).
+
+%% Test larger chunked response (closer to original issue)
+chunked_large_body_read() ->
+    %% Test with 100KB body similar to original issue
+    URLChunked = url(<<"/chunked/102400">>),
+    {ok, Status, _, Client} = hackney:request(get, URLChunked, [], <<>>, [{recv_timeout, 10000}]),
+    ?assertEqual(200, Status),
+    {ok, Body} = hackney:body(Client),
+    ?assertEqual(102400, byte_size(Body)).
 
 basic_auth_request() ->
     URL = url(<<"/basic-auth/username/password">>),
