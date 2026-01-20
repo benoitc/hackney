@@ -553,3 +553,42 @@ websocket_unparse_url_test_() ->
                       password = <<>>}}
     ],
     [{V, fun() -> V = hackney_url:unparse_url(R) end} || {V, R} <- Tests].
+
+%% Tests for unsupported URL schemes (issue #468)
+%% URLs with unsupported schemes should be parsed correctly with transport=undefined
+unsupported_scheme_test_() ->
+    Tests = [
+        {<<"ftp://foo.com/bar">>,
+         #hackney_url{transport = undefined,
+                      scheme = ftp,
+                      netloc = <<"foo.com">>,
+                      raw_path = <<"/bar">>,
+                      path = <<"/bar">>,
+                      qs = <<>>,
+                      fragment = <<>>,
+                      host = "foo.com",
+                      port = 0,
+                      user = <<>>,
+                      password = <<>>}},
+        {<<"file:///path/to/file">>,
+         #hackney_url{transport = undefined,
+                      scheme = file,
+                      netloc = <<>>,
+                      raw_path = <<"/path/to/file">>,
+                      path = <<"/path/to/file">>,
+                      qs = <<>>,
+                      fragment = <<>>,
+                      host = [],
+                      port = 0,
+                      user = <<>>,
+                      password = <<>>}},
+        {<<"mailto:user@example.com">>,
+         %% mailto: doesn't have ://, so treated as relative URL
+         #hackney_url{transport = hackney_tcp,
+                      scheme = http}}
+    ],
+    [{V, fun() ->
+        R = hackney_url:parse_url(V),
+        ?assertEqual(Expected#hackney_url.transport, R#hackney_url.transport),
+        ?assertEqual(Expected#hackney_url.scheme, R#hackney_url.scheme)
+     end} || {V, Expected} <- Tests].

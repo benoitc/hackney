@@ -57,7 +57,40 @@ parse_url(<<"http+unix://", Rest/binary>>) ->
 parse_url(<<"socks5://", Rest/binary>>) ->
   parse_url(Rest, #hackney_url{transport=hackney_socks5, scheme=socks5});
 parse_url(URL) ->
-  parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http}).
+  %% Check if this looks like a URL with an unrecognized scheme
+  case binary:split(URL, <<"://">>) of
+    [Scheme, Rest] when byte_size(Scheme) > 0, byte_size(Scheme) < 20 ->
+      %% Looks like scheme://... - parse it but mark as unsupported
+      case is_valid_scheme(Scheme) of
+        true ->
+          SchemeLower = hackney_bstr:to_lower(Scheme),
+          SchemeAtom = binary_to_atom(SchemeLower, utf8),
+          parse_url(Rest, #hackney_url{transport=undefined, scheme=SchemeAtom});
+        false ->
+          %% Not a valid scheme, treat as path-like URL
+          parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http})
+      end;
+    _ ->
+      %% No :// found or empty scheme, treat as relative/partial URL
+      parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http})
+  end.
+
+%% @private Check if a binary is a valid URL scheme (RFC 3986)
+%% scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+is_valid_scheme(<<C, Rest/binary>>) when (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) ->
+  is_valid_scheme_rest(Rest);
+is_valid_scheme(_) ->
+  false.
+
+is_valid_scheme_rest(<<>>) ->
+  true;
+is_valid_scheme_rest(<<C, Rest/binary>>) when (C >= $a andalso C =< $z) orelse
+                                               (C >= $A andalso C =< $Z) orelse
+                                               (C >= $0 andalso C =< $9) orelse
+                                               C =:= $+ orelse C =:= $- orelse C =:= $. ->
+  is_valid_scheme_rest(Rest);
+is_valid_scheme_rest(_) ->
+  false.
 
 parse_url(URL, S) ->
   {URL1, Fragment} = cut_fragment(URL),
@@ -268,6 +301,9 @@ parse_netloc(<<"[", Rest/binary>>, #hackney_url{transport=Transport}=S) ->
       parse_netloc(Rest, S)
   end;
 
+parse_netloc(<<>>, S) ->
+  %% Empty netloc (e.g., file:///path)
+  S#hackney_url{host=[], port=0};
 parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
   case binary:split(Netloc, <<":">>, [trim]) of
     [Host] when Transport =:= hackney_tcp ->
@@ -282,6 +318,10 @@ parse_netloc(Netloc, #hackney_url{transport=Transport}=S) ->
     [Host] when Transport =:= hackney_socks5 ->
       S#hackney_url{host=unicode:characters_to_list(Host),
                     port=1080};
+    [Host] when Transport =:= undefined ->
+      %% Unknown/unsupported scheme - no default port
+      S#hackney_url{host=unicode:characters_to_list(Host),
+                    port=0};
     [Host, Port] ->
       S#hackney_url{host=unicode:characters_to_list(Host),
                     port=list_to_integer(binary_to_list(Port))}

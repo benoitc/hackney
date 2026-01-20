@@ -468,6 +468,8 @@ request(Method, URL, Headers, Body) ->
 %% - {ok, ConnPid}: Streaming body mode (body = stream) - use send_body/2, finish_send_body/1
 %% - {error, Reason}: Error
 -spec request(atom() | binary(), url(), list(), term(), list()) -> request_ret().
+request(Method, URL, Headers, Body, Options) when is_binary(URL) orelse is_list(URL) ->
+  request(Method, hackney_url:parse_url(URL), Headers, Body, Options);
 request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   PathEncodeFun = proplists:get_value(path_encode_fun, Options0,
     fun hackney_url:pathencode/1),
@@ -482,6 +484,7 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                             {options, Options0}]),
 
   #hackney_url{transport=Transport,
+               scheme = Scheme,
                host = Host,
                port = Port,
                user = User,
@@ -489,6 +492,18 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                path = Path,
                qs = Query} = URL,
 
+  %% Check for unsupported URL schemes
+  case Transport of
+    undefined ->
+      {error, {unsupported_scheme, Scheme}};
+    _ ->
+      request_with_transport(Method, URL, Headers0, Body, Options0,
+                             Transport, Host, Port, User, Password, Path, Query)
+  end.
+
+%% @private Continue request processing after transport validation
+request_with_transport(Method, URL, Headers0, Body, Options0,
+                       Transport, Host, Port, User, Password, Path, Query) ->
   Options = case User of
               <<>> -> Options0;
               _ -> lists:keystore(basic_auth, 1, Options0, {basic_auth, {User, Password}})
@@ -511,9 +526,7 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
       do_request(ConnPid, Method, AbsolutePath, Headers1, Body, Options, URL, Host);
     Error ->
       Error
-  end;
-request(Method, URL, Headers, Body, Options) when is_binary(URL) orelse is_list(URL) ->
-  request(Method, hackney_url:parse_url(URL), Headers, Body, Options).
+  end.
 
 %% @doc Send a request on an existing connection.
 -spec send_request(conn(), {atom(), binary(), list(), term()}) ->
