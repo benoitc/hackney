@@ -49,6 +49,7 @@
       "NEWS.md",
       "GETTING_STARTED.md",
       "CONTRIBUTING.md",
+      "DEVELOPMENT.md",
       "guides",
       %% Legal
       "LICENSE",
