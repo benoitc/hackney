@@ -550,6 +550,7 @@ send_request(ConnPid, {Method, Path, Headers, Body}) when is_pid(ConnPid) ->
 %%====================================================================
 
 %% @doc Get the full response body.
+%% After reading the body, the connection is automatically released back to the pool.
 -spec body(conn()) -> {ok, binary()} | {error, term()}.
 body(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:body(ConnPid).
@@ -559,6 +560,8 @@ body(ConnPid, Timeout) when is_pid(ConnPid) ->
   hackney_conn:body(ConnPid, Timeout).
 
 %% @doc Stream the response body in chunks.
+%% Returns {ok, Data} for each chunk, done when complete, or {error, Reason}.
+%% When done is returned, the connection is automatically released back to the pool.
 -spec stream_body(conn()) -> {ok, binary()} | done | {error, term()}.
 stream_body(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:stream_body(ConnPid).
@@ -568,9 +571,9 @@ stream_body(ConnPid) when is_pid(ConnPid) ->
 %% can't guarantee the socket state after skipping.
 -spec skip_body(conn()) -> ok | {error, term()}.
 skip_body(ConnPid) when is_pid(ConnPid) ->
-  case body(ConnPid) of
+  case hackney_conn:body(ConnPid) of
     {ok, _} ->
-      %% Stop the connection process so pool gets DOWN message and decrements in_use
+      %% Body was read (connection auto-released to pool), now stop it
       hackney_conn:stop(ConnPid),
       ok;
     {error, Reason} ->
@@ -936,15 +939,14 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     {ok, Status, RespHeaders} ->
       case Method of
         <<"HEAD">> ->
-          %% HEAD responses have no body - release connection to pool
-          safe_release_to_pool(ConnPid),
+          %% HEAD responses have no body - call body() to trigger auto-release
+          %% (body returns immediately for HEAD with empty response)
+          _ = hackney_conn:body(ConnPid),
           {ok, Status, RespHeaders};
         _ when WithBody ->
           case hackney_conn:body(ConnPid) of
             {ok, RespBody} ->
-              %% Body read - release connection to pool
-              %% (connection might already be closed if server closed without Content-Length)
-              safe_release_to_pool(ConnPid),
+              %% Body read - connection auto-released to pool
               {ok, Status, RespHeaders, RespBody};
             {error, Reason} ->
               {error, Reason}
@@ -1580,22 +1582,6 @@ proxy_type_for_scheme(_) -> http.
   Method(URL, Headers, Body, Options) ->
   hackney:request(Method, URL, Headers, Body, Options)).
 -include("hackney_methods.hrl").
-
-
-%% @private Safe release to pool - handles the case where connection
-%% might have already exited (e.g., server closed without Content-Length).
-safe_release_to_pool(ConnPid) when is_pid(ConnPid) ->
-  case is_process_alive(ConnPid) of
-    true ->
-      try
-        hackney_conn:release_to_pool(ConnPid)
-      catch
-        exit:{normal, _} -> ok;
-        exit:{noproc, _} -> ok
-      end;
-    false ->
-      ok
-  end.
 
 %% @doc Parse a proxy URL and extract host, port, and optional credentials.
 %% Supports URLs like:

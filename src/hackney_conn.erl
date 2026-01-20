@@ -637,7 +637,8 @@ connecting(EventType, Event, Data) ->
 %% State: connected - Ready for requests
 %%====================================================================
 
-connected(enter, OldState, #conn_data{transport = Transport, socket = Socket, idle_timeout = Timeout} = Data) ->
+connected(enter, OldState, #conn_data{transport = Transport, socket = Socket,
+                                       idle_timeout = Timeout, pool_pid = PoolPid} = Data) ->
     %% Set socket to active mode to receive server close notifications (tcp_closed/ssl_closed)
     %% This fixes issue #544: stale connections not being detected when server closes idle connections
     %% Only enable active mode when returning from a completed request cycle (receiving, streaming states)
@@ -647,9 +648,20 @@ connected(enter, OldState, #conn_data{transport = Transport, socket = Socket, id
         {_, false} -> ok;
         {_, true} -> Transport:setopts(Socket, [{active, once}])
     end,
+    %% Auto-release to pool when body reading is complete
+    %% This happens when transitioning from receiving state (body fully read)
+    Data2 = case {PoolPid, should_auto_release(OldState)} of
+        {undefined, _} ->
+            Data;
+        {_, false} ->
+            Data;
+        {_, true} ->
+            %% Transfer ownership back to pool and notify it
+            auto_release_to_pool(Data)
+    end,
     case Timeout of
-        infinity -> keep_state_and_data;
-        _ -> {keep_state, Data, [{state_timeout, Timeout, idle_timeout}]}
+        infinity -> {keep_state, Data2};
+        _ -> {keep_state, Data2, [{state_timeout, Timeout, idle_timeout}]}
     end;
 
 connected({call, From}, release_to_pool, #conn_data{pool_pid = PoolPid, owner_mon = OldMon,
@@ -1929,6 +1941,23 @@ should_enable_active_mode(streaming) -> true;
 should_enable_active_mode(streaming_once) -> true;
 should_enable_active_mode(closed) -> true;  %% Reconnection from closed state
 should_enable_active_mode(_) -> false.
+
+%% @private Determine if we should auto-release to pool when entering connected state
+%% We release when body reading is complete (coming from receiving state)
+%% but NOT from streaming states (user is still actively streaming)
+should_auto_release(receiving) -> true;
+should_auto_release(_) -> false.
+
+%% @private Auto-release connection back to pool
+%% Transfers ownership to pool and notifies it asynchronously
+auto_release_to_pool(#conn_data{pool_pid = PoolPid, owner_mon = OldMon} = Data) ->
+    %% Transfer ownership to pool
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, PoolPid),
+    Data2 = Data#conn_data{owner = PoolPid, owner_mon = NewMon},
+    %% Notify pool asynchronously (avoid blocking the state machine)
+    notify_pool_available(Data2),
+    Data2.
 
 %% @private Check if socket is healthy (not closed by peer)
 %% Note: With active mode enabled on connected sockets, we rely on tcp_closed/ssl_closed
