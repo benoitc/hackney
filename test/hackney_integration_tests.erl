@@ -25,6 +25,7 @@ all_tests() ->
    fun basic_auth_app_variable/0,
    fun set_cookie_request/0,
    fun send_cookies_request/0,
+   fun send_multiple_cookies_request/0,
    fun absolute_redirect_request_no_follow/0,
    fun absolute_redirect_request_follow/0,
    fun relative_redirect_request_follow/0,
@@ -200,6 +201,19 @@ send_cookies_request() ->
     {ok, Body} = hackney:body(Client),
     Match = re:run(Body, <<".*SESSION.*123.*">>),
     ?assertMatch({match, _}, Match).
+
+%% Test for issue #719: Multiple cookies should be sent in a single Cookie header
+%% RFC 6265 says "the user agent MUST NOT attach more than one Cookie header field"
+send_multiple_cookies_request() ->
+    URL = url(<<"/cookies">>),
+    Options = [{cookie, [{<<"cookie1">>, <<"value1">>}, {<<"cookie2">>, <<"value2">>}]}],
+    {ok, _, _, Client} = hackney:request(get, URL, [], <<>>, Options),
+    {ok, Body} = hackney:body(Client),
+    %% Both cookies should be present in the response
+    Match1 = re:run(Body, <<"cookie1">>),
+    Match2 = re:run(Body, <<"cookie2">>),
+    ?assertMatch({match, _}, Match1),
+    ?assertMatch({match, _}, Match2).
 
 absolute_redirect_request_no_follow() ->
     RedirectTarget = url(<<"/get">>),
