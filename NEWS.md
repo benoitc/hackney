@@ -1,5 +1,59 @@
 # NEWS
 
+2.0.0 - 2026-01-20
+------------------
+
+This release finalizes the 2.0 architecture with many bug fixes and new features since beta.1.
+
+See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) for details.
+
+### New Features
+
+- **HTTP 1xx informational responses** (#631) - Support for handling 103 Early Hints and other informational responses
+- **HTTPS proxy support** (#795) - Full support for proxying through HTTPS proxies
+- **Proxy authentication callback** (#799) - New `proxy_auth_fun` option for custom proxy authentication logic
+- **CONNECT response callback** (#798) - New `on_connect_response` callback to inspect CONNECT proxy response headers
+- **SSL peer certificate** (#599) - New `hackney:peercert/1` function to get the peer's SSL certificate
+
+### New Options
+
+- `auto_decompress` - When `true`, automatically decompresses gzip/deflate responses (#155):
+  ```erlang
+  {ok, Status, Headers, Body} = hackney:request(get, URL, [], [],
+      [{with_body, true}, {auto_decompress, true}]).
+  ```
+- `stream_to` - For async requests, the `stream_to` process is now set as the connection owner (#646). If `stream_to` dies, the connection terminates; if the original caller dies, the connection continues as long as `stream_to` is alive.
+- `proxy_auth_fun` - Callback function for custom proxy authentication
+- `on_connect_response` - Callback to receive CONNECT proxy response headers
+
+### New Functions
+
+- `hackney:peercert/1` - Get the peer's SSL certificate from a connection
+
+### Bug Fixes
+
+- fix: handle non-HTTP URL schemes properly (#468)
+- fix: force connection close for 204/304 responses (#434)
+- fix: sanitize header values to prevent HTTP header injection (#506)
+- fix: filter Host header for HTTP/2 requests (send as `:authority` pseudo-header)
+- fix: handle non-standard decimal status codes (#697)
+- fix: remove parse_trans from runtime dependencies (#714)
+- fix: handle race condition in get_protocol calls
+- fix: strip auth credentials on cross-host redirects (#701)
+- fix: tolerate trailing semicolons in parameter parsing (#618)
+- fix: handle @ symbols in URL credentials per RFC 3986 (#657)
+- fix: properly resolve relative redirect URLs per RFC 3986 (#711)
+- fix: detect server-initiated closes on idle pooled connections (#544)
+- fix: respect recv_timeout during proxy CONNECT handshake
+- fix: prevent SOCKS5 and HTTP CONNECT tunnels from being pooled (#797)
+
+### Security
+
+- Header injection prevention (#506) - Header values are now sanitized to prevent CRLF injection attacks
+- Auth credential stripping (#701) - Authorization headers and credentials are stripped when redirecting to a different host
+
+---
+
 2.0.0-beta.1 - 2026-01-07
 -------------------------
 
@@ -67,12 +121,6 @@ The connection pool has been completely redesigned:
 - `max_per_host` - Maximum concurrent connections per host (default 50)
 - `checkout_timeout` - Timeout to acquire connection slot (default 8000ms)
 - `prewarm_count` - Warm connections per host (default 4)
-- `auto_decompress` - When `true`, automatically decompresses gzip/deflate responses (#155):
-  ```erlang
-  {ok, Status, Headers, Body} = hackney:request(get, URL, [], [],
-      [{with_body, true}, {auto_decompress, true}]).
-  ```
-- `stream_to` - For async requests, the `stream_to` process is now set as the connection owner (#646). If `stream_to` dies, the connection terminates; if the original caller dies, the connection continues as long as `stream_to` is alive.
 
 ### New Functions
 
