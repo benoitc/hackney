@@ -17,6 +17,8 @@ all_tests() ->
    fun not_modified_body_read_then_next_request/0,
    fun chunked_body_read_then_next_request/0,
    fun chunked_large_body_read/0,
+   fun connection_close_response/0,
+   fun connection_close_large_body/0,
    fun basic_auth_request_failed/0,
    fun basic_auth_request/0,
    fun basic_auth_url_request/0,
@@ -139,6 +141,26 @@ chunked_large_body_read() ->
     URLChunked = url(<<"/chunked/102400">>),
     {ok, Status, _, Client} = hackney:request(get, URLChunked, [], <<>>, [{recv_timeout, 10000}]),
     ?assertEqual(200, Status),
+    {ok, Body} = hackney:body(Client),
+    ?assertEqual(102400, byte_size(Body)).
+
+%% Test for issue #439: Connection: close responses should not be lost
+%% Tests that responses with Connection: close header are received correctly
+connection_close_response() ->
+    URL = url(<<"/connection-close">>),
+    {ok, Status, Headers, Client} = hackney:request(get, URL, [], <<>>, []),
+    ?assertEqual(200, Status),
+    %% Verify Connection: close header
+    ?assertEqual(<<"close">>, hackney_headers:get_value(<<"connection">>, hackney_headers:from_list(Headers))),
+    {ok, Body} = hackney:body(Client),
+    ?assertEqual(<<"{\"connection\": \"close\"}">>, Body).
+
+%% Test larger Connection: close response
+connection_close_large_body() ->
+    URL = url(<<"/connection-close/102400">>),
+    {ok, Status, Headers, Client} = hackney:request(get, URL, [], <<>>, [{recv_timeout, 10000}]),
+    ?assertEqual(200, Status),
+    ?assertEqual(<<"close">>, hackney_headers:get_value(<<"connection">>, hackney_headers:from_list(Headers))),
     {ok, Body} = hackney:body(Client),
     ?assertEqual(102400, byte_size(Body)).
 

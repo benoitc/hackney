@@ -130,6 +130,17 @@ handle_request(<<"GET">>, <<"/connection-close">>, Req, State) ->
     }, <<"{\"connection\": \"close\"}">>, Req),
     {ok, Req2, State};
 
+%% GET /connection-close/:size - return large body with Connection: close
+%% For testing issue #439 - responses with connection close sometimes lost
+handle_request(<<"GET">>, <<"/connection-close/", SizeBin/binary>>, Req, State) ->
+    Size = binary_to_integer(SizeBin),
+    Body = binary:copy(<<"X">>, Size),
+    Req2 = cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/octet-stream">>,
+        <<"connection">> => <<"close">>
+    }, Body, Req),
+    {ok, Req2, State};
+
 %% GET /inform - send 1xx informational response before final response
 %% Query params:
 %%   - status: informational status code (default 103)
