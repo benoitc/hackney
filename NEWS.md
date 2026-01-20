@@ -46,6 +46,7 @@ See [Migration Guide](guides/MIGRATION.md) and [Design Guide](guides/design.md) 
 - fix: detect server-initiated closes on idle pooled connections (#544)
 - fix: respect recv_timeout during proxy CONNECT handshake
 - fix: prevent SOCKS5 and HTTP CONNECT tunnels from being pooled (#797)
+- fix: auto-release connections to pool when body reading completes (connection leak fix)
 
 ### Security
 
