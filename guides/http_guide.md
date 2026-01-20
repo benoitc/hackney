@@ -28,12 +28,77 @@ hackney:post(URL, [], {form, [{<<"key">>, <<"value">>}]}).
 
 ### Multipart Body
 
+Multipart requests are used to upload files and send form data together.
+
+#### Basic File Upload
+
 ```erlang
 hackney:post(URL, [], {multipart, [
     {<<"field">>, <<"value">>},
     {file, <<"/path/to/file.txt">>}
 ]}).
 ```
+
+#### File Upload with Custom Field Name
+
+Use `{file, Path, FieldName, ExtraHeaders}` to specify the form field name:
+
+```erlang
+%% Upload file to "attachment" field instead of default "file"
+hackney:post(URL, [], {multipart, [
+    {file, <<"/path/to/document.pdf">>, <<"attachment">>, []}
+]}).
+```
+
+#### File Upload with Full Control
+
+For complete control over the Content-Disposition header:
+
+```erlang
+Path = <<"/path/to/photo.jpg">>,
+FName = hackney_bstr:to_binary(filename:basename(Path)),
+Disposition = {<<"form-data">>,
+               [{<<"name">>, <<"photo">>},
+                {<<"filename">>, FName}]},
+hackney:post(URL, [], {multipart, [
+    {file, Path, Disposition, []}
+]}).
+```
+
+#### Mixed File and Text Fields
+
+Combine file uploads with text fields:
+
+```erlang
+hackney:post(URL, [], {multipart, [
+    {file, <<"/path/to/image.jpg">>, <<"image">>, []},
+    {<<"title">>, <<"My Photo">>},
+    {<<"description">>, <<"A nice picture">>}
+]}).
+```
+
+#### Text Fields with Explicit Content-Type
+
+Some servers require explicit content-type for text fields:
+
+```erlang
+hackney:post(URL, [], {multipart, [
+    {file, <<"/path/to/doc.pdf">>, <<"document">>, []},
+    {<<"name">>, <<"Report">>, [{<<"content-type">>, <<"text/plain">>}]}
+]}).
+```
+
+#### Supported Part Formats
+
+| Format | Description |
+|--------|-------------|
+| `{file, Path}` | File with auto-generated field name |
+| `{file, Path, ExtraHeaders}` | File with extra headers |
+| `{file, Path, FieldName, ExtraHeaders}` | File with custom field name |
+| `{file, Path, {Disposition, Params}, ExtraHeaders}` | Full control |
+| `{Name, Data}` | Text field (Data must be binary) |
+| `{Name, Data, ExtraHeaders}` | Text field with headers |
+| `{Name, Data, Disposition, ExtraHeaders}` | Text field with full control |
 
 ### Streaming Body
 
