@@ -29,5 +29,6 @@
  connection = <<>>      :: binary(),
  ctype = <<>>           :: binary(),
  location = <<>>        :: binary(),
+ content_encoding = <<>> :: binary(),
  body_state = waiting   :: atom() | tuple()
 }).

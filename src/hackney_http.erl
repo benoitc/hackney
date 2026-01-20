@@ -346,6 +346,9 @@ parse_header(Line, St) ->
           <<"location">> ->
             Location = hackney_bstr:trim(Value),
             St#hparser{location=Location};
+          <<"content-encoding">> ->
+            CE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
+            St#hparser{content_encoding=CE};
           _ ->
             St
         end,
