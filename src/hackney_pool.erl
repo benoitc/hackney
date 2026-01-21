@@ -426,7 +426,7 @@ handle_call({count, Key}, _From, #state{available=Available}=State) ->
 
 handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=InUse}=State) ->
     %% Count in_use and free for this host (any transport)
-    HostLower = string_compat:to_lower(Host),
+    HostLower = string:lowercase(Host),
     InUseCount = maps:fold(
         fun(_Pid, {H, P, _T}, Acc) when H =:= HostLower, P =:= Port -> Acc + 1;
            (_, _, Acc) -> Acc
@@ -708,7 +708,7 @@ terminate(_Reason, #state{name=PoolName, available=Available,
 %%====================================================================
 
 connection_key(Host0, Port, Transport) ->
-    Host = string_compat:to_lower(Host0),
+    Host = string:lowercase(Host0),
     {Host, Port, Transport}.
 
 find_available(Key, Available) ->

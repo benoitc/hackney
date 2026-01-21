@@ -81,7 +81,7 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
 
 
 check_hostname_opts(Host0) ->
-  Host1 = string_compat:strip(Host0, right, $.),
+  Host1 = string:trim(Host0, trailing, "."),
   VerifyFun = {
     fun ssl_verify_hostname:verify_fun/3,
     [{check_hostname, Host1}]
