@@ -1,5 +1,14 @@
 # NEWS
 
+2.0.1 - 2026-01-21
+------------------
+
+### Dependencies
+
+- Remove `unicode_util_compat` dependency (stdlib has `unicode_util` since OTP 20)
+- Bump `idna` to 7.1.0
+- Replace `string_compat` calls with stdlib `string` module functions
+
 2.0.0 - 2026-01-20
 ------------------
 
