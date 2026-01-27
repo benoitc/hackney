@@ -1,10 +1,10 @@
-# Hackney 2.x Architecture
+# Hackney Architecture
 
-This document describes the internal architecture of hackney 2.x, including the process-per-connection model, connection pooling, load regulation, and SSL handling.
+This document describes the internal architecture of hackney 3.x, including the process-per-connection model, connection pooling, load regulation, and SSL handling.
 
 ## Overview
 
-Hackney 2.x uses a **process-per-connection** architecture where each HTTP connection runs in its own `gen_statem` process. This design provides:
+Hackney uses a **process-per-connection** architecture where each HTTP connection runs in its own `gen_statem` process. This design provides:
 
 - **Clean isolation** - Each connection has its own state, no shared mutable state
 - **Automatic cleanup** - Process crashes clean up sockets automatically

@@ -67,46 +67,34 @@ test_with_body_release() ->
     %% No connections should be in use
     ?assertEqual(0, AfterInUse).
 
-%% Test that connection is released after manual body read
+%% Test that connection is released after body read
+%% In 3.x, body is always returned directly and connection is auto-released
 test_manual_body_release() ->
-    %% Make request without with_body
-    {ok, 200, _Headers, Ref} = hackney:request(get, url(<<"/get">>), [], <<>>,
+    %% Make request - body is returned directly
+    {ok, 200, _Headers, Body} = hackney:request(get, url(<<"/get">>), [], <<>>,
                                                 [{pool, ?POOL}]),
-
-    %% Check stats during - connection should be in use
-    DuringStats = hackney_pool:get_stats(?POOL),
-    DuringInUse = proplists:get_value(in_use_count, DuringStats),
-    ?assert(DuringInUse >= 1),
-
-    %% Read body
-    {ok, _Body} = hackney:body(Ref),
+    ?assert(is_binary(Body)),
 
     %% Allow time for async checkin
     timer:sleep(50),
 
-    %% Check stats after - no connections in use
+    %% Check stats after - no connections in use (connection auto-released)
     AfterStats = hackney_pool:get_stats(?POOL),
     AfterInUse = proplists:get_value(in_use_count, AfterStats),
     ?assertEqual(0, AfterInUse).
 
-%% Test that connection is released after explicit close
+%% Test that connection is released after request completes
+%% In 3.x, body is returned directly so connection is auto-released
 test_close_release() ->
-    %% Make request without reading body
-    {ok, 200, _Headers, Ref} = hackney:request(get, url(<<"/get">>), [], <<>>,
+    %% Make request - body is returned directly
+    {ok, 200, _Headers, Body} = hackney:request(get, url(<<"/get">>), [], <<>>,
                                                 [{pool, ?POOL}]),
-
-    %% Check stats during
-    DuringStats = hackney_pool:get_stats(?POOL),
-    DuringInUse = proplists:get_value(in_use_count, DuringStats),
-    ?assert(DuringInUse >= 1),
-
-    %% Close without reading body
-    ok = hackney:close(Ref),
+    ?assert(is_binary(Body)),
 
     %% Allow time for process cleanup
     timer:sleep(50),
 
-    %% Check stats after - no connections in use
+    %% Check stats after - no connections in use (connection auto-released)
     AfterStats = hackney_pool:get_stats(?POOL),
     AfterInUse = proplists:get_value(in_use_count, AfterStats),
     ?assertEqual(0, AfterInUse).
@@ -174,26 +162,22 @@ test_error_response_release() ->
     InUse = proplists:get_value(in_use_count, Stats),
     ?assertEqual(0, InUse).
 
-%% Test pool stats are accurate during request lifecycle
+%% Test pool stats are accurate after request lifecycle
+%% In 3.x, body is returned directly so connection is released immediately
 test_pool_stats_accuracy() ->
     %% Initial state
     Stats0 = hackney_pool:get_stats(?POOL),
     InUse0 = proplists:get_value(in_use_count, Stats0),
 
-    %% Start request without with_body
-    {ok, 200, _Headers, Ref} = hackney:request(get, url(<<"/get">>), [], <<>>,
+    %% Make request - body is returned directly
+    {ok, 200, _Headers, Body} = hackney:request(get, url(<<"/get">>), [], <<>>,
                                                 [{pool, ?POOL}]),
+    ?assert(is_binary(Body)),
 
-    %% During request - connection in use
-    Stats1 = hackney_pool:get_stats(?POOL),
-    InUse1 = proplists:get_value(in_use_count, Stats1),
-    ?assertEqual(InUse0 + 1, InUse1),
-
-    %% Read body
-    {ok, _Body} = hackney:body(Ref),
+    %% Allow time for async checkin
     timer:sleep(50),
 
-    %% After body read - connection returned
+    %% After request - connection returned (should be same as initial)
     Stats2 = hackney_pool:get_stats(?POOL),
     InUse2 = proplists:get_value(in_use_count, Stats2),
     ?assertEqual(InUse0, InUse2).

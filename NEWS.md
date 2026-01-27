@@ -1,5 +1,72 @@
 # NEWS
 
+3.0.0 - 2026-01-27
+------------------
+
+### BREAKING CHANGES
+
+This is a major release with breaking changes to the high-level API. See [Migration Guide](guides/MIGRATION.md) for detailed upgrade instructions.
+
+#### Response Format Change
+
+The high-level API now returns the response body directly in the tuple, consistent across all protocols (HTTP/1.1, HTTP/2, HTTP/3):
+
+```erlang
+%% Before (2.x) - HTTP/1.1
+{ok, 200, Headers, ConnPid} = hackney:get(URL),
+{ok, Body} = hackney:body(ConnPid).
+
+%% After (3.x) - All protocols
+{ok, 200, Headers, Body} = hackney:get(URL).
+```
+
+#### Removed Functions
+
+The following deprecated functions have been removed:
+
+| Function | Replacement |
+|----------|-------------|
+| `hackney:body/1` | Body returned directly in response tuple |
+| `hackney:body/2` | Body returned directly in response tuple |
+| `hackney:stream_body/1` | Use async mode with `[async]` or `[{async, once}]` |
+| `hackney:skip_body/1` | Not needed - body always consumed |
+
+#### Security: Cross-Host Redirect Behavior (CVE-2018-1000007)
+
+Authorization headers and credentials are no longer forwarded when following redirects to a different host. This prevents credential leakage when a server redirects to an untrusted host.
+
+To restore the previous behavior (not recommended), use the `location_trusted` option:
+
+```erlang
+hackney:get(URL, [], <<>>, [{location_trusted, true}]).
+```
+
+### New Features
+
+- **HTTP/3 enhancements**: Added `peername/1`, `sockname/1`, `peercert/1`, and `setopts/2` support for HTTP/3 connections
+- **HTTP 1xx informational responses**: Support for handling 103 Early Hints and other informational responses
+- **Native metrics with Prometheus**: Pluggable metrics backend with built-in Prometheus support
+
+### Migration
+
+For streaming responses, migrate to async mode:
+
+```erlang
+%% Async streaming (push-based)
+{ok, Ref} = hackney:get(URL, [], <<>>, [async]),
+receive {hackney_response, Ref, {status, 200, _}} -> ok end,
+receive {hackney_response, Ref, {headers, Headers}} -> ok end,
+%% Receive body chunks until done
+
+%% On-demand streaming (pull-based)
+{ok, Ref} = hackney:get(URL, [], <<>>, [{async, once}]),
+%% Call hackney:stream_next(Ref) to receive each chunk
+```
+
+See [Migration Guide](guides/MIGRATION.md) for complete migration instructions.
+
+---
+
 2.0.1 - 2026-01-21
 ------------------
 

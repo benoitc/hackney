@@ -16,8 +16,6 @@
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          cookies/1,
-         body/1, body/2, skip_body/1,
-         stream_body/1,
          send_body/2, finish_send_body/1, start_response/1,
          setopts/2]).
 
@@ -60,8 +58,7 @@
 -type url() :: #hackney_url{} | binary().
 -type conn() :: pid().
 -type request_ret() ::
-    {ok, integer(), list(), conn()} |     %% normal response with body to read
-    {ok, integer(), list(), binary()} |   %% with_body option
+    {ok, integer(), list(), binary()} |   %% response with body (default)
     {ok, integer(), list()} |             %% HEAD request
     {ok, reference()} |                   %% async mode
     {ok, conn()} |                        %% streaming body mode (body = stream)
@@ -450,7 +447,6 @@ request(Method, URL, Headers, Body) ->
 %% - Options: Request options
 %%
 %% Options:
-%% - with_body: If true, return full body in response
 %% - async: true | once - Receive response asynchronously
 %% - stream_to: PID to receive async messages
 %% - follow_redirect: Follow redirects automatically
@@ -461,12 +457,13 @@ request(Method, URL, Headers, Body) ->
 %% - recv_timeout: Receive timeout in ms (default 5000)
 %%
 %% Returns:
-%% - {ok, Status, Headers, ConnPid}: Success, use body/1 or stream_body/1 to get body
-%% - {ok, Status, Headers, Body}: Success with with_body option
+%% - {ok, Status, Headers, Body}: Success with response body
 %% - {ok, Status, Headers}: HEAD request
 %% - {ok, Ref}: Async mode - use stream_next/1 to receive messages
 %% - {ok, ConnPid}: Streaming body mode (body = stream) - use send_body/2, finish_send_body/1
 %% - {error, Reason}: Error
+%%
+%% Note: The `with_body' option is deprecated and ignored. Body is always returned directly.
 -spec request(atom() | binary(), url(), list(), term(), list()) -> request_ret().
 request(Method, URL, Headers, Body, Options) when is_binary(URL) orelse is_list(URL) ->
   request(Method, hackney_url:parse_url(URL), Headers, Body, Options);
@@ -541,41 +538,6 @@ send_request(ConnPid, {Method, Path, Headers, Body}) when is_pid(ConnPid) ->
         <<"HEAD">> -> {ok, Status, RespHeaders};
         _ -> {ok, Status, RespHeaders, ConnPid}
       end;
-    {error, Reason} ->
-      {error, Reason}
-  end.
-
-%%====================================================================
-%% Response Body API
-%%====================================================================
-
-%% @doc Get the full response body.
-%% After reading the body, the connection is automatically released back to the pool.
--spec body(conn()) -> {ok, binary()} | {error, term()}.
-body(ConnPid) when is_pid(ConnPid) ->
-  hackney_conn:body(ConnPid).
-
--spec body(conn(), timeout()) -> {ok, binary()} | {error, term()}.
-body(ConnPid, Timeout) when is_pid(ConnPid) ->
-  hackney_conn:body(ConnPid, Timeout).
-
-%% @doc Stream the response body in chunks.
-%% Returns {ok, Data} for each chunk, done when complete, or {error, Reason}.
-%% When done is returned, the connection is automatically released back to the pool.
--spec stream_body(conn()) -> {ok, binary()} | done | {error, term()}.
-stream_body(ConnPid) when is_pid(ConnPid) ->
-  hackney_conn:stream_body(ConnPid).
-
-%% @doc Skip the response body and close the connection.
-%% The connection is closed rather than returned to pool since we
-%% can't guarantee the socket state after skipping.
--spec skip_body(conn()) -> ok | {error, term()}.
-skip_body(ConnPid) when is_pid(ConnPid) ->
-  case hackney_conn:body(ConnPid) of
-    {ok, _} ->
-      %% Body was read (connection auto-released to pool), now stop it
-      hackney_conn:stop(ConnPid),
-      ok;
     {error, Reason} ->
       {error, Reason}
   end.
@@ -831,7 +793,11 @@ do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
   %% Check for async mode
   Async = proplists:get_value(async, Options, false),
   StreamTo = proplists:get_value(stream_to, Options, self()),
-  WithBody = proplists:get_value(with_body, Options, false),
+  %% DEPRECATED: The with_body option is now ignored.
+  %% Body is always returned directly for consistent behavior between HTTP/1.1 and HTTP/2.
+  %% For incremental body streaming, use async mode instead.
+  _ = proplists:get_value(with_body, Options, true), %% Read but ignored
+  WithBody = true, %% Always return body directly
   FollowRedirect = proplists:get_value(follow_redirect, Options, false),
   MaxRedirect = proplists:get_value(max_redirect, Options, 5),
   RedirectCount = proplists:get_value(redirect_count, Options, 0),
@@ -913,11 +879,7 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
       case Method of
         <<"HEAD">> ->
           {ok, Status, RespHeaders};
-        _ when WithBody ->
-          {ok, Status, RespHeaders, RespBody};
         _ ->
-          %% Caller wants connection ref but HTTP/2 already consumed body
-          %% Return body anyway since we have it
           {ok, Status, RespHeaders, RespBody}
       end;
     %% HTTP/1.1 returns 3-tuple, body fetched separately
@@ -933,8 +895,13 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
         true ->
           {error, {max_redirect, RedirectCount}};
         false ->
-          %% Return the redirect response
-          {ok, Status, RespHeaders, ConnPid}
+          %% Return the redirect response with body
+          case hackney_conn:body(ConnPid) of
+            {ok, RespBody} ->
+              {ok, Status, RespHeaders, RespBody};
+            {error, Reason} ->
+              {error, Reason}
+          end
       end;
     {ok, Status, RespHeaders} ->
       case Method of
@@ -943,16 +910,15 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
           %% (body returns immediately for HEAD with empty response)
           _ = hackney_conn:body(ConnPid),
           {ok, Status, RespHeaders};
-        _ when WithBody ->
+        _ ->
+          %% Always fetch body for consistent response format
           case hackney_conn:body(ConnPid) of
             {ok, RespBody} ->
               %% Body read - connection auto-released to pool
               {ok, Status, RespHeaders, RespBody};
             {error, Reason} ->
               {error, Reason}
-          end;
-        _ ->
-          {ok, Status, RespHeaders, ConnPid}
+          end
       end;
     {error, Reason} ->
       {error, Reason}

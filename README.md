@@ -54,7 +54,7 @@ stream_body(Ref) ->
 ### Mix
 
 ```elixir
-{:hackney, "~> 2.0"}
+{:hackney, "~> 3.0"}
 ```
 
 ## Documentation

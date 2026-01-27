@@ -1,3 +1,103 @@
+# Migration Guide
+
+## Migrating from hackney 2.x to 3.x
+
+### Quick Summary
+
+- **Response format**: Body is now always returned directly in the response
+- **`with_body` option**: Deprecated and ignored
+- **`hackney:body/1,2` and `hackney:stream_body/1`**: Deprecated - use async mode for streaming
+- **Async mode**: Now works consistently across HTTP/1.1, HTTP/2, and HTTP/3
+
+### Breaking Changes
+
+#### Response Format
+
+The most significant change is that the response body is now always returned directly in the response tuple, regardless of protocol:
+
+```erlang
+%% Before (2.x) - HTTP/1.1
+{ok, 200, Headers, ConnPid} = hackney:get(URL),
+{ok, Body} = hackney:body(ConnPid).
+
+%% Before (2.x) - HTTP/2
+{ok, 200, Headers, Body} = hackney:get(URL).  %% Already returned body
+
+%% After (3.x) - All protocols
+{ok, 200, Headers, Body} = hackney:get(URL).  %% Consistent!
+```
+
+#### Deprecated Options and Functions
+
+| Deprecated | Replacement |
+|------------|-------------|
+| `{with_body, true/false}` | Option ignored - body always returned |
+| `hackney:body/1` | Body in response tuple |
+| `hackney:body/2` | Body in response tuple |
+| `hackney:stream_body/1` | Use async mode |
+
+#### Streaming Response Bodies
+
+For incremental body streaming, use async mode instead of `stream_body/1`:
+
+```erlang
+%% Before (2.x) - sync streaming
+{ok, 200, Headers, Pid} = hackney:get(URL),
+{ok, Chunk1} = hackney:stream_body(Pid),
+{ok, Chunk2} = hackney:stream_body(Pid),
+done = hackney:stream_body(Pid).
+
+%% After (3.x) - async streaming
+{ok, Ref} = hackney:get(URL, [], <<>>, [async]),
+receive {hackney_response, Ref, {status, 200, _}} -> ok end,
+receive {hackney_response, Ref, {headers, Headers}} -> ok end,
+stream_loop(Ref).
+
+stream_loop(Ref) ->
+    receive
+        {hackney_response, Ref, done} -> ok;
+        {hackney_response, Ref, Chunk} ->
+            process_chunk(Chunk),
+            stream_loop(Ref)
+    end.
+```
+
+For on-demand streaming (pull-based), use `{async, once}`:
+
+```erlang
+{ok, Ref} = hackney:get(URL, [], <<>>, [{async, once}]),
+receive {hackney_response, Ref, {status, 200, _}} -> ok end,
+hackney:stream_next(Ref),
+receive {hackney_response, Ref, {headers, Headers}} -> ok end,
+hackney:stream_next(Ref),
+receive {hackney_response, Ref, Chunk} -> process(Chunk) end,
+hackney:stream_next(Ref),
+%% ... continue until done
+```
+
+### HTTP/2 Async Mode
+
+HTTP/2 async mode now works correctly. Previously, async requests over HTTP/2 would fail or behave incorrectly. Now the same async API works for all protocols:
+
+```erlang
+%% Works for HTTP/1.1, HTTP/2, and HTTP/3
+{ok, Ref} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [async]),
+receive
+    {hackney_response, Ref, {status, Status, _}} ->
+        io:format("Status: ~p~n", [Status])
+end,
+receive
+    {hackney_response, Ref, {headers, Headers}} ->
+        io:format("Headers: ~p~n", [Headers])
+end,
+receive
+    {hackney_response, Ref, done} -> ok;
+    {hackney_response, Ref, Chunk} -> io:format("Chunk: ~p~n", [Chunk])
+end.
+```
+
+---
+
 # Migrating from hackney 1.x to 2.x
 
 ## Quick Summary
@@ -64,17 +164,18 @@ See [HTTP/2 Guide](http2_guide.md) for details.
 
 ## What Changed
 
-### Connection Handle
+### Connection Handle and Response Format
 
 ```erlang
-%% 1.x - opaque reference
-{ok, StatusCode, Headers, Ref} = hackney:get(URL).
+%% 1.x - opaque reference, body read separately
+{ok, StatusCode, Headers, Ref} = hackney:get(URL),
+{ok, Body} = hackney:body(Ref).
 
-%% 2.x - pid
-{ok, StatusCode, Headers, ConnPid} = hackney:get(URL).
+%% 2.x/3.x - body returned directly
+{ok, StatusCode, Headers, Body} = hackney:get(URL).
 ```
 
-Code works unchanged - you pass the handle to other hackney functions.
+In 3.x, body is always returned directly in the response tuple for consistency across all protocols.
 
 ### Pool Behavior
 
@@ -149,11 +250,15 @@ Merged into `hackney_conn`:
 
 ### Simple Request
 
-No changes:
+Body is now returned directly (no need to call `hackney:body/1`):
 
 ```erlang
+%% 1.x
 {ok, 200, Headers, Ref} = hackney:get(URL),
 {ok, Body} = hackney:body(Ref).
+
+%% 2.x/3.x - simpler!
+{ok, 200, Headers, Body} = hackney:get(URL).
 ```
 
 ### Streaming Request
@@ -164,7 +269,7 @@ No changes:
 {ok, Ref} = hackney:request(post, URL, Headers, stream, []),
 ok = hackney:send_body(Ref, Chunk),
 ok = hackney:finish_send_body(Ref),
-{ok, Status, RespHeaders, Ref} = hackney:start_response(Ref).
+{ok, Status, RespHeaders, Body} = hackney:start_response(Ref).
 ```
 
 ### Async Response
