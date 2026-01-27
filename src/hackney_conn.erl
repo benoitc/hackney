@@ -1466,6 +1466,11 @@ handle_common({call, From}, peercert, _State,
     %% QUIC/HTTP3 does not expose peer certificate through this API
     {keep_state_and_data, [{reply, From, {error, not_supported}}]};
 
+handle_common({call, From}, {setopts, Opts}, _State,
+              #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
+    Result = hackney_quic:setopts(H3Conn, Opts),
+    {keep_state_and_data, [{reply, From, Result}]};
+
 %% Low-level send operation
 handle_common({call, From}, {send, Data}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
   when Socket =/= undefined ->
