@@ -328,10 +328,11 @@ test_queue_timeout() ->
             %% Second request should fail immediately (pool full, no queue)
             {error, checkout_timeout} = hackney:request(post, URL, Headers, stream, Opts),
 
-            %% Finish first request
+            %% Finish first request - body is returned directly with start_response
             ok = hackney:finish_send_body(Ref),
-            {ok, _Status, _Headers, Ref} = hackney:start_response(Ref),
-            ok = hackney:skip_body(Ref),
+            {ok, _Status, _Headers, _Body} = hackney:start_response(Ref),
+            %% Close the connection to release it back to pool
+            hackney:close(Ref),
 
             %% Now pool is free, next request should succeed
             {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),

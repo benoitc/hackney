@@ -16,8 +16,6 @@
          request/1, request/2, request/3, request/4, request/5,
          send_request/2,
          cookies/1,
-         body/1, body/2, skip_body/1,
-         stream_body/1,
          send_body/2, finish_send_body/1, start_response/1,
          setopts/2]).
 
@@ -40,13 +38,6 @@
          resume_stream/1]).
 
 -export([parse_proxy_url/1]).
-
-%% Deprecated functions - body is now returned directly in response
--deprecated([
-    {body, 1, "body is now returned directly in response, use async mode for streaming"},
-    {body, 2, "body is now returned directly in response, use async mode for streaming"},
-    {stream_body, 1, "use async mode for incremental body streaming"}
-]).
 
 -ifdef(TEST).
 -export([get_proxy_env/1, do_get_proxy_env/1]).
@@ -547,49 +538,6 @@ send_request(ConnPid, {Method, Path, Headers, Body}) when is_pid(ConnPid) ->
         <<"HEAD">> -> {ok, Status, RespHeaders};
         _ -> {ok, Status, RespHeaders, ConnPid}
       end;
-    {error, Reason} ->
-      {error, Reason}
-  end.
-
-%%====================================================================
-%% Response Body API
-%%====================================================================
-
-%% @deprecated This function is deprecated. Body is now returned directly in the response.
-%% Use async mode for incremental body streaming.
-%% @doc Get the full response body.
-%% DEPRECATED: Body is now always returned directly in the response tuple.
-%% This function remains for backward compatibility but is no longer needed.
--spec body(conn()) -> {ok, binary()} | {error, term()}.
-body(ConnPid) when is_pid(ConnPid) ->
-  hackney_conn:body(ConnPid).
-
-%% @deprecated This function is deprecated. Body is now returned directly in the response.
-%% @doc Get the full response body with custom timeout.
-%% DEPRECATED: Body is now always returned directly in the response tuple.
--spec body(conn(), timeout()) -> {ok, binary()} | {error, term()}.
-body(ConnPid, Timeout) when is_pid(ConnPid) ->
-  hackney_conn:body(ConnPid, Timeout).
-
-%% @deprecated This function is deprecated. Use async mode for incremental body streaming.
-%% @doc Stream the response body in chunks.
-%% DEPRECATED: Use async mode instead for incremental body streaming.
-%% Returns {ok, Data} for each chunk, done when complete, or {error, Reason}.
-%% When done is returned, the connection is automatically released back to the pool.
--spec stream_body(conn()) -> {ok, binary()} | done | {error, term()}.
-stream_body(ConnPid) when is_pid(ConnPid) ->
-  hackney_conn:stream_body(ConnPid).
-
-%% @doc Skip the response body and close the connection.
-%% The connection is closed rather than returned to pool since we
-%% can't guarantee the socket state after skipping.
--spec skip_body(conn()) -> ok | {error, term()}.
-skip_body(ConnPid) when is_pid(ConnPid) ->
-  case hackney_conn:body(ConnPid) of
-    {ok, _} ->
-      %% Body was read (connection auto-released to pool), now stop it
-      hackney_conn:stop(ConnPid),
-      ok;
     {error, Reason} ->
       {error, Reason}
   end.
