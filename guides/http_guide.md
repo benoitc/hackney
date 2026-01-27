@@ -257,6 +257,75 @@ hackney_pool:start_pool(my_api, [
 hackney:get(URL, [], <<>>, [{pool, my_api}]).
 ```
 
+## Manual Connection Management
+
+For fine-grained control, you can create a connection and reuse it for multiple requests. This works for both HTTP/1.1 and HTTP/2.
+
+### Get a Connection
+
+```erlang
+%% Connect to a host (returns a connection PID)
+{ok, ConnPid} = hackney:connect(hackney_ssl, "example.com", 443, []).
+
+%% Or from a URL
+{ok, ConnPid} = hackney:connect(<<"https://example.com">>).
+```
+
+### Check the Protocol
+
+```erlang
+%% See which protocol was negotiated
+Protocol = hackney_conn:get_protocol(ConnPid).  %% http1 | http2 | http3
+```
+
+### Send Requests on the Connection
+
+```erlang
+%% Send multiple requests on the same connection
+{ok, 200, Headers1, Body1} = hackney:send_request(ConnPid, {get, <<"/api/users">>, [], <<>>}).
+{ok, 201, Headers2, Body2} = hackney:send_request(ConnPid, {post, <<"/api/users">>,
+    [{<<"content-type">>, <<"application/json">>}],
+    <<"{\"name\": \"Alice\"}">>}).
+{ok, 200, Headers3, Body3} = hackney:send_request(ConnPid, {get, <<"/api/users/1">>, [], <<>>}).
+```
+
+### Close the Connection
+
+```erlang
+hackney:close(ConnPid).
+```
+
+### Complete Example
+
+```erlang
+%% Reuse a connection for multiple API calls
+{ok, Conn} = hackney:connect(hackney_ssl, "api.example.com", 443, []),
+
+%% Check protocol (optional)
+case hackney_conn:get_protocol(Conn) of
+    http2 -> io:format("Using HTTP/2 multiplexing~n");
+    http1 -> io:format("Using HTTP/1.1 keep-alive~n")
+end,
+
+%% Make requests
+{ok, 200, _, Token} = hackney:send_request(Conn, {post, <<"/auth">>, [], Credentials}),
+{ok, 200, _, Users} = hackney:send_request(Conn, {get, <<"/users">>, AuthHeaders, <<>>}),
+{ok, 200, _, Data} = hackney:send_request(Conn, {get, <<"/data">>, AuthHeaders, <<>>}),
+
+%% Clean up
+hackney:close(Conn).
+```
+
+### HTTP/1.1 vs HTTP/2 Behavior
+
+| Aspect | HTTP/1.1 | HTTP/2 |
+|--------|----------|--------|
+| Requests | Sequential (one at a time) | Multiplexed (concurrent) |
+| Connection | Keep-alive between requests | Single connection, multiple streams |
+| Use case | Simple sequential calls | High-throughput parallel calls |
+
+For HTTP/2 multiplexing (parallel requests on one connection), see the [HTTP/2 Guide](http2_guide.md).
+
 ## Redirects
 
 ```erlang

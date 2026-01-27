@@ -167,12 +167,12 @@ For more control, get a connection and reuse it directly:
 http2 = hackney_conn:get_protocol(Conn).
 
 %% 3. Make multiple requests on same connection
-{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 5000).
-{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/blog/">>, [], <<>>, 5000).
-{ok, 200, _, _} = hackney_conn:request(Conn, <<"GET">>, <<"/">>, [], <<>>, 5000).
+{ok, 200, _, _} = hackney:send_request(Conn, {get, <<"/">>, [], <<>>}).
+{ok, 200, _, _} = hackney:send_request(Conn, {get, <<"/blog/">>, [], <<>>}).
+{ok, 200, _, _} = hackney:send_request(Conn, {get, <<"/">>, [], <<>>}).
 
 %% 4. Close when done
-hackney_conn:stop(Conn).
+hackney:close(Conn).
 ```
 
 ### Concurrent Requests
@@ -186,7 +186,7 @@ Fire multiple requests in parallel on the same connection:
 Self = self(),
 Paths = [<<"/">>, <<"/blog/">>, <<"/documentation/">>],
 [spawn(fun() ->
-    Result = hackney_conn:request(Conn, <<"GET">>, Path, [], <<>>, 5000),
+    Result = hackney:send_request(Conn, {get, Path, [], <<>>}),
     Self ! {Path, Result}
 end) || Path <- Paths].
 
