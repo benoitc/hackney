@@ -58,10 +58,9 @@
 -type url() :: #hackney_url{} | binary().
 -type conn() :: pid().
 -type request_ret() ::
-    {ok, integer(), list(), binary()} |   %% response with body (default)
-    {ok, integer(), list()} |             %% HEAD request
-    {ok, reference()} |                   %% async mode
-    {ok, conn()} |                        %% streaming body mode (body = stream)
+    {ok, integer(), list(), binary()} | %% response with body
+    {ok, integer(), list()} |           %% HEAD request
+    {ok, reference()} |                 %% async mode
     {error, term()}.
 -export_type([url/0, conn/0, request_ret/0]).
 
@@ -934,8 +933,6 @@ follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeade
     LocationBin ->
       %% Parse the new URL (could be relative or absolute)
       NewURL = resolve_redirect_url(CurrentURL, LocationBin),
-      %% Get the full URL as a binary for storing
-      FinalLocation = hackney_url:unparse_url(NewURL),
       %% Determine method for redirect (301, 302, 303 -> GET, 307, 308 -> same method)
       NewMethod = case Status of
         S when S =:= 301; S =:= 302; S =:= 303 ->
@@ -956,12 +953,7 @@ follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeade
       case request(NewMethod, NewURL, [], NewBody,
                    [{follow_redirect, true}, {max_redirect, MaxRedirect},
                     {redirect_count, RedirectCount + 1}, {with_body, WithBody} | Options2]) of
-        {ok, Status2, Headers2, NewConnPid} when is_pid(NewConnPid) ->
-          %% Store the final location in the connection
-          hackney_conn:set_location(NewConnPid, FinalLocation),
-          {ok, Status2, Headers2, NewConnPid};
         {ok, Status2, Headers2, Body2} ->
-          %% Body was returned (with_body option)
           {ok, Status2, Headers2, Body2};
         {ok, Status2, Headers2} ->
           {ok, Status2, Headers2};
