@@ -1456,6 +1456,11 @@ handle_common({call, From}, peername, _State,
     Result = hackney_quic:peername(H3Conn),
     {keep_state_and_data, [{reply, From, Result}]};
 
+handle_common({call, From}, sockname, _State,
+              #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
+    Result = hackney_quic:sockname(H3Conn),
+    {keep_state_and_data, [{reply, From, Result}]};
+
 %% Low-level send operation
 handle_common({call, From}, {send, Data}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)
   when Socket =/= undefined ->
