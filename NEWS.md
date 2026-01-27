@@ -1,5 +1,14 @@
 # NEWS
 
+3.0.1 - 2026-01-28
+------------------
+
+### Bug Fixes
+
+- Fix dialyzer warning in `follow_redirect` by removing dead code branch that checked `is_pid()` on a value that was always binary
+- Store final redirect location in connection process state so it can be retrieved via `hackney:location/1`
+- Clean up `request_ret()` type spec to accurately reflect return values
+
 3.0.0 - 2026-01-27
 ------------------
 
