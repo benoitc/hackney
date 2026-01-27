@@ -467,18 +467,16 @@ test_skip_1xx_responses() ->
 
     %% Use hackney directly (which uses hackney_conn internally)
     URL = iolist_to_binary(["http://127.0.0.1:", integer_to_list(MockPort), "/"]),
-    {ok, Status, Headers, ClientRef} = hackney:request(get, URL, [], <<>>, []),
+    {ok, Status, Headers, Body} = hackney:request(get, URL, [], <<>>, []),
 
     %% Verify we got the final 200 response, not the 103
     ?assertEqual(200, Status),
     ?assert(is_list(Headers)),
 
-    %% Read body
-    {ok, Body} = hackney:body(ClientRef),
+    %% Body is now returned directly
     ?assertEqual(<<"Hello, World!">>, Body),
 
     %% Cleanup
-    hackney:close(ClientRef),
     gen_tcp:close(ListenSock),
     receive mock_server_done -> ok after 1000 -> ok end.
 

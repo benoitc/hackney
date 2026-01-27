@@ -6,8 +6,10 @@ This guide covers hackney's HTTP features in depth.
 
 ```erlang
 hackney:request(Method, URL, Headers, Body, Options) ->
-    {ok, StatusCode, RespHeaders, Ref} | {error, Reason}
+    {ok, StatusCode, RespHeaders, Body} | {error, Reason}
 ```
+
+Body is always returned directly in the response for consistent behavior across HTTP/1.1, HTTP/2, and HTTP/3.
 
 ## Request Bodies
 
@@ -115,8 +117,8 @@ ok = hackney:finish_send_body(Ref),
 ### Read Full Body
 
 ```erlang
-{ok, 200, Headers, Ref} = hackney:get(URL),
-{ok, Body} = hackney:body(Ref).
+%% Body is returned directly
+{ok, 200, Headers, Body} = hackney:get(URL).
 ```
 
 ### Automatic Decompression
@@ -125,7 +127,6 @@ Hackney can automatically decompress gzip and deflate encoded responses:
 
 ```erlang
 {ok, 200, Headers, Body} = hackney:get(URL, [], <<>>, [
-    with_body,
     {auto_decompress, true}
 ]).
 ```
@@ -136,16 +137,27 @@ When `auto_decompress` is enabled:
 - Supports gzip, deflate, and x-gzip encodings
 - Non-compressed responses are returned unchanged
 
-### Stream Response Body
+### Stream Response Body (Async Mode)
+
+For incremental body streaming, use async mode:
 
 ```erlang
-{ok, 200, Headers, Ref} = hackney:get(URL),
-stream_body(Ref).
+{ok, Ref} = hackney:get(URL, [], <<>>, [async]),
+stream_loop(Ref).
 
-stream_body(Ref) ->
-    case hackney:stream_body(Ref) of
-        {ok, Data} -> process(Data), stream_body(Ref);
-        done -> ok
+stream_loop(Ref) ->
+    receive
+        {hackney_response, Ref, {status, Status, _}} ->
+            io:format("Status: ~p~n", [Status]),
+            stream_loop(Ref);
+        {hackney_response, Ref, {headers, Headers}} ->
+            io:format("Headers: ~p~n", [Headers]),
+            stream_loop(Ref);
+        {hackney_response, Ref, done} ->
+            ok;
+        {hackney_response, Ref, Chunk} when is_binary(Chunk) ->
+            process_chunk(Chunk),
+            stream_loop(Ref)
     end.
 ```
 
@@ -153,16 +165,13 @@ stream_body(Ref) ->
 
 Hackney automatically negotiates HTTP/2 for HTTPS connections via ALPN.
 
+Response format is consistent across all protocols - body is always returned directly.
+
 ### Automatic HTTP/2
 
 ```erlang
 %% HTTP/2 used automatically when server supports it
-{ok, 200, Headers, Body} = hackney:get(
-    <<"https://nghttp2.org/">>,
-    [],
-    <<>>,
-    [with_body]
-).
+{ok, 200, Headers, Body} = hackney:get(<<"https://nghttp2.org/">>).
 ```
 
 ### Force Protocol
@@ -251,7 +260,7 @@ hackney:get(URL, [], <<>>, [{pool, my_api}]).
 ## Redirects
 
 ```erlang
-{ok, 200, Headers, Ref} = hackney:get(URL, [], <<>>, [
+{ok, 200, Headers, Body} = hackney:get(URL, [], <<>>, [
     {follow_redirect, true},
     {max_redirect, 5}
 ]).

@@ -202,17 +202,14 @@ redirect_integration_test_() ->
 test_absolute_redirect_follow() ->
     RedirectTarget = url(<<"/get">>),
     URL = url(<<"/redirect-to?url=", RedirectTarget/binary>>),
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
-    Location = hackney:location(Client),
-    hackney:close(Client),
-    ?assertEqual(200, Status),
-    ?assertEqual(RedirectTarget, Location).
+    %% In 3.x, body is returned directly
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
+    ?assertEqual(200, Status).
 
 test_relative_redirect_with_slash() ->
     %% Redirect to absolute path /get
     URL = url(<<"/redirect-to?url=/get">>),
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
-    hackney:close(Client),
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
     ?assertEqual(200, Status).
 
 test_relative_redirect_without_slash() ->
@@ -221,11 +218,9 @@ test_relative_redirect_without_slash() ->
     %% We need to set up a specific test case for this
     %% For now, verify basic relative redirect works
     URL = url(<<"/redirect-to?url=get">>),  %% relative path without /
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
-    FinalLocation = hackney:location(Client),
-    hackney:close(Client),
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
     %% The redirect from /redirect-to to "get" should go to /get
-    io:format("Relative redirect result: status=~p, location=~p~n", [Status, FinalLocation]),
+    io:format("Relative redirect result: status=~p~n", [Status]),
     ?assertEqual(200, Status).
 
 test_redirect_port_in_host() ->
@@ -234,8 +229,7 @@ test_redirect_port_in_host() ->
     %% For this test, we redirect to our own server on non-standard port
     RedirectTarget = <<"http://localhost:", (integer_to_binary(?PORT))/binary, "/get">>,
     URL = url(<<"/redirect-to?url=", RedirectTarget/binary>>),
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
-    hackney:close(Client),
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
     %% If this works, the Host header was correct
     ?assertEqual(200, Status).
 
@@ -249,8 +243,7 @@ test_long_redirect_url() ->
     %% This should not crash - it should either succeed or return an error
     Result = hackney:request(get, URL, [], <<>>, [{follow_redirect, true}]),
     case Result of
-        {ok, Status, _Headers, Client} ->
-            hackney:close(Client),
+        {ok, Status, _Headers, _Body} ->
             ?assertEqual(200, Status);
         {error, _Reason} ->
             %% An error is acceptable (e.g., line_too_long), but not a crash
@@ -337,9 +330,8 @@ test_inform_callback() ->
     end,
     %% Use URL-encoded link value
     URL = url(<<"/inform?status=103&link=%3C/style.css%3E%3B%20rel%3Dpreload">>),
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>,
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>,
         [{inform_fun, InformFun}]),
-    hackney:close(Client),
     %% Should receive the informational message
     receive
         {got_inform, InformStatus, _Reason, InformHeaders} ->
@@ -356,8 +348,7 @@ test_inform_callback() ->
 test_inform_no_callback() ->
     %% Without callback, 1xx should be silently skipped
     URL = url(<<"/inform?status=103">>),
-    {ok, Status, _Headers, Client} = hackney:request(get, URL, [], <<>>, []),
-    hackney:close(Client),
+    {ok, Status, _Headers, _Body} = hackney:request(get, URL, [], <<>>, []),
     %% Final response should be 200
     ?assertEqual(200, Status).
 

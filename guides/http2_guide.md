@@ -19,12 +19,7 @@ Hackney supports HTTP/2 with automatic protocol negotiation via ALPN (Applicatio
 
 ```erlang
 %% HTTP/2 is used automatically for HTTPS when server supports it
-{ok, 200, Headers, Body} = hackney:get(
-    <<"https://nghttp2.org/">>,
-    [],
-    <<>>,
-    [with_body]
-).
+{ok, 200, Headers, Body} = hackney:get(<<"https://nghttp2.org/">>).
 
 %% Headers are lowercase in HTTP/2
 {<<"server">>, Server} = lists:keyfind(<<"server">>, 1, Headers).
@@ -65,7 +60,7 @@ hackney:get(URL, [], <<>>, [{protocols, [http1, http2]}]).
 HTTP/2 responses have lowercase header names, while HTTP/1.1 preserves the original case:
 
 ```erlang
-{ok, 200, Headers, _} = hackney:get(URL, [], <<>>, [with_body]),
+{ok, 200, Headers, Body} = hackney:get(URL),
 
 %% Check first header's key
 case hd(Headers) of
@@ -111,15 +106,27 @@ find_header(Name, Headers) ->
 
 ### Response Format
 
-The high-level API returns the same format for both protocols:
+Response format is now **consistent** across all protocols (HTTP/1.1, HTTP/2, and HTTP/3):
 
 ```erlang
-%% with_body option
-{ok, Status, Headers, Body} = hackney:get(URL, [], <<>>, [with_body]).
+%% All protocols return the same format
+{ok, Status, Headers, Body} = hackney:get(URL).
+```
 
-%% Without with_body (HTTP/1.1 returns connection ref)
-{ok, Status, Headers, Ref} = hackney:get(URL),
-{ok, Body} = hackney:body(Ref).
+For incremental body streaming, use async mode:
+
+```erlang
+{ok, Ref} = hackney:get(URL, [], <<>>, [async]),
+receive
+    {hackney_response, Ref, {status, Status, _}} -> ok
+end,
+receive
+    {hackney_response, Ref, {headers, Headers}} -> ok
+end,
+receive
+    {hackney_response, Ref, done} -> ok;
+    {hackney_response, Ref, Chunk} -> process(Chunk)
+end.
 ```
 
 ## Connection Multiplexing
@@ -298,9 +305,10 @@ HTTP/2's multiplexing works best with connection reuse:
 Take advantage of multiplexing for parallel requests:
 
 ```erlang
+Parent = self(),
 URLs = [<<"https://api.example.com/1">>, <<"https://api.example.com/2">>],
 Pids = [spawn_link(fun() ->
-    Result = hackney:get(URL, [], <<>>, [with_body]),
+    Result = hackney:get(URL),
     Parent ! {self(), Result}
 end) || URL <- URLs],
 Results = [receive {Pid, R} -> R end || Pid <- Pids].
@@ -334,13 +342,8 @@ If the server doesn't support HTTP/2, hackney automatically falls back to HTTP/1
 # Start hackney
 Application.ensure_all_started(:hackney)
 
-# HTTP/2 request
-{:ok, status, headers, body} = :hackney.get(
-  "https://nghttp2.org/",
-  [],
-  "",
-  [:with_body]
-)
+# HTTP/2 request - body is returned directly
+{:ok, status, headers, body} = :hackney.get("https://nghttp2.org/")
 
 # Check protocol via header case
 case headers do
@@ -353,16 +356,10 @@ end
 
 ```erlang
 %% HTTP/2 only - fails if server doesn't support it
-{ok, _, _, _} = hackney:get(URL, [], <<>>, [
-    with_body,
-    {protocols, [http2]}
-]).
+{ok, _, _, _} = hackney:get(URL, [], <<>>, [{protocols, [http2]}]).
 
 %% HTTP/1.1 only - never uses HTTP/2
-{ok, _, _, _} = hackney:get(URL, [], <<>>, [
-    with_body,
-    {protocols, [http1]}
-]).
+{ok, _, _, _} = hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
 ```
 
 ## Troubleshooting

@@ -35,10 +35,9 @@ multipart_post() ->
             {<<"part2">>, <<"bar">>},
             {<<"part3">>, <<"baz">>}],
         %% Use {pool, false} to avoid pool conflicts with other tests
+        %% In 3.x, body is returned directly
         case hackney:request(post, URL, Headers, {multipart, Parts}, [{pool, false}]) of
-            {ok, Code, _Headers, Ref} when Code >= 200, Code < 300 ->
-                {ok, Body} = hackney:body(Ref),
-                hackney:close(Ref),
+            {ok, Code, _Headers, Body} when Code >= 200, Code < 300 ->
                 ?assertEqual(Parts, binary_to_term(Body));
             {error, Reason} ->
                 ?assertEqual(ok, {error, Reason})

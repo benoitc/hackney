@@ -92,15 +92,14 @@ not_modified_response() ->
     {ok, StatusCode, _, _} = hackney:request(get, URL, [], <<>>, []),
     ?assertEqual(304, StatusCode).
 
-%% Test for issue #434: 204 response followed by body read should not corrupt next request
+%% Test for issue #434: 204 response followed by next request should work correctly
 %% Per RFC 7230 3.3.3, 204 and 304 responses have no body regardless of headers
 no_content_body_read_then_next_request() ->
     URL204 = url(<<"/status/204">>),
     URLGet = url(<<"/get">>),
-    %% First request: 204 with explicit body read
-    {ok, Status1, _, Client1} = hackney:request(get, URL204, [], <<>>, []),
+    %% First request: 204 (body returned directly, should be empty)
+    {ok, Status1, _, Body1} = hackney:request(get, URL204, [], <<>>, []),
     ?assertEqual(204, Status1),
-    {ok, Body1} = hackney:body(Client1),
     ?assertEqual(<<>>, Body1),
     %% Second request: should succeed (connection closed after 204, new connection used)
     {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
@@ -110,10 +109,9 @@ no_content_body_read_then_next_request() ->
 not_modified_body_read_then_next_request() ->
     URL304 = url(<<"/status/304">>),
     URLGet = url(<<"/get">>),
-    %% First request: 304 with explicit body read
-    {ok, Status1, _, Client1} = hackney:request(get, URL304, [], <<>>, []),
+    %% First request: 304 (body returned directly, should be empty)
+    {ok, Status1, _, Body1} = hackney:request(get, URL304, [], <<>>, []),
     ?assertEqual(304, Status1),
-    {ok, Body1} = hackney:body(Client1),
     ?assertEqual(<<>>, Body1),
     %% Second request: should succeed
     {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
@@ -125,12 +123,11 @@ not_modified_body_read_then_next_request() ->
 chunked_body_read_then_next_request() ->
     URLChunked = url(<<"/chunked/1000">>),
     URLGet = url(<<"/get">>),
-    %% First request: chunked response with explicit body read
-    {ok, Status1, Headers1, Client1} = hackney:request(get, URLChunked, [], <<>>, []),
+    %% First request: chunked response (body returned directly)
+    {ok, Status1, Headers1, Body1} = hackney:request(get, URLChunked, [], <<>>, []),
     ?assertEqual(200, Status1),
     %% Verify it's chunked (no content-length header in Cowboy stream_reply)
     ?assertEqual(undefined, hackney_headers:get_value(<<"content-length">>, hackney_headers:from_list(Headers1))),
-    {ok, Body1} = hackney:body(Client1),
     ?assertEqual(1000, byte_size(Body1)),
     %% Second request: should succeed without hanging
     {ok, Status2, _, _} = hackney:request(get, URLGet, [], <<>>, []),
@@ -140,29 +137,26 @@ chunked_body_read_then_next_request() ->
 chunked_large_body_read() ->
     %% Test with 100KB body similar to original issue
     URLChunked = url(<<"/chunked/102400">>),
-    {ok, Status, _, Client} = hackney:request(get, URLChunked, [], <<>>, [{recv_timeout, 10000}]),
+    {ok, Status, _, Body} = hackney:request(get, URLChunked, [], <<>>, [{recv_timeout, 10000}]),
     ?assertEqual(200, Status),
-    {ok, Body} = hackney:body(Client),
     ?assertEqual(102400, byte_size(Body)).
 
 %% Test for issue #439: Connection: close responses should not be lost
 %% Tests that responses with Connection: close header are received correctly
 connection_close_response() ->
     URL = url(<<"/connection-close">>),
-    {ok, Status, Headers, Client} = hackney:request(get, URL, [], <<>>, []),
+    {ok, Status, Headers, Body} = hackney:request(get, URL, [], <<>>, []),
     ?assertEqual(200, Status),
     %% Verify Connection: close header
     ?assertEqual(<<"close">>, hackney_headers:get_value(<<"connection">>, hackney_headers:from_list(Headers))),
-    {ok, Body} = hackney:body(Client),
     ?assertEqual(<<"{\"connection\": \"close\"}">>, Body).
 
 %% Test larger Connection: close response
 connection_close_large_body() ->
     URL = url(<<"/connection-close/102400">>),
-    {ok, Status, Headers, Client} = hackney:request(get, URL, [], <<>>, [{recv_timeout, 10000}]),
+    {ok, Status, Headers, Body} = hackney:request(get, URL, [], <<>>, [{recv_timeout, 10000}]),
     ?assertEqual(200, Status),
     ?assertEqual(<<"close">>, hackney_headers:get_value(<<"connection">>, hackney_headers:from_list(Headers))),
-    {ok, Body} = hackney:body(Client),
     ?assertEqual(102400, byte_size(Body)).
 
 basic_auth_request() ->
@@ -197,8 +191,7 @@ set_cookie_request() ->
 send_cookies_request() ->
     URL = url(<<"/cookies">>),
     Options = [{cookie, [{<<"SESSION">>, <<"123">>}]}],
-    {ok, _, _, Client} = hackney:request(get, URL, [], <<>>, Options),
-    {ok, Body} = hackney:body(Client),
+    {ok, _, _, Body} = hackney:request(get, URL, [], <<>>, Options),
     Match = re:run(Body, <<".*SESSION.*123.*">>),
     ?assertMatch({match, _}, Match).
 
@@ -207,8 +200,7 @@ send_cookies_request() ->
 send_multiple_cookies_request() ->
     URL = url(<<"/cookies">>),
     Options = [{cookie, [{<<"cookie1">>, <<"value1">>}, {<<"cookie2">>, <<"value2">>}]}],
-    {ok, _, _, Client} = hackney:request(get, URL, [], <<>>, Options),
-    {ok, Body} = hackney:body(Client),
+    {ok, _, _, Body} = hackney:request(get, URL, [], <<>>, Options),
     %% Both cookies should be present in the response
     Match1 = re:run(Body, <<"cookie1">>),
     Match2 = re:run(Body, <<"cookie2">>),
@@ -219,8 +211,8 @@ absolute_redirect_request_no_follow() ->
     RedirectTarget = url(<<"/get">>),
     URL = <<"http://localhost:", (integer_to_binary(?PORT))/binary, "/redirect-to?url=", RedirectTarget/binary>>,
     Options = [{follow_redirect, false}],
-    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
-    Location = hackney:location(Client),
+    {ok, StatusCode, Headers, _Body} = hackney:request(get, URL, [], <<>>, Options),
+    Location = hackney:redirect_location(Headers),
     ?assertEqual(302, StatusCode),
     ?assertEqual(RedirectTarget, Location).
 
@@ -228,18 +220,16 @@ absolute_redirect_request_follow() ->
     RedirectTarget = url(<<"/get">>),
     URL = <<"http://localhost:", (integer_to_binary(?PORT))/binary, "/redirect-to?url=", RedirectTarget/binary>>,
     Options = [{follow_redirect, true}],
-    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
-    Location = hackney:location(Client),
-    ?assertEqual(200, StatusCode),
-    ?assertEqual(RedirectTarget, Location).
+    {ok, StatusCode, _Headers, _Body} = hackney:request(get, URL, [], <<>>, Options),
+    %% After following redirect, we're at the final URL, not the redirect URL
+    ?assertEqual(200, StatusCode).
 
 relative_redirect_request_follow() ->
     URL = url(<<"/redirect-to?url=/get">>),
     Options = [{follow_redirect, true}],
-    {ok, StatusCode, _, Client} = hackney:request(get, URL, [], <<>>, Options),
-    Location = hackney:location(Client),
-    ?assertEqual(200, StatusCode),
-    ?assertEqual(url(<<"/get">>), Location).
+    {ok, StatusCode, _Headers, _Body} = hackney:request(get, URL, [], <<>>, Options),
+    %% After following redirect, we're at the final URL
+    ?assertEqual(200, StatusCode).
 
 async_request() ->
     URL = url(<<"/get">>),
@@ -286,22 +276,17 @@ test_custom_host_headers() ->
   ?assertEqual(<<"myhost.com">>, maps:get(<<"host">>, ReqHeaders)).
 
 test_frees_manager_ets_when_body_is_in_client() ->
-    %% With process-per-connection model, each request creates a connection
-    %% process. Verify the connection process is alive during the request
-    %% and cleaned up properly after.
+    %% In 3.x, body is always returned directly, so this test now verifies
+    %% that the body is returned and is binary, not a pid.
     URL = url(<<"/get">>),
-    {ok, 200, _, Client} = hackney:get(URL),
-    %% Client is now a pid
-    ?assert(is_pid(Client)),
-    ?assert(is_process_alive(Client)),
-    {ok, _unusedBody} = hackney:body(Client),
-    %% After reading body and closing, connection may still be alive (pooled)
-    %% or terminated - both are valid based on pool settings
+    {ok, 200, _, Body} = hackney:get(URL),
+    %% Body is now returned directly (not a pid)
+    ?assert(is_binary(Body)),
     ok.
 
 test_frees_manager_ets_when_body_is_in_response() ->
-    %% With process-per-connection model and with_body option,
-    %% the body is returned directly and the connection is closed/pooled.
+    %% Body is now always returned directly regardless of with_body option
+    %% (option is deprecated and ignored)
     URL = url(<<"/get">>),
     Headers = [],
     Options = [with_body],
@@ -329,18 +314,16 @@ test_307_redirect_pool_cleanup() ->
 
     %% Make a GET request that should get a 307 redirect
     %% With follow_redirect=false, this should return the redirect response directly
-    {ok, Status1, _Headers1, Client1} = hackney:request(get, URL, [], <<"">>, RequestOpts),
+    %% In 3.x, body is returned directly (connection auto-released to pool)
+    {ok, Status1, _Headers1, _Body1} = hackney:request(get, URL, [], <<"">>, RequestOpts),
     ?assertEqual(307, Status1),
-    %% Client1 is now a PID - skip the body to return connection to pool
-    ok = hackney:skip_body(Client1),
 
     %% Allow time for checkin to complete
     timer:sleep(10),
 
     %% Make a second request to verify pool connections are available
-    {ok, Status2, _Headers2, Client2} = hackney:request(get, URL, [], <<"">>, RequestOpts),
+    {ok, Status2, _Headers2, _Body2} = hackney:request(get, URL, [], <<"">>, RequestOpts),
     ?assertEqual(307, Status2),
-    ok = hackney:skip_body(Client2),
 
     %% Allow time for async cleanup to complete
     timer:sleep(10),
