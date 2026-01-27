@@ -923,7 +923,7 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
       {error, Reason}
   end.
 
-follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeaders, Status,
+follow_redirect(ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeaders, Status,
                 MaxRedirect, RedirectCount) ->
   %% Get the Location header
   Location = redirect_location(RespHeaders),
@@ -933,6 +933,8 @@ follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeade
     LocationBin ->
       %% Parse the new URL (could be relative or absolute)
       NewURL = resolve_redirect_url(CurrentURL, LocationBin),
+      %% Get the full URL as a binary for storing
+      FinalLocation = hackney_url:unparse_url(NewURL),
       %% Determine method for redirect (301, 302, 303 -> GET, 307, 308 -> same method)
       NewMethod = case Status of
         S when S =:= 301; S =:= 302; S =:= 303 ->
@@ -954,8 +956,12 @@ follow_redirect(_ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeade
                    [{follow_redirect, true}, {max_redirect, MaxRedirect},
                     {redirect_count, RedirectCount + 1}, {with_body, WithBody} | Options2]) of
         {ok, Status2, Headers2, Body2} ->
+          %% Store the final location in the connection
+          hackney_conn:set_location(ConnPid, FinalLocation),
           {ok, Status2, Headers2, Body2};
         {ok, Status2, Headers2} ->
+          %% Store the final location in the connection
+          hackney_conn:set_location(ConnPid, FinalLocation),
           {ok, Status2, Headers2};
         Error ->
           Error
