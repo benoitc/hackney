@@ -463,7 +463,7 @@ request(Method, URL, Headers, Body) ->
 %% - {ok, ConnPid}: Streaming body mode (body = stream) - use send_body/2, finish_send_body/1
 %% - {error, Reason}: Error
 %%
-%% Note: The `with_body` option is deprecated and ignored. Body is always returned directly.
+%% Note: The `with_body' option is deprecated and ignored. Body is always returned directly.
 -spec request(atom() | binary(), url(), list(), term(), list()) -> request_ret().
 request(Method, URL, Headers, Body, Options) when is_binary(URL) orelse is_list(URL) ->
   request(Method, hackney_url:parse_url(URL), Headers, Body, Options);
