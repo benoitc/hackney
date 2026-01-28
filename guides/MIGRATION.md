@@ -261,16 +261,72 @@ Body is now returned directly (no need to call `hackney:body/1`):
 {ok, 200, Headers, Body} = hackney:get(URL).
 ```
 
-### Streaming Request
+### Streaming Request Body
 
-No changes:
+The streaming body API allows you to send the request body in chunks. This is useful for uploading large files or data that is generated incrementally.
+
+**Basic usage:**
 
 ```erlang
-{ok, Ref} = hackney:request(post, URL, Headers, stream, []),
-ok = hackney:send_body(Ref, Chunk),
-ok = hackney:finish_send_body(Ref),
-{ok, Status, RespHeaders, Body} = hackney:start_response(Ref).
+%% 1. Start request with body = stream
+{ok, ConnPid} = hackney:request(post, URL, Headers, stream, []),
+
+%% 2. Send body chunks (can be called multiple times)
+ok = hackney:send_body(ConnPid, <<"first chunk">>),
+ok = hackney:send_body(ConnPid, <<"second chunk">>),
+
+%% 3. Signal end of body
+ok = hackney:finish_send_body(ConnPid),
+
+%% 4. Get response headers
+{ok, Status, RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+
+%% 5. Read response body
+{ok, RespBody} = hackney:body(ConnPid),
+
+%% 6. Close connection when done
+hackney:close(ConnPid).
 ```
+
+**With chunked transfer encoding:**
+
+When the body size is unknown, use chunked transfer encoding:
+
+```erlang
+Headers = [{<<"Transfer-Encoding">>, <<"chunked">>},
+           {<<"Content-Type">>, <<"application/octet-stream">>}],
+{ok, ConnPid} = hackney:post(URL, Headers, stream),
+
+%% Send chunks as they become available
+lists:foreach(fun(Chunk) ->
+    ok = hackney:send_body(ConnPid, Chunk)
+end, generate_chunks()),
+
+ok = hackney:finish_send_body(ConnPid),
+{ok, Status, RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+{ok, RespBody} = hackney:body(ConnPid),
+hackney:close(ConnPid).
+```
+
+**With known Content-Length:**
+
+```erlang
+Data = <<"my large data">>,
+Headers = [{<<"Content-Length">>, integer_to_binary(byte_size(Data))},
+           {<<"Content-Type">>, <<"application/octet-stream">>}],
+{ok, ConnPid} = hackney:post(URL, Headers, stream),
+
+%% Send data in smaller chunks
+ok = hackney:send_body(ConnPid, binary:part(Data, 0, 5)),
+ok = hackney:send_body(ConnPid, binary:part(Data, 5, byte_size(Data) - 5)),
+
+ok = hackney:finish_send_body(ConnPid),
+{ok, Status, RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+{ok, RespBody} = hackney:body(ConnPid),
+hackney:close(ConnPid).
+```
+
+**Note:** The `hackney:body/1` function is deprecated for regular requests (where body is returned directly), but is still used after `start_response/1` in streaming body mode to read the response.
 
 ### Async Response
 
