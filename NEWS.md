@@ -1,5 +1,16 @@
 # NEWS
 
+3.0.2 - 2026-02-02
+------------------
+
+### Bug Fixes
+
+- Add default `Content-Type: application/octet-stream` header when sending a body without explicit Content-Type (#823). This restores 1.x behavior and follows RFC 7231 recommendations.
+
+### Dependencies
+
+- Bump `certifi` to 2.16.0 (#824)
+
 3.0.1 - 2026-01-28
 ------------------
 

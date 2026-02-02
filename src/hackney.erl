@@ -1093,13 +1093,16 @@ encode_body(Headers, {multipart, Parts}, _Options) ->
   Headers2 = hackney_headers:store(<<"Content-Length">>, integer_to_binary(MpSize), Headers1),
   {Headers2, MpBody};
 encode_body(Headers, Body, _Options) when is_binary(Body) ->
-  case hackney_headers:get_value(<<"content-length">>, Headers) of
+  %% Add Content-Length if not present
+  Headers1 = case hackney_headers:get_value(<<"content-length">>, Headers) of
     undefined ->
-      Headers1 = hackney_headers:store(<<"Content-Length">>, integer_to_binary(byte_size(Body)), Headers),
-      {Headers1, Body};
+      hackney_headers:store(<<"Content-Length">>, integer_to_binary(byte_size(Body)), Headers);
     _ ->
-      {Headers, Body}
-  end;
+      Headers
+  end,
+  %% Add default Content-Type if not present (RFC 7231 recommends application/octet-stream)
+  {_, Headers2} = hackney_headers:store_new(<<"Content-Type">>, <<"application/octet-stream">>, Headers1),
+  {Headers2, Body};
 encode_body(Headers, Body, _Options) when is_list(Body) ->
   Bin = iolist_to_binary(Body),
   encode_body(Headers, Bin, _Options);
