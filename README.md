@@ -270,6 +270,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on pull requests and devel
 
 Issues and pull requests welcome at https://github.com/benoitc/hackney
 
+## Support
+
+hackney is critical infrastructure for many Erlang and Elixir applications. If your company relies on it, consider sponsoring its maintenance:
+
+[![Sponsor](https://img.shields.io/badge/sponsor-❤-ff69b4)](https://github.com/sponsors/benoitc)
+
+Sponsorship ensures continued development, timely security patches, and compatibility with OTP releases.
+
+**Corporate sponsors:** If gunicorn is part of your infrastructure, [reach out](mailto:benoitc@enki-multimedia.eu) for sponsored support options.
+
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE)
