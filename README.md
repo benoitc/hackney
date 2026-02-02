@@ -278,7 +278,7 @@ hackney is critical infrastructure for many Erlang and Elixir applications. If y
 
 Sponsorship ensures continued development, timely security patches, and compatibility with OTP releases.
 
-**Corporate sponsors:** If gunicorn is part of your infrastructure, [reach out](mailto:benoitc@enki-multimedia.eu) for sponsored support options.
+**Corporate sponsors:** If hackney is part of your infrastructure, [reach out](mailto:benoitc@enki-multimedia.eu) for sponsored support options.
 
 ## License
 
