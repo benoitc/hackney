@@ -270,10 +270,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on pull requests and devel
 
 Issues and pull requests welcome at https://github.com/benoitc/hackney
 
-## Support
-
-Professional support is available via Enki Multimedia. Contact [sales@enki-multimedia.eu](mailto:sales@enki-multimedia.eu).
-
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE)
