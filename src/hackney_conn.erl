@@ -1031,7 +1031,15 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 - send body chunk via QUIC
     #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId} = Data,
-    case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(BodyData), false) of
+    Result = case BodyData of
+        Fun when is_function(Fun, 0) ->
+            stream_body_fun_h3(ConnRef, StreamId, Fun);
+        {Fun, State} when is_function(Fun, 1) ->
+            stream_body_fun_h3(ConnRef, StreamId, {Fun, State});
+        _ ->
+            hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(BodyData), false)
+    end,
+    case Result of
         ok ->
             {keep_state_and_data, [{reply, From, ok}]};
         {error, Reason} ->
@@ -1041,8 +1049,15 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
     %% Send as chunked encoding (HTTP/1.1)
-    ChunkData = encode_chunk(BodyData),
-    case Transport:send(Socket, ChunkData) of
+    Result = case BodyData of
+        Fun when is_function(Fun, 0) ->
+            stream_body_fun(Transport, Socket, Fun);
+        {Fun, State} when is_function(Fun, 1) ->
+            stream_body_fun(Transport, Socket, {Fun, State});
+        _ ->
+            Transport:send(Socket, encode_chunk(BodyData))
+    end,
+    case Result of
         ok ->
             {keep_state_and_data, [{reply, From, ok}]};
         {error, Reason} ->
@@ -1704,6 +1719,61 @@ encode_chunk(Data) when is_list(Data) ->
     Size = iolist_size(Data),
     SizeHex = integer_to_binary(Size, 16),
     [SizeHex, <<"\r\n">>, Data, <<"\r\n">>].
+
+%% @private Stream body from stateless function
+%% fun() -> {ok, Data} | eof | {error, Reason}
+stream_body_fun(Transport, Socket, Fun) when is_function(Fun, 0) ->
+    case Fun() of
+        {ok, Data} ->
+            case Transport:send(Socket, encode_chunk(Data)) of
+                ok -> stream_body_fun(Transport, Socket, Fun);
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end;
+%% @private Stream body from stateful function
+%% fun(State) -> {ok, Data, NewState} | eof | {error, Reason}
+stream_body_fun(Transport, Socket, {Fun, State}) when is_function(Fun, 1) ->
+    case Fun(State) of
+        {ok, Data, NewState} ->
+            case Transport:send(Socket, encode_chunk(Data)) of
+                ok -> stream_body_fun(Transport, Socket, {Fun, NewState});
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private Stream body from function for HTTP/3
+stream_body_fun_h3(ConnRef, StreamId, Fun) when is_function(Fun, 0) ->
+    case Fun() of
+        {ok, Data} ->
+            case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(Data), false) of
+                ok -> stream_body_fun_h3(ConnRef, StreamId, Fun);
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end;
+stream_body_fun_h3(ConnRef, StreamId, {Fun, State}) when is_function(Fun, 1) ->
+    case Fun(State) of
+        {ok, Data, NewState} ->
+            case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(Data), false) of
+                ok -> stream_body_fun_h3(ConnRef, StreamId, {Fun, NewState});
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
 
 %% @private Get default User-Agent
 default_ua() ->
