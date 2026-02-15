@@ -42,6 +42,9 @@ hackney_conn_integration_test_() ->
       {"simple GET request", {timeout, 30, fun test_get_request/0}},
       {"POST request with body", {timeout, 30, fun test_post_request/0}},
       {"stream body", {timeout, 30, fun test_stream_body/0}},
+      {"stream body with stateless function", {timeout, 30, fun test_stream_body_stateless_fun/0}},
+      {"stream body with stateful function", {timeout, 30, fun test_stream_body_stateful_fun/0}},
+      {"stream body function returns error", {timeout, 30, fun test_stream_body_fun_error/0}},
       {"HEAD request", {timeout, 30, fun test_head_request/0}},
       {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}},
       %% Async tests
@@ -304,6 +307,112 @@ test_stream_body() ->
     ?assert(is_binary(Body)),
     ?assert(byte_size(Body) > 0),
 
+    hackney_conn:stop(Pid).
+
+test_stream_body_stateless_fun() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    %% Create stateless function using ets table for state
+    %% (function runs in hackney_conn process, not test process)
+    Chunks = [<<"chunk1">>, <<"chunk2">>, <<"chunk3">>],
+    Tab = ets:new(stream_test, [public, set]),
+    ets:insert(Tab, {chunks, Chunks}),
+    Fun = fun() ->
+        case ets:lookup(Tab, chunks) of
+            [{chunks, []}] -> eof;
+            [{chunks, [H | T]}] ->
+                ets:insert(Tab, {chunks, T}),
+                {ok, H}
+        end
+    end,
+
+    %% Send headers for streaming body (Host header required for HTTP/1.1)
+    Headers = [{<<"Host">>, <<"127.0.0.1:", (integer_to_binary(?PORT))/binary>>},
+               {<<"Content-Type">>, <<"text/plain">>}],
+    ok = hackney_conn:send_request_headers(Pid, <<"POST">>, <<"/post">>, Headers),
+
+    %% Send body using function
+    ok = hackney_conn:send_body_chunk(Pid, Fun),
+    ok = hackney_conn:finish_send_body(Pid),
+
+    %% Get response
+    {ok, Status, _RespHeaders, _} = hackney_conn:start_response(Pid),
+    ?assert(Status >= 200 andalso Status < 300),
+
+    %% Read response body
+    {ok, RespBody} = hackney_conn:body(Pid),
+    ?assert(is_binary(RespBody)),
+
+    hackney_conn:stop(Pid),
+    ets:delete(Tab).
+
+test_stream_body_stateful_fun() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    %% Stateful function: fun(State) -> {ok, Data, NewState} | eof
+    Chunks = [<<"hello ">>, <<"world">>, <<"!">>],
+    Fun = fun
+        ([]) -> eof;
+        ([H | T]) -> {ok, H, T}
+    end,
+
+    %% Host header required for HTTP/1.1
+    Headers = [{<<"Host">>, <<"127.0.0.1:", (integer_to_binary(?PORT))/binary>>},
+               {<<"Content-Type">>, <<"text/plain">>}],
+    ok = hackney_conn:send_request_headers(Pid, <<"POST">>, <<"/post">>, Headers),
+
+    %% Send body using stateful function
+    ok = hackney_conn:send_body_chunk(Pid, {Fun, Chunks}),
+    ok = hackney_conn:finish_send_body(Pid),
+
+    {ok, Status, _RespHeaders, _} = hackney_conn:start_response(Pid),
+    ?assert(Status >= 200 andalso Status < 300),
+
+    {ok, RespBody} = hackney_conn:body(Pid),
+    ?assert(is_binary(RespBody)),
+
+    hackney_conn:stop(Pid).
+
+test_stream_body_fun_error() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    %% Function that returns error immediately
+    Fun = fun() -> {error, simulated_error} end,
+
+    %% Host header required for HTTP/1.1
+    Headers = [{<<"Host">>, <<"127.0.0.1:", (integer_to_binary(?PORT))/binary>>}],
+    ok = hackney_conn:send_request_headers(Pid, <<"POST">>, <<"/post">>, Headers),
+
+    %% Should return error
+    {error, simulated_error} = hackney_conn:send_body_chunk(Pid, Fun),
+
+    %% Connection should be in closed state after error
+    timer:sleep(100),
+    ?assertEqual({ok, closed}, hackney_conn:get_state(Pid)),
     hackney_conn:stop(Pid).
 
 test_head_request() ->
