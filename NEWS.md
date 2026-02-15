@@ -1,5 +1,16 @@
 # NEWS
 
+3.0.3 - 2026-02-15
+------------------
+
+### Bug Fixes
+
+- Restore function-based streaming body support (#821). Functions passed to `send_body/2` now work correctly for iterative body streaming, supporting both stateless `fun() -> {ok, Data} | eof` and stateful `fun(State) -> {ok, Data, NewState} | eof` forms.
+
+### CI
+
+- Fix FreeBSD CI job by adding pcre2 package to resolve git linker error
+
 3.0.2 - 2026-02-02
 ------------------
 
