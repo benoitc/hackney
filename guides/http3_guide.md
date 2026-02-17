@@ -17,13 +17,7 @@ Hackney supports HTTP/3, the latest version of HTTP built on QUIC (UDP-based tra
 
 ## Requirements
 
-HTTP/3 support requires the QUIC NIF to be built. Check availability:
-
-```erlang
-hackney_quic:is_available().  %% true | false
-```
-
-The NIF is built automatically with `rebar3 compile` if dependencies (cmake, zlib) are available.
+HTTP/3 support uses a pure Erlang QUIC implementation. QUIC support is available automatically when hackney is compiled - no external dependencies required.
 
 ## Quick Start
 
@@ -340,19 +334,14 @@ String.contains?(body, "http=http/3")  # true
 
 ### HTTP/3 Not Being Used
 
-1. Check if QUIC NIF is loaded:
-   ```erlang
-   hackney_quic:is_available().  %% Should be true
-   ```
+1. Check if `http3` is in protocols list
 
-2. Check if `http3` is in protocols list
-
-3. Check if host is marked as blocked:
+2. Check if host is marked as blocked:
    ```erlang
    hackney_altsvc:is_h3_blocked(Host, Port).
    ```
 
-4. Verify server supports HTTP/3:
+3. Verify server supports HTTP/3:
    ```bash
    curl -v --http3 https://example.com/
    ```
@@ -364,17 +353,6 @@ UDP may be blocked by firewalls. Try:
 1. Use fallback protocols: `{protocols, [http3, http2, http1]}`
 2. Check if other HTTP/3 sites work (e.g., cloudflare.com)
 3. Check firewall/network settings for UDP port 443
-
-### Build Issues
-
-If QUIC NIF fails to build:
-
-1. Ensure cmake is installed
-2. Ensure zlib development headers are available
-3. Check build output for errors:
-   ```bash
-   rebar3 compile 2>&1 | grep -i error
-   ```
 
 ## Next Steps
 

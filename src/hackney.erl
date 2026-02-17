@@ -221,47 +221,41 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
 
 %% @private Establish a new HTTP/3 connection
 try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
-  %% Check if QUIC is available
-  case hackney_quic:is_available() of
-    false ->
-      false;
-    true ->
-      %% Start HTTP/3 connection via hackney_conn
-      ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
-      ConnOpts = #{
-        host => Host,
-        port => Port,
-        transport => Transport,
-        connect_timeout => ConnectTimeout,
-        recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-        connect_options => [{protocols, [http3]}],
-        ssl_options => proplists:get_value(ssl_options, Options, [])
-      },
-      case hackney_conn_sup:start_conn(ConnOpts) of
-        {ok, ConnPid} ->
-          case hackney_conn:connect(ConnPid, ConnectTimeout) of
-            ok ->
-              %% Verify it's HTTP/3
-              case catch hackney_conn:get_protocol(ConnPid) of
-                http3 ->
-                  %% Register for multiplexing
-                  PoolHandler:register_h3(Host, Port, Transport, ConnPid, Options),
-                  {ok, ConnPid};
-                _ ->
-                  %% Not HTTP/3 or connection terminated, close and fail
-                  catch hackney_conn:stop(ConnPid),
-                  hackney_altsvc:mark_h3_blocked(Host, Port),
-                  false
-              end;
-            {error, _Reason} ->
+  %% Start HTTP/3 connection via hackney_conn
+  ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+  ConnOpts = #{
+    host => Host,
+    port => Port,
+    transport => Transport,
+    connect_timeout => ConnectTimeout,
+    recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    connect_options => [{protocols, [http3]}],
+    ssl_options => proplists:get_value(ssl_options, Options, [])
+  },
+  case hackney_conn_sup:start_conn(ConnOpts) of
+    {ok, ConnPid} ->
+      case hackney_conn:connect(ConnPid, ConnectTimeout) of
+        ok ->
+          %% Verify it's HTTP/3
+          case catch hackney_conn:get_protocol(ConnPid) of
+            http3 ->
+              %% Register for multiplexing
+              PoolHandler:register_h3(Host, Port, Transport, ConnPid, Options),
+              {ok, ConnPid};
+            _ ->
+              %% Not HTTP/3 or connection terminated, close and fail
               catch hackney_conn:stop(ConnPid),
               hackney_altsvc:mark_h3_blocked(Host, Port),
               false
           end;
         {error, _Reason} ->
+          catch hackney_conn:stop(ConnPid),
           hackney_altsvc:mark_h3_blocked(Host, Port),
           false
-      end
+      end;
+    {error, _Reason} ->
+      hackney_altsvc:mark_h3_blocked(Host, Port),
+      false
   end.
 
 connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->

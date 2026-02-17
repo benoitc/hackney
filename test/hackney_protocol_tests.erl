@@ -82,15 +82,6 @@ per_request_protocols_test() ->
     ).
 
 %%====================================================================
-%% Protocol Availability Tests
-%%====================================================================
-
-%% Test that is_available returns boolean
-quic_availability_test() ->
-    Result = hackney_quic:is_available(),
-    ?assert(is_boolean(Result)).
-
-%%====================================================================
 %% HTTP/3 Request Opt-In Test (requires network)
 %%====================================================================
 
@@ -107,31 +98,26 @@ http3_opt_in_request_test_() ->
     }.
 
 test_http3_opt_in() ->
-    case hackney_quic:is_available() of
-        false ->
-            ?debugMsg("Skipping HTTP/3 opt-in test - QUIC NIF not available");
-        true ->
-            %% Test that HTTP/3 can be enabled via protocols option
-            %% Cloudflare supports HTTP/3
-            case gen_tcp:connect("cloudflare.com", 443, [], 5000) of
-                {ok, TestSock} ->
-                    gen_tcp:close(TestSock),
-                    %% This should attempt HTTP/3 first
-                    {ok, ConnRef} = hackney_quic:connect(
-                        <<"cloudflare.com">>, 443, #{}, self()
-                    ),
-                    %% Drive the QUIC event loop until connected or closed
-                    Result = quic_loop(ConnRef, fun
-                        ({connected, _Info}) -> {done, connected};
-                        ({closed, _Reason}) -> {done, closed};
-                        (_) -> continue
-                    end, 10000),
-                    hackney_quic:close(ConnRef, normal),
-                    %% Either connected or closed is valid - we're testing opt-in works
-                    ?assert(Result =:= connected orelse Result =:= closed orelse Result =:= {error, timeout});
-                {error, _} ->
-                    ?debugMsg("Skipping HTTP/3 opt-in test - network not available")
-            end
+    %% Test that HTTP/3 can be enabled via protocols option
+    %% Cloudflare supports HTTP/3
+    case gen_tcp:connect("cloudflare.com", 443, [], 5000) of
+        {ok, TestSock} ->
+            gen_tcp:close(TestSock),
+            %% This should attempt HTTP/3 first
+            {ok, ConnRef} = hackney_quic:connect(
+                <<"cloudflare.com">>, 443, #{}, self()
+            ),
+            %% Drive the QUIC event loop until connected or closed
+            Result = quic_loop(ConnRef, fun
+                ({connected, _Info}) -> {done, connected};
+                ({closed, _Reason}) -> {done, closed};
+                (_) -> continue
+            end, 10000),
+            hackney_quic:close(ConnRef, normal),
+            %% Either connected or closed is valid - we're testing opt-in works
+            ?assert(Result =:= connected orelse Result =:= closed orelse Result =:= {error, timeout});
+        {error, _} ->
+            ?debugMsg("Skipping HTTP/3 opt-in test - network not available")
     end.
 
 %% Helper to drive the QUIC event loop until a condition is met or timeout
@@ -185,6 +171,5 @@ protocol_selection_test_() ->
         {"Default ALPN opts", fun default_alpn_opts_test/0},
         {"HTTP/3 opt-in ALPN", fun http3_opt_in_alpn_test/0},
         {"App env protocols", fun app_env_protocols_test/0},
-        {"Per-request protocols", fun per_request_protocols_test/0},
-        {"QUIC availability", fun quic_availability_test/0}
+        {"Per-request protocols", fun per_request_protocols_test/0}
     ].

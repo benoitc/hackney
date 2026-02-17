@@ -7,16 +7,13 @@
 %%%
 %%% @doc HTTP/3 support for hackney.
 %%%
-%%% This module provides HTTP/3 functionality using the QUIC NIF.
+%%% This module provides HTTP/3 functionality using pure Erlang QUIC.
 %%% It handles stream management, header encoding, and request/response
 %%% handling for HTTP/3 connections over QUIC.
 %%%
 %%% == Usage ==
 %%%
 %%% ```
-%%% %% Check if HTTP/3 is available
-%%% hackney_h3:is_available() -> boolean()
-%%%
 %%% %% Make a simple GET request
 %%% {ok, Status, Headers, Body} = hackney_h3:request(get, "https://cloudflare.com/")
 %%%
@@ -70,9 +67,9 @@
 %%====================================================================
 
 %% @doc Check if HTTP/3/QUIC support is available.
--spec is_available() -> boolean().
-is_available() ->
-    hackney_quic:is_available().
+%% Always returns true as pure Erlang implementation is always available.
+-spec is_available() -> true.
+is_available() -> true.
 
 %% @doc Make an HTTP/3 request with default options.
 -spec request(method(), url()) -> response().

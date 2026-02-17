@@ -1,0 +1,12 @@
+{
+  "Rules": [
+    {
+      "ID": "ExpireOldCache",
+      "Status": "Enabled",
+      "Prefix": "",
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}
