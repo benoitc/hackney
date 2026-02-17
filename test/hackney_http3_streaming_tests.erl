@@ -106,6 +106,8 @@ test_h3_stream_body_done() ->
                             %% Calling stream_body again should return error (no stream)
                             Result = hackney_conn:stream_body(ConnPid),
                             ?debugFmt("After done, stream_body returns: ~p", [Result]),
+                            %% After stream is done, stream_body returns {error, no_stream}
+                            ?assertEqual({error, no_stream}, Result),
                             hackney:close(ConnPid);
                         {error, Reason} ->
                             hackney:close(ConnPid),
