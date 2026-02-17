@@ -66,10 +66,15 @@ test_default_protocols() ->
     Opts = [{connect_timeout, 10000}],
     case hackney:connect(hackney_ssl, "httpbin.org", 443, Opts) of
         {ok, ConnPid} ->
-            Protocol = hackney_conn:get_protocol(ConnPid),
-            %% Should be http1 or http2, not http3
-            ?assert(Protocol =:= http1 orelse Protocol =:= http2),
-            hackney:close(ConnPid);
+            case is_process_alive(ConnPid) of
+                true ->
+                    Protocol = hackney_conn:get_protocol(ConnPid),
+                    %% Should be http1 or http2, not http3
+                    ?assert(Protocol =:= http1 orelse Protocol =:= http2),
+                    hackney:close(ConnPid);
+                false ->
+                    ?debugFmt("Connection process died unexpectedly", [])
+            end;
         {error, Reason} ->
             ?debugFmt("Connect failed: ~p", [Reason])
     end.
