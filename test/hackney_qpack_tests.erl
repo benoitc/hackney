@@ -41,10 +41,11 @@ encode_path_root_test() ->
 encode_literal_name_value_test() ->
     %% Custom header not in static table
     Encoded = hackney_qpack:encode([{<<"x-custom">>, <<"value">>}]),
-    %% Prefix + literal instruction + name length + name + value length + value
-    <<0, 0, 2#00100000, Rest/binary>> = Encoded,
-    %% Name: length 8, "x-custom"
-    <<8, "x-custom", 5, "value">> = Rest,
+    %% Prefix + literal instruction (0010_0_111 = 0x27 since name len 8 > 7)
+    %% + name len continuation (8-7=1) + name + value len + value
+    <<0, 0, 2#00100111, Rest/binary>> = Encoded,
+    %% Name length continuation: 1 (8-7=1), then "x-custom", then value: length 5 + "value"
+    <<1, "x-custom", 5, "value">> = Rest,
     ok.
 
 encode_multiple_headers_test() ->

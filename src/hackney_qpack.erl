@@ -284,11 +284,25 @@ encode_literal_with_name_ref(Index, Value) ->
     <<NameRef/binary, ValueEnc/binary>>.
 
 %% Literal with literal name - 001N (N=0 never index)
+%% Format: 0010 H NNN [multi-byte length] name [value string header] value
+%% Where H is Huffman flag for name, NNN is 3-bit length prefix
 encode_literal(Name, Value) ->
     %% 0010xxxx for literal name, never index
-    NameEnc = encode_string(Name),
+    %% We don't use Huffman for encoding, so H=0
+    NameLen = byte_size(Name),
     ValueEnc = encode_string(Value),
-    <<2#00100000, NameEnc/binary, ValueEnc/binary>>.
+    %% Encode instruction byte with embedded name length (3-bit prefix)
+    case NameLen < 7 of
+        true ->
+            %% Name length fits in 3 bits: 0010_0_NNN
+            FirstByte = 2#00100000 bor NameLen,
+            <<FirstByte, Name/binary, ValueEnc/binary>>;
+        false ->
+            %% Name length needs multi-byte encoding: 0010_0_111 + continuation
+            FirstByte = 2#00100111,  %% 0x27
+            LenCont = encode_multi_byte_int(NameLen - 7),
+            <<FirstByte, LenCont/binary, Name/binary, ValueEnc/binary>>
+    end.
 
 %% Encode string (without Huffman for simplicity)
 encode_string(Str) ->
