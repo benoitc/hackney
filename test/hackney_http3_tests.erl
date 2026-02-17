@@ -29,11 +29,6 @@ cleanup(_) ->
 %% hackney_h3 module tests
 %%====================================================================
 
-%% Test hackney_h3:is_available
-is_available_test() ->
-    Result = hackney_h3:is_available(),
-    ?assert(is_boolean(Result)).
-
 %% Test hackney_h3:request
 http3_request_test_() ->
     {
@@ -48,23 +43,16 @@ http3_request_test_() ->
     }.
 
 test_http3_direct_request() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Test HTTP/3 connection establishment
-            %% Note: Full request/response is not yet implemented in the NIF
-            %% This test verifies connection works
-            Result = hackney_h3:connect(<<"cloudflare.com">>, 443),
-            case Result of
-                {ok, ConnRef} ->
-                    hackney_h3:close(ConnRef),
-                    ok;
-                {error, Reason} ->
-                    %% Connection issues are acceptable in test environments
-                    ?debugFmt("HTTP/3 connect failed: ~p", [Reason]),
-                    ok
-            end
+    %% Test HTTP/3 connection establishment
+    Result = hackney_h3:connect(<<"cloudflare.com">>, 443),
+    case Result of
+        {ok, ConnRef} ->
+            hackney_h3:close(ConnRef),
+            ok;
+        {error, Reason} ->
+            %% Connection issues are acceptable in test environments
+            ?debugFmt("HTTP/3 connect failed: ~p", [Reason]),
+            ok
     end.
 
 %% Test hackney_h3:parse_response_headers
@@ -103,30 +91,25 @@ hackney_conn_http3_config_test_() ->
     }.
 
 test_conn_http3_option() ->
-    case hackney_quic:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Test that hackney_conn can be started with HTTP/3 configuration
-            Opts = #{
-                host => "cloudflare.com",
-                port => 443,
-                transport => hackney_ssl,
-                connect_options => [{protocols, [http3, http2, http1]}],
-                connect_timeout => 10000
-            },
-            {ok, Pid} = hackney_conn:start_link(Opts),
-            ?assert(is_pid(Pid)),
-            %% Connect - this should try HTTP/3 first
-            Result = hackney_conn:connect(Pid),
-            hackney_conn:stop(Pid),
-            case Result of
-                ok ->
-                    ok;
-                {error, Reason} ->
-                    %% HTTP/3 might fail and fall back to HTTP/2 or HTTP/1
-                    %% That's acceptable behavior
-                    ?debugFmt("Connect result: ~p", [Reason]),
-                    ok
-            end
+    %% Test that hackney_conn can be started with HTTP/3 configuration
+    Opts = #{
+        host => "cloudflare.com",
+        port => 443,
+        transport => hackney_ssl,
+        connect_options => [{protocols, [http3, http2, http1]}],
+        connect_timeout => 10000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ?assert(is_pid(Pid)),
+    %% Connect - this should try HTTP/3 first
+    Result = hackney_conn:connect(Pid),
+    hackney_conn:stop(Pid),
+    case Result of
+        ok ->
+            ok;
+        {error, Reason} ->
+            %% HTTP/3 might fail and fall back to HTTP/2 or HTTP/1
+            %% That's acceptable behavior
+            ?debugFmt("Connect result: ~p", [Reason]),
+            ok
     end.

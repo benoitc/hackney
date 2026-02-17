@@ -35,11 +35,6 @@
       %% Source code
       "src",
       "include",
-      %% C source and vendored dependencies (QUIC NIF)
-      "c_src",
-      %% Build scripts
-      "do_cmake.sh",
-      "do_quic.sh",
       %% Configuration
       "rebar.config",
       "rebar.lock",

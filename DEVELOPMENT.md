@@ -6,33 +6,30 @@ This guide covers development setup, testing, and contributing to hackney.
 
 - Erlang/OTP 27 or later
 - rebar3 3.24.0 or later
-- CMake 3.14 or later
-- Go (for building BoringSSL)
-- zlib development headers
 
 ### Platform-specific requirements
 
 **macOS:**
 ```bash
-brew install erlang cmake go zlib
+brew install erlang
 ```
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get install erlang cmake golang zlib1g-dev build-essential
+sudo apt-get install erlang build-essential
 ```
 
 **FreeBSD:**
 ```bash
-pkg install erlang-runtime28 rebar3 cmake git gmake go llvm18
+pkg install erlang-runtime28 rebar3
 ```
 
 ## Building
 
-Clone the repository with submodules:
+Clone the repository:
 
 ```bash
-git clone --recursive https://github.com/benoitc/hackney.git
+git clone https://github.com/benoitc/hackney.git
 cd hackney
 ```
 
@@ -42,9 +39,7 @@ Build the project:
 rebar3 compile
 ```
 
-This will:
-1. Compile all Erlang source files
-2. Build the QUIC NIF (BoringSSL + lsquic + hackney_quic)
+This will compile all Erlang source files and fetch dependencies (including the pure Erlang QUIC library for HTTP/3 support).
 
 ## Running Tests
 
@@ -106,62 +101,22 @@ docker run --rm -it hackney-test bash
 Then you can:
 - Run tests manually: `rebar3 eunit`
 - Start an Erlang shell: `rebar3 shell`
-- Inspect the build: `ls -la priv/`
-
-### Debugging with core dumps
-
-Enable core dumps for debugging segfaults:
-
-```bash
-docker run --rm --ulimit core=-1 hackney-test bash -c "
-    ulimit -c unlimited
-    rebar3 eunit || (ls -la core* 2>/dev/null; gdb -batch -ex bt /usr/local/bin/erl core*)
-"
-```
 
 ## QUIC/HTTP3 Development
 
-The QUIC implementation uses:
-- **BoringSSL** - Google's fork of OpenSSL (required for QUIC TLS 1.3)
-- **lsquic** - LiteSpeed QUIC library
+HTTP/3 support uses a pure Erlang QUIC implementation from the `quic` dependency.
 
-### NIF Source Files
+### Source Files
 
-- `c_src/hackney_quic_nif.c` - NIF entry points
-- `c_src/quic_conn.c` - Connection management
-- `c_src/quic_conn.h` - Connection structures and declarations
-- `c_src/atoms.h` - Atom definitions
+- `src/hackney_quic.erl` - QUIC/HTTP3 transport wrapper
+- `src/hackney_qpack.erl` - QPACK header compression
+- `src/hackney_h3.erl` - HTTP/3 high-level API
 
-### Building the NIF
-
-The NIF is built automatically by rebar3 using CMake. To rebuild from scratch:
-
-```bash
-rm -rf _build/cmake priv/*.so
-rebar3 compile
-```
-
-### CMake Configuration
-
-The CMake build is configured in `c_src/CMakeLists.txt`. Key options:
-
-- `CMAKE_BUILD_TYPE` - Release (default) or Debug
-- `CMAKE_POSITION_INDEPENDENT_CODE` - Always ON for NIF shared library
-
-### Debugging the NIF
-
-Build with debug symbols:
-
-```bash
-rm -rf _build/cmake
-CMAKE_BUILD_TYPE=Debug rebar3 compile
-```
-
-Use LLDB/GDB to debug:
-
-```bash
-lldb -- erl -pa _build/default/lib/*/ebin
-```
+The underlying QUIC implementation is in the `quic` dependency which provides:
+- TLS 1.3 handshake
+- QUIC packet encoding/decoding
+- Congestion control
+- Loss recovery
 
 ## Code Style
 
@@ -170,13 +125,6 @@ lldb -- erl -pa _build/default/lib/*/ebin
 - Follow standard Erlang conventions
 - Use edoc for function documentation
 - Keep lines under 100 characters
-
-### C
-
-- Use C17 standard
-- Use `enif_alloc`/`enif_free` for memory allocation (not malloc/free)
-- Always check return values
-- Use atomic operations for thread-safe flags
 
 ## Submitting Changes
 

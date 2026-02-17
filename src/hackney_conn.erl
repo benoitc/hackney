@@ -177,7 +177,7 @@
     enable_push = false :: false | pid(),
 
     %% HTTP/3 support (QUIC)
-    %% QUIC connection reference from hackney_quic NIF
+    %% QUIC connection reference from hackney_quic
     h3_conn :: reference() | undefined,
     %% Map of active HTTP/3 streams: StreamId => {From, StreamState}
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
@@ -585,7 +585,7 @@ idle({call, From}, connect, Data) ->
     Protocols = proplists:get_value(protocols, ConnectOpts, hackney_util:default_protocols()),
     ShouldTryHttp3 = TryHttp3 orelse (Transport =:= hackney_ssl andalso lists:member(http3, Protocols)),
 
-    case ShouldTryHttp3 andalso hackney_quic:is_available() of
+    case ShouldTryHttp3 of
         true ->
             %% Try HTTP/3 first
             case try_h3_connect(Host, Port, Timeout, ConnectOpts) of

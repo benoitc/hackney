@@ -1,5 +1,26 @@
 # NEWS
 
+3.1.0 - 2026-02-17
+------------------
+
+### Refactor
+
+- Replace QUIC NIF with pure Erlang implementation. HTTP/3 now works with zero external dependencies - no CMake, Go, or C compiler needed. Just `rebar3 compile`.
+
+### Removed
+
+- Remove c_src/ directory containing lsquic, BoringSSL, and NIF code (~1.3M lines of C)
+- Remove do_cmake.sh and do_quic.sh build scripts
+
+### Added
+
+- Add `hackney_qpack.erl` for QPACK header compression (RFC 9204)
+
+### Changed
+
+- `hackney_quic:is_available/0` now always returns `true` (pure Erlang is always available)
+- Update documentation to reflect no C dependencies
+
 3.0.3 - 2026-02-15
 ------------------
 

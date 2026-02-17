@@ -66,11 +66,7 @@ rebar3 compile
 
 ### Building with QUIC support
 
-QUIC/HTTP3 requires lsquic and BoringSSL (vendored in `c_src/`):
-
-```sh
-HACKNEY_QUIC_OPTS="-DCMAKE_BUILD_TYPE=Release" rebar3 compile
-```
+QUIC/HTTP3 support is included automatically via the pure Erlang `quic` dependency - no additional build steps required.
 
 ### Running Tests
 
