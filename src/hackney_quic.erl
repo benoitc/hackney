@@ -31,6 +31,16 @@
 
 -behaviour(gen_server).
 
+%% Suppress dialyzer warnings due to incomplete type specs in quic library
+-dialyzer({nowarn_function, [
+    init/1,
+    ensure_table/0,
+    register_conn/2,
+    handle_info/2,
+    setup_h3_streams/1
+]}).
+-dialyzer({no_match, [init/1, process_h3_frames/5]}).
+
 %% API
 -export([
     connect/4,
