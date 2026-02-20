@@ -23,6 +23,8 @@ setup() ->
 
 cleanup(_) ->
     hackney_conn_sup:stop_all(),
+    %% Allow time for late UDP packets to be processed
+    timer:sleep(100),
     ok.
 
 %%====================================================================
