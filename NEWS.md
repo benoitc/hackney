@@ -1,5 +1,19 @@
 # NEWS
 
+3.1.1 - 2026-02-20
+------------------
+
+### Bug Fixes
+
+- Fix HTTP/3 Fin flag handling for HEAD requests and responses without body
+- Bump `quic` dependency to 0.7.1 (fixes packet number reconstruction)
+
+### Added
+
+- Add TLS options support in `hackney_quic` (verify, cacerts, cacertfile, SNI)
+- Add redirect following in `hackney_h3` (follow_redirect, max_redirect options)
+- Add HTTP/3 integration and redirect test suites (36 new tests)
+
 3.1.0 - 2026-02-17
 ------------------
 
