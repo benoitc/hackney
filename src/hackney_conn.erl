@@ -903,9 +903,9 @@ connected(info, {ssl, Socket, _UnexpectedData}, #conn_data{socket = Socket, prot
     {next_state, closed, Data#conn_data{socket = undefined}};
 
 %% HTTP/3 QUIC message handling
-connected(info, {quic, ConnRef, {stream_headers, StreamId, Headers, _Fin}},
+connected(info, {quic, ConnRef, {stream_headers, StreamId, Headers, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_headers(StreamId, Headers, Streams, Data);
+    handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
 
 connected(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
@@ -1106,10 +1106,10 @@ streaming_body(info, {ssl_closed, Socket}, #conn_data{socket = Socket} = Data) -
     {next_state, closed, Data#conn_data{socket = undefined}};
 
 %% HTTP/3 QUIC message handling in streaming_body state
-streaming_body(info, {quic, ConnRef, {stream_headers, StreamId, Headers, _Fin}},
+streaming_body(info, {quic, ConnRef, {stream_headers, StreamId, Headers, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     %% Early response headers while still sending body
-    handle_h3_headers(StreamId, Headers, Streams, Data);
+    handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
 
 streaming_body(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
@@ -3096,21 +3096,34 @@ find_streaming_stream(Streams) ->
     Result.
 
 %% @private Handle HTTP/3 response headers
-handle_h3_headers(StreamId, Headers, Streams, Data) ->
+handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
     case hackney_h3:parse_response_headers(Headers) of
         {ok, Status, RespHeaders} ->
             %% RespHeaders from hackney_h3:parse_response_headers is already a list
             HeadersList = RespHeaders,
             case maps:get(StreamId, Streams, undefined) of
                 {From, waiting_headers} ->
-                    %% Sync mode - update stream state to receiving body
-                    UpdatedStreams = maps:put(StreamId,
-                        {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
-                    {keep_state, Data#conn_data{
-                        h3_streams = UpdatedStreams,
-                        status = Status,
-                        response_headers = RespHeaders
-                    }};
+                    case Fin of
+                        true ->
+                            %% Headers with Fin=true means no body (redirect, 204, 304, HEAD response)
+                            %% Reply immediately with empty body
+                            UpdatedStreams = maps:remove(StreamId, Streams),
+                            {keep_state, Data#conn_data{
+                                h3_streams = UpdatedStreams,
+                                status = Status,
+                                response_headers = RespHeaders,
+                                request_from = undefined
+                            }, [{reply, From, {ok, Status, HeadersList, <<>>}}]};
+                        false ->
+                            %% Sync mode - update stream state to receiving body
+                            UpdatedStreams = maps:put(StreamId,
+                                {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
+                            {keep_state, Data#conn_data{
+                                h3_streams = UpdatedStreams,
+                                status = Status,
+                                response_headers = RespHeaders
+                            }}
+                    end;
                 {_From, {waiting_headers_async, AsyncMode, StreamTo, Ref}} ->
                     %% Async mode - send status and headers to StreamTo
                     StreamTo ! {hackney_response, Ref, {status, Status, <<"">>}},

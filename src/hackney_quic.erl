@@ -270,11 +270,8 @@ init({Host, Port, Opts, Owner}) ->
     %% Monitor the owner
     MonRef = erlang:monitor(process, Owner),
 
-    %% ALPN for HTTP/3
-    QuicOpts = Opts#{
-        alpn => [<<"h3">>],
-        verify => maps:get(verify, Opts, false)
-    },
+    %% Build TLS options for QUIC
+    QuicOpts = build_quic_opts(Host, Opts),
 
     %% Connect using the pure Erlang QUIC library
     case quic:connect(binary_to_list(Host), Port, QuicOpts, self()) of
@@ -435,6 +432,62 @@ terminate(_Reason, #state{quic_conn = QuicConn}) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% @private Build QUIC options with TLS configuration
+%% Supports:
+%%   - verify: boolean() | verify_peer | verify_none (certificate verification)
+%%   - cacerts: [der_encoded()] (CA certificates in DER format)
+%%   - cacertfile: string() (path to CA certificate file)
+%%   - depth: non_neg_integer() (certificate chain verification depth)
+%%   - server_name_indication: hostname | disable (SNI)
+%%   - insecure_skip_verify: boolean() (alias for verify => false)
+build_quic_opts(Host, Opts) ->
+    %% ALPN for HTTP/3 - required
+    BaseOpts = #{alpn => [<<"h3">>]},
+
+    %% Handle verify option
+    Verify = case maps:get(insecure_skip_verify, Opts, false) of
+        true -> false;
+        false ->
+            case maps:get(verify, Opts, false) of
+                verify_peer -> true;
+                verify_none -> false;
+                true -> true;
+                false -> false
+            end
+    end,
+    Opts1 = BaseOpts#{verify => Verify},
+
+    %% Add CA certificates if specified
+    Opts2 = case maps:get(cacerts, Opts, undefined) of
+        undefined ->
+            case maps:get(cacertfile, Opts, undefined) of
+                undefined -> Opts1;
+                CACertFile -> Opts1#{cacertfile => CACertFile}
+            end;
+        CACerts -> Opts1#{cacerts => CACerts}
+    end,
+
+    %% Add certificate chain depth if specified
+    Opts3 = case maps:get(depth, Opts, undefined) of
+        undefined -> Opts2;
+        Depth when is_integer(Depth), Depth >= 0 -> Opts2#{depth => Depth}
+    end,
+
+    %% Add Server Name Indication
+    Opts4 = case maps:get(server_name_indication, Opts, undefined) of
+        undefined ->
+            %% Use host as SNI by default
+            HostStr = if is_binary(Host) -> binary_to_list(Host); true -> Host end,
+            Opts3#{server_name_indication => HostStr};
+        disable ->
+            Opts3;
+        SNI when is_list(SNI); is_binary(SNI) ->
+            SNIStr = if is_binary(SNI) -> binary_to_list(SNI); true -> SNI end,
+            Opts3#{server_name_indication => SNIStr}
+    end,
+
+    Opts4.
 
 %% Connection registry using ETS
 %% Table created on first use
