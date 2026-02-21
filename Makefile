@@ -63,6 +63,12 @@ h2spec-test: priv/h2spec compile
 e2e-test: compile
 	@${REBAR} ct --suite=hackney_http2_e2e_SUITE
 
+http3-e2e-test: compile
+	@${REBAR} ct --suite=hackney_http3_e2e_SUITE
+
+all-e2e-test: compile
+	@${REBAR} ct --suite=hackney_http2_e2e_SUITE,hackney_http3_e2e_SUITE
+
 http2-bench: compile
 	@${REBAR} as test compile
 	@erl -pa _build/test/lib/*/ebin -pa _build/test/lib/hackney/test -noshell \
