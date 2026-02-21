@@ -173,8 +173,8 @@
 	remote_lingering_streams = [] :: [hackney_cow_http2:streamid()],
 
 	%% HPACK decoding and encoding state.
-	decode_state = hackney_cow_hpack:init() :: hackney_cow_hpack:state(),
-	encode_state = hackney_cow_hpack:init() :: hackney_cow_hpack:state()
+	decode_state = hackney_hpack:init() :: hackney_hpack:state(),
+	encode_state = hackney_hpack:init() :: hackney_hpack:state()
 }).
 
 -type http2_machine() :: #http2_machine{}.
@@ -540,7 +540,7 @@ client_headers_frame(_, State) ->
 
 headers_decode(Frame=#headers{head=head_fin, data=HeaderData},
 		State=#http2_machine{decode_state=DecodeState0}, Type, Stream) ->
-	try hackney_cow_hpack:decode(HeaderData, DecodeState0) of
+	try hackney_hpack:decode(HeaderData, DecodeState0) of
 		{Headers, DecodeState} when Type =:= request ->
 			headers_enforce_concurrency_limit(Frame,
 				State#http2_machine{decode_state=DecodeState}, Type, Stream, Headers);
@@ -857,7 +857,7 @@ settings_frame({settings, Settings}, State0=#http2_machine{
 	State2 = maps:fold(fun
 		(header_table_size, NewSize, State=#http2_machine{encode_state=EncodeState0}) ->
 			MaxSize = maps:get(max_encode_table_size, Opts, 4096),
-			EncodeState = hackney_cow_hpack:set_max_size(min(NewSize, MaxSize), EncodeState0),
+			EncodeState = hackney_hpack:set_max_size(min(NewSize, MaxSize), EncodeState0),
 			State#http2_machine{encode_state=EncodeState};
 		(initial_window_size, NewWindowSize, State) ->
 			OldWindowSize = maps:get(initial_window_size, Settings0, 65535),
@@ -901,7 +901,7 @@ settings_ack_frame(State0=#http2_machine{settings_timer=TRef,
 		local_settings=Local, next_settings=#{}},
 	{ok, maps:fold(fun
 		(header_table_size, MaxSize, State=#http2_machine{decode_state=DecodeState0}) ->
-			DecodeState = hackney_cow_hpack:set_max_size(MaxSize, DecodeState0),
+			DecodeState = hackney_hpack:set_max_size(MaxSize, DecodeState0),
 			State#http2_machine{decode_state=DecodeState};
 		(initial_window_size, NewWindowSize, State) ->
 			OldWindowSize = maps:get(initial_window_size, Local0, 65535),
@@ -1162,7 +1162,7 @@ prepare_headers(StreamID, State=#http2_machine{encode_state=EncodeState0},
 		_ -> IsFin0
 	end,
 	Headers = merge_pseudo_headers(PseudoHeaders, remove_http11_headers(Headers0)),
-	{HeaderBlock, EncodeState} = hackney_cow_hpack:encode(Headers, EncodeState0),
+	{HeaderBlock, EncodeState} = hackney_hpack:encode(Headers, EncodeState0),
 	{ok, IsFin, HeaderBlock, stream_store(Stream#stream{local=IsFin0},
 		State#http2_machine{encode_state=EncodeState})}.
 
@@ -1181,7 +1181,7 @@ prepare_push_promise(StreamID, State=#http2_machine{encode_state=EncodeState0,
 		false -> undefined
 	end,
 	Headers = merge_pseudo_headers(PseudoHeaders, remove_http11_headers(Headers0)),
-	{HeaderBlock, EncodeState} = hackney_cow_hpack:encode(Headers, EncodeState0),
+	{HeaderBlock, EncodeState} = hackney_hpack:encode(Headers, EncodeState0),
 	{ok, LocalStreamID, HeaderBlock, stream_store(
 		#stream{id=LocalStreamID, method=maps:get(method, PseudoHeaders),
 			remote=fin, remote_expected_size=0,
@@ -1220,7 +1220,7 @@ merge_pseudo_headers(PseudoHeaders, Headers0) ->
 	-> {ok, iodata(), State} when State::http2_machine().
 prepare_trailers(StreamID, State=#http2_machine{encode_state=EncodeState0}, Trailers) ->
 	Stream = #stream{local=nofin} = stream_get(StreamID, State),
-	{HeaderBlock, EncodeState} = hackney_cow_hpack:encode(Trailers, EncodeState0),
+	{HeaderBlock, EncodeState} = hackney_hpack:encode(Trailers, EncodeState0),
 	{ok, HeaderBlock, stream_store(Stream#stream{local=fin},
 		State#http2_machine{encode_state=EncodeState})}.
 
