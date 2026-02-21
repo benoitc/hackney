@@ -1,11 +1,49 @@
 # NEWS
 
+3.2.0 - 2026-02-21
+------------------
+
+### Refactor
+
+- Replace all cowlib modules with hackney-native implementations
+  - `hackney_cow_http2_machine` → `hackney_http2_machine` (with optimizations)
+  - `hackney_cow_http2` → `hackney_http2`
+  - `hackney_cow_deflate` → `hackney_deflate`
+  - `hackney_cow_ws` → `hackney_ws_proto`
+  - Remove `hackney_cow_hpack` (already replaced by `hackney_hpack`)
+
+### Performance
+
+- HTTP/2 state machine optimizations:
+  - Stream caching for recently accessed streams
+  - gb_sets for lingering streams (O(log N) vs O(N) lookups)
+  - IOList accumulation for header fragments
+- HPACK and QPACK header compression with O(1) static table lookups
+
+### Added
+
+- h2spec HTTP/2 compliance testing (95% pass rate - 139/146 tests)
+  - `h2spec_server.erl`: Minimal HTTP/2 server for compliance testing
+  - `h2spec_SUITE.erl`: CT suite for running h2spec tests
+  - Makefile target: `make h2spec-test`
+- HTTP/3 E2E tests against real servers
+  - `hackney_http3_e2e_SUITE.erl`: Tests against Cloudflare, Google, quic.tech
+  - Makefile targets: `make http3-e2e-test`, `make all-e2e-test`
+- HTTP/2 machine benchmarks (`hackney_http2_machine_bench.erl`)
+
+### Bug Fixes
+
+- Fix HTTP/2 flow control for body sending (use `send_or_queue_data/4`)
+- Fix async 204/304/HEAD responses not sending `done` message
+- Fix unknown HTTP/2 frame types not being ignored (RFC 7540 4.1)
+- Fix HTTP/2 frame size validation
+
 3.1.2 - 2026-02-21
 ------------------
 
 ### Dependencies
 
-- Bump `quic` dependency to 0.10.1
+- Bump `quic` dependency to 0.10.2
 
 3.1.1 - 2026-02-20
 ------------------
