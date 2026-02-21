@@ -227,7 +227,7 @@ to_binary(Headers) ->
 
 %% @doc Parse Content-Type header into {Type, SubType, Params}.
 %% The charset parameter is lowercased as it's case insensitive.
-%% Example: <<"text/html; charset=UTF-8">> -> {<<"text">>, <<"html">>, [{<<"charset">>, <<"utf-8">>}]}
+%% Example: `<<"text/html; charset=UTF-8">> -> {<<"text">>, <<"html">>, [{<<"charset">>, <<"utf-8">>}]}'
 -spec parse_content_type(binary()) -> {binary(), binary(), [{binary(), binary()}]} | {error, badarg}.
 parse_content_type(Data) ->
   parse_media_type(Data,
