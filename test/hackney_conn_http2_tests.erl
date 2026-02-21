@@ -58,7 +58,7 @@ get_protocol_idle_test() ->
 
 h2_machine_init_test() ->
     Opts = #{preface_timeout => infinity, settings_timeout => infinity},
-    {ok, Preface, Machine} = hackney_cow_http2_machine:init(client, Opts),
+    {ok, Preface, Machine} = hackney_http2_machine:init(client, Opts),
     ?assert(is_binary(iolist_to_binary(Preface))),
     ?assert(is_tuple(Machine)),
     PrefaceBin = iolist_to_binary(Preface),

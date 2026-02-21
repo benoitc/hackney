@@ -17,7 +17,7 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(hackney_cow_http2).
+-module(hackney_http2).
 
 %% Parsing.
 -export([parse_sequence/1]).

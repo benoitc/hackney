@@ -102,7 +102,7 @@
     ws_accept :: binary() | undefined,
     ws_protocol :: binary() | undefined,
 
-    %% Frame parsing state (for hackney_cow_ws)
+    %% Frame parsing state (for hackney_ws_proto)
     frag_state = undefined :: term(),
     frag_buffer = [] :: list(),  %% Accumulated fragment payloads
     utf8_state = 0 :: integer(),
@@ -569,7 +569,7 @@ do_handshake(#ws_data{socket = Socket, transport = Transport, host = Host,
                       port = Port, path = Path, headers = ExtraHeaders,
                       protocols = Protocols} = Data) ->
     %% Generate random key
-    Key = hackney_cow_ws:key(),
+    Key = hackney_ws_proto:key(),
 
     %% Build Host header
     Host1 = case is_binary(Host) of
@@ -620,7 +620,7 @@ do_handshake(#ws_data{socket = Socket, transport = Transport, host = Host,
             case read_handshake_response(Socket, Transport, <<>>) of
                 {ok, Status, ResponseHeaders, Rest} when Status =:= 101 ->
                     %% Validate response
-                    ExpectedAccept = hackney_cow_ws:encode_key(Key),
+                    ExpectedAccept = hackney_ws_proto:encode_key(Key),
                     case validate_handshake(ResponseHeaders, ExpectedAccept) of
                         ok ->
                             Protocol = get_header_value(<<"sec-websocket-protocol">>, ResponseHeaders),
@@ -739,7 +739,7 @@ validate_handshake(Headers, ExpectedAccept) ->
 %% @private Send a WebSocket frame
 do_send_frame(Frame, #ws_data{socket = Socket, transport = Transport, extensions = Exts}) ->
     %% Client frames must be masked
-    EncodedFrame = hackney_cow_ws:masked_frame(Frame, Exts),
+    EncodedFrame = hackney_ws_proto:masked_frame(Frame, Exts),
     Transport:send(Socket, EncodedFrame).
 
 %% @private Receive a WebSocket frame (passive mode)
@@ -749,7 +749,7 @@ do_recv_frame(#ws_data{buffer = Buffer} = Data, Timeout) ->
 do_recv_frame(Buffer, #ws_data{socket = Socket, transport = Transport,
                                 frag_state = FragState, extensions = Exts,
                                 utf8_state = Utf8State} = Data, Timeout) ->
-    case hackney_cow_ws:parse_header(Buffer, Exts, FragState) of
+    case hackney_ws_proto:parse_header(Buffer, Exts, FragState) of
         more ->
             %% Need more data
             case Transport:recv(Socket, 0, Timeout) of
@@ -766,7 +766,7 @@ do_recv_frame(Buffer, #ws_data{socket = Socket, transport = Transport,
     end.
 
 %% @private Parse frame payload
-%% hackney_cow_ws:parse_payload/9 signature:
+%% hackney_ws_proto:parse_payload/9 signature:
 %%   parse_payload(Data, MaskKey, Utf8State, ParsedLen, Type, Len, FragState, Extensions, Rsv)
 %% Returns:
 %%   {ok, Payload, Utf8State, Rest} - non-close frame completed
@@ -779,7 +779,7 @@ parse_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
                        extensions = Exts, frag_buffer = FragBuffer} = Data,
               Timeout, Utf8State) ->
     %% ParsedLen = 0 for new frames
-    case hackney_cow_ws:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
+    case hackney_ws_proto:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
         {ok, CloseCode, Payload, Utf8State1, Rest} when Type =:= close ->
             %% Close frame with code
             Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
@@ -798,13 +798,13 @@ parse_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
                     %% Final fragment - assemble full message
                     AllPayloads = lists:reverse([Payload | FragBuffer]),
                     FullPayload = iolist_to_binary(AllPayloads),
-                    Frame = hackney_cow_ws:make_frame(FragType, FullPayload, undefined, undefined),
+                    Frame = hackney_ws_proto:make_frame(FragType, FullPayload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
                                          frag_buffer = [], utf8_state = Utf8State1},
                     handle_received_frame(Frame, Data1, Timeout);
                 undefined ->
                     %% Complete non-fragmented frame
-                    Frame = hackney_cow_ws:make_frame(Type, Payload, undefined, undefined),
+                    Frame = hackney_ws_proto:make_frame(Type, Payload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
                                          frag_buffer = [], utf8_state = Utf8State1},
                     handle_received_frame(Frame, Data1, Timeout)
@@ -884,7 +884,7 @@ parse_active_frames(Data) ->
 
 parse_active_frames(#ws_data{buffer = Buffer, frag_state = FragState,
                               extensions = Exts, utf8_state = Utf8State} = Data, Acc) ->
-    case hackney_cow_ws:parse_header(Buffer, Exts, FragState) of
+    case hackney_ws_proto:parse_header(Buffer, Exts, FragState) of
         more ->
             {ok, lists:reverse(Acc), Data};
         error ->
@@ -919,7 +919,7 @@ parse_active_frames(#ws_data{buffer = Buffer, frag_state = FragState,
 parse_active_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
                      #ws_data{extensions = Exts, frag_buffer = FragBuffer} = Data,
                      Utf8State) ->
-    case hackney_cow_ws:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
+    case hackney_ws_proto:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
         {ok, CloseCode, Payload, Utf8State1, Rest} when Type =:= close ->
             %% Close frame with code
             Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
@@ -938,13 +938,13 @@ parse_active_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
                     %% Final fragment
                     AllPayloads = lists:reverse([Payload | FragBuffer]),
                     FullPayload = iolist_to_binary(AllPayloads),
-                    Frame = hackney_cow_ws:make_frame(FragType, FullPayload, undefined, undefined),
+                    Frame = hackney_ws_proto:make_frame(FragType, FullPayload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
                                          frag_buffer = [], utf8_state = Utf8State1},
                     {ok, Frame, Data1};
                 undefined ->
                     %% Complete non-fragmented frame
-                    Frame = hackney_cow_ws:make_frame(Type, Payload, undefined, undefined),
+                    Frame = hackney_ws_proto:make_frame(Type, Payload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
                                          frag_buffer = [], utf8_state = Utf8State1},
                     {ok, Frame, Data1}
@@ -961,9 +961,9 @@ parse_active_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
 %% parse_payload(Data, MaskKey, Utf8State, ParsedLen, Type, Len, FragState, Exts, Rsv)
 parse_close_response(SocketData, #ws_data{buffer = Buffer, extensions = Exts}) ->
     FullBuffer = <<Buffer/binary, SocketData/binary>>,
-    case hackney_cow_ws:parse_header(FullBuffer, Exts, undefined) of
+    case hackney_ws_proto:parse_header(FullBuffer, Exts, undefined) of
         {close, FragState, Rsv, Len, MaskKey, Rest} ->
-            case hackney_cow_ws:parse_payload(Rest, MaskKey, 0, 0, close, Len, FragState, Exts, Rsv) of
+            case hackney_ws_proto:parse_payload(Rest, MaskKey, 0, 0, close, Len, FragState, Exts, Rsv) of
                 {ok, Code, Reason, _, _} ->
                     {ok, Code, Reason};
                 _ ->

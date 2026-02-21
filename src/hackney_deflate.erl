@@ -18,7 +18,7 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(hackney_cow_deflate).
+-module(hackney_deflate).
 
 -export([inflate/3]).
 

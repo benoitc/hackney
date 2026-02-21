@@ -17,7 +17,7 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(hackney_cow_ws).
+-module(hackney_ws_proto).
 
 -export([key/0]).
 -export([encode_key/1]).
@@ -576,7 +576,7 @@ mask(<<>>, _, Unmasked) ->
 
 inflate_frame(Data, Inflate, TakeOver, MaxInflateSize, FragState, true)
 		when FragState =:= undefined; element(1, FragState) =:= fin ->
-	case hackney_cow_deflate:inflate(Inflate, [Data, <<0, 0, 255, 255>>], MaxInflateSize) of
+	case hackney_deflate:inflate(Inflate, [Data, <<0, 0, 255, 255>>], MaxInflateSize) of
 		{ok, Data2} ->
 			case TakeOver of
 				no_takeover -> zlib:inflateReset(Inflate);
@@ -589,7 +589,7 @@ inflate_frame(Data, Inflate, TakeOver, MaxInflateSize, FragState, true)
 			{error, badsize}
 	end;
 inflate_frame(Data, Inflate, _T, MaxInflateSize, _F, _E) ->
-	case hackney_cow_deflate:inflate(Inflate, Data, MaxInflateSize) of
+	case hackney_deflate:inflate(Inflate, Data, MaxInflateSize) of
 		{ok, Data2} ->
 			{ok, iolist_to_binary(Data2)};
 		{error, data_error} ->

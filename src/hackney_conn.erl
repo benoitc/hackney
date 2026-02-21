@@ -168,7 +168,7 @@
     %% HTTP/2 support
     %% Protocol negotiated via ALPN (http1, http2, or http3)
     protocol = http1 :: http1 | http2 | http3,
-    %% HTTP/2 connection state machine (from hackney_cow_http2_machine)
+    %% HTTP/2 connection state machine (from hackney_http2_machine)
     h2_machine :: tuple() | undefined,
     %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
     %% StreamState: waiting_headers | waiting_body | done | {push, Headers}
@@ -2256,7 +2256,7 @@ do_tcp_connect(From, Data) ->
 init_h2_connection(Socket, Data, From) ->
     #conn_data{transport = Transport} = Data,
     %% Initialize HTTP/2 state machine in client mode
-    {ok, Preface, H2Machine} = hackney_cow_http2_machine:init(client, #{}),
+    {ok, Preface, H2Machine} = hackney_http2_machine:init(client, #{}),
     %% Send HTTP/2 connection preface (includes SETTINGS frame)
     case Transport:send(Socket, Preface) of
         ok ->
@@ -2280,7 +2280,7 @@ init_h2_connection(Socket, Data, From) ->
 init_h2_after_upgrade(SslSocket, Data, From) ->
     #conn_data{transport = Transport} = Data,
     %% Initialize HTTP/2 state machine in client mode
-    {ok, Preface, H2Machine} = hackney_cow_http2_machine:init(client, #{}),
+    {ok, Preface, H2Machine} = hackney_http2_machine:init(client, #{}),
     %% Send HTTP/2 connection preface (includes SETTINGS frame)
     case Transport:send(SslSocket, Preface) of
         ok ->
@@ -2312,7 +2312,7 @@ do_h2_request(From, Method, Path, Headers, Body, Data) ->
 
     %% Initialize a new stream
     MethodBin = to_binary(Method),
-    {ok, StreamId, H2Machine1} = hackney_cow_http2_machine:init_stream(MethodBin, H2Machine0),
+    {ok, StreamId, H2Machine1} = hackney_http2_machine:init_stream(MethodBin, H2Machine0),
 
     %% Build pseudo-headers
     Scheme = case Transport of
@@ -2343,9 +2343,9 @@ do_h2_request(From, Method, Path, Headers, Body, Data) ->
     end,
 
     %% Prepare headers using h2_machine
-    {ok, _IsFin2, HeaderBlock, H2Machine2} = hackney_cow_http2_machine:prepare_headers(StreamId, H2Machine1, IsFin, PseudoHeaders, H2Headers),
+    {ok, _IsFin2, HeaderBlock, H2Machine2} = hackney_http2_machine:prepare_headers(StreamId, H2Machine1, IsFin, PseudoHeaders, H2Headers),
     %% Build and send HEADERS frame
-    HeadersFrame = hackney_cow_http2:headers(StreamId, IsFin, HeaderBlock),
+    HeadersFrame = hackney_http2:headers(StreamId, IsFin, HeaderBlock),
     case Transport:send(Socket, HeadersFrame) of
         ok ->
             %% Send body if present
@@ -2392,7 +2392,7 @@ do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, _Fol
 
     %% Initialize a new stream
     MethodBin = to_binary(Method),
-    {ok, StreamId, H2Machine1} = hackney_cow_http2_machine:init_stream(MethodBin, H2Machine0),
+    {ok, StreamId, H2Machine1} = hackney_http2_machine:init_stream(MethodBin, H2Machine0),
 
     %% Build pseudo-headers
     Scheme = case Transport of
@@ -2423,9 +2423,9 @@ do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, _Fol
     end,
 
     %% Prepare headers using h2_machine
-    {ok, _IsFin2, HeaderBlock, H2Machine2} = hackney_cow_http2_machine:prepare_headers(StreamId, H2Machine1, IsFin, PseudoHeaders, H2Headers),
+    {ok, _IsFin2, HeaderBlock, H2Machine2} = hackney_http2_machine:prepare_headers(StreamId, H2Machine1, IsFin, PseudoHeaders, H2Headers),
     %% Build and send HEADERS frame
-    HeadersFrame = hackney_cow_http2:headers(StreamId, IsFin, HeaderBlock),
+    HeadersFrame = hackney_http2:headers(StreamId, IsFin, HeaderBlock),
     case Transport:send(Socket, HeadersFrame) of
         ok ->
             %% Send body if present
@@ -2468,7 +2468,7 @@ send_h2_body(Transport, Socket, StreamId, Body, H2Machine) ->
     %% For now, send entire body in one DATA frame
     %% TODO: Respect flow control window and split large bodies
     BodyBin = iolist_to_binary(Body),
-    DataFrame = hackney_cow_http2:data(StreamId, fin, BodyBin),
+    DataFrame = hackney_http2:data(StreamId, fin, BodyBin),
     case Transport:send(Socket, DataFrame) of
         ok -> {ok, H2Machine};
         {error, Reason} -> {error, Reason}
@@ -2543,7 +2543,7 @@ handle_h2_data(RecvData, Data) ->
 
 %% @private Parse HTTP/2 frames from buffer
 parse_h2_frames(Buffer, Data) ->
-    case hackney_cow_http2:parse(Buffer) of
+    case hackney_http2:parse(Buffer) of
         {ok, Frame, Rest} ->
             case handle_h2_frame(Frame, Data) of
                 {ok, NewData} ->
@@ -2563,10 +2563,10 @@ parse_h2_frames(Buffer, Data) ->
 handle_h2_frame({settings, Settings}, Data) ->
     %% Server SETTINGS frame - acknowledge and update machine
     #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
-    case hackney_cow_http2_machine:frame({settings, Settings}, H2Machine) of
+    case hackney_http2_machine:frame({settings, Settings}, H2Machine) of
         {ok, H2Machine2} ->
             %% Send SETTINGS ACK
-            SettingsAck = hackney_cow_http2:settings_ack(),
+            SettingsAck = hackney_http2:settings_ack(),
             case Transport:send(Socket, SettingsAck) of
                 ok -> {ok, Data#conn_data{h2_machine = H2Machine2}};
                 {error, Reason} -> {error, Reason, Data}
@@ -2578,7 +2578,7 @@ handle_h2_frame({settings, Settings}, Data) ->
 handle_h2_frame(settings_ack, Data) ->
     %% Server acknowledged our SETTINGS
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame(settings_ack, H2Machine) of
+    case hackney_http2_machine:frame(settings_ack, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2599,7 +2599,7 @@ handle_h2_frame({headers, StreamId, IsFin, HeadFin, Exclusive, DepStreamId, Weig
 handle_h2_frame({data, StreamId, IsFin, BodyData}, Data) ->
     %% Response body data received
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({data, StreamId, IsFin, BodyData}, H2Machine) of
+    case hackney_http2_machine:frame({data, StreamId, IsFin, BodyData}, H2Machine) of
         {ok, {data, StreamId, RespIsFin, RespData}, H2Machine2} ->
             %% h2_machine may return processed data
             do_handle_h2_data_body(StreamId, RespIsFin, RespData, H2Machine2, Data);
@@ -2613,9 +2613,9 @@ handle_h2_frame({data, StreamId, IsFin, BodyData}, Data) ->
 handle_h2_frame({ping, Opaque}, Data) ->
     %% Respond to PING with PING ACK
     #conn_data{transport = Transport, socket = Socket, h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({ping, Opaque}, H2Machine) of
+    case hackney_http2_machine:frame({ping, Opaque}, H2Machine) of
         {ok, H2Machine2} ->
-            PingAck = hackney_cow_http2:ping_ack(Opaque),
+            PingAck = hackney_http2:ping_ack(Opaque),
             Transport:send(Socket, PingAck),
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2625,7 +2625,7 @@ handle_h2_frame({ping, Opaque}, Data) ->
 handle_h2_frame({ping_ack, _Opaque}, Data) ->
     %% PING ACK received - ignore
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({ping_ack, _Opaque}, H2Machine) of
+    case hackney_http2_machine:frame({ping_ack, _Opaque}, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2635,7 +2635,7 @@ handle_h2_frame({ping_ack, _Opaque}, Data) ->
 handle_h2_frame({goaway, LastStreamId, ErrorCode, _DebugData}, Data) ->
     %% Server is going away
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({goaway, LastStreamId, ErrorCode, _DebugData}, H2Machine) of
+    case hackney_http2_machine:frame({goaway, LastStreamId, ErrorCode, _DebugData}, H2Machine) of
         {ok, {goaway, _, _, _}, H2Machine2} ->
             {error, {goaway, ErrorCode}, Data#conn_data{h2_machine = H2Machine2}};
         {ok, H2Machine2} ->
@@ -2647,7 +2647,7 @@ handle_h2_frame({goaway, LastStreamId, ErrorCode, _DebugData}, Data) ->
 handle_h2_frame({window_update, Increment}, Data) ->
     %% Connection-level window update
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({window_update, Increment}, H2Machine) of
+    case hackney_http2_machine:frame({window_update, Increment}, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2657,7 +2657,7 @@ handle_h2_frame({window_update, Increment}, Data) ->
 handle_h2_frame({window_update, StreamId, Increment}, Data) ->
     %% Stream-level window update
     #conn_data{h2_machine = H2Machine} = Data,
-    case hackney_cow_http2_machine:frame({window_update, StreamId, Increment}, H2Machine) of
+    case hackney_http2_machine:frame({window_update, StreamId, Increment}, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2681,13 +2681,13 @@ handle_h2_frame({push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock}
     #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket,
                enable_push = EnablePush, h2_streams = Streams} = Data,
     Frame = {push_promise, StreamId, HeadFin, PromisedStreamId, HeaderBlock},
-    case hackney_cow_http2_machine:frame(Frame, H2Machine) of
+    case hackney_http2_machine:frame(Frame, H2Machine) of
         {ok, {push_promise, OriginStreamId, PromisedStreamId2, Headers, PseudoHeaders}, H2Machine2} ->
             handle_push_promise(EnablePush, OriginStreamId, PromisedStreamId2, Headers, PseudoHeaders,
                                 Streams, H2Machine2, Transport, Socket, Data);
         {ok, H2Machine2} ->
             %% Machine processed but didn't decode headers - reject
-            RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId, refused_stream),
+            RstFrame = hackney_http2:rst_stream(PromisedStreamId, refused_stream),
             Transport:send(Socket, RstFrame),
             {ok, Data#conn_data{h2_machine = H2Machine2}};
         {error, Reason, _H2Machine} ->
@@ -2702,7 +2702,7 @@ handle_h2_frame(_Frame, Data) ->
 handle_push_promise(false, _OriginStreamId, PromisedStreamId, _Headers, _PseudoHeaders,
                     _Streams, H2Machine, Transport, Socket, Data) ->
     %% Push disabled - reject with RST_STREAM (REFUSED_STREAM = 0x7)
-    RstFrame = hackney_cow_http2:rst_stream(PromisedStreamId, refused_stream),
+    RstFrame = hackney_http2:rst_stream(PromisedStreamId, refused_stream),
     Transport:send(Socket, RstFrame),
     {ok, Data#conn_data{h2_machine = H2Machine}};
 handle_push_promise(PushHandler, OriginStreamId, PromisedStreamId, Headers, PseudoHeaders,
@@ -2799,23 +2799,23 @@ do_handle_h2_data_body(StreamId, IsFin, BodyData, H2Machine0, Data) ->
 %% Type can be 'connection' for connection-level or StreamId for stream-level
 maybe_send_window_update(connection, DataLen, H2Machine, Transport, Socket) ->
     %% Check connection-level window
-    case hackney_cow_http2_machine:ensure_window(DataLen, H2Machine) of
+    case hackney_http2_machine:ensure_window(DataLen, H2Machine) of
         ok ->
             {H2Machine, ok};
         {ok, Increment, H2Machine2} ->
             %% Send connection-level WINDOW_UPDATE
-            Frame = hackney_cow_http2:window_update(Increment),
+            Frame = hackney_http2:window_update(Increment),
             _ = Transport:send(Socket, Frame),
             {H2Machine2, ok}
     end;
 maybe_send_window_update(StreamId, DataLen, H2Machine, Transport, Socket) when is_integer(StreamId) ->
     %% Check stream-level window
-    case hackney_cow_http2_machine:ensure_window(StreamId, DataLen, H2Machine) of
+    case hackney_http2_machine:ensure_window(StreamId, DataLen, H2Machine) of
         ok ->
             {H2Machine, ok};
         {ok, Increment, H2Machine2} ->
             %% Send stream-level WINDOW_UPDATE
-            Frame = hackney_cow_http2:window_update(StreamId, Increment),
+            Frame = hackney_http2:window_update(StreamId, Increment),
             _ = Transport:send(Socket, Frame),
             {H2Machine2, ok}
     end.
@@ -2823,7 +2823,7 @@ maybe_send_window_update(StreamId, DataLen, H2Machine, Transport, Socket) when i
 %% @private Handle HTTP/2 headers response
 do_handle_h2_headers(StreamId, _IsFin, Frame, Data) ->
     #conn_data{h2_machine = H2Machine, h2_streams = Streams} = Data,
-    case hackney_cow_http2_machine:frame(Frame, H2Machine) of
+    case hackney_http2_machine:frame(Frame, H2Machine) of
         {ok, {headers, StreamId, RespIsFin, Headers, PseudoHeaders, _Len}, H2Machine2} ->
             %% Response headers received
             %% PseudoHeaders contains #{status => Status} for responses

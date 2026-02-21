@@ -38,3 +38,32 @@ quic-deps-update:
 quic-clean:
 	@rm -rf _build/cmake
 	@rm -f priv/hackney_quic.so priv/hackney_quic.dll
+
+# h2spec HTTP/2 compliance testing
+H2SPEC_VERSION ?= 2.6.0
+
+priv/h2spec:
+	@mkdir -p priv
+	@echo "Downloading h2spec v$(H2SPEC_VERSION)..."
+	@OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
+	ARCH=$$(uname -m); \
+	if [ "$$ARCH" = "x86_64" ]; then ARCH="amd64"; fi; \
+	if [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then \
+		if [ "$$OS" = "darwin" ]; then ARCH="amd64"; else ARCH="arm64"; fi; \
+	fi; \
+	curl -sL "https://github.com/summerwind/h2spec/releases/download/v$(H2SPEC_VERSION)/h2spec_$${OS}_$${ARCH}.tar.gz" | \
+	tar xz -C priv
+
+download-h2spec: priv/h2spec
+	@echo "h2spec installed at priv/h2spec"
+
+h2spec-test: priv/h2spec compile
+	@${REBAR} ct --suite=h2spec_SUITE
+
+e2e-test: compile
+	@${REBAR} ct --suite=hackney_http2_e2e_SUITE
+
+http2-bench: compile
+	@${REBAR} as test compile
+	@erl -pa _build/test/lib/*/ebin -pa _build/test/lib/hackney/test -noshell \
+		-eval 'hackney_http2_machine_bench:run().' -s init stop

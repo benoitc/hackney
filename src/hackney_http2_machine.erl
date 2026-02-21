@@ -17,7 +17,7 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(hackney_cow_http2_machine).
+-module(hackney_http2_machine).
 
 -export([init/2]).
 -export([init_stream/2]).
@@ -79,25 +79,25 @@
 }).
 
 -record(stream, {
-	id = undefined :: hackney_cow_http2:streamid(),
+	id = undefined :: hackney_http2:streamid(),
 
 	%% Request method.
 	method = undefined :: binary(),
 
 	%% Whether we finished sending data.
-	local = idle :: idle | hackney_cow_http2:fin(),
+	local = idle :: idle | hackney_http2:fin(),
 
 	%% Local flow control window (how much we can send).
 	local_window :: integer(),
 
 	%% Buffered data waiting for the flow control window to increase.
 	local_buffer = queue:new() ::
-		queue:queue({hackney_cow_http2:fin(), non_neg_integer(), {data, iodata()} | #sendfile{}}),
+		queue:queue({hackney_http2:fin(), non_neg_integer(), {data, iodata()} | #sendfile{}}),
 	local_buffer_size = 0 :: non_neg_integer(),
 	local_trailers = undefined :: undefined | headers(),
 
 	%% Whether we finished receiving data.
-	remote = idle :: idle | hackney_cow_http2:fin(),
+	remote = idle :: idle | hackney_http2:fin(),
 
 	%% Remote flow control window (how much we accept to receive).
 	remote_window :: integer(),
@@ -114,8 +114,8 @@
 -type stream() :: #stream{}.
 
 -type continued_frame() ::
-	{headers, hackney_cow_http2:streamid(), hackney_cow_http2:fin(), hackney_cow_http2:head_fin(), binary()} |
-	{push_promise, hackney_cow_http2:streamid(), hackney_cow_http2:head_fin(), hackney_cow_http2:streamid(), binary()}.
+	{headers, hackney_http2:streamid(), hackney_http2:fin(), hackney_http2:head_fin(), iodata()} |
+	{push_promise, hackney_http2:streamid(), hackney_http2:head_fin(), hackney_http2:streamid(), iodata()}.
 
 -record(http2_machine, {
 	%% Whether the HTTP/2 endpoint is a client or a server.
@@ -160,17 +160,26 @@
 
 	%% Currently active HTTP/2 streams. Streams may be initiated either
 	%% by the client or by the server through PUSH_PROMISE frames.
-	streams = #{} :: #{hackney_cow_http2:streamid() => stream()},
+	streams = #{} :: #{hackney_http2:streamid() => stream()},
+
+	%% OPTIMIZATION: Cache for recently accessed stream to avoid repeated map lookups.
+	%% DATA frames, HEADERS, WINDOW_UPDATE all lookup same stream repeatedly.
+	%% Set to undefined when cache is invalid (stream closed, stored, etc.)
+	active_stream = undefined :: undefined | {hackney_http2:streamid(), stream()},
 
 	%% HTTP/2 streams that have recently been reset locally.
 	%% We are expected to keep receiving additional frames after
 	%% sending an RST_STREAM.
-	local_lingering_streams = [] :: [hackney_cow_http2:streamid()],
+	%% OPTIMIZATION: Use gb_sets for O(log N) lookup instead of O(N) list.
+	local_lingering_streams = gb_sets:empty() :: gb_sets:set(hackney_http2:streamid()),
+	local_lingering_count = 0 :: non_neg_integer(),
 
 	%% HTTP/2 streams that have recently been reset remotely.
 	%% We keep a few of these around in order to reject subsequent
 	%% frames on these streams.
-	remote_lingering_streams = [] :: [hackney_cow_http2:streamid()],
+	%% OPTIMIZATION: Use gb_sets for O(log N) lookup instead of O(N) list.
+	remote_lingering_streams = gb_sets:empty() :: gb_sets:set(hackney_http2:streamid()),
+	remote_lingering_count = 0 :: non_neg_integer(),
 
 	%% HPACK decoding and encoding state.
 	decode_state = hackney_hpack:init() :: hackney_hpack:state(),
@@ -202,6 +211,10 @@
 	orelse
 	((Mode =:= client) andalso ?IS_CLIENT_LOCAL(StreamID))
 )).
+
+%% Maximum number of lingering streams to keep.
+-define(MAX_LOCAL_LINGERING, 100).
+-define(MAX_REMOTE_LINGERING, 10).
 
 -spec init(client | server, opts()) -> {ok, iodata(), http2_machine()}.
 init(client, Opts) ->
@@ -252,11 +265,11 @@ client_preface(State0) ->
 common_preface(State=#http2_machine{opts=Opts, next_settings=NextSettings}) ->
 	case maps:get(initial_connection_window_size, Opts, 65535) of
 		65535 ->
-			{ok, hackney_cow_http2:settings(NextSettings), State};
+			{ok, hackney_http2:settings(NextSettings), State};
 		Size ->
 			{ok, [
-				hackney_cow_http2:settings(NextSettings),
-				hackney_cow_http2:window_update(Size - 65535)
+				hackney_http2:settings(NextSettings),
+				hackney_http2:window_update(Size - 65535)
 			], update_window(Size - 65535, State)}
 	end.
 
@@ -280,7 +293,7 @@ setting_from_opt(Settings, Opts, OptName, SettingName, Default) ->
 	end.
 
 -spec init_stream(binary(), State)
-	-> {ok, hackney_cow_http2:streamid(), State} when State::http2_machine().
+	-> {ok, hackney_http2:streamid(), State} when State::http2_machine().
 init_stream(Method, State=#http2_machine{mode=client, local_streamid=LocalStreamID,
 		local_settings=#{initial_window_size := RemoteWindow},
 		remote_settings=#{initial_window_size := LocalWindow}}) ->
@@ -290,7 +303,7 @@ init_stream(Method, State=#http2_machine{mode=client, local_streamid=LocalStream
 		local_streamid=LocalStreamID + 2})}.
 
 -spec init_upgrade_stream(binary(), State)
-	-> {ok, hackney_cow_http2:streamid(), State} when State::http2_machine().
+	-> {ok, hackney_http2:streamid(), State} when State::http2_machine().
 init_upgrade_stream(Method, State=#http2_machine{mode=server, remote_streamid=0,
 		local_settings=#{initial_window_size := RemoteWindow},
 		remote_settings=#{initial_window_size := LocalWindow}}) ->
@@ -299,20 +312,20 @@ init_upgrade_stream(Method, State=#http2_machine{mode=server, remote_streamid=0,
 		local_window=LocalWindow, remote_window=RemoteWindow, te=undefined},
 	{ok, 1, stream_store(Stream, State#http2_machine{remote_streamid=1})}.
 
--spec frame(hackney_cow_http2:frame(), State)
+-spec frame(hackney_http2:frame(), State)
 	-> {ok, State}
-	| {ok, {data, hackney_cow_http2:streamid(), hackney_cow_http2:fin(), binary()}, State}
-	| {ok, {headers, hackney_cow_http2:streamid(), hackney_cow_http2:fin(),
+	| {ok, {data, hackney_http2:streamid(), hackney_http2:fin(), binary()}, State}
+	| {ok, {headers, hackney_http2:streamid(), hackney_http2:fin(),
 		headers(), pseudo_headers(), non_neg_integer() | undefined}, State}
-	| {ok, {trailers, hackney_cow_http2:streamid(), headers()}, State}
-	| {ok, {rst_stream, hackney_cow_http2:streamid(), hackney_cow_http2:error()}, State}
-	| {ok, {push_promise, hackney_cow_http2:streamid(), hackney_cow_http2:streamid(),
+	| {ok, {trailers, hackney_http2:streamid(), headers()}, State}
+	| {ok, {rst_stream, hackney_http2:streamid(), hackney_http2:error()}, State}
+	| {ok, {push_promise, hackney_http2:streamid(), hackney_http2:streamid(),
 		headers(), pseudo_headers()}, State}
-	| {ok, {goaway, hackney_cow_http2:streamid(), hackney_cow_http2:error(), binary()}, State}
-	| {send, [{hackney_cow_http2:streamid(), hackney_cow_http2:fin(),
+	| {ok, {goaway, hackney_http2:streamid(), hackney_http2:error(), binary()}, State}
+	| {send, [{hackney_http2:streamid(), hackney_http2:fin(),
 		[{data, iodata()} | #sendfile{} | {trailers, headers()}]}], State}
-	| {error, {stream_error, hackney_cow_http2:streamid(), hackney_cow_http2:error(), atom()}, State}
-	| {error, {connection_error, hackney_cow_http2:error(), atom()}, State}
+	| {error, {stream_error, hackney_http2:streamid(), hackney_http2:error(), atom()}, State}
+	| {error, {connection_error, hackney_http2:error(), atom()}, State}
 	when State::http2_machine().
 frame(Frame, State=#http2_machine{state=settings, preface_timer=TRef}) ->
 	ok = case TRef of
@@ -393,7 +406,7 @@ data_frame(Frame={data, StreamID, _, Data}, State0=#http2_machine{
 			%% After we send an RST_STREAM frame and terminate a stream,
 			%% the remote endpoint might still be sending us some more
 			%% frames until it can process this RST_STREAM.
-			case lists:member(StreamID, Lingering) of
+			case gb_sets:is_member(StreamID, Lingering) of
 				true ->
 					{ok, State};
 				false ->
@@ -442,10 +455,10 @@ is_body_size_valid(_) ->
 %% Convenience record to manipulate the tuple.
 %% The order of the fields matter.
 -record(headers, {
-	id :: hackney_cow_http2:streamid(),
-	fin :: hackney_cow_http2:fin(),
-	head :: hackney_cow_http2:head_fin(),
-	data :: binary()
+	id :: hackney_http2:streamid(),
+	fin :: hackney_http2:fin(),
+	head :: hackney_http2:head_fin(),
+	data :: iodata()
 }).
 
 headers_frame(Frame=#headers{}, State=#http2_machine{mode=Mode}) ->
@@ -540,7 +553,7 @@ client_headers_frame(_, State) ->
 
 headers_decode(Frame=#headers{head=head_fin, data=HeaderData},
 		State=#http2_machine{decode_state=DecodeState0}, Type, Stream) ->
-	try hackney_hpack:decode(HeaderData, DecodeState0) of
+	try hackney_hpack:decode(iolist_to_binary(HeaderData), DecodeState0) of
 		{Headers, DecodeState} when Type =:= request ->
 			headers_enforce_concurrency_limit(Frame,
 				State#http2_machine{decode_state=DecodeState}, Type, Stream, Headers);
@@ -841,13 +854,10 @@ rst_stream_frame({rst_stream, StreamID, _}, State=#http2_machine{mode=Mode,
 	{error, {connection_error, protocol_error,
 		'RST_STREAM frame received on a stream in idle state. (RFC7540 5.1)'},
 		State};
-rst_stream_frame({rst_stream, StreamID, Reason}, State=#http2_machine{
-		streams=Streams0, remote_lingering_streams=Lingering0}) ->
+rst_stream_frame({rst_stream, StreamID, Reason}, State=#http2_machine{streams=Streams0}) ->
 	Streams = maps:remove(StreamID, Streams0),
-	%% We only keep up to 10 streams in this state. @todo Make it configurable?
-	Lingering = [StreamID|lists:sublist(Lingering0, 10 - 1)],
-	{ok, {rst_stream, StreamID, Reason},
-		State#http2_machine{streams=Streams, remote_lingering_streams=Lingering}}.
+	State1 = State#http2_machine{streams=Streams, active_stream=undefined},
+	{ok, {rst_stream, StreamID, Reason}, remote_stream_linger(StreamID, State1)}.
 
 %% SETTINGS frame.
 
@@ -886,7 +896,7 @@ streams_update_local_window(State=#http2_machine{streams=Streams0}, Increment) -
 	Streams = maps:map(fun(_, S=#stream{local_window=StreamWindow}) ->
 		S#stream{local_window=StreamWindow + Increment}
 	end, Streams0),
-	State#http2_machine{streams=Streams}.
+	State#http2_machine{streams=Streams, active_stream=undefined}.
 
 %% Ack for a previously sent SETTINGS frame.
 
@@ -916,17 +926,17 @@ streams_update_remote_window(State=#http2_machine{streams=Streams0}, Increment) 
 	Streams = maps:map(fun(_, S=#stream{remote_window=StreamWindow}) ->
 		S#stream{remote_window=StreamWindow + Increment}
 	end, Streams0),
-	State#http2_machine{streams=Streams}.
+	State#http2_machine{streams=Streams, active_stream=undefined}.
 
 %% PUSH_PROMISE frame.
 
 %% Convenience record to manipulate the tuple.
 %% The order of the fields matter.
 -record(push_promise, {
-	id :: hackney_cow_http2:streamid(),
-	head :: hackney_cow_http2:head_fin(),
-	promised_id :: hackney_cow_http2:streamid(),
-	data :: binary()
+	id :: hackney_http2:streamid(),
+	head :: hackney_http2:head_fin(),
+	promised_id :: hackney_http2:streamid(),
+	data :: iodata()
 }).
 
 push_promise_frame(_, State=#http2_machine{mode=server}) ->
@@ -1034,7 +1044,7 @@ window_update_frame({window_update, StreamID, Increment},
 		undefined ->
 			%% WINDOW_UPDATE frames may be received for a short period of time
 			%% after a stream is closed. They must be ignored.
-			case lists:member(StreamID, Lingering) of
+			case gb_sets:is_member(StreamID, Lingering) of
 				false -> {ok, State0};
 				true -> stream_reset(StreamID, State0, stream_closed,
 					'WINDOW_UPDATE frame received after the stream was reset. (RFC7540 5.1)')
@@ -1046,8 +1056,8 @@ window_update_frame({window_update, StreamID, Increment},
 %% Convenience record to manipulate the tuple.
 %% The order of the fields matter.
 -record(continuation, {
-	id :: hackney_cow_http2:streamid(),
-	head :: hackney_cow_http2:head_fin(),
+	id :: hackney_http2:streamid(),
+	head :: hackney_http2:head_fin(),
 	data :: binary()
 }).
 
@@ -1103,11 +1113,16 @@ continuation_frame(_F, State) ->
 		'An invalid frame was received in the middle of a header block. (RFC7540 6.2)'},
 		State}.
 
+%% OPTIMIZATION: Use iolist accumulation to avoid binary copies.
+%% The final iolist_to_binary conversion happens in headers_decode.
 continuation_frame_append(Fragment0, Fragment1, State=#http2_machine{opts=Opts}) ->
 	MaxSize = maps:get(max_fragmented_header_block_size, Opts, 32768),
-	case byte_size(Fragment0) + byte_size(Fragment1) =< MaxSize of
+	Size0 = iolist_size(Fragment0),
+	Size1 = byte_size(Fragment1),
+	case Size0 + Size1 =< MaxSize of
 		true ->
-			{ok, <<Fragment0/binary, Fragment1/binary>>};
+			%% Accumulate as iolist instead of binary concatenation
+			{ok, [Fragment0, Fragment1]};
 		false ->
 			{error, {connection_error, enhance_your_calm,
 				'Larger fragmented header block size than we are willing to accept.'},
@@ -1133,7 +1148,7 @@ ignored_frame(State) ->
 
 -spec timeout(preface_timeout | settings_timeout, reference(), State)
 	-> {ok, State}
-	| {error, {connection_error, hackney_cow_http2:error(), atom()}, State}
+	| {error, {connection_error, hackney_http2:error(), atom()}, State}
 	when State::http2_machine().
 timeout(preface_timeout, TRef, State=#http2_machine{preface_timer=TRef}) ->
 	{error, {connection_error, protocol_error,
@@ -1150,9 +1165,9 @@ timeout(_, _, State) ->
 %% this module does not send data directly, instead it returns
 %% a value that can then be used to send the frames.
 
--spec prepare_headers(hackney_cow_http2:streamid(), State, idle | hackney_cow_http2:fin(),
+-spec prepare_headers(hackney_http2:streamid(), State, idle | hackney_http2:fin(),
 	pseudo_headers(), headers())
-	-> {ok, hackney_cow_http2:fin(), iodata(), State} when State::http2_machine().
+	-> {ok, hackney_http2:fin(), iodata(), State} when State::http2_machine().
 prepare_headers(StreamID, State=#http2_machine{encode_state=EncodeState0},
 		IsFin0, PseudoHeaders, Headers0) ->
 	Stream = #stream{method=Method, local=idle} = stream_get(StreamID, State),
@@ -1166,8 +1181,8 @@ prepare_headers(StreamID, State=#http2_machine{encode_state=EncodeState0},
 	{ok, IsFin, HeaderBlock, stream_store(Stream#stream{local=IsFin0},
 		State#http2_machine{encode_state=EncodeState})}.
 
--spec prepare_push_promise(hackney_cow_http2:streamid(), State, pseudo_headers(), headers())
-	-> {ok, hackney_cow_http2:streamid(), iodata(), State}
+-spec prepare_push_promise(hackney_http2:streamid(), State, pseudo_headers(), headers())
+	-> {ok, hackney_http2:streamid(), iodata(), State}
 	| {error, no_push} when State::http2_machine().
 prepare_push_promise(_, #http2_machine{remote_settings=#{enable_push := false}}, _, _) ->
 	{error, no_push};
@@ -1216,7 +1231,7 @@ merge_pseudo_headers(PseudoHeaders, Headers0) ->
 			[{iolist_to_binary([$:, atom_to_binary(Name, latin1)]), Value}|Acc]
 		end, Headers0, maps:to_list(PseudoHeaders)).
 
--spec prepare_trailers(hackney_cow_http2:streamid(), State, headers())
+-spec prepare_trailers(hackney_http2:streamid(), State, headers())
 	-> {ok, iodata(), State} when State::http2_machine().
 prepare_trailers(StreamID, State=#http2_machine{encode_state=EncodeState0}, Trailers) ->
 	Stream = #stream{local=nofin} = stream_get(StreamID, State),
@@ -1224,9 +1239,9 @@ prepare_trailers(StreamID, State=#http2_machine{encode_state=EncodeState0}, Trai
 	{ok, HeaderBlock, stream_store(Stream#stream{local=fin},
 		State#http2_machine{encode_state=EncodeState})}.
 
--spec send_or_queue_data(hackney_cow_http2:streamid(), State, hackney_cow_http2:fin(), DataOrFileOrTrailers)
+-spec send_or_queue_data(hackney_http2:streamid(), State, hackney_http2:fin(), DataOrFileOrTrailers)
 	-> {ok, State}
-	| {send, [{hackney_cow_http2:streamid(), hackney_cow_http2:fin(), [DataOrFileOrTrailers]}], State}
+	| {send, [{hackney_http2:streamid(), hackney_http2:fin(), [DataOrFileOrTrailers]}], State}
 	when State::http2_machine(), DataOrFileOrTrailers::
 		{data, iodata()} | #sendfile{} | {trailers, headers()}.
 send_or_queue_data(StreamID, State0=#http2_machine{opts=Opts, local_window=ConnWindow},
@@ -1289,9 +1304,9 @@ send_data(State0=#http2_machine{streams=Streams0}) ->
 	Iterator = maps:iterator(Streams0),
 	case send_data_for_all_streams(maps:next(Iterator), Streams0, State0, []) of
 		{ok, Streams, State, []} ->
-			{ok, State#http2_machine{streams=Streams}};
+			{ok, State#http2_machine{streams=Streams, active_stream=undefined}};
 		{ok, Streams, State, Send} ->
-			{send, Send, State#http2_machine{streams=Streams}}
+			{send, Send, State#http2_machine{streams=Streams, active_stream=undefined}}
 	end.
 
 send_data_for_all_streams(none, Streams, State, Send) ->
@@ -1454,7 +1469,7 @@ ensure_window(Size, State=#http2_machine{opts=Opts, remote_window=RemoteWindow})
 			{ok, Increment, State#http2_machine{remote_window=RemoteWindow + Increment}}
 	end.
 
--spec ensure_window(hackney_cow_http2:streamid(), non_neg_integer(), State)
+-spec ensure_window(hackney_http2:streamid(), non_neg_integer(), State)
 	-> ok | {ok, pos_integer(), State} when State::http2_machine().
 ensure_window(StreamID, Size, State=#http2_machine{opts=Opts}) ->
 	case stream_get(StreamID, State) of
@@ -1523,7 +1538,7 @@ update_window(Size, State=#http2_machine{remote_window=RemoteWindow})
 		when Size > 0 ->
 	State#http2_machine{remote_window=RemoteWindow + Size}.
 
--spec update_window(hackney_cow_http2:streamid(), 1..16#7fffffff, State)
+-spec update_window(hackney_http2:streamid(), 1..16#7fffffff, State)
 	-> State when State::http2_machine().
 update_window(StreamID, Size, State)
 		when Size > 0 ->
@@ -1532,12 +1547,12 @@ update_window(StreamID, Size, State)
 
 %% Public interface to reset streams.
 
--spec reset_stream(hackney_cow_http2:streamid(), State)
+-spec reset_stream(hackney_http2:streamid(), State)
 	-> {ok, State} | {error, not_found} when State::http2_machine().
 reset_stream(StreamID, State=#http2_machine{streams=Streams0}) ->
 	case maps:take(StreamID, Streams0) of
 		{_, Streams} ->
-			{ok, stream_linger(StreamID, State#http2_machine{streams=Streams})};
+			{ok, local_stream_linger(StreamID, State#http2_machine{streams=Streams, active_stream=undefined})};
 		error ->
 			{error, not_found}
 	end.
@@ -1585,21 +1600,21 @@ default_setting_value(enable_connect_protocol) -> false.
 %% Function to obtain the last known streamid received
 %% for the purposes of sending a GOAWAY frame and closing the connection.
 
--spec get_last_streamid(http2_machine()) -> hackney_cow_http2:streamid().
+-spec get_last_streamid(http2_machine()) -> hackney_http2:streamid().
 get_last_streamid(#http2_machine{remote_streamid=RemoteStreamID}) ->
 	RemoteStreamID.
 
 %% Set last accepted streamid to the last known streamid, for the purpose
 %% ignoring frames for remote streams created after sending GOAWAY.
 
--spec set_last_streamid(http2_machine()) -> {hackney_cow_http2:streamid(), http2_machine()}.
+-spec set_last_streamid(http2_machine()) -> {hackney_http2:streamid(), http2_machine()}.
 set_last_streamid(State=#http2_machine{remote_streamid=StreamID,
 		last_remote_streamid=LastStreamID}) when StreamID =< LastStreamID->
 	{StreamID, State#http2_machine{last_remote_streamid = StreamID}}.
 
 %% Retrieve the local buffer size for a stream.
 
--spec get_stream_local_buffer_size(hackney_cow_http2:streamid(), http2_machine())
+-spec get_stream_local_buffer_size(hackney_http2:streamid(), http2_machine())
 	-> {ok, non_neg_integer()} | {error, not_found | closed}.
 get_stream_local_buffer_size(StreamID, State=#http2_machine{mode=Mode,
 		local_streamid=LocalStreamID, remote_streamid=RemoteStreamID}) ->
@@ -1615,8 +1630,8 @@ get_stream_local_buffer_size(StreamID, State=#http2_machine{mode=Mode,
 
 %% Retrieve the local state for a stream, including the state in the queue.
 
--spec get_stream_local_state(hackney_cow_http2:streamid(), http2_machine())
-	-> {ok, idle | hackney_cow_http2:fin(), empty | nofin | fin} | {error, not_found | closed}.
+-spec get_stream_local_state(hackney_http2:streamid(), http2_machine())
+	-> {ok, idle | hackney_http2:fin(), empty | nofin | fin} | {error, not_found | closed}.
 get_stream_local_state(StreamID, State=#http2_machine{mode=Mode,
 		local_streamid=LocalStreamID, remote_streamid=RemoteStreamID}) ->
 	case stream_get(StreamID, State) of
@@ -1638,8 +1653,8 @@ get_stream_local_state(StreamID, State=#http2_machine{mode=Mode,
 
 %% Retrieve the remote state for a stream.
 
--spec get_stream_remote_state(hackney_cow_http2:streamid(), http2_machine())
-	-> {ok, idle | hackney_cow_http2:fin()} | {error, not_found | closed}.
+-spec get_stream_remote_state(hackney_http2:streamid(), http2_machine())
+	-> {ok, idle | hackney_http2:fin()} | {error, not_found | closed}.
 get_stream_remote_state(StreamID, State=#http2_machine{mode=Mode,
 		local_streamid=LocalStreamID, remote_streamid=RemoteStreamID}) ->
 	case stream_get(StreamID, State) of
@@ -1654,36 +1669,58 @@ get_stream_remote_state(StreamID, State=#http2_machine{mode=Mode,
 
 %% Query whether the stream was reset recently by the remote endpoint.
 
--spec is_lingering_stream(hackney_cow_http2:streamid(), http2_machine()) -> boolean().
+-spec is_lingering_stream(hackney_http2:streamid(), http2_machine()) -> boolean().
 is_lingering_stream(StreamID, #http2_machine{
 		local_lingering_streams=Local, remote_lingering_streams=Remote}) ->
-	case lists:member(StreamID, Local) of
-		true -> true;
-		false -> lists:member(StreamID, Remote)
-	end.
+	gb_sets:is_member(StreamID, Local) orelse gb_sets:is_member(StreamID, Remote).
 
 %% Stream-related functions.
 
+%% OPTIMIZATION: Check cache first before map lookup.
+stream_get(StreamID, #http2_machine{active_stream={StreamID, Stream}}) ->
+	Stream;
 stream_get(StreamID, #http2_machine{streams=Streams}) ->
 	maps:get(StreamID, Streams, undefined).
 
+%% OPTIMIZATION: Update cache and store stream.
 stream_store(#stream{id=StreamID, local=fin, remote=fin},
 		State=#http2_machine{streams=Streams0}) ->
 	Streams = maps:remove(StreamID, Streams0),
-	State#http2_machine{streams=Streams};
+	State#http2_machine{streams=Streams, active_stream=undefined};
 stream_store(Stream=#stream{id=StreamID},
 		State=#http2_machine{streams=Streams}) ->
-	State#http2_machine{streams=Streams#{StreamID => Stream}}.
+	State#http2_machine{streams=Streams#{StreamID => Stream}, active_stream={StreamID, Stream}}.
 
 %% @todo Don't send an RST_STREAM if one was already sent.
 stream_reset(StreamID, State, Reason, HumanReadable) ->
 	{error, {stream_error, StreamID, Reason, HumanReadable},
-		stream_linger(StreamID, State)}.
+		local_stream_linger(StreamID, State)}.
 
-stream_linger(StreamID, State=#http2_machine{local_lingering_streams=Lingering0}) ->
-	%% We only keep up to 100 streams in this state. @todo Make it configurable?
-	Lingering = [StreamID|lists:sublist(Lingering0, 100 - 1)],
-	State#http2_machine{local_lingering_streams=Lingering}.
+%% OPTIMIZATION: Use gb_sets with size limit tracking.
+local_stream_linger(StreamID, State=#http2_machine{
+		local_lingering_streams=Lingering0, local_lingering_count=Count0}) ->
+	{Lingering, Count} = case Count0 >= ?MAX_LOCAL_LINGERING of
+		true ->
+			%% Remove oldest (smallest) element to make room
+			{_, Lingering1} = gb_sets:take_smallest(Lingering0),
+			{gb_sets:add_element(StreamID, Lingering1), Count0};
+		false ->
+			{gb_sets:add_element(StreamID, Lingering0), Count0 + 1}
+	end,
+	State#http2_machine{local_lingering_streams=Lingering,
+		local_lingering_count=Count, active_stream=undefined}.
+
+remote_stream_linger(StreamID, State=#http2_machine{
+		remote_lingering_streams=Lingering0, remote_lingering_count=Count0}) ->
+	{Lingering, Count} = case Count0 >= ?MAX_REMOTE_LINGERING of
+		true ->
+			%% Remove oldest (smallest) element to make room
+			{_, Lingering1} = gb_sets:take_smallest(Lingering0),
+			{gb_sets:add_element(StreamID, Lingering1), Count0};
+		false ->
+			{gb_sets:add_element(StreamID, Lingering0), Count0 + 1}
+	end,
+	State#http2_machine{remote_lingering_streams=Lingering, remote_lingering_count=Count}.
 
 %% @private Convert HTTP status binary to integer (replaces cow_http:status_to_integer/1)
 status_to_integer(<<H, T, U>>)
