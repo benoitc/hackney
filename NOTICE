@@ -25,15 +25,11 @@ Copyright (C) 1998 - 2014, Daniel Stenberg, <daniel@haxx.se>, et al.
 *) hackney_cidr is based on inet_cidr 1.2.1. vendored for customer purpose.
 Copyright (c) 2024, Enki Multimedia , MIT License
 
-*) hackney_cow_ws and hackney_cow_deflate are vendored from cowlib
-(https://github.com/ninenines/cowlib) under ISC license.
-Copyright (c) Loïc Hoguin <essen@ninenines.eu>
-Copyright (c) jdamanalo <joshuadavid.agustin@manalo.ph> (cow_deflate)
-
-*) hackney_cow_http2, hackney_cow_hpack, hackney_cow_hpack_dec_huffman_lookup.hrl,
-and hackney_cow_http2_machine are vendored from cowlib
+*) hackney_ws_proto, hackney_deflate, hackney_http2, hackney_http2_machine,
+hackney_hpack, and hackney_hpack_huffman_dec.hrl are based on cowlib
 (https://github.com/ninenines/cowlib) under ISC license.
 Copyright (c) 2015-2024, Loïc Hoguin <essen@ninenines.eu>
+Copyright (c) jdamanalo <joshuadavid.agustin@manalo.ph> (deflate)
 
 *) lsquic (c_src/lsquic) - QUIC and HTTP/3 library
 (https://github.com/litespeedtech/lsquic) under MIT license.

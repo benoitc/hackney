@@ -45,7 +45,7 @@
 -include("hackney_hpack_huffman.hrl").
 
 %% Reuse existing Huffman decode lookup table from cowlib
--include("libs/hackney_cow_hpack_dec_huffman_lookup.hrl").
+-include("hackney_hpack_huffman_dec.hrl").
 
 %% Dynamic table entry size overhead per RFC 7541 Section 4.1
 -define(ENTRY_OVERHEAD, 32).

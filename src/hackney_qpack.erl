@@ -557,7 +557,7 @@ decode_string_with_huffman(_HuffFlag, Len, Data) ->
     throw({invalid_string, need_more_data, Len, byte_size(Data)}).
 
 %% Huffman decoding using HPACK lookup table
--include("libs/hackney_cow_hpack_dec_huffman_lookup.hrl").
+-include("hackney_hpack_huffman_dec.hrl").
 
 dec_huffman(Data, Length) ->
     dec_huffman(Data, Length, 0, <<>>).
