@@ -1,9 +1,10 @@
 %%% -*- erlang -*-
 %%%
-%%% Vendored from cowlib (https://github.com/ninenines/cowlib)
-%%% Original module: cow_ws
+%%% Based on cow_ws from cowlib (https://github.com/ninenines/cowlib)
+%%% Modified for hackney.
 %%%
 %% Copyright (c) Loïc Hoguin <essen@ninenines.eu>
+%% Copyright (c) 2026, Benoit Chesneau <benoitc@benoitcnetwork.eu>
 %%
 %% Permission to use, copy, modify, and/or distribute this software for any
 %% purpose with or without fee is hereby granted, provided that the above
