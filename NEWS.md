@@ -19,6 +19,7 @@
   - gb_sets for lingering streams (O(log N) vs O(N) lookups)
   - IOList accumulation for header fragments
 - HPACK and QPACK header compression with O(1) static table lookups
+- WebSocket: use `rand:bytes/1` instead of `crypto:strong_rand_bytes/1` for mask keys
 
 ### Added
 
