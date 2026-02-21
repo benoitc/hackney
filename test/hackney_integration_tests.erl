@@ -248,11 +248,14 @@ async_head_request() ->
     ?assertEqual([headers, status], Keys).
 
 async_no_content_request() ->
-    %% TODO: Fix async handling for 204 responses (done message not sent)
-    %% For now just verify sync 204 works
+    %% Test async handling for 204 No Content responses
     URL = url(<<"/status/204">>),
-    {ok, StatusCode, _, _} = hackney:get(URL),
-    ?assertEqual(204, StatusCode).
+    Options = [async],
+    {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
+    {StatusCode, Keys} = receive_response(ClientRef),
+    ?assertEqual(204, StatusCode),
+    %% 204 should have status and headers but no body
+    ?assertEqual([headers, status], Keys).
 
 test_duplicate_headers() ->
   %% Test that Content-Type header is properly sent

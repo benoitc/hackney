@@ -225,9 +225,10 @@ to_binary(Headers) ->
   iolist_to_binary(to_iolist(Headers)).
 
 
-%% We lowercase the charset header as we know it's case insensitive.
-%% TODO: change api to parse content
--spec parse_content_type(binary()) -> any().
+%% @doc Parse Content-Type header into {Type, SubType, Params}.
+%% The charset parameter is lowercased as it's case insensitive.
+%% Example: <<"text/html; charset=UTF-8">> -> {<<"text">>, <<"html">>, [{<<"charset">>, <<"utf-8">>}]}
+-spec parse_content_type(binary()) -> {binary(), binary(), [{binary(), binary()}]} | {error, badarg}.
 parse_content_type(Data) ->
   parse_media_type(Data,
     fun (Rest, Type, SubType) ->

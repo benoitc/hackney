@@ -1190,12 +1190,23 @@ receiving(internal, do_recv_response_async, Data) ->
                     %% Normal response - send status and headers
                     StreamTo ! {hackney_response, Ref, {status, Status, NewData#conn_data.reason}},
                     StreamTo ! {hackney_response, Ref, {headers, HeadersList}},
-                    %% Transition to appropriate streaming state based on mode
-                    NextState = case AsyncMode of
-                        true -> streaming;
-                        once -> streaming_once
-                    end,
-                    {next_state, NextState, NewData#conn_data{response_headers = Headers}}
+                    %% Check if response has no body (204, 304, or HEAD request)
+                    HasNoBody = (Status =:= 204) orelse (Status =:= 304) orelse (Method =:= <<"HEAD">>),
+                    case HasNoBody of
+                        true ->
+                            %% No body - send done immediately
+                            StreamTo ! {hackney_response, Ref, done},
+                            notify_pool_available(NewData),
+                            {next_state, connected, NewData#conn_data{response_headers = Headers,
+                                                                       async = false, async_ref = undefined}};
+                        false ->
+                            %% Transition to appropriate streaming state based on mode
+                            NextState = case AsyncMode of
+                                true -> streaming;
+                                once -> streaming_once
+                            end,
+                            {next_state, NextState, NewData#conn_data{response_headers = Headers}}
+                    end
             end;
         {error, Reason} ->
             StreamTo ! {hackney_response, Ref, {error, Reason}},
@@ -2459,19 +2470,52 @@ do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, _Fol
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
-%% @private Send HTTP/2 request body as DATA frames
+%% @private Send HTTP/2 request body as DATA frames with flow control
 send_h2_body(_Transport, _Socket, _StreamId, <<>>, H2Machine) ->
     {ok, H2Machine};
 send_h2_body(_Transport, _Socket, _StreamId, [], H2Machine) ->
     {ok, H2Machine};
 send_h2_body(Transport, Socket, StreamId, Body, H2Machine) ->
-    %% For now, send entire body in one DATA frame
-    %% TODO: Respect flow control window and split large bodies
     BodyBin = iolist_to_binary(Body),
-    DataFrame = hackney_http2:data(StreamId, fin, BodyBin),
-    case Transport:send(Socket, DataFrame) of
-        ok -> {ok, H2Machine};
+    %% Use the HTTP/2 machine to handle flow control
+    case hackney_http2_machine:send_or_queue_data(StreamId, H2Machine, fin, {data, BodyBin}) of
+        {ok, H2Machine1} ->
+            %% Data was queued (flow control window exhausted)
+            %% For simple requests, this shouldn't happen often
+            {ok, H2Machine1};
+        {send, SendList, H2Machine1} ->
+            %% Send all the data frames
+            send_h2_data_frames(Transport, Socket, SendList, H2Machine1)
+    end.
+
+%% @private Send the DATA frames produced by the HTTP/2 machine
+send_h2_data_frames(_Transport, _Socket, [], H2Machine) ->
+    {ok, H2Machine};
+send_h2_data_frames(Transport, Socket, [{StreamId, IsFin, DataList} | Rest], H2Machine) ->
+    case send_h2_data_list(Transport, Socket, StreamId, IsFin, DataList) of
+        ok -> send_h2_data_frames(Transport, Socket, Rest, H2Machine);
         {error, Reason} -> {error, Reason}
+    end.
+
+%% @private Send individual data items for a stream
+send_h2_data_list(_Transport, _Socket, _StreamId, _IsFin, []) ->
+    ok;
+send_h2_data_list(Transport, Socket, StreamId, IsFin, [Item | Rest]) ->
+    %% Determine if this is the last item
+    ItemIsFin = case Rest of
+        [] -> IsFin;
+        _ -> nofin
+    end,
+    case Item of
+        {data, Data} ->
+            DataFrame = hackney_http2:data(StreamId, ItemIsFin, Data),
+            case Transport:send(Socket, DataFrame) of
+                ok -> send_h2_data_list(Transport, Socket, StreamId, IsFin, Rest);
+                {error, Reason} -> {error, Reason}
+            end;
+        {trailers, _Trailers} ->
+            %% Trailers not supported in simple body send
+            send_h2_data_list(Transport, Socket, StreamId, IsFin, Rest)
     end.
 
 %% @private Build authority (host:port) for HTTP/2 :authority pseudo-header
