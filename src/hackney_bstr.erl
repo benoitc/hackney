@@ -362,7 +362,22 @@ word(Data, Fun) ->
 
 -spec trim(binary()) -> binary().
 trim(Data) ->
-  re:replace(Data, "^\\s+|\\s+$", "", [{return, binary}, global]).
+  trim_leading(trim_trailing(Data)).
+
+trim_leading(<<$\s, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<$\t, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<$\r, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(<<$\n, Rest/binary>>) -> trim_leading(Rest);
+trim_leading(Data) -> Data.
+
+trim_trailing(<<>>) -> <<>>;
+trim_trailing(Data) ->
+  case binary:last(Data) of
+    C when C =:= $\s; C =:= $\t; C =:= $\r; C =:= $\n ->
+      trim_trailing(binary:part(Data, 0, byte_size(Data) - 1));
+    _ ->
+      Data
+  end.
 
 -spec quoted_string(binary(), fun()) -> any().
 quoted_string(<< $", Rest/binary >>, Fun) ->

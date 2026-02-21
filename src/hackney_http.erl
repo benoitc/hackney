@@ -324,38 +324,71 @@ parse_header_(Sep, #hparser{buffer=Buf}=St) ->
   end.
 
 parse_header(Line, St) ->
-  [Key, Value] = case binary:split(Line, <<":">>, [trim]) of
-                   [K] -> [K, <<>>];
-                   [K, V] -> [K, parse_header_value(V)]
+  {Key, Value} = case binary:split(Line, <<":">>) of
+                   [K] -> {K, <<>>};
+                   [K, V] -> {K, hackney_bstr:trim(V)}
                  end,
-  St1 = case hackney_bstr:to_lower(hackney_bstr:trim(Key)) of
-          <<"content-length">> ->
-            case hackney_util:to_int(Value) of
-              {ok, CLen} -> St#hparser{clen=CLen};
-              false -> St#hparser{clen=bad_int}
-            end;
-          <<"transfer-encoding">> ->
-            TE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
-            St#hparser{te=TE};
-          <<"connection">> ->
-            Connection = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
-            St#hparser{connection=Connection};
-          <<"content-type">> ->
-            CType=hackney_bstr:to_lower(hackney_bstr:trim(Value)),
-            St#hparser{ctype=CType};
-          <<"location">> ->
-            Location = hackney_bstr:trim(Value),
-            St#hparser{location=Location};
-          <<"content-encoding">> ->
-            CE = hackney_bstr:to_lower(hackney_bstr:trim(Value)),
-            St#hparser{content_encoding=CE};
-          _ ->
-            St
-        end,
+  St1 = update_parser_header(Key, Value, St),
   {header, {Key, Value}, St1}.
 
-parse_header_value(H) ->
-  hackney_bstr:trim(H).
+%% Fast path for common headers using case-insensitive pattern matching
+%% This avoids calling to_lower/trim for every header
+update_parser_header(Key, Value, St) ->
+  case byte_size(Key) of
+    14 -> maybe_content_length(Key, Value, St);
+    17 -> maybe_transfer_encoding(Key, Value, St);
+    10 -> maybe_connection(Key, Value, St);
+    12 -> maybe_content_type(Key, Value, St);
+    8 -> maybe_location(Key, Value, St);
+    16 -> maybe_content_encoding(Key, Value, St);
+    _ -> St
+  end.
+
+maybe_content_length(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"content-length">> ->
+      case hackney_util:to_int(Value) of
+        {ok, CLen} -> St#hparser{clen=CLen};
+        false -> St#hparser{clen=bad_int}
+      end;
+    _ -> St
+  end.
+
+maybe_transfer_encoding(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"transfer-encoding">> ->
+      St#hparser{te=hackney_bstr:to_lower(Value)};
+    _ -> St
+  end.
+
+maybe_connection(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"connection">> ->
+      St#hparser{connection=hackney_bstr:to_lower(Value)};
+    _ -> St
+  end.
+
+maybe_content_type(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"content-type">> ->
+      St#hparser{ctype=hackney_bstr:to_lower(Value)};
+    _ -> St
+  end.
+
+maybe_location(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"location">> ->
+      St#hparser{location=Value};
+    _ -> St
+  end.
+
+maybe_content_encoding(Key, Value, St) ->
+  case hackney_bstr:to_lower(Key) of
+    <<"content-encoding">> ->
+      St#hparser{content_encoding=hackney_bstr:to_lower(Value)};
+    _ -> St
+  end.
+
 
 skip_junks(#hparser{buffer=Buf}=St) ->
   case binary:split(Buf, <<"\r\n">>) of
@@ -498,40 +531,47 @@ ce_identity(Data) ->
   {ok, Data}.
 
 read_size(Data) ->
-  case read_size(Data, [], true) of
-    {ok, Line, Rest} ->
-      case io_lib:fread("~16u", Line) of
-        {ok, [Size], _} ->
-          {ok, Size, Rest};
-        _ ->
-          {error, {poorly_formatted_size, Line}}
-      end;
-    Err ->
-      Err
-  end.
+  read_size(Data, 0, 0).
 
 read_size(<<>>, _, _) ->
   eof;
 
-read_size(<<"\r\n", Rest/binary>>, Acc, _) ->
-  {ok, lists:reverse(Acc), Rest};
+read_size(<<"\r\n", Rest/binary>>, Size, Len) when Len > 0 ->
+  {ok, Size, Rest};
+read_size(<<"\r\n", _Rest/binary>>, _, 0) ->
+  eof;
 
-read_size(<<"\n", Rest/binary>>, Acc, _) ->
-  {ok, lists:reverse(Acc), Rest};
+read_size(<<"\n", Rest/binary>>, Size, Len) when Len > 0 ->
+  {ok, Size, Rest};
+read_size(<<"\n", _Rest/binary>>, _, 0) ->
+  eof;
 
-read_size(<<$;, Rest/binary>>, Acc, _) ->
-  read_size(Rest, Acc, false);
+%% Skip chunk extensions (after semicolon) and trailing spaces
+read_size(<<$;, Rest/binary>>, Size, Len) ->
+  skip_to_eol(Rest, Size, Len);
+read_size(<<$\s, Rest/binary>>, Size, Len) ->
+  skip_to_eol(Rest, Size, Len);
 
-read_size(<<$\s, Rest/binary>>, Acc, _) ->
-  read_size(Rest, Acc, false);
+%% Parse hex digits directly
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $0, C =< $9 ->
+  read_size(Rest, (Size bsl 4) bor (C - $0), Len + 1);
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $a, C =< $f ->
+  read_size(Rest, (Size bsl 4) bor (C - $a + 10), Len + 1);
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $A, C =< $F ->
+  read_size(Rest, (Size bsl 4) bor (C - $A + 10), Len + 1);
 
-read_size(<<C, Rest/binary>>, Acc, AddToAcc) ->
-  case AddToAcc of
-    true ->
-      read_size(Rest, [C|Acc], AddToAcc);
-    false ->
-      read_size(Rest, Acc, AddToAcc)
-  end.
+read_size(_, _, _) ->
+  {error, invalid_chunk_size}.
+
+%% Skip characters until end of line
+skip_to_eol(<<"\r\n", Rest/binary>>, Size, Len) when Len > 0 ->
+  {ok, Size, Rest};
+skip_to_eol(<<"\n", Rest/binary>>, Size, Len) when Len > 0 ->
+  {ok, Size, Rest};
+skip_to_eol(<<_, Rest/binary>>, Size, Len) ->
+  skip_to_eol(Rest, Size, Len);
+skip_to_eol(<<>>, _, _) ->
+  eof.
 
 read_chunk(Data, Size) ->
   case Data of
