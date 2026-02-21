@@ -10,7 +10,9 @@
   - `hackney_cow_http2` → `hackney_http2`
   - `hackney_cow_deflate` → `hackney_deflate`
   - `hackney_cow_ws` → `hackney_ws_proto`
+  - `hackney_cow_hpack_dec_huffman_lookup.hrl` → `hackney_hpack_huffman_dec.hrl`
   - Remove `hackney_cow_hpack` (already replaced by `hackney_hpack`)
+- Remove `src/libs/` directory (all modules moved to `src/`)
 
 ### Performance
 
