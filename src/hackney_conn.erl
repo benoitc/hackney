@@ -2690,20 +2690,34 @@ handle_h2_frame({goaway, LastStreamId, ErrorCode, _DebugData}, Data) ->
 
 handle_h2_frame({window_update, Increment}, Data) ->
     %% Connection-level window update
-    #conn_data{h2_machine = H2Machine} = Data,
+    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
     case hackney_http2_machine:frame({window_update, Increment}, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {send, SendList, H2Machine2} ->
+            case send_h2_data_frames(Transport, Socket, SendList, H2Machine2) of
+                {ok, H2Machine3} ->
+                    {ok, Data#conn_data{h2_machine = H2Machine3}};
+                {error, Reason} ->
+                    {error, Reason, Data}
+            end;
         {error, Reason, _H2Machine} ->
             {error, Reason, Data}
     end;
 
 handle_h2_frame({window_update, StreamId, Increment}, Data) ->
     %% Stream-level window update
-    #conn_data{h2_machine = H2Machine} = Data,
+    #conn_data{h2_machine = H2Machine, transport = Transport, socket = Socket} = Data,
     case hackney_http2_machine:frame({window_update, StreamId, Increment}, H2Machine) of
         {ok, H2Machine2} ->
             {ok, Data#conn_data{h2_machine = H2Machine2}};
+        {send, SendList, H2Machine2} ->
+            case send_h2_data_frames(Transport, Socket, SendList, H2Machine2) of
+                {ok, H2Machine3} ->
+                    {ok, Data#conn_data{h2_machine = H2Machine3}};
+                {error, Reason} ->
+                    {error, Reason, Data}
+            end;
         {error, Reason, _H2Machine} ->
             {error, Reason, Data}
     end;
