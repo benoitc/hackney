@@ -566,7 +566,7 @@ find_in_dynamic_field(Header, #state{field_index = FieldIndex, insert_count = In
         {ok, AbsIndex} when InsertCount - AbsIndex < Count ->
             %% Convert absolute index to relative index
             %% Relative index = insert_count - abs_index + STATIC_TABLE_SIZE
-            {ok, ?STATIC_TABLE_SIZE + (InsertCount - AbsIndex)};
+            {ok, ?STATIC_TABLE_SIZE + (InsertCount - AbsIndex) + 1};
         _ ->
             error
     end.
@@ -575,7 +575,7 @@ find_in_dynamic_field(Header, #state{field_index = FieldIndex, insert_count = In
 find_in_dynamic_name(Name, #state{name_index = NameIndex, insert_count = InsertCount, count = Count}) ->
     case maps:find(Name, NameIndex) of
         {ok, AbsIndex} when InsertCount - AbsIndex < Count ->
-            {ok, ?STATIC_TABLE_SIZE + (InsertCount - AbsIndex)};
+            {ok, ?STATIC_TABLE_SIZE + (InsertCount - AbsIndex) + 1};
         _ ->
             error
     end.
