@@ -233,6 +233,75 @@ is_lingering_stream_test() ->
     ?assertEqual(false, hackney_http2_machine:is_lingering_stream(1, State)).
 
 %%====================================================================
+%% Window Update Send Tests
+%%====================================================================
+
+setup_stream_with_headers(ServerSettings) ->
+    {ok, _Preface, S0} = hackney_http2_machine:init(client, ?TEST_OPTS),
+    {ok, S1} = hackney_http2_machine:frame({settings, ServerSettings}, S0),
+    {ok, S2} = hackney_http2_machine:frame(settings_ack, S1),
+    {ok, StreamID, S3} = hackney_http2_machine:init_stream(<<"POST">>, S2),
+    PseudoHeaders = #{
+        method => <<"POST">>,
+        scheme => <<"https">>,
+        authority => <<"example.com">>,
+        path => <<"/upload">>
+    },
+    Headers = [{<<"content-type">>, <<"application/octet-stream">>}],
+    {ok, nofin, _HeaderBlock, S4} = hackney_http2_machine:prepare_headers(
+        StreamID, S3, nofin, PseudoHeaders, Headers),
+    {StreamID, S4}.
+
+conn_window_update_sends_queued_data_test() ->
+    {StreamID, S0} = setup_stream_with_headers(#{initial_window_size => 200000}),
+    FillData = {data, binary:copy(<<0>>, 65535)},
+    {send, _, S1} = hackney_http2_machine:send_or_queue_data(StreamID, S0, nofin, FillData),
+    QueuedData = {data, binary:copy(<<1>>, 10000)},
+    {ok, S2} = hackney_http2_machine:send_or_queue_data(StreamID, S1, fin, QueuedData),
+    BufferSize = hackney_http2_machine:get_connection_local_buffer_size(S2),
+    ?assert(BufferSize > 0),
+    {send, SendList, _S3} = hackney_http2_machine:frame({window_update, 50000}, S2),
+    ?assert(is_list(SendList)),
+    ?assert(length(SendList) > 0).
+
+stream_window_update_sends_queued_data_test() ->
+    {StreamID, S0} = setup_stream_with_headers(#{initial_window_size => 100}),
+    FillData = {data, binary:copy(<<0>>, 100)},
+    {send, _, S1} = hackney_http2_machine:send_or_queue_data(StreamID, S0, nofin, FillData),
+    QueuedData = {data, binary:copy(<<1>>, 500)},
+    {ok, S2} = hackney_http2_machine:send_or_queue_data(StreamID, S1, fin, QueuedData),
+    {send, SendList, _S3} = hackney_http2_machine:frame(
+        {window_update, StreamID, 10000}, S2),
+    ?assert(is_list(SendList)),
+    ?assert(length(SendList) > 0),
+    [{SentStreamID, _, _} | _] = SendList,
+    ?assertEqual(StreamID, SentStreamID).
+
+conn_window_update_no_queued_data_test() ->
+    {ok, _Preface, S0} = hackney_http2_machine:init(client, ?TEST_OPTS),
+    {ok, S1} = hackney_http2_machine:frame({settings, #{}}, S0),
+    {ok, S2} = hackney_http2_machine:frame(settings_ack, S1),
+    {ok, S3} = hackney_http2_machine:frame({window_update, 1000}, S2),
+    ?assert(is_tuple(S3)).
+
+stream_window_update_no_queued_data_test() ->
+    {StreamID, S0} = setup_stream_with_headers(#{}),
+    {ok, S1} = hackney_http2_machine:frame({window_update, StreamID, 1000}, S0),
+    ?assert(is_tuple(S1)).
+
+conn_window_update_overflow_test() ->
+    {ok, _Preface, S0} = hackney_http2_machine:init(client, ?TEST_OPTS),
+    {ok, S1} = hackney_http2_machine:frame({settings, #{}}, S0),
+    {ok, S2} = hackney_http2_machine:frame(settings_ack, S1),
+    {error, {connection_error, flow_control_error, _}, _S3} =
+        hackney_http2_machine:frame({window_update, 16#7fffffff}, S2).
+
+stream_window_update_overflow_test() ->
+    {StreamID, S0} = setup_stream_with_headers(#{}),
+    Result = hackney_http2_machine:frame({window_update, StreamID, 16#7fffffff}, S0),
+    ?assertMatch({error, {stream_error, StreamID, flow_control_error, _}, _}, Result).
+
+%%====================================================================
 %% Test Suites
 %%====================================================================
 
@@ -273,4 +342,20 @@ stream_state_test_() ->
         {"Stream not found", fun get_stream_state_not_found_test/0},
         {"Last streamid", fun last_streamid_test/0},
         {"Is lingering stream", fun is_lingering_stream_test/0}
+    ].
+
+window_update_send_test_() ->
+    [
+        {"Conn window_update sends queued data",
+            fun conn_window_update_sends_queued_data_test/0},
+        {"Stream window_update sends queued data",
+            fun stream_window_update_sends_queued_data_test/0},
+        {"Conn window_update with no queued data",
+            fun conn_window_update_no_queued_data_test/0},
+        {"Stream window_update with no queued data",
+            fun stream_window_update_no_queued_data_test/0},
+        {"Conn window_update overflow error",
+            fun conn_window_update_overflow_test/0},
+        {"Stream window_update overflow error",
+            fun stream_window_update_overflow_test/0}
     ].
