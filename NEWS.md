@@ -1,5 +1,15 @@
 # NEWS
 
+3.2.1 - 2026-03-01
+------------------
+
+### Bug Fixes
+
+- Fix `recv_timeout` option being ignored for pooled connections (#832)
+- Fix off-by-one error in HPACK decoding (#831)
+- Fix invalid match in `handle_h2_frame/2` for HTTP/2 window updates (#829)
+- Fix binary syntax in EDoc comment to fix XML parsing error
+
 3.2.0 - 2026-02-21
 ------------------
 
