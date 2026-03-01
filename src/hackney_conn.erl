@@ -46,6 +46,7 @@
     request_async/6,
     request_async/7,
     request_async/8,
+    request_async/9,
     stream_next/1,
     stop_async/1,
     pause_stream/1,
@@ -323,6 +324,11 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
     {ok, reference()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
     gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}).
+
+-spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean(), list()) ->
+    {ok, reference()} | {error, term()}.
+request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts) ->
+    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}).
 
 %% @doc Request the next message in {async, once} mode.
 -spec stream_next(pid()) -> ok | {error, term()}.
@@ -794,13 +800,19 @@ connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
 connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
-connected({call, From}, {request, Method, Path, Headers, Body, _ReqOpts}, #conn_data{protocol = http2} = Data) ->
+connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
-    do_h2_request(From, Method, Path, Headers, Body, Data);
+    %% Allow recv_timeout to be overridden per-request (fix for issue #832)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    do_h2_request(From, Method, Path, Headers, Body, NewData);
 
-connected({call, From}, {request, Method, Path, Headers, Body, _ReqOpts}, #conn_data{protocol = http3} = Data) ->
+connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 request - use hackney_h3 (1xx not applicable for HTTP/3)
-    do_h3_request(From, Method, Path, Headers, Body, Data);
+    %% Allow recv_timeout to be overridden per-request (fix for issue #832)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    do_h3_request(From, Method, Path, Headers, Body, NewData);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request
@@ -826,6 +838,8 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
     %% HTTP/1.1 request
     InformFun = proplists:get_value(inform_fun, ReqOpts, undefined),
     AutoDecompress = proplists:get_value(auto_decompress, ReqOpts, false),
+    %% Allow recv_timeout to be overridden per-request (fix for issue #832)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
     NewData = Data#conn_data{
         request_from = From,
         method = Method,
@@ -840,7 +854,8 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         async_ref = undefined,
         stream_to = undefined,
         inform_fun = InformFun,
-        auto_decompress = AutoDecompress
+        auto_decompress = AutoDecompress,
+        recv_timeout = RecvTimeout
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
 
@@ -849,8 +864,26 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false, Data);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}, Data) ->
-    %% Start a new async request with redirect option
+    %% Start a new async request with redirect option (HTTP/1.1)
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data);
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 async request with ReqOpts (fix for issue #832)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, _FollowRedirect, ReqOpts}, #conn_data{protocol = http3} = Data) ->
+    %% HTTP/3 async request with ReqOpts (fix for issue #832, redirect not yet implemented for H3)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, NewData);
+
+connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, Data) ->
+    %% HTTP/1.1 async request with ReqOpts (fix for issue #832)
+    RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
 
 connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 streaming body - send headers only via QUIC

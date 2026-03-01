@@ -807,7 +807,7 @@ do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
                                  Options, URL, FollowRedirect, MaxRedirect, RedirectCount);
     _ ->
       %% Async request with optional redirect handling
-      async_request(ConnPid, MethodBin, Path, Headers3, Body, Async, StreamTo, FollowRedirect)
+      async_request(ConnPid, MethodBin, Path, Headers3, Body, Async, StreamTo, FollowRedirect, Options)
   end,
 
   case Result of
@@ -850,9 +850,14 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     undefined -> [];
     InformFun -> [{inform_fun, InformFun}]
   end,
-  ReqOpts = case proplists:get_value(auto_decompress, Options, false) of
+  ReqOpts1 = case proplists:get_value(auto_decompress, Options, false) of
     true -> [{auto_decompress, true} | ReqOpts0];
     false -> ReqOpts0
+  end,
+  %% Pass recv_timeout through to the connection so it's applied per-request
+  ReqOpts = case proplists:get_value(recv_timeout, Options) of
+    undefined -> ReqOpts1;
+    RecvTimeout -> [{recv_timeout, RecvTimeout} | ReqOpts1]
   end,
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
     %% HTTP/2 returns body directly - handle 4-tuple first
@@ -1055,13 +1060,18 @@ maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
       end
   end.
 
-async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
+async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Options) ->
   %% Handle body encoding
   {FinalHeaders, FinalBody} = encode_body(Headers, Body, []),
   HeadersList = hackney_headers:to_list(FinalHeaders),
+  %% Build ReqOpts for recv_timeout (fix for issue #832)
+  ReqOpts = case proplists:get_value(recv_timeout, Options) of
+    undefined -> [];
+    RecvTimeout -> [{recv_timeout, RecvTimeout}]
+  end,
   %% Note: Issue #646 - ownership transfer to StreamTo (when different from caller)
   %% is handled atomically inside hackney_conn:do_request_async
-  case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode, StreamTo, FollowRedirect) of
+  case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode, StreamTo, FollowRedirect, ReqOpts) of
     {ok, Ref} ->
       {ok, Ref};
     {error, Reason} ->
