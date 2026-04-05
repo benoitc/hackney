@@ -26,7 +26,9 @@
          cancel_request/1,
          setopts/2]).
 
--export([redirect_location/1]).
+-export([redirect_location/1,
+         parse_no_proxy_env/2,
+         match_no_proxy_env/2]).
 
 -export([stream_next/1,
          stop_async/1,
@@ -751,7 +753,7 @@ parse_no_proxy_env([S | Rest], Acc) ->
   catch
     _:_ ->
       Labels = string:tokens(S, "."),
-      parse_no_proxy_env(Rest, [{host, lists:reverse(Labels)}])
+      parse_no_proxy_env(Rest, [{host, lists:reverse(Labels)} | Acc])
   end;
 parse_no_proxy_env([], Acc) ->
   NoProxy = lists:reverse(Acc),
@@ -777,10 +779,10 @@ do_match_no_proxy_env([{cidr, CIDR} | Rest], Addrs, Labels, Host) ->
 do_match_no_proxy_env([{host, _Labels} | _] = Patterns, Addrs, undefined, Host) ->
   HostLabels = string:tokens(Host, "."),
   do_match_no_proxy_env(Patterns, Addrs, lists:reverse(HostLabels), Host);
-do_match_no_proxy_env([{host, Labels} | Rest], Addrs, HostLabels, Host) ->
+do_match_no_proxy_env([{host, Labels} | Rest], Addrs, HostLabels, Host) ->
   case test_host_labels(Labels, HostLabels) of
     true -> true;
-    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+    false -> do_match_no_proxy_env(Rest, Addrs, HostLabels, Host)
   end;
 do_match_no_proxy_env([], _, _, _) ->
   false.
