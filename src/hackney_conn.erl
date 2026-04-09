@@ -761,10 +761,9 @@ connected({call, From}, {upgrade_to_ssl, _SslOpts}, #conn_data{transport = hackn
     {keep_state_and_data, [{reply, From, ok}]};
 connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
     %% Upgrade TCP socket to SSL (e.g., after CONNECT proxy tunnel)
-    %% Get default SSL options with hostname verification
-    DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
-    %% Merge user-provided SSL options (they override defaults)
-    MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts),
+    %% Use ssl_opts/2 to properly merge defaults with user options
+    %% (handles cacertfile vs cacerts correctly)
+    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts}]),
     %% Add ALPN options for HTTP/2 negotiation
     %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
     AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
@@ -2271,8 +2270,9 @@ do_tcp_connect(From, Data) ->
     TransportOpts = proplists:delete(protocols, ConnectOpts),
     Opts = case Transport of
         hackney_ssl ->
-            DefaultSslOpts = hackney_ssl:check_hostname_opts(Host),
-            MergedSslOpts = hackney_util:merge_opts(DefaultSslOpts, SslOpts0),
+            %% Use ssl_opts/2 to properly merge defaults with user options
+            %% (handles cacertfile vs cacerts correctly)
+            MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
             AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
             FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
             TransportOpts ++ [{ssl_options, FinalSslOpts}];
