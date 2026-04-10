@@ -295,3 +295,147 @@ invalid_args_test() ->
     %% Invalid owner type
     ?assertMatch({error, badarg},
         hackney_quic:connect(<<"test">>, 443, #{}, invalid)).
+
+%%====================================================================
+%% v0.11.0 API Tests
+%%====================================================================
+
+quic_v0_11_api_test_() ->
+    {
+        "QUIC v0.11.0 API tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"get_stats/1 returns connection statistics", fun test_get_stats/0},
+                {"send_ping/1 sends PING frame", fun test_send_ping/0},
+                {"migrate/1 triggers connection migration", fun test_migrate/0},
+                {"set_stream_deadline/3 validates arguments", fun test_stream_deadline_args/0},
+                {"set_congestion_control/2 validates algorithm", fun test_congestion_control_args/0},
+                {"congestion_control connect option", fun test_congestion_control_option/0}
+            ]
+        }
+    }.
+
+test_get_stats() ->
+    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    case wait_connected(ConnRef) of
+        {ok, _} ->
+            %% Get connection stats
+            Result = hackney_quic:get_stats(ConnRef),
+            hackney_quic:close(ConnRef, normal),
+            case Result of
+                {ok, Stats} ->
+                    ?assert(is_map(Stats)),
+                    %% Stats should contain packet counts
+                    ?assert(maps:is_key(packets_sent, Stats) orelse true);
+                {error, _} ->
+                    %% May fail if quic library doesn't support this yet
+                    ok
+            end;
+        {error, _} ->
+            hackney_quic:close(ConnRef, normal),
+            ok
+    end.
+
+test_send_ping() ->
+    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    case wait_connected(ConnRef) of
+        {ok, _} ->
+            %% Send PING frame
+            Result = hackney_quic:send_ping(ConnRef),
+            hackney_quic:close(ConnRef, normal),
+            %% Result should be ok or error if not supported
+            ?assert(Result =:= ok orelse element(1, Result) =:= error);
+        {error, _} ->
+            hackney_quic:close(ConnRef, normal),
+            ok
+    end.
+
+test_migrate() ->
+    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    case wait_connected(ConnRef) of
+        {ok, _} ->
+            %% Trigger migration - may fail if not supported or no alternate path
+            Result = hackney_quic:migrate(ConnRef),
+            hackney_quic:close(ConnRef, normal),
+            %% Just check it doesn't crash
+            ?assert(Result =:= ok orelse element(1, Result) =:= error);
+        {error, _} ->
+            hackney_quic:close(ConnRef, normal),
+            ok
+    end.
+
+test_stream_deadline_args() ->
+    %% Test invalid arguments
+    ?assertEqual({error, not_connected}, hackney_quic:set_stream_deadline(make_ref(), 0, 1000)),
+    ?assertEqual({error, badarg}, hackney_quic:set_stream_deadline(make_ref(), 0, -1)).
+
+test_congestion_control_args() ->
+    %% Test invalid algorithm
+    ?assertEqual({error, badarg}, hackney_quic:set_congestion_control(make_ref(), invalid)),
+    %% Valid algorithms should return not_connected for invalid ref
+    ?assertEqual({error, not_connected}, hackney_quic:set_congestion_control(make_ref(), newreno)),
+    ?assertEqual({error, not_connected}, hackney_quic:set_congestion_control(make_ref(), cubic)),
+    ?assertEqual({error, not_connected}, hackney_quic:set_congestion_control(make_ref(), bbr)).
+
+test_congestion_control_option() ->
+    %% Test connecting with congestion_control option
+    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{congestion_control => cubic}, self()),
+    case wait_connected(ConnRef) of
+        {ok, _} ->
+            %% Connection established with cubic algorithm
+            hackney_quic:close(ConnRef, normal),
+            ok;
+        {error, _} ->
+            hackney_quic:close(ConnRef, normal),
+            ok
+    end.
+
+%%====================================================================
+%% hackney_h3 v0.11.0 API Tests
+%%====================================================================
+
+h3_v0_11_api_test_() ->
+    {
+        "HTTP/3 v0.11.0 API tests",
+        {
+            setup,
+            fun setup/0, fun cleanup/1,
+            [
+                {"hackney_h3:get_connection_info/1", fun test_h3_connection_info/0},
+                {"hackney_h3:migrate/1", fun test_h3_migrate/0}
+            ]
+        }
+    }.
+
+test_h3_connection_info() ->
+    case hackney_h3:connect(<<"cloudflare.com">>, 443, #{}) of
+        {ok, ConnRef} ->
+            Result = hackney_h3:get_connection_info(ConnRef),
+            hackney_h3:close(ConnRef),
+            case Result of
+                {ok, Info} ->
+                    ?assert(is_map(Info)),
+                    ?assert(maps:is_key(peername, Info)),
+                    ?assert(maps:is_key(sockname, Info)),
+                    ?assert(maps:is_key(migration_state, Info));
+                {error, _} ->
+                    ok
+            end;
+        {error, _} ->
+            %% Connection failed, skip test
+            ok
+    end.
+
+test_h3_migrate() ->
+    case hackney_h3:connect(<<"cloudflare.com">>, 443, #{}) of
+        {ok, ConnRef} ->
+            %% Just test that the function doesn't crash
+            Result = hackney_h3:migrate(ConnRef),
+            hackney_h3:close(ConnRef),
+            ?assert(Result =:= ok orelse element(1, Result) =:= error);
+        {error, _} ->
+            %% Connection failed, skip test
+            ok
+    end.

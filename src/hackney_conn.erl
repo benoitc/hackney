@@ -178,8 +178,8 @@
     enable_push = false :: false | pid(),
 
     %% HTTP/3 support (QUIC)
-    %% QUIC connection reference from hackney_quic
-    h3_conn :: reference() | undefined,
+    %% QUIC connection pid from hackney_quic
+    h3_conn :: pid() | undefined,
     %% Map of active HTTP/3 streams: StreamId => {From, StreamState}
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
     %% Current HTTP/3 stream ID for streaming body mode
@@ -958,6 +958,27 @@ connected(info, {quic, ConnRef, {transport_error, Code, Msg}},
     %% QUIC transport error
     handle_h3_error({transport_error, Code, Msg}, Data);
 
+%% v0.11.0: QUIC connection migration events
+connected(info, {quic, ConnRef, {path_validated, _PathInfo}},
+          #conn_data{h3_conn = ConnRef}) ->
+    %% Path validation completed - connection can now use the new path
+    keep_state_and_data;
+
+connected(info, {quic, ConnRef, {migration_completed, _NewAddr}},
+          #conn_data{h3_conn = ConnRef}) ->
+    %% Connection migration completed successfully
+    keep_state_and_data;
+
+connected(info, {quic, ConnRef, {path_challenge, _Token}},
+          #conn_data{h3_conn = ConnRef}) ->
+    %% Path challenge received - handled internally by QUIC layer
+    keep_state_and_data;
+
+connected(info, {quic, ConnRef, {path_response, _Token}},
+          #conn_data{h3_conn = ConnRef}) ->
+    %% Path response received - path validation in progress
+    keep_state_and_data;
+
 %% QUIC socket ready - drive event loop
 connected(info, {select, _Resource, _Ref, ready_input},
           #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
@@ -1159,6 +1180,23 @@ streaming_body(info, {quic, ConnRef, {closed, Reason}},
 streaming_body(info, {quic, ConnRef, {transport_error, Code, Msg}},
                #conn_data{h3_conn = ConnRef} = Data) ->
     handle_h3_error({transport_error, Code, Msg}, Data);
+
+%% v0.11.0: QUIC connection migration events
+streaming_body(info, {quic, ConnRef, {path_validated, _PathInfo}},
+               #conn_data{h3_conn = ConnRef}) ->
+    keep_state_and_data;
+
+streaming_body(info, {quic, ConnRef, {migration_completed, _NewAddr}},
+               #conn_data{h3_conn = ConnRef}) ->
+    keep_state_and_data;
+
+streaming_body(info, {quic, ConnRef, {path_challenge, _Token}},
+               #conn_data{h3_conn = ConnRef}) ->
+    keep_state_and_data;
+
+streaming_body(info, {quic, ConnRef, {path_response, _Token}},
+               #conn_data{h3_conn = ConnRef}) ->
+    keep_state_and_data;
 
 %% QUIC socket ready - drive event loop
 streaming_body(info, {select, _Resource, _Ref, ready_input},

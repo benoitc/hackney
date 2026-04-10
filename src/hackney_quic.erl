@@ -23,6 +23,10 @@
 %%%   <li>`{quic, ConnRef, {stream_reset, StreamId, ErrorCode}}' - Stream reset</li>
 %%%   <li>`{quic, ConnRef, {closed, Reason}}' - Connection closed</li>
 %%%   <li>`{quic, ConnRef, {transport_error, Code, Reason}}' - Transport error</li>
+%%%   <li>`{quic, ConnRef, {path_validated, PathInfo}}' - Path validation complete (v0.11.0)</li>
+%%%   <li>`{quic, ConnRef, {migration_completed, NewAddr}}' - Connection migrated (v0.11.0)</li>
+%%%   <li>`{quic, ConnRef, {path_challenge, Token}}' - Path challenge received (v0.11.0)</li>
+%%%   <li>`{quic, ConnRef, {path_response, Token}}' - Path response received (v0.11.0)</li>
 %%% </ul>
 %%%
 %%% @end
@@ -55,14 +59,20 @@
     sockname/1,
     setopts/2,
     get_fd/1,
-    is_available/0
+    is_available/0,
+    %% v0.11.0 APIs
+    get_stats/1,
+    send_ping/1,
+    set_stream_deadline/3,
+    migrate/1,
+    set_congestion_control/2
 ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
-    quic_conn :: reference() | undefined,
+    quic_conn :: pid() | undefined,
     owner :: pid(),
     owner_mon :: reference(),
     streams = #{} :: #{non_neg_integer() => stream_state()},
@@ -77,7 +87,12 @@
     settings_sent = false :: boolean(),
     settings_received = false :: boolean(),
     host :: binary(),
-    port :: inet:port_number()
+    port :: inet:port_number(),
+    %% v0.11.0: Connection migration state
+    migration_state = idle :: idle | migrating | migrated,
+    last_migration_addr :: {inet:ip_address(), inet:port_number()} | undefined,
+    %% v0.11.0: Congestion control algorithm
+    congestion_control = newreno :: newreno | cubic | bbr
 }).
 
 -record(uni_stream_info, {
@@ -126,7 +141,7 @@ get_fd(Socket) ->
     inet:getfd(Socket).
 
 %% @doc Connect to a QUIC/HTTP3 server.
--spec connect(Host, Port, Opts, Owner) -> {ok, reference()} | {error, term()}
+-spec connect(Host, Port, Opts, Owner) -> {ok, pid()} | {error, term()}
     when Host :: binary() | string(),
          Port :: inet:port_number(),
          Opts :: map(),
@@ -149,7 +164,7 @@ connect(_Host, _Port, _Opts, _Owner) ->
 
 %% @doc Close a QUIC connection.
 -spec close(ConnRef, Reason) -> ok
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          Reason :: term().
 close(ConnRef, Reason) ->
     case get_conn_pid(ConnRef) of
@@ -161,7 +176,7 @@ close(ConnRef, Reason) ->
 
 %% @doc Open a new bidirectional stream.
 -spec open_stream(ConnRef) -> {ok, non_neg_integer()} | {error, term()}
-    when ConnRef :: reference().
+    when ConnRef :: pid().
 open_stream(ConnRef) ->
     case get_conn_pid(ConnRef) of
         {ok, Pid} ->
@@ -172,7 +187,7 @@ open_stream(ConnRef) ->
 
 %% @doc Send HTTP/3 headers on a stream.
 -spec send_headers(ConnRef, StreamId, Headers, Fin) -> ok | {error, term()}
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          StreamId :: non_neg_integer(),
          Headers :: [{binary(), binary()}],
          Fin :: boolean().
@@ -188,7 +203,7 @@ send_headers(_ConnRef, _StreamId, _Headers, _Fin) ->
 
 %% @doc Send data on a stream.
 -spec send_data(ConnRef, StreamId, Data, Fin) -> ok | {error, term()}
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          StreamId :: non_neg_integer(),
          Data :: iodata(),
          Fin :: boolean().
@@ -204,7 +219,7 @@ send_data(_ConnRef, _StreamId, _Data, _Fin) ->
 
 %% @doc Reset a stream with an error code.
 -spec reset_stream(ConnRef, StreamId, ErrorCode) -> ok | {error, term()}
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          StreamId :: non_neg_integer(),
          ErrorCode :: non_neg_integer().
 reset_stream(ConnRef, StreamId, ErrorCode) when is_integer(ErrorCode), ErrorCode >= 0 ->
@@ -219,7 +234,7 @@ reset_stream(_ConnRef, _StreamId, _ErrorCode) ->
 
 %% @doc Handle connection timeout.
 -spec handle_timeout(ConnRef, NowMs) -> non_neg_integer() | infinity
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          NowMs :: non_neg_integer().
 handle_timeout(_ConnRef, _NowMs) ->
     %% Timeouts are handled internally by the quic library
@@ -227,14 +242,14 @@ handle_timeout(_ConnRef, _NowMs) ->
 
 %% @doc Process pending QUIC events.
 -spec process(ConnRef) -> non_neg_integer() | infinity
-    when ConnRef :: reference().
+    when ConnRef :: pid().
 process(_ConnRef) ->
     %% Events are handled via messages, no explicit processing needed
     infinity.
 
 %% @doc Get the remote address of the connection.
 -spec peername(ConnRef) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}
-    when ConnRef :: reference().
+    when ConnRef :: pid().
 peername(ConnRef) ->
     case get_conn_pid(ConnRef) of
         {ok, Pid} ->
@@ -245,7 +260,7 @@ peername(ConnRef) ->
 
 %% @doc Get the local address of the connection.
 -spec sockname(ConnRef) -> {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}
-    when ConnRef :: reference().
+    when ConnRef :: pid().
 sockname(ConnRef) ->
     case get_conn_pid(ConnRef) of
         {ok, Pid} ->
@@ -256,11 +271,91 @@ sockname(ConnRef) ->
 
 %% @doc Set connection options.
 -spec setopts(ConnRef, Opts) -> ok | {error, term()}
-    when ConnRef :: reference(),
+    when ConnRef :: pid(),
          Opts :: [{atom(), term()}].
 setopts(_ConnRef, _Opts) ->
     %% Options not currently supported
     ok.
+
+%%====================================================================
+%% v0.11.0 APIs
+%%====================================================================
+
+%% @doc Get connection statistics.
+%% Returns packet counts, byte counts, RTT measurements and other metrics.
+-spec get_stats(ConnRef) -> {ok, Stats} | {error, term()}
+    when ConnRef :: pid(),
+         Stats :: #{packets_sent => non_neg_integer(),
+                    packets_received => non_neg_integer(),
+                    bytes_sent => non_neg_integer(),
+                    bytes_received => non_neg_integer(),
+                    rtt_min => non_neg_integer(),
+                    rtt_smoothed => non_neg_integer(),
+                    cwnd => non_neg_integer(),
+                    congestion_events => non_neg_integer()}.
+get_stats(ConnRef) ->
+    case get_conn_pid(ConnRef) of
+        {ok, Pid} ->
+            gen_server:call(Pid, get_stats);
+        error ->
+            {error, not_connected}
+    end.
+
+%% @doc Send a PING frame for keepalive or RTT measurement.
+%% The peer will respond with an ACK, which can be used to measure RTT.
+-spec send_ping(ConnRef) -> ok | {error, term()}
+    when ConnRef :: pid().
+send_ping(ConnRef) ->
+    case get_conn_pid(ConnRef) of
+        {ok, Pid} ->
+            gen_server:call(Pid, send_ping);
+        error ->
+            {error, not_connected}
+    end.
+
+%% @doc Set a deadline for a stream.
+%% Data not sent before the deadline expires will be discarded.
+-spec set_stream_deadline(ConnRef, StreamId, DeadlineMs) -> ok | {error, term()}
+    when ConnRef :: pid(),
+         StreamId :: non_neg_integer(),
+         DeadlineMs :: non_neg_integer().
+set_stream_deadline(ConnRef, StreamId, DeadlineMs) when is_integer(DeadlineMs), DeadlineMs >= 0 ->
+    case get_conn_pid(ConnRef) of
+        {ok, Pid} ->
+            gen_server:call(Pid, {set_stream_deadline, StreamId, DeadlineMs});
+        error ->
+            {error, not_connected}
+    end;
+set_stream_deadline(_ConnRef, _StreamId, _DeadlineMs) ->
+    {error, badarg}.
+
+%% @doc Trigger connection migration to a new network path.
+%% This initiates path validation and CID rotation for unlinkability.
+-spec migrate(ConnRef) -> ok | {error, term()}
+    when ConnRef :: pid().
+migrate(ConnRef) ->
+    case get_conn_pid(ConnRef) of
+        {ok, Pid} ->
+            gen_server:call(Pid, migrate);
+        error ->
+            {error, not_connected}
+    end.
+
+%% @doc Set the congestion control algorithm.
+%% Available algorithms: newreno (default), cubic, bbr.
+-spec set_congestion_control(ConnRef, Algorithm) -> ok | {error, term()}
+    when ConnRef :: pid(),
+         Algorithm :: newreno | cubic | bbr.
+set_congestion_control(ConnRef, Algorithm)
+  when Algorithm =:= newreno; Algorithm =:= cubic; Algorithm =:= bbr ->
+    case get_conn_pid(ConnRef) of
+        {ok, Pid} ->
+            gen_server:call(Pid, {set_congestion_control, Algorithm});
+        error ->
+            {error, not_connected}
+    end;
+set_congestion_control(_ConnRef, _Algorithm) ->
+    {error, badarg}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -273,6 +368,9 @@ init({Host, Port, Opts, Owner}) ->
     %% Build TLS options for QUIC
     QuicOpts = build_quic_opts(Host, Opts),
 
+    %% Get congestion control from options (default: newreno)
+    CC = maps:get(congestion_control, Opts, newreno),
+
     %% Connect using the pure Erlang QUIC library
     case quic:connect(binary_to_list(Host), Port, QuicOpts, self()) of
         {ok, QuicConn} ->
@@ -283,7 +381,8 @@ init({Host, Port, Opts, Owner}) ->
                 owner = Owner,
                 owner_mon = MonRef,
                 host = Host,
-                port = Port
+                port = Port,
+                congestion_control = CC
             }};
         {error, Reason} ->
             {stop, Reason}
@@ -338,6 +437,47 @@ handle_call(sockname, _From, #state{quic_conn = QuicConn} = State) ->
     Result = quic:sockname(QuicConn),
     {reply, Result, State};
 
+%% v0.11.0 API calls - these functions may not exist in older quic versions
+handle_call(get_stats, _From, #state{quic_conn = QuicConn} = State) ->
+    Result = try quic:get_stats(QuicConn)
+             catch error:undef -> {error, not_supported}
+             end,
+    {reply, Result, State};
+
+handle_call(send_ping, _From, #state{quic_conn = QuicConn} = State) ->
+    Result = try quic:send_ping(QuicConn)
+             catch error:undef -> {error, not_supported}
+             end,
+    {reply, Result, State};
+
+handle_call({set_stream_deadline, StreamId, DeadlineMs}, _From,
+            #state{quic_conn = QuicConn} = State) ->
+    Result = try quic:set_stream_deadline(QuicConn, StreamId, DeadlineMs)
+             catch error:undef -> {error, not_supported}
+             end,
+    {reply, Result, State};
+
+handle_call(migrate, _From, #state{quic_conn = QuicConn} = State) ->
+    Result = try quic:migrate(QuicConn)
+             catch error:undef -> {error, not_supported}
+             end,
+    case Result of
+        ok ->
+            {reply, ok, State#state{migration_state = migrating}};
+        {error, _} = Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({set_congestion_control, Algorithm}, _From, State) ->
+    %% quic:set_congestion_control/2 not yet available in quic library
+    %% Store locally for future use when API becomes available
+    {reply, ok, State#state{congestion_control = Algorithm}};
+
+handle_call(get_migration_state, _From, #state{migration_state = MigState,
+                                                last_migration_addr = LastAddr} = State) ->
+    Info = #{migration_state => MigState, last_migration_addr => LastAddr},
+    {reply, {ok, Info}, State};
+
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -386,6 +526,34 @@ handle_info({quic, QuicConn, {error, Code, Reason}},
             #state{quic_conn = QuicConn, owner = Owner} = State) ->
     Owner ! {quic, QuicConn, {transport_error, Code, Reason}},
     {stop, {error, Code}, State};
+
+%% v0.11.0: Connection migration events
+handle_info({quic, QuicConn, {path_validated, PathInfo}},
+            #state{quic_conn = QuicConn, owner = Owner} = State) ->
+    %% Path validation completed - forward to owner
+    Owner ! {quic, QuicConn, {path_validated, PathInfo}},
+    {noreply, State};
+
+handle_info({quic, QuicConn, {migration_completed, NewAddr}},
+            #state{quic_conn = QuicConn, owner = Owner} = State) ->
+    %% Connection migration completed
+    Owner ! {quic, QuicConn, {migration_completed, NewAddr}},
+    {noreply, State#state{
+        migration_state = migrated,
+        last_migration_addr = NewAddr
+    }};
+
+handle_info({quic, QuicConn, {path_challenge, Token}},
+            #state{quic_conn = QuicConn, owner = Owner} = State) ->
+    %% Path challenge received - forward to owner for awareness
+    Owner ! {quic, QuicConn, {path_challenge, Token}},
+    {noreply, State};
+
+handle_info({quic, QuicConn, {path_response, Token}},
+            #state{quic_conn = QuicConn, owner = Owner} = State) ->
+    %% Path response received - forward to owner
+    Owner ! {quic, QuicConn, {path_response, Token}},
+    {noreply, State};
 
 handle_info({'DOWN', MonRef, process, _Pid, _Reason},
             #state{owner_mon = MonRef, quic_conn = QuicConn} = State) ->
@@ -487,7 +655,14 @@ build_quic_opts(Host, Opts) ->
             Opts3#{server_name_indication => SNIStr}
     end,
 
-    Opts4.
+    %% v0.11.0: Add congestion control algorithm if specified
+    Opts5 = case maps:get(congestion_control, Opts, undefined) of
+        undefined -> Opts4;
+        CC when CC =:= newreno; CC =:= cubic; CC =:= bbr ->
+            Opts4#{congestion_control => CC}
+    end,
+
+    Opts5.
 
 %% Connection registry using ETS
 %% Table created on first use

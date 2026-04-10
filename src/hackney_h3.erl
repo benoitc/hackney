@@ -27,6 +27,16 @@
 
 -include("hackney_lib.hrl").
 
+%% Suppress dialyzer warnings for redirect handling code (not yet fully integrated)
+-dialyzer({nowarn_function, [
+    handle_redirect/11,
+    get_redirect_location/1,
+    resolve_redirect_url/2,
+    redirect_method/2,
+    do_request/7,
+    do_request_with_redirect/8
+]}).
+
 -export([
     %% High-level API
     is_available/0,
@@ -47,10 +57,13 @@
     parse_response_headers/1,
     %% Connection close
     close/1,
-    close/2
+    close/2,
+    %% v0.11.0: Connection migration
+    migrate/1,
+    get_connection_info/1
 ]).
 
--type h3_conn() :: reference().
+-type h3_conn() :: pid().
 -type stream_id() :: non_neg_integer().
 -type method() :: get | post | put | delete | head | options | patch | atom() | binary().
 -type url() :: binary() | string().
@@ -376,6 +389,76 @@ close(ConnRef) ->
 -spec close(h3_conn(), term()) -> ok.
 close(ConnRef, Reason) ->
     hackney_quic:close(ConnRef, Reason).
+
+%%====================================================================
+%% v0.11.0: Connection Migration
+%%====================================================================
+
+%% @doc Trigger connection migration to a new network path.
+%% This initiates path validation and CID rotation for unlinkability.
+%% Useful when the network changes (e.g., WiFi to cellular).
+-spec migrate(h3_conn()) -> ok | {error, term()}.
+migrate(ConnRef) ->
+    hackney_quic:migrate(ConnRef).
+
+%% @doc Get connection information including migration status.
+%% Returns a map with:
+%%   - migration_state: idle | migrating | migrated
+%%   - last_migration_addr: the last address migrated to (if any)
+%%   - peername: current peer address
+%%   - sockname: current local address
+-spec get_connection_info(h3_conn()) -> {ok, map()} | {error, term()}.
+get_connection_info(ConnRef) ->
+    case hackney_quic:peername(ConnRef) of
+        {ok, PeerAddr} ->
+            case hackney_quic:sockname(ConnRef) of
+                {ok, LocalAddr} ->
+                    %% Get migration state from hackney_quic
+                    case get_conn_pid(ConnRef) of
+                        {ok, Pid} ->
+                            MigInfo = gen_server:call(Pid, get_migration_state),
+                            case MigInfo of
+                                {ok, #{migration_state := MigState, last_migration_addr := LastAddr}} ->
+                                    {ok, #{
+                                        peername => PeerAddr,
+                                        sockname => LocalAddr,
+                                        migration_state => MigState,
+                                        last_migration_addr => LastAddr
+                                    }};
+                                _ ->
+                                    {ok, #{
+                                        peername => PeerAddr,
+                                        sockname => LocalAddr,
+                                        migration_state => idle,
+                                        last_migration_addr => undefined
+                                    }}
+                            end;
+                        error ->
+                            {ok, #{
+                                peername => PeerAddr,
+                                sockname => LocalAddr,
+                                migration_state => idle,
+                                last_migration_addr => undefined
+                            }}
+                    end;
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private Get the gen_server pid for a connection reference.
+get_conn_pid(ConnRef) ->
+    case ets:whereis(hackney_quic_conns) of
+        undefined ->
+            error;
+        _ ->
+            case ets:lookup(hackney_quic_conns, ConnRef) of
+                [{ConnRef, Pid}] -> {ok, Pid};
+                [] -> error
+            end
+    end.
 
 %%====================================================================
 %% Internal functions

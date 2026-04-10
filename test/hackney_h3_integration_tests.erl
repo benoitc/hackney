@@ -404,8 +404,8 @@ test_h3_request_with_options() ->
 test_h3_connect_api() ->
     case hackney_h3:connect(<<"cloudflare.com">>, 443, #{}) of
         {ok, ConnRef} ->
-            %% Should be connected
-            ?assert(is_reference(ConnRef)),
+            %% Should be connected (ConnRef is a pid in quic 0.11.0)
+            ?assert(is_pid(ConnRef)),
             hackney_h3:close(ConnRef);
         {error, _Reason} ->
             ok
