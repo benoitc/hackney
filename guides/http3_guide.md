@@ -17,7 +17,7 @@ Hackney supports HTTP/3, the latest version of HTTP built on QUIC (UDP-based tra
 
 ## Requirements
 
-HTTP/3 support is provided by the [`erlang_quic`](https://github.com/benoitc/erlang_quic) dependency (module `quic_h3`), which handles the QUIC transport, QPACK header compression, HTTP/3 framing, and control streams. Hackney hosts only a thin adapter (`hackney_quic`) that translates `quic_h3` events into the internal connection protocol. No C dependencies, no external binaries required.
+HTTP/3 support is provided by the [`erlang_quic`](https://github.com/benoitc/erlang_quic) dependency (module `quic_h3`), which handles the QUIC transport, QPACK header compression, HTTP/3 framing, and control streams. Hackney hosts only a thin adapter (`hackney_h3`) that translates `quic_h3` events into the internal connection protocol. No C dependencies, no external binaries required.
 
 ## Quick Start
 
@@ -186,24 +186,24 @@ Like HTTP/2, HTTP/3 multiplexes requests as streams on a single QUIC connection:
 
 The high-level `hackney:get/post/...` functions cover the common case. For
 servers that send streamed responses, or when you want to drive several
-requests concurrently on the same QUIC connection, use the `hackney_quic`
+requests concurrently on the same QUIC connection, use the `hackney_h3`
 adapter directly.
 
 ### Connect
 
 ```erlang
-{ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()).
+{ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()).
 
 receive
-    {quic, ConnRef, {connected, _Info}} -> ok
+    {h3, ConnRef, {connected, _Info}} -> ok
 after 5000 ->
     error(connect_timeout)
 end.
 ```
 
-`hackney_quic:connect/4` registers the calling process as the owner of the
+`hackney_h3:connect/4` registers the calling process as the owner of the
 connection. All events for the connection arrive as messages of the form
-`{quic, ConnRef, Event}`.
+`{h3, ConnRef, Event}`.
 
 ### Send a request
 
@@ -218,15 +218,15 @@ Headers = [
     {<<":authority">>, <<"cloudflare.com">>},
     {<<":path">>, <<"/cdn-cgi/trace">>}
 ],
-{ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, true).
+{ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, true).
 ```
 
 For requests with a body:
 
 ```erlang
-{ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, false),
-ok = hackney_quic:send_data(ConnRef, StreamId, <<"chunk-1">>, false),
-ok = hackney_quic:send_data(ConnRef, StreamId, <<"chunk-2">>, true).  %% Fin
+{ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, false),
+ok = hackney_h3:send_data(ConnRef, StreamId, <<"chunk-1">>, false),
+ok = hackney_h3:send_data(ConnRef, StreamId, <<"chunk-2">>, true).  %% Fin
 ```
 
 ### Receive the response
@@ -237,18 +237,18 @@ the `StreamId`:
 ```erlang
 recv(ConnRef, StreamId, Status, Headers, Body) ->
     receive
-        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
+        {h3, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
             {<<":status">>, S} = lists:keyfind(<<":status">>, 1, RespHeaders),
             recv(ConnRef, StreamId, binary_to_integer(S),
                  [H || {K, _} = H <- RespHeaders, K =/= <<":status">>],
                  Body);
-        {quic, ConnRef, {stream_data, StreamId, Chunk, true}} ->
+        {h3, ConnRef, {stream_data, StreamId, Chunk, true}} ->
             {ok, Status, Headers, <<Body/binary, Chunk/binary>>};
-        {quic, ConnRef, {stream_data, StreamId, Chunk, false}} ->
+        {h3, ConnRef, {stream_data, StreamId, Chunk, false}} ->
             recv(ConnRef, StreamId, Status, Headers, <<Body/binary, Chunk/binary>>);
-        {quic, ConnRef, {stream_reset, StreamId, ErrorCode}} ->
+        {h3, ConnRef, {stream_reset, StreamId, ErrorCode}} ->
             {error, {stream_reset, ErrorCode}};
-        {quic, ConnRef, {closed, Reason}} ->
+        {h3, ConnRef, {closed, Reason}} ->
             {error, {closed, Reason}}
     after 30000 ->
         {error, timeout}
@@ -265,9 +265,9 @@ Since each request gets its own `StreamId`, you can have several in flight
 on the same QUIC connection and demultiplex on the StreamId in your receive:
 
 ```erlang
-{ok, S1} = hackney_quic:send_request(ConnRef, headers(<<"/">>), true),
-{ok, S2} = hackney_quic:send_request(ConnRef, headers(<<"/cdn-cgi/trace">>), true),
-{ok, S3} = hackney_quic:send_request(ConnRef, headers(<<"/robots.txt">>), true),
+{ok, S1} = hackney_h3:send_request(ConnRef, headers(<<"/">>), true),
+{ok, S2} = hackney_h3:send_request(ConnRef, headers(<<"/cdn-cgi/trace">>), true),
+{ok, S3} = hackney_h3:send_request(ConnRef, headers(<<"/robots.txt">>), true),
 
 %% Collect responses as they complete; order is not guaranteed.
 collect(ConnRef, sets:from_list([S1, S2, S3]), #{}).
@@ -276,12 +276,12 @@ collect(_ConnRef, Pending, Acc) when map_size(Acc) =:= sets:size(Pending) ->
     Acc;
 collect(ConnRef, Pending, Acc) ->
     receive
-        {quic, ConnRef, {stream_headers, SId, Hs, _}} ->
+        {h3, ConnRef, {stream_headers, SId, Hs, _}} ->
             collect(ConnRef, Pending, Acc#{SId => {Hs, <<>>}});
-        {quic, ConnRef, {stream_data, SId, Chunk, true}} ->
+        {h3, ConnRef, {stream_data, SId, Chunk, true}} ->
             #{SId := {Hs, Body}} = Acc,
             collect(ConnRef, Pending, Acc#{SId => {Hs, <<Body/binary, Chunk/binary>>}});
-        {quic, ConnRef, {stream_data, SId, Chunk, false}} ->
+        {h3, ConnRef, {stream_data, SId, Chunk, false}} ->
             #{SId := {Hs, Body}} = Acc,
             collect(ConnRef, Pending, Acc#{SId => {Hs, <<Body/binary, Chunk/binary>>}})
     end.
@@ -293,13 +293,13 @@ Use `reset_stream/3` to abort a single in-flight request without tearing
 down the connection:
 
 ```erlang
-ok = hackney_quic:reset_stream(ConnRef, StreamId, 16#0102).  %% H3_REQUEST_CANCELLED
+ok = hackney_h3:reset_stream(ConnRef, StreamId, 16#0102).  %% H3_REQUEST_CANCELLED
 ```
 
 ### Close
 
 ```erlang
-hackney_quic:close(ConnRef, normal).
+hackney_h3:close(ConnRef, normal).
 ```
 
 ### Event reference

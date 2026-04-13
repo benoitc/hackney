@@ -8,12 +8,15 @@ UNRELEASED
 - HTTP/3 is now delegated to the `erlang_quic` library's `quic_h3` module
   (branch `feat/http3`). Hackney no longer ships its own HTTP/3 framing,
   QPACK codec, control-stream or unidirectional-stream handling:
-  - `hackney_quic.erl` is now a thin ~270 LOC gen_server adapter that
-    translates `{quic_h3, Conn, _}` events into the existing
-    `{quic, ConnRef, _}' message protocol consumed by `hackney_conn`.
-  - The public `hackney_quic` API now exposes `send_request/3` (atomic
-    stream-open + HEADERS) instead of the separate `open_stream/1` +
-    `send_headers/4` pair; `hackney_h3` updated to use it.
+  - `hackney_quic.erl` has been merged into `hackney_h3.erl`: the single
+    module now holds both the high-level request API and the gen_server
+    adapter that translates `{quic_h3, Conn, _}` events.
+  - The public low-level message tag is now `{h3, ConnRef, _}` (previously
+    `{quic, ConnRef, _}`). External subscribers to these events must retag
+    their receives.
+  - The public low-level API moves from `hackney_quic:` to `hackney_h3:`
+    (`connect/4`, `send_request/3`, `send_data/4`, `reset_stream/3`,
+    `close/2`, `process/1`).
   - `hackney_qpack.erl` removed (~622 LOC); the QPACK codec lives in
     `quic_qpack` in the `quic` dependency.
   - H3 peername/sockname/setopts/peercert now return `{error, not_supported}`:

@@ -44,7 +44,7 @@ http3_conn_test_() ->
     }.
 
 test_h3_connection_request() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -88,7 +88,7 @@ test_h3_connection_request() ->
     end.
 
 test_h3_get_protocol() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->

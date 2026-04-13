@@ -178,7 +178,7 @@
     enable_push = false :: false | pid(),
 
     %% HTTP/3 support (QUIC)
-    %% QUIC connection reference from hackney_quic
+    %% HTTP/3 connection reference from hackney_h3
     h3_conn :: reference() | undefined,
     %% Map of active HTTP/3 streams: StreamId => {From, StreamState}
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
@@ -935,25 +935,25 @@ connected(info, {ssl, Socket, _UnexpectedData}, #conn_data{socket = Socket, prot
         when Protocol =/= http2 ->
     {next_state, closed, Data#conn_data{socket = undefined}};
 
-%% HTTP/3 QUIC message handling
-connected(info, {quic, ConnRef, {stream_headers, StreamId, Headers, Fin}},
+%% HTTP/3 message handling
+connected(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
 
-connected(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
+connected(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
 
-connected(info, {quic, ConnRef, {stream_reset, StreamId, ErrorCode}},
+connected(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
 
-connected(info, {quic, ConnRef, {closed, Reason}},
+connected(info, {h3, ConnRef, {closed, Reason}},
           #conn_data{h3_conn = ConnRef} = Data) ->
-    %% QUIC connection closed
+    %% HTTP/3 connection closed
     handle_h3_conn_closed(Reason, Data);
 
-connected(info, {quic, ConnRef, {transport_error, Code, Msg}},
+connected(info, {h3, ConnRef, {transport_error, Code, Msg}},
           #conn_data{h3_conn = ConnRef} = Data) ->
     %% QUIC transport error
     handle_h3_error({transport_error, Code, Msg}, Data);
@@ -961,7 +961,7 @@ connected(info, {quic, ConnRef, {transport_error, Code, Msg}},
 %% QUIC socket ready - drive event loop
 connected(info, {select, _Resource, _Ref, ready_input},
           #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
-    _ = hackney_quic:process(ConnRef),
+    _ = hackney_h3:process(ConnRef),
     keep_state_and_data;
 
 connected(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
@@ -1138,32 +1138,32 @@ streaming_body(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) -
 streaming_body(info, {ssl_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
 
-%% HTTP/3 QUIC message handling in streaming_body state
-streaming_body(info, {quic, ConnRef, {stream_headers, StreamId, Headers, Fin}},
+%% HTTP/3 message handling in streaming_body state
+streaming_body(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     %% Early response headers while still sending body
     handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
 
-streaming_body(info, {quic, ConnRef, {stream_data, StreamId, RecvData, Fin}},
+streaming_body(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
 
-streaming_body(info, {quic, ConnRef, {stream_reset, StreamId, ErrorCode}},
+streaming_body(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
 
-streaming_body(info, {quic, ConnRef, {closed, Reason}},
+streaming_body(info, {h3, ConnRef, {closed, Reason}},
                #conn_data{h3_conn = ConnRef} = Data) ->
     handle_h3_conn_closed(Reason, Data);
 
-streaming_body(info, {quic, ConnRef, {transport_error, Code, Msg}},
+streaming_body(info, {h3, ConnRef, {transport_error, Code, Msg}},
                #conn_data{h3_conn = ConnRef} = Data) ->
     handle_h3_error({transport_error, Code, Msg}, Data);
 
 %% QUIC socket ready - drive event loop
 streaming_body(info, {select, _Resource, _Ref, ready_input},
                #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
-    _ = hackney_quic:process(ConnRef),
+    _ = hackney_h3:process(ConnRef),
     keep_state_and_data;
 
 streaming_body(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
@@ -1590,7 +1590,7 @@ handle_common({call, From}, _, _State, _Data) ->
 %% QUIC socket ready - drive event loop (common handler for all states)
 handle_common(info, {select, _Resource, _Ref, ready_input},
               _State, #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
-    _ = hackney_quic:process(ConnRef),
+    _ = hackney_h3:process(ConnRef),
     keep_state_and_data;
 
 handle_common(info, _Msg, _State, _Data) ->
@@ -2227,7 +2227,7 @@ skip_response_body(Data) ->
 %% lsquic handles its own UDP socket creation and DNS resolution.
 try_h3_connect(Host, Port, Timeout, _ConnectOpts) ->
     HostBin = if is_list(Host) -> list_to_binary(Host); true -> Host end,
-    case hackney_quic:connect(HostBin, Port, #{}, self()) of
+    case hackney_h3:connect(HostBin, Port, #{}, self()) of
         {ok, ConnRef} ->
             %% Drive event loop until connected
             wait_h3_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
@@ -2241,16 +2241,16 @@ wait_h3_connected(ConnRef, Timeout, StartTime) ->
     Remaining = max(0, Timeout - Elapsed),
     receive
         {select, _Resource, _Ref, ready_input} ->
-            _ = hackney_quic:process(ConnRef),
+            _ = hackney_h3:process(ConnRef),
             wait_h3_connected(ConnRef, Timeout, StartTime);
-        {quic, ConnRef, {connected, _Info}} ->
+        {h3, ConnRef, {connected, _Info}} ->
             {ok, ConnRef};
-        {quic, ConnRef, {closed, Reason}} ->
+        {h3, ConnRef, {closed, Reason}} ->
             {error, {quic_closed, Reason}};
-        {quic, ConnRef, {transport_error, Code, Msg}} ->
+        {h3, ConnRef, {transport_error, Code, Msg}} ->
             {error, {quic_error, Code, Msg}}
     after Remaining ->
-        hackney_quic:close(ConnRef, timeout),
+        hackney_h3:close(ConnRef, timeout),
         {error, timeout}
     end.
 

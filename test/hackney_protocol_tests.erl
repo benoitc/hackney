@@ -104,7 +104,7 @@ test_http3_opt_in() ->
         {ok, TestSock} ->
             gen_tcp:close(TestSock),
             %% This should attempt HTTP/3 first
-            {ok, ConnRef} = hackney_quic:connect(
+            {ok, ConnRef} = hackney_h3:connect(
                 <<"cloudflare.com">>, 443, #{}, self()
             ),
             %% Drive the QUIC event loop until connected or closed
@@ -113,7 +113,7 @@ test_http3_opt_in() ->
                 ({closed, _Reason}) -> {done, closed};
                 (_) -> continue
             end, 10000),
-            hackney_quic:close(ConnRef, normal),
+            hackney_h3:close(ConnRef, normal),
             %% Either connected or closed is valid - we're testing opt-in works
             ?assert(Result =:= connected orelse Result =:= closed orelse Result =:= {error, timeout});
         {error, _} ->
@@ -136,16 +136,16 @@ quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime) ->
     receive
         %% Socket ready - process and continue
         {select, _Resource, _Ref, ready_input} ->
-            NextTimeout = hackney_quic:process(ConnRef),
+            NextTimeout = hackney_h3:process(ConnRef),
             NewTimer = schedule_timer(ConnRef, NextTimeout),
             quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
         %% Timer fired - process timeouts
         {quic_timer, ConnRef} ->
-            NextTimeout = hackney_quic:process(ConnRef),
+            NextTimeout = hackney_h3:process(ConnRef),
             NewTimer = schedule_timer(ConnRef, NextTimeout),
             quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
         %% QUIC events - check condition
-        {quic, ConnRef, Event} ->
+        {h3, ConnRef, Event} ->
             case Condition(Event) of
                 {done, Result} -> Result;
                 continue -> quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime)
