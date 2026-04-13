@@ -124,22 +124,33 @@ getaddrs(Name) ->
   {IP6Addrs, IP4Addrs}.
 
 getbyname(Hostname, Type) ->
-  %% First try DNS resolution using inet_res:getbyname
-  case (catch inet_res:getbyname(Hostname, Type)) of
+  case hosts_lookup_first(Hostname, Type) of
+    [] ->
+      case (catch inet_res:getbyname(Hostname, Type)) of
+        {'ok', #hostent{h_addr_list=AddrList}} -> 
+          lists:usort(AddrList);
+        {error, _Reason} -> 
+          fallback_hosts_lookup(Hostname, Type);
+        Else ->
+          ?report_debug("DNS error", [{hostname, Hostname}
+                                     ,{type, Type}
+                                     ,{error, Else}]),
+          fallback_hosts_lookup(Hostname, Type)
+      end;
+    Addrs ->
+      Addrs
+  end.
+
+hosts_lookup_first(Hostname, Type) ->
+  InetType = case Type of
+    a -> inet;
+    aaaa -> inet6
+  end,
+  case (catch inet_hosts:gethostbyname(Hostname, InetType)) of
     {'ok', #hostent{h_addr_list=AddrList}} -> 
       lists:usort(AddrList);
-    {error, _Reason} -> 
-      %% DNS failed, try fallback to /etc/hosts using inet:gethostbyname
-      %% This fixes NXDOMAIN errors in Docker Compose environments where
-      %% hostnames are resolved via /etc/hosts entries
-      fallback_hosts_lookup(Hostname, Type);
-    Else ->
-      %% ERLANG 22 has an issue when g matching some DNS server messages
-      ?report_debug("DNS error", [{hostname, Hostname}
-                                 ,{type, Type}
-                                 ,{error, Else}]),
-      %% Try fallback on unexpected errors too
-      fallback_hosts_lookup(Hostname, Type)
+    _ -> 
+      []
   end.
 
 %% Fallback to check /etc/hosts when DNS resolution fails
