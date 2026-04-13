@@ -147,8 +147,7 @@ tls_test_() ->
             fun setup/0, fun cleanup/1,
             [
                 {"Connect without TLS verification (default)", fun test_connect_no_verify/0},
-                {"Connect with TLS verification enabled", fun test_connect_with_verify/0},
-                {"Verify peer info available after connect", fun test_peer_info/0}
+                {"Connect with TLS verification enabled", fun test_connect_with_verify/0}
             ]
         }
     }.
@@ -180,24 +179,6 @@ test_connect_with_verify() ->
         {ok, _} -> ok;
         {error, _Reason} ->
             %% May fail if CA certs not properly configured, but at least we tried
-            ok
-    end.
-
-test_peer_info() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            %% Verify peername returns valid address
-            {ok, {IP, Port}} = hackney_quic:peername(ConnRef),
-            ?assert(is_tuple(IP)),
-            ?assertEqual(443, Port),
-            %% Verify sockname returns local address
-            {ok, {LocalIP, LocalPort}} = hackney_quic:sockname(ConnRef),
-            ?assert(is_tuple(LocalIP)),
-            ?assert(is_integer(LocalPort)),
-            hackney_quic:close(ConnRef, normal);
-        {error, _} ->
-            hackney_quic:close(ConnRef, normal),
             ok
     end.
 
@@ -310,7 +291,6 @@ test_post_request() ->
     {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
     case wait_connected(ConnRef) of
         {ok, _} ->
-            {ok, StreamId} = hackney_quic:open_stream(ConnRef),
             Headers = [
                 {<<":method">>, <<"POST">>},
                 {<<":scheme">>, <<"https">>},
@@ -320,10 +300,8 @@ test_post_request() ->
                 {<<"content-length">>, <<"2">>},
                 {<<"user-agent">>, <<"hackney-h3-test/1.0">>}
             ],
-            %% Send headers without fin
-            ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, false),
-            %% Send body with fin
-            ok = hackney_quic:send_data(ConnRef, StreamId, <<"{}">> , true),
+            {ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, false),
+            ok = hackney_quic:send_data(ConnRef, StreamId, <<"{}">>, true),
             case wait_response(ConnRef, StreamId, 10000) of
                 {ok, Status, _RespHeaders, _Body} ->
                     %% Should get a response (may be 200 or 405 or other)
@@ -342,14 +320,12 @@ test_multiple_requests() ->
     case wait_connected(ConnRef) of
         {ok, _} ->
             %% First request
-            {ok, StreamId1} = hackney_quic:open_stream(ConnRef),
             Headers1 = build_get_headers(<<"cloudflare.com">>, <<"/">>),
-            ok = hackney_quic:send_headers(ConnRef, StreamId1, Headers1, true),
+            {ok, StreamId1} = hackney_quic:send_request(ConnRef, Headers1, true),
 
             %% Second request (concurrent)
-            {ok, StreamId2} = hackney_quic:open_stream(ConnRef),
             Headers2 = build_get_headers(<<"cloudflare.com">>, <<"/cdn-cgi/trace">>),
-            ok = hackney_quic:send_headers(ConnRef, StreamId2, Headers2, true),
+            {ok, StreamId2} = hackney_quic:send_request(ConnRef, Headers2, true),
 
             %% Both stream IDs should be different
             ?assertNotEqual(StreamId1, StreamId2),
@@ -460,69 +436,6 @@ test_invalid_port() ->
     ?assertMatch({error, badarg}, hackney_quic:connect(<<"test">>, 70000, #{}, self())).
 
 %%====================================================================
-%% QPACK Header Tests
-%%====================================================================
-
-qpack_test_() ->
-    {
-        "QPACK header encoding/decoding tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Encode and decode headers", fun test_qpack_roundtrip/0},
-                {"Static table entries", fun test_qpack_static_table/0},
-                {"Large headers", fun test_qpack_large_headers/0}
-            ]
-        }
-    }.
-
-test_qpack_roundtrip() ->
-    Headers = [
-        {<<":method">>, <<"GET">>},
-        {<<":path">>, <<"/">>},
-        {<<":scheme">>, <<"https">>},
-        {<<":authority">>, <<"example.com">>},
-        {<<"user-agent">>, <<"test/1.0">>},
-        {<<"accept">>, <<"*/*">>}
-    ],
-    Encoded = hackney_qpack:encode(Headers),
-    ?assert(is_binary(Encoded)),
-    {ok, Decoded} = hackney_qpack:decode(Encoded),
-    %% Should decode to same headers (order may differ)
-    ?assertEqual(length(Headers), length(Decoded)),
-    lists:foreach(fun({K, V}) ->
-        ?assert(lists:member({K, V}, Decoded))
-    end, Headers).
-
-test_qpack_static_table() ->
-    %% Common headers should use static table for efficient encoding
-    Headers = [
-        {<<":method">>, <<"GET">>},  %% Static index 17
-        {<<":path">>, <<"/">>},       %% Static index 1
-        {<<":status">>, <<"200">>}    %% Static index 25
-    ],
-    Encoded = hackney_qpack:encode(Headers),
-    %% Static table encoding should be compact
-    ?assert(byte_size(Encoded) < 20),
-    {ok, Decoded} = hackney_qpack:decode(Encoded),
-    ?assertEqual(Headers, Decoded).
-
-test_qpack_large_headers() ->
-    %% Test with larger header values
-    LargeValue = list_to_binary(lists:duplicate(1000, $x)),
-    Headers = [
-        {<<":method">>, <<"GET">>},
-        {<<":path">>, <<"/">>},
-        {<<"x-custom-header">>, LargeValue}
-    ],
-    Encoded = hackney_qpack:encode(Headers),
-    {ok, Decoded} = hackney_qpack:decode(Encoded),
-    ?assertEqual(3, length(Decoded)),
-    {_, DecodedValue} = lists:keyfind(<<"x-custom-header">>, 1, Decoded),
-    ?assertEqual(LargeValue, DecodedValue).
-
-%%====================================================================
 %% Internal Functions
 %%====================================================================
 
@@ -531,9 +444,8 @@ make_h3_request(Host, Port, Path) ->
         {ok, ConnRef} ->
             case wait_connected(ConnRef) of
                 {ok, _} ->
-                    {ok, StreamId} = hackney_quic:open_stream(ConnRef),
                     Headers = build_get_headers(Host, Path),
-                    ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
+                    {ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, true),
                     Result = wait_response(ConnRef, StreamId, 10000),
                     hackney_quic:close(ConnRef, normal),
                     Result;

@@ -39,8 +39,6 @@
     send_body_chunk/4,
     finish_send_body/3,
     %% Stream management
-    new_stream/1,
-    close_stream/2,
     get_stream_state/2,
     update_stream_state/3,
     %% Response parsing
@@ -260,24 +258,19 @@ await_response(ConnRef, StreamId) ->
 -spec send_request(h3_conn(), method(), binary(), binary(), headers(), binary()) ->
     {ok, stream_id(), streams_map()} | {error, term()}.
 send_request(ConnRef, Method, Host, Path, Headers, Body) ->
-    case hackney_quic:open_stream(ConnRef) of
-        {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            HasBody = Body =/= <<>> andalso Body =/= [],
-            Fin = not HasBody,
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, Fin) of
-                ok when HasBody ->
-                    case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
-                        ok ->
-                            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
-                        {error, _} = Error ->
-                            Error
-                    end;
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    HasBody = Body =/= <<>> andalso Body =/= [],
+    Fin = not HasBody,
+    case hackney_quic:send_request(ConnRef, AllHeaders, Fin) of
+        {ok, StreamId} when HasBody ->
+            case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
                 ok ->
                     {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
                 {error, _} = Error ->
                     Error
             end;
+        {ok, StreamId} ->
+            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
         {error, _} = Error ->
             Error
     end.
@@ -287,15 +280,10 @@ send_request(ConnRef, Method, Host, Path, Headers, Body) ->
 -spec send_request_headers(h3_conn(), method(), binary(), binary(), headers()) ->
     {ok, stream_id(), streams_map()} | {error, term()}.
 send_request_headers(ConnRef, Method, Host, Path, Headers) ->
-    case hackney_quic:open_stream(ConnRef) of
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    case hackney_quic:send_request(ConnRef, AllHeaders, false) of
         {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, false) of
-                ok ->
-                    {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
-                {error, _} = Error ->
-                    Error
-            end;
+            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
         {error, _} = Error ->
             Error
     end.
@@ -320,17 +308,6 @@ finish_send_body(ConnRef, StreamId, Streams) ->
 %%====================================================================
 %% Stream management
 %%====================================================================
-
-%% @doc Open a new stream for a request.
--spec new_stream(h3_conn()) -> {ok, stream_id()} | {error, term()}.
-new_stream(ConnRef) ->
-    hackney_quic:open_stream(ConnRef).
-
-%% @doc Close a specific stream.
--spec close_stream(h3_conn(), stream_id()) -> ok.
-close_stream(_ConnRef, _StreamId) ->
-    %% HTTP/3 streams are closed when fin is sent/received
-    ok.
 
 %% @doc Get the state of a specific stream.
 -spec get_stream_state(stream_id(), streams_map()) ->
@@ -404,24 +381,19 @@ wait_connected(ConnRef, Timeout, StartTime) ->
     end.
 
 do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
-    case hackney_quic:open_stream(ConnRef) of
-        {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            HasBody = Body =/= <<>> andalso Body =/= [],
-            Fin = not HasBody,
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, Fin) of
-                ok when HasBody ->
-                    case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
-                        ok ->
-                            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
-                        {error, _} = Error ->
-                            Error
-                    end;
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    HasBody = Body =/= <<>> andalso Body =/= [],
+    Fin = not HasBody,
+    case hackney_quic:send_request(ConnRef, AllHeaders, Fin) of
+        {ok, StreamId} when HasBody ->
+            case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
                 ok ->
                     await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
                 {error, _} = Error ->
                     Error
             end;
+        {ok, StreamId} ->
+            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
         {error, _} = Error ->
             Error
     end.

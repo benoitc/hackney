@@ -1509,26 +1509,23 @@ handle_common({call, From}, sockname, _State, #conn_data{transport = Transport, 
     Result = Transport:sockname(Socket),
     {keep_state_and_data, [{reply, From, Result}]};
 
-%% HTTP/3 socket operations
+%% HTTP/3 socket operations — peername/sockname/peercert/setopts not exposed
+%% by the underlying quic_h3 connection.
 handle_common({call, From}, peername, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    Result = hackney_quic:peername(H3Conn),
-    {keep_state_and_data, [{reply, From, Result}]};
+    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
 
 handle_common({call, From}, sockname, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    Result = hackney_quic:sockname(H3Conn),
-    {keep_state_and_data, [{reply, From, Result}]};
+    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
 
 handle_common({call, From}, peercert, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    %% QUIC/HTTP3 does not expose peer certificate through this API
     {keep_state_and_data, [{reply, From, {error, not_supported}}]};
 
-handle_common({call, From}, {setopts, Opts}, _State,
+handle_common({call, From}, {setopts, _Opts}, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    Result = hackney_quic:setopts(H3Conn, Opts),
-    {keep_state_and_data, [{reply, From, Result}]};
+    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
 
 %% Low-level send operation
 handle_common({call, From}, {send, Data}, _State, #conn_data{transport = Transport, socket = Socket} = _Data)

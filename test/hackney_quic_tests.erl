@@ -100,7 +100,6 @@ quic_connection_test_() ->
             fun setup/0, fun cleanup/1,
             [
                 {"Connect to cloudflare.com", fun test_cloudflare_connect/0},
-                {"Test peername/sockname", fun test_addresses/0},
                 {"Test stream opening", fun test_open_stream/0}
             ]
         }
@@ -121,32 +120,19 @@ test_cloudflare_connect() ->
             ?assertEqual(unexpected_close, Reason)
     end.
 
-test_addresses() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            %% Test peername
-            {ok, {PeerIP, PeerPort}} = hackney_quic:peername(ConnRef),
-            ?assert(is_tuple(PeerIP)),
-            ?assertEqual(443, PeerPort),
-            %% Test sockname
-            {ok, {LocalIP, LocalPort}} = hackney_quic:sockname(ConnRef),
-            ?assert(is_tuple(LocalIP)),
-            ?assert(is_integer(LocalPort)),
-            hackney_quic:close(ConnRef, normal);
-        {error, timeout} ->
-            hackney_quic:close(ConnRef, normal),
-            ?assert(false, "Timeout waiting for connection")
-    end.
-
 test_open_stream() ->
     {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Test opening a stream
-            Result = hackney_quic:open_stream(ConnRef),
+            %% send_request atomically opens a stream and sends HEADERS
+            Headers = [
+                {<<":method">>, <<"GET">>},
+                {<<":scheme">>, <<"https">>},
+                {<<":authority">>, <<"cloudflare.com">>},
+                {<<":path">>, <<"/">>}
+            ],
+            Result = hackney_quic:send_request(ConnRef, Headers, true),
             ?assertMatch({ok, _}, Result),
             hackney_quic:close(ConnRef, normal);
         {error, _} ->
@@ -178,10 +164,6 @@ test_send_request() ->
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Open a stream
-            {ok, StreamId} = hackney_quic:open_stream(ConnRef),
-
-            %% Send HTTP/3 request headers
             Headers = [
                 {<<":method">>, <<"GET">>},
                 {<<":path">>, <<"/">>},
@@ -189,8 +171,8 @@ test_send_request() ->
                 {<<":authority">>, <<"cloudflare.com">>},
                 {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
             ],
-            Result = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
-            ?assertMatch(ok, Result),
+            Result = hackney_quic:send_request(ConnRef, Headers, true),
+            ?assertMatch({ok, _}, Result),
             hackney_quic:close(ConnRef, normal);
         {error, _} ->
             hackney_quic:close(ConnRef, normal),
@@ -216,20 +198,6 @@ test_full_request_response() ->
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Process a bit to let H3 control streams be established
-            _ = hackney_quic:process(ConnRef),
-            timer:sleep(100),
-
-            %% Open a stream
-            {ok, StreamId} = hackney_quic:open_stream(ConnRef),
-
-            %% Wait for stream_opened notification (optional)
-            quic_loop(ConnRef, fun
-                ({stream_opened, _SId}) -> {done, ok};
-                (_) -> continue
-            end, 1000),
-
-            %% Send HTTP/3 request headers
             Headers = [
                 {<<":method">>, <<"GET">>},
                 {<<":scheme">>, <<"https">>},
@@ -237,7 +205,7 @@ test_full_request_response() ->
                 {<<":path">>, <<"/">>},
                 {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
             ],
-            ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
+            {ok, _StreamId} = hackney_quic:send_request(ConnRef, Headers, true),
 
             %% Wait for response headers
             HeaderResult = quic_loop(ConnRef, fun

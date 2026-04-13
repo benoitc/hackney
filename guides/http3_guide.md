@@ -17,7 +17,7 @@ Hackney supports HTTP/3, the latest version of HTTP built on QUIC (UDP-based tra
 
 ## Requirements
 
-HTTP/3 support uses a pure Erlang QUIC implementation. QUIC support is available automatically when hackney is compiled - no external dependencies required.
+HTTP/3 support is provided by the [`erlang_quic`](https://github.com/benoitc/erlang_quic) dependency (module `quic_h3`), which handles the QUIC transport, QPACK header compression, HTTP/3 framing, and control streams. Hackney hosts only a thin adapter (`hackney_quic`) that translates `quic_h3` events into the internal connection protocol. No C dependencies, no external binaries required.
 
 ## Quick Start
 
