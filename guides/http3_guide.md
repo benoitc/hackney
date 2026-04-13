@@ -182,6 +182,138 @@ Like HTTP/2, HTTP/3 multiplexes requests as streams on a single QUIC connection:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Low-Level Stream API
+
+The high-level `hackney:get/post/...` functions cover the common case. For
+servers that send streamed responses, or when you want to drive several
+requests concurrently on the same QUIC connection, use the `hackney_quic`
+adapter directly.
+
+### Connect
+
+```erlang
+{ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()).
+
+receive
+    {quic, ConnRef, {connected, _Info}} -> ok
+after 5000 ->
+    error(connect_timeout)
+end.
+```
+
+`hackney_quic:connect/4` registers the calling process as the owner of the
+connection. All events for the connection arrive as messages of the form
+`{quic, ConnRef, Event}`.
+
+### Send a request
+
+`send_request/3` opens a request stream and sends the HEADERS frame in one
+shot. Pass `Fin = true` when the request has no body, `false` if you will
+follow up with `send_data/4`:
+
+```erlang
+Headers = [
+    {<<":method">>, <<"GET">>},
+    {<<":scheme">>, <<"https">>},
+    {<<":authority">>, <<"cloudflare.com">>},
+    {<<":path">>, <<"/cdn-cgi/trace">>}
+],
+{ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, true).
+```
+
+For requests with a body:
+
+```erlang
+{ok, StreamId} = hackney_quic:send_request(ConnRef, Headers, false),
+ok = hackney_quic:send_data(ConnRef, StreamId, <<"chunk-1">>, false),
+ok = hackney_quic:send_data(ConnRef, StreamId, <<"chunk-2">>, true).  %% Fin
+```
+
+### Receive the response
+
+The owner process receives a response as a sequence of events tagged with
+the `StreamId`:
+
+```erlang
+recv(ConnRef, StreamId, Status, Headers, Body) ->
+    receive
+        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, _Fin}} ->
+            {<<":status">>, S} = lists:keyfind(<<":status">>, 1, RespHeaders),
+            recv(ConnRef, StreamId, binary_to_integer(S),
+                 [H || {K, _} = H <- RespHeaders, K =/= <<":status">>],
+                 Body);
+        {quic, ConnRef, {stream_data, StreamId, Chunk, true}} ->
+            {ok, Status, Headers, <<Body/binary, Chunk/binary>>};
+        {quic, ConnRef, {stream_data, StreamId, Chunk, false}} ->
+            recv(ConnRef, StreamId, Status, Headers, <<Body/binary, Chunk/binary>>);
+        {quic, ConnRef, {stream_reset, StreamId, ErrorCode}} ->
+            {error, {stream_reset, ErrorCode}};
+        {quic, ConnRef, {closed, Reason}} ->
+            {error, {closed, Reason}}
+    after 30000 ->
+        {error, timeout}
+    end.
+```
+
+The `Fin = true` flag on a `stream_data` event marks end-of-stream. For
+header-only responses (HEAD, 204, 304) the adapter still emits a final
+`{stream_data, StreamId, <<>>, true}` so this loop terminates the same way.
+
+### Concurrent streams on one connection
+
+Since each request gets its own `StreamId`, you can have several in flight
+on the same QUIC connection and demultiplex on the StreamId in your receive:
+
+```erlang
+{ok, S1} = hackney_quic:send_request(ConnRef, headers(<<"/">>), true),
+{ok, S2} = hackney_quic:send_request(ConnRef, headers(<<"/cdn-cgi/trace">>), true),
+{ok, S3} = hackney_quic:send_request(ConnRef, headers(<<"/robots.txt">>), true),
+
+%% Collect responses as they complete; order is not guaranteed.
+collect(ConnRef, sets:from_list([S1, S2, S3]), #{}).
+
+collect(_ConnRef, Pending, Acc) when map_size(Acc) =:= sets:size(Pending) ->
+    Acc;
+collect(ConnRef, Pending, Acc) ->
+    receive
+        {quic, ConnRef, {stream_headers, SId, Hs, _}} ->
+            collect(ConnRef, Pending, Acc#{SId => {Hs, <<>>}});
+        {quic, ConnRef, {stream_data, SId, Chunk, true}} ->
+            #{SId := {Hs, Body}} = Acc,
+            collect(ConnRef, Pending, Acc#{SId => {Hs, <<Body/binary, Chunk/binary>>}});
+        {quic, ConnRef, {stream_data, SId, Chunk, false}} ->
+            #{SId := {Hs, Body}} = Acc,
+            collect(ConnRef, Pending, Acc#{SId => {Hs, <<Body/binary, Chunk/binary>>}})
+    end.
+```
+
+### Cancel a stream
+
+Use `reset_stream/3` to abort a single in-flight request without tearing
+down the connection:
+
+```erlang
+ok = hackney_quic:reset_stream(ConnRef, StreamId, 16#0102).  %% H3_REQUEST_CANCELLED
+```
+
+### Close
+
+```erlang
+hackney_quic:close(ConnRef, normal).
+```
+
+### Event reference
+
+| Event                                              | Meaning                                                 |
+|----------------------------------------------------|---------------------------------------------------------|
+| `{connected, Info}`                                | QUIC + H3 handshake complete                            |
+| `{stream_headers, StreamId, Headers, Fin}`         | Response headers (or trailers when `Fin = true`)        |
+| `{stream_data, StreamId, Bin, Fin}`                | Response body chunk; `Fin = true` ends the stream       |
+| `{stream_reset, StreamId, ErrorCode}`              | Peer reset the stream                                   |
+| `{goaway, LastStreamId}`                           | Peer is shutting down; finish in-flight streams         |
+| `{closed, Reason}`                                 | Connection closed                                       |
+| `{transport_error, Code, Reason}`                  | QUIC transport error                                    |
+
 ## UDP Blocking and Fallback
 
 Some networks block UDP traffic, which prevents HTTP/3 from working. Hackney handles this with negative caching:
