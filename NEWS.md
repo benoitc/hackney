@@ -6,7 +6,7 @@ UNRELEASED
 ### Refactor
 
 - HTTP/3 is now delegated to the `erlang_quic` library's `quic_h3` module
-  (branch `feat/http3`). Hackney no longer ships its own HTTP/3 framing,
+  (hex `quic` 1.0.0). Hackney no longer ships its own HTTP/3 framing,
   QPACK codec, control-stream or unidirectional-stream handling:
   - `hackney_quic.erl` has been merged into `hackney_h3.erl`: the single
     module now holds both the high-level request API and the gen_server
@@ -21,8 +21,7 @@ UNRELEASED
     `quic_qpack` in the `quic` dependency.
   - H3 peername/sockname/setopts/peercert now return `{error, not_supported}`:
     the underlying `quic_h3` connection does not expose them.
-- `rebar.config`: `quic` dependency switched to
-  `{git, "https://github.com/benoitc/erlang_quic.git", {branch, "feat/http3"}}`.
+- `rebar.config`: `quic` dependency pinned to hex `1.0.0`.
 
 3.2.1 - 2026-03-01
 ------------------
