@@ -3,9 +3,24 @@
 UNRELEASED
 ----------
 
+### Bug Fixes
+
+- Fix HTTP/2 pooled connections wedging under sustained concurrent load
+  (#836). The pool checks out a TCP connection first then upgrades to
+  SSL+ALPN; `connected(enter)` armed the 2s pool idle timer while the
+  protocol was still classified as HTTP/1.1, and the timer then fired
+  on a busy multiplexed HTTP/2 connection, terminating it mid-request.
+  `init_h2_connection` / `init_h2_after_upgrade` now explicitly cancel
+  the idle timer. hackney_conn also traps `EXIT` from the linked
+  `h2_connection` and stays alive briefly in `closed` state so late
+  calls that raced the pool checkout get a proper error reply instead
+  of `exit:{normal, _}`. Pool's `checkout_h2` validates the state of
+  the connection process (not just `is_process_alive`).
+- Bump `h2` dependency to 0.4.0.
+
 ### Refactor
 
-- HTTP/2 is now delegated to the `erlang_h2` library (hex `h2` 0.3.0).
+- HTTP/2 is now delegated to the `erlang_h2` library (hex `h2` 0.4.0).
   Hackney no longer ships its own HTTP/2 framing, HPACK codec, or
   connection/stream state machine:
   - `hackney_http2.erl`, `hackney_http2_machine.erl`, `hackney_hpack.erl`

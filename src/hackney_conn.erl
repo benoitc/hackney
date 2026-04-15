@@ -107,6 +107,10 @@
 
 -define(CONNECT_TIMEOUT, 8000).
 -define(IDLE_TIMEOUT, infinity).
+%% Grace window for pooled hackney_conn in `closed` state, during which
+%% late-arriving calls race the pool DOWN cleanup and still get a proper
+%% error reply instead of exit:{normal, _}. See issue #836.
+-define(CLOSED_GRACE_MS, 50).
 
 %% State data record
 -record(conn_data, {
@@ -895,6 +899,10 @@ connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
 %% HTTP/2 owner messages from h2 library
 connected(info, {h2, H2Conn, Event}, #conn_data{h2_conn = H2Conn} = Data) ->
     handle_h2_event(Event, Data);
+%% h2_connection is linked via start_link; trap_exit surfaces its termination
+%% as an 'EXIT' signal. Convert to the same cleanup path as the monitor DOWN.
+connected(info, {'EXIT', H2Conn, Reason}, #conn_data{h2_conn = H2Conn} = Data) ->
+    h2_on_closed(Reason, Data#conn_data{h2_conn = undefined, h2_mon = undefined});
 connected(info, {'DOWN', Mon, process, _Pid, Reason},
           #conn_data{h2_mon = Mon} = Data) ->
     h2_on_closed(Reason, Data#conn_data{h2_conn = undefined, h2_mon = undefined});
@@ -1406,14 +1414,22 @@ closed(enter, _OldState, #conn_data{socket = Socket, transport = Transport, pool
         undefined -> ok;
         _ -> Transport:close(Socket)
     end,
-    %% For pooled connections, stop the process so pool can clean up
-    %% For non-pooled connections, stay alive to allow reconnection
+    %% Pooled connections used to stop immediately here, but that made
+    %% late-arriving {call, From, {request, _}} messages from workers that
+    %% raced the pool checkout race a terminating gen_statem — which
+    %% surfaces as `exit:{normal, _}` in the caller (issue #836). Stay
+    %% alive briefly so those late calls get a proper `{error, {closed, _}}`
+    %% reply via handle_common's invalid_state fallback, then stop.
     case PoolPid of
         undefined ->
             {keep_state, Data#conn_data{socket = undefined}};
         _ ->
-            {stop, normal, Data#conn_data{socket = undefined}}
+            {keep_state, Data#conn_data{socket = undefined},
+             [{state_timeout, ?CLOSED_GRACE_MS, closed_grace_expired}]}
     end;
+
+closed(state_timeout, closed_grace_expired, Data) ->
+    {stop, normal, Data};
 
 closed({call, From}, connect, Data) ->
     %% Allow reconnection from closed state
@@ -1574,6 +1590,12 @@ handle_common({call, From}, _, _State, _Data) ->
 handle_common(info, {select, _Resource, _Ref, ready_input},
               _State, #conn_data{h3_conn = ConnRef}) when ConnRef =/= undefined ->
     _ = hackney_h3:process(ConnRef),
+    keep_state_and_data;
+
+%% With trap_exit = true, an EXIT signal from any linked process (other than
+%% h2_conn, handled in connected/3) arrives here. Swallow it rather than
+%% propagating — avoids tearing down the gen_statem on stray links.
+handle_common(info, {'EXIT', _Pid, _Reason}, _State, _Data) ->
     keep_state_and_data;
 
 handle_common(info, _Msg, _State, _Data) ->
@@ -2303,13 +2325,18 @@ start_h2_connection(Socket, Data, From, Origin) ->
                                 h2_mon = Mon,
                                 h2_streams = #{}
                             },
+                            %% Cancel any pending idle_timeout armed by the
+                            %% TCP-first connected(enter): HTTP/2 connections
+                            %% multiplex and stay in `connected`, so the 2s
+                            %% pool default would kill a busy conn (#836).
+                            CancelIdle = {state_timeout, infinity, idle_timeout},
                             case Origin of
                                 first_connect ->
                                     {next_state, connected, NewData,
-                                     [{reply, From, ok}]};
+                                     [CancelIdle, {reply, From, ok}]};
                                 after_upgrade ->
                                     {keep_state, NewData,
-                                     [{reply, From, ok}]}
+                                     [CancelIdle, {reply, From, ok}]}
                             end;
                         {error, WaitErr} ->
                             catch h2_connection:close(H2Conn),
@@ -2364,17 +2391,26 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
         B when is_binary(B) -> B;
         L -> iolist_to_binary(L)
     end,
-    SendRes = case BodyBin of
-        <<>> -> h2_connection:send_request_headers(H2Conn, H2Headers, true);
-        _ ->
-            case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
-                {ok, SId} ->
-                    case h2_connection:send_data(H2Conn, SId, BodyBin, true) of
-                        ok -> {ok, SId};
-                        {error, _} = E1 -> E1
-                    end;
-                Err -> Err
-            end
+    %% h2_connection can die between pool checkout and this call; gen_statem:call
+    %% on a dead pid raises exit:noproc. Catch that and normalise to an error
+    %% so the caller sees {error, {closed, _}} instead of a gen_statem:call
+    %% blowing up (issue #836).
+    SendRes = try
+        case BodyBin of
+            <<>> -> h2_connection:send_request_headers(H2Conn, H2Headers, true);
+            _ ->
+                case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
+                    {ok, SId} ->
+                        case h2_connection:send_data(H2Conn, SId, BodyBin, true) of
+                            ok -> {ok, SId};
+                            {error, _} = E1 -> E1
+                        end;
+                    Err -> Err
+                end
+        end
+    catch
+        exit:{ExitReason, _} -> {error, {closed, ExitReason}};
+        exit:ExitReason     -> {error, {closed, ExitReason}}
     end,
     case SendRes of
         {ok, StreamId} ->
@@ -2544,6 +2580,9 @@ h2_on_closed(Reason, Data) ->
     {Replies, Data1} = collect_h2_aborts({closed, Reason}, Data),
     Stripped = Data1#conn_data{h2_conn = undefined, h2_mon = undefined,
                                socket = undefined},
+    %% Transition to closed. For pooled conns, closed(enter,...) keeps the
+    %% process alive for ?CLOSED_GRACE_MS so calls from workers that raced
+    %% the pool checkout get a proper error reply (issue #836).
     {next_state, closed, Stripped, Replies}.
 
 collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->

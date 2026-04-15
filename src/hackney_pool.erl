@@ -490,17 +490,18 @@ handle_call({checkin_sync, Pid, ShouldClose}, _From, State) ->
     {reply, ok, State2};
 
 handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State) ->
-    %% HTTP/2 checkout - return existing connection if available
+    %% HTTP/2 checkout - return existing connection if available.
+    %% Liveness check includes both process_alive and gen_statem state, so a
+    %% hackney_conn that already transitioned to `closed` (e.g. after an h2
+    %% GOAWAY) but has not yet been removed via 'DOWN' is not handed out.
     case maps:get(Key, H2Conns, undefined) of
         undefined ->
             {reply, none, State};
         Pid ->
-            %% Verify connection is still alive
-            case erlang:is_process_alive(Pid) of
+            case h2_conn_usable(Pid) of
                 true ->
                     {reply, {ok, Pid}, State};
                 false ->
-                    %% Connection died, remove from pool
                     H2Conns2 = maps:remove(Key, H2Conns),
                     {reply, none, State#state{h2_connections = H2Conns2}}
             end
@@ -911,6 +912,20 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
             end;
         error ->
             State
+    end.
+
+%% @private Check that a pooled HTTP/2 conn is alive and in `connected` state.
+%% Short timeout so a stuck conn doesn't wedge the pool; any failure → unusable.
+h2_conn_usable(Pid) ->
+    case erlang:is_process_alive(Pid) of
+        false -> false;
+        true ->
+            try hackney_conn:get_state(Pid) of
+                {ok, connected} -> true;
+                _ -> false
+            catch
+                _:_ -> false
+            end
     end.
 
 %% @private Remove an HTTP/2 connection from the pool
