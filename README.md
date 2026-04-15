@@ -24,23 +24,13 @@ An HTTP client for Erlang. Simple, reliable, fast.
 %% Start hackney
 application:ensure_all_started(hackney).
 
-%% Simple GET
-{ok, 200, _Headers, Body} = hackney:get(<<"https://httpbin.org/get">>, [], <<>>, [with_body]).
+%% Simple GET - the body is returned directly
+{ok, 200, _Headers, Body} = hackney:get(<<"https://httpbin.org/get">>).
 
 %% POST JSON
 Headers = [{<<"content-type">>, <<"application/json">>}],
 Payload = <<"{\"key\": \"value\"}">>,
-{ok, 201, _, _} = hackney:post(<<"https://httpbin.org/post">>, Headers, Payload, [with_body]).
-
-%% Stream large response
-{ok, 200, _, Ref} = hackney:get(<<"https://example.com/large-file">>),
-stream_body(Ref).
-
-stream_body(Ref) ->
-    case hackney:stream_body(Ref) of
-        {ok, Chunk} -> io:format("~p bytes~n", [byte_size(Chunk)]), stream_body(Ref);
-        done -> ok
-    end.
+{ok, 200, _, _} = hackney:post(<<"https://httpbin.org/post">>, Headers, Payload).
 ```
 
 ## Installation
@@ -63,7 +53,7 @@ stream_body(Ref) ->
 |-------|-------------|
 | [Getting Started](GETTING_STARTED.md) | Installation, first requests, basic patterns |
 | [HTTP Guide](guides/http_guide.md) | Requests, responses, streaming, async, pools |
-| [HTTP/2 Guide](guides/http2_guide.md) | HTTP/2 protocol, ALPN, multiplexing, server push |
+| [HTTP/2 Guide](guides/http2_guide.md) | HTTP/2 protocol, ALPN, multiplexing, flow control |
 | [HTTP/3 Guide](guides/http3_guide.md) | HTTP/3 over QUIC, opt-in configuration, Alt-Svc |
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
 | [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
@@ -115,18 +105,9 @@ hackney:finish_send_body(Ref),
 {ok, Status, _, Ref} = hackney:start_response(Ref).
 ```
 
-Stream response bodies for downloads:
-
-```erlang
-{ok, 200, _, Ref} = hackney:get(URL),
-read_chunks(Ref).
-
-read_chunks(Ref) ->
-    case hackney:stream_body(Ref) of
-        {ok, Data} -> process(Data), read_chunks(Ref);
-        done -> ok
-    end.
-```
+Sync responses return the full body directly. To receive a large response
+piece-by-piece, use the async API (see the [Async Responses](#async-responses)
+section below).
 
 ### Async Responses
 
@@ -164,7 +145,7 @@ HTTP/2 is used automatically when the server supports it:
 
 ```erlang
 %% Automatic HTTP/2 via ALPN negotiation
-{ok, 200, Headers, Body} = hackney:get(<<"https://nghttp2.org/">>, [], <<>>, [with_body]).
+{ok, 200, Headers, Body} = hackney:get(<<"https://nghttp2.org/">>).
 
 %% Force HTTP/1.1 only
 hackney:get(URL, [], <<>>, [{protocols, [http1]}]).
@@ -233,7 +214,7 @@ hackney:get(URL, [], <<>>, [
 
 ```erlang
 %% Automatically decompress gzip/deflate responses
-hackney:get(URL, [], <<>>, [{auto_decompress, true}, with_body]).
+hackney:get(URL, [], <<>>, [{auto_decompress, true}]).
 ```
 
 ### SSL Options
