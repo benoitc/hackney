@@ -5,6 +5,20 @@ UNRELEASED
 
 ### Refactor
 
+- HTTP/2 is now delegated to the `erlang_h2` library (hex `h2` 0.3.0).
+  Hackney no longer ships its own HTTP/2 framing, HPACK codec, or
+  connection/stream state machine:
+  - `hackney_http2.erl`, `hackney_http2_machine.erl`, `hackney_hpack.erl`
+    and the `hackney_hpack_huffman*` headers have been removed.
+  - `hackney_conn.erl` now starts an `h2_connection` gen_statem on the
+    post-ALPN socket, transfers socket ownership, and translates
+    `{h2, Conn, Event}` owner-messages into hackney's sync replies or
+    `{hackney_response, Ref, _}` async events.
+  - Server push handling (RFC 7540 §8.2, deprecated) is no longer exposed.
+    The `enable_push` option is a no-op.
+  - Public user-facing API is unchanged: `hackney:request/5`, streaming
+    async responses, pooled HTTP/2 connections, and `request_async` all
+    behave as before.
 - HTTP/3 is now delegated to the `erlang_quic` library's `quic_h3` module
   (hex `quic` 1.0.0). Hackney no longer ships its own HTTP/3 framing,
   QPACK codec, control-stream or unidirectional-stream handling:

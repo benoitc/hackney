@@ -13,7 +13,8 @@ Hackney supports HTTP/2 with automatic protocol negotiation via ALPN (Applicatio
 - **Multiplexing** - Multiple requests share a single connection
 - **Header compression** - HPACK compression reduces overhead
 - **Flow control** - Automatic window management
-- **Server push** - Optional support for server-initiated streams
+- **Delegated to `erlang_h2`** - the underlying HTTP/2 stack is the `h2`
+  hex package; hackney exposes the same request API it always did
 
 ## Quick Start
 
@@ -243,20 +244,10 @@ end) || Path <- Paths].
 
 ## Server Push
 
-Server push allows the server to send resources before the client requests them. By default, hackney rejects server pushes. To handle them:
-
-```erlang
-%% Using low-level API with push handler
-{ok, Conn} = hackney_conn:start_link(#{
-    host => "example.com",
-    port => 443,
-    transport => hackney_ssl,
-    enable_push => self()  %% Receive push notifications
-}),
-
-%% Push notifications arrive as messages:
-%% {hackney_push, ConnPid, {PromisedStreamId, Method, Scheme, Authority, Path, Headers}}
-```
+Server push (RFC 7540 §8.2) is deprecated and no longer supported by the
+underlying `h2` library. The `enable_push` option is accepted for
+backwards-compatibility but is a no-op; pushes from the server are silently
+refused.
 
 ## Flow Control
 
@@ -275,11 +266,14 @@ HTTP/2 specific errors:
 case hackney:get(URL) of
     {ok, Status, Headers, Body} ->
         ok;
-    {error, {h2_connection_error, ErrorCode}} ->
-        %% HTTP/2 connection-level error
-        io:format("HTTP/2 error: ~p~n", [ErrorCode]);
-    {error, closed} ->
-        %% Connection closed (GOAWAY received)
+    {error, {goaway, ErrorCode}} ->
+        %% Peer sent GOAWAY
+        io:format("HTTP/2 GOAWAY: ~p~n", [ErrorCode]);
+    {error, {stream_error, ErrorCode}} ->
+        %% Peer sent RST_STREAM for this request
+        io:format("HTTP/2 stream reset: ~p~n", [ErrorCode]);
+    {error, {closed, _Reason}} ->
+        %% Connection closed
         ok;
     {error, Reason} ->
         io:format("Error: ~p~n", [Reason])
