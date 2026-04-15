@@ -21,8 +21,7 @@ hackney_sup
 └── hackney_altsvc           (Alt-Svc cache for HTTP/3 discovery)
 
 QUIC connections (HTTP/3):
-├── hackney_quic.erl         (HTTP/3 wrapper using pure Erlang QUIC)
-└── hackney_qpack.erl        (QPACK header compression)
+└── hackney_h3.erl           (HTTP/3 high-level + adapter over quic_h3)
 ```
 
 ## Connection Process (hackney_conn)
@@ -304,13 +303,13 @@ Like TCP connections, QUIC uses an event-driven architecture where the owner pro
 │  2. Receives {select, Resource, Ref, ready_input}               │
 │     └── Socket has data ready                                   │
 │                                                                  │
-│  3. Calls hackney_quic:process(ConnRef)                         │
+│  3. Calls hackney_h3:process(ConnRef)                         │
 │     └── Receives UDP packets                                    │
 │     └── Processes QUIC frames                                   │
 │     └── Triggers events (headers, data, etc.)                   │
 │     └── Returns next timeout in ms                              │
 │                                                                  │
-│  4. Receives {quic, ConnRef, Event}                             │
+│  4. Receives {h3, ConnRef, Event}                             │
 │     └── {connected, Info}                                       │
 │     └── {stream_headers, StreamId, Headers, Fin}                │
 │     └── {stream_data, StreamId, Data, Fin}                      │
@@ -325,22 +324,12 @@ Like TCP connections, QUIC uses an event-driven architecture where the owner pro
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      hackney_quic.erl                            │
-│  - connect/4: Start QUIC connection                             │
-│  - process/1: Process pending I/O                               │
-│  - open_stream/1: Create new HTTP/3 stream                      │
-│  - send_headers/4: Send HTTP/3 request headers                  │
+│                       hackney_h3.erl                             │
+│  - connect/4: Start QUIC connection via quic_h3                 │
+│  - send_request/3: Open stream + send HEADERS                   │
 │  - send_data/4: Send request body                               │
+│  - reset_stream/3: Cancel an in-flight stream                   │
 │  - close/2: Close connection                                    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      hackney_qpack.erl                           │
-│  - encode/1: Encode HTTP headers to QPACK format                │
-│  - decode/1: Decode QPACK-encoded headers                       │
-│  - Static table with 99 predefined headers                      │
-│  - Huffman encoding/decoding                                    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -358,7 +347,7 @@ Like TCP connections, QUIC uses an event-driven architecture where the owner pro
 ```
 Owner Process                         quic library
      │                                     │
-     │  hackney_quic:connect(...)          │
+     │  hackney_h3:connect(...)          │
      ├────────────────────────────────────►│ Create UDP socket
      │                                     │ Generate TLS keys
      │                                     │ Send Initial packet
@@ -367,17 +356,17 @@ Owner Process                         quic library
      │  {select, _, _, ready_input}        │
      │◄────────────────────────────────────┤ UDP packet received
      │                                     │
-     │  hackney_quic:process(ConnRef)      │
+     │  hackney_h3:process(ConnRef)      │
      ├────────────────────────────────────►│ Process QUIC packets
      │                                     │ Continue handshake
-     │  {quic, ConnRef, {connected, Info}} │
+     │  {h3, ConnRef, {connected, Info}} │
      │◄────────────────────────────────────┤
      │                                     │
      │  ... (request/response cycle) ...   │
      │                                     │
-     │  hackney_quic:close(ConnRef, ...)   │
+     │  hackney_h3:close(ConnRef, ...)   │
      ├────────────────────────────────────►│ Send CONNECTION_CLOSE
-     │  {quic, ConnRef, {closed, normal}}  │
+     │  {h3, ConnRef, {closed, normal}}  │
      │◄────────────────────────────────────┤
      │                                     │
 ```

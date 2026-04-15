@@ -46,7 +46,7 @@ http3_integration_test_() ->
     }.
 
 test_explicit_h3_connect() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -82,7 +82,7 @@ test_default_protocols() ->
     end.
 
 test_altsvc_enables_h3() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -123,7 +123,7 @@ protocol_selection_test_() ->
     }.
 
 test_h3_only() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -140,7 +140,7 @@ test_h3_only() ->
     end.
 
 test_blocked_fallback() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -172,7 +172,7 @@ http3_get_test_() ->
     }.
 
 test_h3_get() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -194,7 +194,7 @@ test_h3_get() ->
     end.
 
 test_h3_get_protocol() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->

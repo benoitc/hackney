@@ -5,10 +5,10 @@
 %%%
 %%% Copyright (c) 2024-2026 Benoit Chesneau
 %%%
-%%% @doc Tests for QUIC/HTTP3 support in hackney.
+%%% @doc Low-level tests for the HTTP/3 adapter in hackney_h3.
 %%%
 
--module(hackney_quic_tests).
+-module(hackney_h3_low_level_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -31,7 +31,7 @@ cleanup(_) ->
 %%====================================================================
 
 %% Helper to drive the QUIC event loop until a condition is met or timeout
-%% Condition is a fun that receives {quic, ConnRef, Event} and returns:
+%% Condition is a fun that receives {h3, ConnRef, Event} and returns:
 %%   {done, Result} - Stop and return Result
 %%   continue - Keep waiting
 quic_loop(ConnRef, Condition, Timeout) ->
@@ -51,18 +51,18 @@ quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime) ->
     receive
         %% Socket ready - process and continue
         {select, _Resource, _Ref, ready_input} ->
-            NextTimeout = hackney_quic:process(ConnRef),
+            NextTimeout = hackney_h3:process(ConnRef),
             NewTimer = schedule_timer(ConnRef, NextTimeout),
             quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
 
         %% Timer fired - process timeouts
         {quic_timer, ConnRef} ->
-            NextTimeout = hackney_quic:process(ConnRef),
+            NextTimeout = hackney_h3:process(ConnRef),
             NewTimer = schedule_timer(ConnRef, NextTimeout),
             quic_loop(ConnRef, Condition, Timeout, NewTimer, StartTime);
 
         %% QUIC events - check condition
-        {quic, ConnRef, Event} ->
+        {h3, ConnRef, Event} ->
             case Condition(Event) of
                 {done, Result} -> Result;
                 continue -> quic_loop(ConnRef, Condition, Timeout, TimerRef, StartTime)
@@ -100,19 +100,18 @@ quic_connection_test_() ->
             fun setup/0, fun cleanup/1,
             [
                 {"Connect to cloudflare.com", fun test_cloudflare_connect/0},
-                {"Test peername/sockname", fun test_addresses/0},
                 {"Test stream opening", fun test_open_stream/0}
             ]
         }
     }.
 
 test_cloudflare_connect() ->
-    Result = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    Result = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
     ?assertMatch({ok, _}, Result),
     {ok, ConnRef} = Result,
 
     ConnResult = wait_connected(ConnRef),
-    hackney_quic:close(ConnRef, normal),
+    hackney_h3:close(ConnRef, normal),
 
     case ConnResult of
         {ok, Info} ->
@@ -121,36 +120,23 @@ test_cloudflare_connect() ->
             ?assertEqual(unexpected_close, Reason)
     end.
 
-test_addresses() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
-
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            %% Test peername
-            {ok, {PeerIP, PeerPort}} = hackney_quic:peername(ConnRef),
-            ?assert(is_tuple(PeerIP)),
-            ?assertEqual(443, PeerPort),
-            %% Test sockname
-            {ok, {LocalIP, LocalPort}} = hackney_quic:sockname(ConnRef),
-            ?assert(is_tuple(LocalIP)),
-            ?assert(is_integer(LocalPort)),
-            hackney_quic:close(ConnRef, normal);
-        {error, timeout} ->
-            hackney_quic:close(ConnRef, normal),
-            ?assert(false, "Timeout waiting for connection")
-    end.
-
 test_open_stream() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Test opening a stream
-            Result = hackney_quic:open_stream(ConnRef),
+            %% send_request atomically opens a stream and sends HEADERS
+            Headers = [
+                {<<":method">>, <<"GET">>},
+                {<<":scheme">>, <<"https">>},
+                {<<":authority">>, <<"cloudflare.com">>},
+                {<<":path">>, <<"/">>}
+            ],
+            Result = hackney_h3:send_request(ConnRef, Headers, true),
             ?assertMatch({ok, _}, Result),
-            hackney_quic:close(ConnRef, normal);
+            hackney_h3:close(ConnRef, normal);
         {error, _} ->
-            hackney_quic:close(ConnRef, normal),
+            hackney_h3:close(ConnRef, normal),
             ?assert(false, "Connection closed unexpectedly")
     end.
 
@@ -161,7 +147,7 @@ test_open_stream() ->
 %% Test get_fd function with a real UDP socket
 get_fd_test() ->
     {ok, Socket} = gen_udp:open(0, [binary, {active, false}]),
-    Result = hackney_quic:get_fd(Socket),
+    Result = hackney_h3:get_fd(Socket),
     ?assertMatch({ok, _}, Result),
     {ok, Fd} = Result,
     ?assert(is_integer(Fd)),
@@ -174,14 +160,10 @@ get_fd_test() ->
 
 %% Test sending HTTP/3 request headers
 test_send_request() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Open a stream
-            {ok, StreamId} = hackney_quic:open_stream(ConnRef),
-
-            %% Send HTTP/3 request headers
             Headers = [
                 {<<":method">>, <<"GET">>},
                 {<<":path">>, <<"/">>},
@@ -189,11 +171,11 @@ test_send_request() ->
                 {<<":authority">>, <<"cloudflare.com">>},
                 {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
             ],
-            Result = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
-            ?assertMatch(ok, Result),
-            hackney_quic:close(ConnRef, normal);
+            Result = hackney_h3:send_request(ConnRef, Headers, true),
+            ?assertMatch({ok, _}, Result),
+            hackney_h3:close(ConnRef, normal);
         {error, _} ->
-            hackney_quic:close(ConnRef, normal),
+            hackney_h3:close(ConnRef, normal),
             ?assert(false, "Connection closed unexpectedly")
     end.
 
@@ -212,24 +194,10 @@ http3_request_test_() ->
 
 %% Test full HTTP/3 request and response flow
 test_full_request_response() ->
-    {ok, ConnRef} = hackney_quic:connect(<<"cloudflare.com">>, 443, #{}, self()),
+    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
 
     case wait_connected(ConnRef) of
         {ok, _} ->
-            %% Process a bit to let H3 control streams be established
-            _ = hackney_quic:process(ConnRef),
-            timer:sleep(100),
-
-            %% Open a stream
-            {ok, StreamId} = hackney_quic:open_stream(ConnRef),
-
-            %% Wait for stream_opened notification (optional)
-            quic_loop(ConnRef, fun
-                ({stream_opened, _SId}) -> {done, ok};
-                (_) -> continue
-            end, 1000),
-
-            %% Send HTTP/3 request headers
             Headers = [
                 {<<":method">>, <<"GET">>},
                 {<<":scheme">>, <<"https">>},
@@ -237,7 +205,7 @@ test_full_request_response() ->
                 {<<":path">>, <<"/">>},
                 {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
             ],
-            ok = hackney_quic:send_headers(ConnRef, StreamId, Headers, true),
+            {ok, _StreamId} = hackney_h3:send_request(ConnRef, Headers, true),
 
             %% Wait for response headers
             HeaderResult = quic_loop(ConnRef, fun
@@ -252,10 +220,10 @@ test_full_request_response() ->
                 {ok, RespHeaders} ->
                     ?assert(lists:keymember(<<":status">>, 1, RespHeaders));
                 {error, timeout} ->
-                    hackney_quic:close(ConnRef, normal),
+                    hackney_h3:close(ConnRef, normal),
                     ?assert(false, "Timeout waiting for response headers");
                 {error, Other} ->
-                    hackney_quic:close(ConnRef, normal),
+                    hackney_h3:close(ConnRef, normal),
                     ?assertEqual(ok, Other)
             end,
 
@@ -268,9 +236,9 @@ test_full_request_response() ->
                 (_) -> continue
             end, 5000),
 
-            hackney_quic:close(ConnRef, normal);
+            hackney_h3:close(ConnRef, normal);
         {error, _} ->
-            hackney_quic:close(ConnRef, normal),
+            hackney_h3:close(ConnRef, normal),
             ?assert(false, "Connection closed unexpectedly")
     end.
 
@@ -281,17 +249,17 @@ test_full_request_response() ->
 %% Test connection with invalid hostname
 invalid_hostname_test() ->
     %% Invalid port should fail
-    Result = hackney_quic:connect(<<"test">>, 0, #{}, self()),
+    Result = hackney_h3:connect(<<"test">>, 0, #{}, self()),
     ?assertMatch({error, badarg}, Result).
 
 %% Test connect with invalid arguments
 invalid_args_test() ->
     %% Port out of range
     ?assertMatch({error, badarg},
-        hackney_quic:connect(<<"test">>, 70000, #{}, self())),
+        hackney_h3:connect(<<"test">>, 70000, #{}, self())),
     %% Invalid opts type
     ?assertMatch({error, badarg},
-        hackney_quic:connect(<<"test">>, 443, invalid, self())),
+        hackney_h3:connect(<<"test">>, 443, invalid, self())),
     %% Invalid owner type
     ?assertMatch({error, badarg},
-        hackney_quic:connect(<<"test">>, 443, #{}, invalid)).
+        hackney_h3:connect(<<"test">>, 443, #{}, invalid)).

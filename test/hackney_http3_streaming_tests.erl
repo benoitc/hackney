@@ -64,7 +64,7 @@ h3_stream_body_test_() ->
     }.
 
 test_h3_stream_body() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -93,7 +93,7 @@ test_h3_stream_body() ->
     end.
 
 test_h3_stream_body_done() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -150,7 +150,7 @@ h3_send_body_test_() ->
     }.
 
 test_h3_send_body_chunks() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -192,7 +192,7 @@ test_h3_send_body_chunks() ->
     end.
 
 test_h3_async_true() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -214,7 +214,7 @@ test_h3_async_true() ->
     end.
 
 test_h3_async_once() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -234,7 +234,7 @@ test_h3_async_once() ->
     end.
 
 test_h3_async_status() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -256,7 +256,7 @@ test_h3_async_status() ->
     end.
 
 test_h3_async_headers() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->

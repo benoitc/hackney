@@ -52,7 +52,7 @@ rebar3 eunit
 Run specific test modules:
 
 ```bash
-rebar3 eunit --module=hackney_quic_tests
+rebar3 eunit --module=hackney_h3_low_level_tests
 rebar3 eunit --module=hackney_http3_tests
 ```
 
@@ -87,7 +87,7 @@ docker run --rm hackney-test
 Run specific test modules:
 
 ```bash
-docker run --rm hackney-test bash -c "rebar3 eunit --module=hackney_quic_tests"
+docker run --rm hackney-test bash -c "rebar3 eunit --module=hackney_h3_low_level_tests"
 ```
 
 ### Interactive debugging in Docker
@@ -108,9 +108,7 @@ HTTP/3 support uses a pure Erlang QUIC implementation from the `quic` dependency
 
 ### Source Files
 
-- `src/hackney_quic.erl` - QUIC/HTTP3 transport wrapper
-- `src/hackney_qpack.erl` - QPACK header compression
-- `src/hackney_h3.erl` - HTTP/3 high-level API
+- `src/hackney_h3.erl` - HTTP/3 high-level + low-level adapter over `quic_h3`
 
 The underlying QUIC implementation is in the `quic` dependency which provides:
 - TLS 1.3 handshake

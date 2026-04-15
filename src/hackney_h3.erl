@@ -25,6 +25,8 @@
 
 -module(hackney_h3).
 
+-behaviour(gen_server).
+
 -include("hackney_lib.hrl").
 
 -export([
@@ -39,16 +41,37 @@
     send_body_chunk/4,
     finish_send_body/3,
     %% Stream management
-    new_stream/1,
-    close_stream/2,
     get_stream_state/2,
     update_stream_state/3,
     %% Response parsing
     parse_response_headers/1,
     %% Connection close
     close/1,
-    close/2
+    close/2,
+    %% Low-level adapter API
+    connect/4,
+    send_request/3,
+    send_data/4,
+    reset_stream/3,
+    handle_timeout/2,
+    process/1,
+    get_fd/1,
+    peername/1,
+    sockname/1,
+    peercert/1
 ]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+
+-record(state, {
+    h3_conn :: pid() | undefined,
+    conn_ref :: reference(),
+    owner :: pid(),
+    owner_mon :: reference()
+}).
+
+-define(CONN_TABLE, hackney_h3_conns).
 
 -type h3_conn() :: reference().
 -type stream_id() :: non_neg_integer().
@@ -238,7 +261,7 @@ connect(Host, Port, Opts) when is_list(Host) ->
     connect(list_to_binary(Host), Port, Opts);
 connect(Host, Port, Opts) when is_binary(Host) ->
     Timeout = maps:get(timeout, Opts, 30000),
-    case hackney_quic:connect(Host, Port, Opts, self()) of
+    case connect(Host, Port, Opts, self()) of
         {ok, ConnRef} ->
             wait_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
         {error, _} = Error ->
@@ -260,24 +283,19 @@ await_response(ConnRef, StreamId) ->
 -spec send_request(h3_conn(), method(), binary(), binary(), headers(), binary()) ->
     {ok, stream_id(), streams_map()} | {error, term()}.
 send_request(ConnRef, Method, Host, Path, Headers, Body) ->
-    case hackney_quic:open_stream(ConnRef) of
-        {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            HasBody = Body =/= <<>> andalso Body =/= [],
-            Fin = not HasBody,
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, Fin) of
-                ok when HasBody ->
-                    case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
-                        ok ->
-                            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
-                        {error, _} = Error ->
-                            Error
-                    end;
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    HasBody = Body =/= <<>> andalso Body =/= [],
+    Fin = not HasBody,
+    case send_request(ConnRef, AllHeaders, Fin) of
+        {ok, StreamId} when HasBody ->
+            case send_data(ConnRef, StreamId, Body, true) of
                 ok ->
                     {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
                 {error, _} = Error ->
                     Error
             end;
+        {ok, StreamId} ->
+            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
         {error, _} = Error ->
             Error
     end.
@@ -287,15 +305,10 @@ send_request(ConnRef, Method, Host, Path, Headers, Body) ->
 -spec send_request_headers(h3_conn(), method(), binary(), binary(), headers()) ->
     {ok, stream_id(), streams_map()} | {error, term()}.
 send_request_headers(ConnRef, Method, Host, Path, Headers) ->
-    case hackney_quic:open_stream(ConnRef) of
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    case send_request(ConnRef, AllHeaders, false) of
         {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, false) of
-                ok ->
-                    {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
-                {error, _} = Error ->
-                    Error
-            end;
+            {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
         {error, _} = Error ->
             Error
     end.
@@ -304,13 +317,13 @@ send_request_headers(ConnRef, Method, Host, Path, Headers) ->
 -spec send_body_chunk(h3_conn(), stream_id(), binary(), boolean()) ->
     ok | {error, term()}.
 send_body_chunk(ConnRef, StreamId, Data, Fin) ->
-    hackney_quic:send_data(ConnRef, StreamId, Data, Fin).
+    send_data(ConnRef, StreamId, Data, Fin).
 
 %% @doc Finish sending body (close stream for writing).
 -spec finish_send_body(h3_conn(), stream_id(), streams_map()) ->
     {ok, streams_map()} | {error, term()}.
 finish_send_body(ConnRef, StreamId, Streams) ->
-    case hackney_quic:send_data(ConnRef, StreamId, <<>>, true) of
+    case send_data(ConnRef, StreamId, <<>>, true) of
         ok ->
             {ok, Streams};
         {error, _} = Error ->
@@ -320,17 +333,6 @@ finish_send_body(ConnRef, StreamId, Streams) ->
 %%====================================================================
 %% Stream management
 %%====================================================================
-
-%% @doc Open a new stream for a request.
--spec new_stream(h3_conn()) -> {ok, stream_id()} | {error, term()}.
-new_stream(ConnRef) ->
-    hackney_quic:open_stream(ConnRef).
-
-%% @doc Close a specific stream.
--spec close_stream(h3_conn(), stream_id()) -> ok.
-close_stream(_ConnRef, _StreamId) ->
-    %% HTTP/3 streams are closed when fin is sent/received
-    ok.
 
 %% @doc Get the state of a specific stream.
 -spec get_stream_state(stream_id(), streams_map()) ->
@@ -375,7 +377,7 @@ close(ConnRef) ->
 %% @doc Close the HTTP/3 connection with a reason.
 -spec close(h3_conn(), term()) -> ok.
 close(ConnRef, Reason) ->
-    hackney_quic:close(ConnRef, Reason).
+    with_pid(ConnRef, fun(Pid) -> gen_server:cast(Pid, {close, Reason}) end, ok).
 
 %%====================================================================
 %% Internal functions
@@ -387,41 +389,36 @@ wait_connected(ConnRef, Timeout, StartTime) ->
     Remaining = max(0, Timeout - Elapsed),
     receive
         {select, _Resource, _Ref, ready_input} ->
-            _ = hackney_quic:process(ConnRef),
+            _ = process(ConnRef),
             wait_connected(ConnRef, Timeout, StartTime);
-        {quic, ConnRef, {connected, _Info}} ->
+        {h3, ConnRef, {connected, _Info}} ->
             {ok, ConnRef};
-        {quic, ConnRef, {closed, Reason}} ->
+        {h3, ConnRef, {closed, Reason}} ->
             {error, {connection_closed, Reason}};
-        {quic, ConnRef, {transport_error, Code, Msg}} ->
+        {h3, ConnRef, {transport_error, Code, Msg}} ->
             {error, {transport_error, Code, Msg}};
-        {quic, ConnRef, {settings, _Settings}} ->
+        {h3, ConnRef, {settings, _Settings}} ->
             %% HTTP/3 SETTINGS frame - ignore and continue waiting
             wait_connected(ConnRef, Timeout, StartTime)
     after Remaining ->
-        hackney_quic:close(ConnRef, timeout),
+        close(ConnRef, timeout),
         {error, timeout}
     end.
 
 do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
-    case hackney_quic:open_stream(ConnRef) of
-        {ok, StreamId} ->
-            AllHeaders = build_request_headers(Method, Host, Path, Headers),
-            HasBody = Body =/= <<>> andalso Body =/= [],
-            Fin = not HasBody,
-            case hackney_quic:send_headers(ConnRef, StreamId, AllHeaders, Fin) of
-                ok when HasBody ->
-                    case hackney_quic:send_data(ConnRef, StreamId, Body, true) of
-                        ok ->
-                            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
-                        {error, _} = Error ->
-                            Error
-                    end;
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    HasBody = Body =/= <<>> andalso Body =/= [],
+    Fin = not HasBody,
+    case send_request(ConnRef, AllHeaders, Fin) of
+        {ok, StreamId} when HasBody ->
+            case send_data(ConnRef, StreamId, Body, true) of
                 ok ->
                     await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
                 {error, _} = Error ->
                     Error
             end;
+        {ok, StreamId} ->
+            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
         {error, _} = Error ->
             Error
     end.
@@ -433,9 +430,9 @@ do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
 await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
     receive
         {select, _Resource, _Ref, ready_input} ->
-            _ = hackney_quic:process(ConnRef),
+            _ = process(ConnRef),
             await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody);
-        {quic, ConnRef, {stream_headers, StreamId, RespHeaders, Fin}} ->
+        {h3, ConnRef, {stream_headers, StreamId, RespHeaders, Fin}} ->
             NewStatus = get_status(RespHeaders),
             FilteredHeaders = filter_pseudo_headers(RespHeaders),
             case Fin of
@@ -445,7 +442,7 @@ await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
                 false ->
                     await_response_loop(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody)
             end;
-        {quic, ConnRef, {stream_data, StreamId, Data, Fin}} ->
+        {h3, ConnRef, {stream_data, StreamId, Data, Fin}} ->
             NewBody = <<AccBody/binary, Data/binary>>,
             case Fin of
                 true ->
@@ -453,14 +450,14 @@ await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
                 false ->
                     await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, NewBody)
             end;
-        {quic, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
+        {h3, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
             {error, stream_reset};
-        {quic, ConnRef, {closed, Reason}} ->
+        {h3, ConnRef, {closed, Reason}} ->
             {error, {connection_closed, Reason}};
-        {quic, ConnRef, {settings, _Settings}} ->
+        {h3, ConnRef, {settings, _Settings}} ->
             %% HTTP/3 SETTINGS frame - ignore and continue waiting
             await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody);
-        {quic, ConnRef, {goaway, _StreamId2}} ->
+        {h3, ConnRef, {goaway, _StreamId2}} ->
             %% GOAWAY frame - connection is shutting down
             {error, goaway}
     after Timeout ->
@@ -537,3 +534,264 @@ filter_pseudo_headers(Headers) ->
 -spec is_pseudo_header(binary()) -> boolean().
 is_pseudo_header(<<$:, _/binary>>) -> true;
 is_pseudo_header(_) -> false.
+
+%%====================================================================
+%% Low-level adapter API (gen_server-backed)
+%%
+%% Messages delivered to the owner:
+%%   {h3, ConnRef, {connected, Info}}
+%%   {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}}
+%%   {h3, ConnRef, {stream_data, StreamId, Bin, Fin}}
+%%   {h3, ConnRef, {stream_reset, StreamId, ErrorCode}}
+%%   {h3, ConnRef, {goaway, LastStreamId}}
+%%   {h3, ConnRef, {closed, Reason}}
+%%   {h3, ConnRef, {transport_error, Code, Reason}}
+%%====================================================================
+
+-spec get_fd(gen_udp:socket()) -> {ok, integer()} | {error, term()}.
+get_fd(Socket) ->
+    inet:getfd(Socket).
+
+-spec connect(Host, Port, Opts, Owner) -> {ok, reference()} | {error, term()}
+    when Host :: binary() | string(),
+         Port :: inet:port_number(),
+         Opts :: map(),
+         Owner :: pid().
+connect(Host, Port, Opts, Owner) when is_list(Host) ->
+    connect(list_to_binary(Host), Port, Opts, Owner);
+connect(Host, Port, Opts, Owner) when is_binary(Host), is_integer(Port),
+                                       Port > 0, Port =< 65535,
+                                       is_map(Opts), is_pid(Owner) ->
+    case gen_server:start(?MODULE, {Host, Port, Opts, Owner}, []) of
+        {ok, Pid} ->
+            gen_server:call(Pid, get_conn_ref);
+        {error, _} = Error ->
+            Error
+    end;
+connect(_Host, _Port, _Opts, _Owner) ->
+    {error, badarg}.
+
+-spec send_request(reference(), [{binary(), binary()}], boolean()) ->
+    {ok, non_neg_integer()} | {error, term()}.
+send_request(ConnRef, Headers, Fin) when is_list(Headers), is_boolean(Fin) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, {send_request, Headers, Fin}) end,
+             {error, not_connected}).
+
+-spec send_data(reference(), non_neg_integer(), iodata(), boolean()) ->
+    ok | {error, term()}.
+send_data(ConnRef, StreamId, Data, Fin) when is_boolean(Fin) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, {send_data, StreamId, Data, Fin}) end,
+             {error, not_connected});
+send_data(_ConnRef, _StreamId, _Data, _Fin) ->
+    {error, badarg}.
+
+-spec reset_stream(reference(), non_neg_integer(), non_neg_integer()) ->
+    ok | {error, term()}.
+reset_stream(ConnRef, StreamId, ErrorCode)
+  when is_integer(ErrorCode), ErrorCode >= 0 ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, {reset_stream, StreamId, ErrorCode}) end,
+             {error, not_connected});
+reset_stream(_ConnRef, _StreamId, _ErrorCode) ->
+    {error, badarg}.
+
+-spec handle_timeout(reference(), non_neg_integer()) -> non_neg_integer() | infinity.
+handle_timeout(_ConnRef, _NowMs) ->
+    infinity.
+
+-spec process(reference()) -> non_neg_integer() | infinity.
+process(_ConnRef) ->
+    infinity.
+
+-spec peername(reference()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+peername(ConnRef) ->
+    quic_call(ConnRef, peername).
+
+-spec sockname(reference()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+sockname(ConnRef) ->
+    quic_call(ConnRef, sockname).
+
+-spec peercert(reference()) -> {ok, binary()} | {error, term()}.
+peercert(ConnRef) ->
+    quic_call(ConnRef, peercert).
+
+quic_call(ConnRef, Op) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, {quic_op, Op}) end,
+             {error, not_connected}).
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+init({Host, Port, Opts, Owner}) ->
+    MonRef = erlang:monitor(process, Owner),
+    H3Opts = build_h3_opts(Host, Opts),
+    case quic_h3:connect(Host, Port, H3Opts) of
+        {ok, H3Conn} ->
+            ConnRef = make_ref(),
+            _ = ensure_table(),
+            ets:insert(?CONN_TABLE, {ConnRef, self()}),
+            {ok, #state{h3_conn = H3Conn,
+                        conn_ref = ConnRef,
+                        owner = Owner,
+                        owner_mon = MonRef}};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
+
+handle_call(get_conn_ref, _From, #state{conn_ref = Ref} = State) ->
+    {reply, {ok, Ref}, State};
+
+handle_call({send_request, Headers, Fin}, _From, #state{h3_conn = Conn} = State) ->
+    case quic_h3:request(Conn, Headers, #{end_stream => Fin}) of
+        {ok, StreamId} ->
+            {reply, {ok, StreamId}, State};
+        {error, _} = Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({send_data, StreamId, Data, Fin}, _From, #state{h3_conn = Conn} = State) ->
+    Bin = iolist_to_binary(Data),
+    {reply, quic_h3:send_data(Conn, StreamId, Bin, Fin), State};
+
+handle_call({reset_stream, StreamId, ErrorCode}, _From, #state{h3_conn = Conn} = State) ->
+    {reply, quic_h3:cancel(Conn, StreamId, ErrorCode), State};
+
+handle_call({quic_op, Op}, _From, #state{h3_conn = Conn} = State)
+  when Op =:= peername; Op =:= sockname; Op =:= peercert ->
+    Reply = try
+        quic:Op(quic_h3:get_quic_conn(Conn))
+    catch
+        _:Reason -> {error, Reason}
+    end,
+    {reply, Reply, State};
+
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+handle_cast({close, _Reason}, #state{h3_conn = Conn} = State) ->
+    catch quic_h3:close(Conn),
+    {stop, normal, State};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info({quic_h3, Conn, connected},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {connected, #{}}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {response, StreamId, Status, Headers}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Full = [{<<":status">>, integer_to_binary(Status)} | Headers],
+    Owner ! {h3, Ref, {stream_headers, StreamId, Full, false}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {data, StreamId, Data, Fin}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {stream_data, StreamId, Data, Fin}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {trailers, StreamId, Trailers}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {stream_headers, StreamId, Trailers, true}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {stream_reset, StreamId, ErrorCode}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {stream_reset, StreamId, ErrorCode}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {goaway, LastStreamId}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {goaway, LastStreamId}},
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {goaway_sent, _}}, #state{h3_conn = Conn} = State) ->
+    {noreply, State};
+
+handle_info({quic_h3, Conn, closed},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {closed, normal}},
+    {stop, normal, State};
+
+handle_info({quic_h3, Conn, {error, Code, Reason}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {transport_error, Code, Reason}},
+    {stop, {transport_error, Code}, State};
+
+handle_info({'DOWN', MonRef, process, _Pid, _Reason},
+            #state{owner_mon = MonRef, h3_conn = Conn} = State) ->
+    catch quic_h3:close(Conn),
+    {stop, normal, State};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, #state{conn_ref = Ref, h3_conn = Conn}) ->
+    case ets:whereis(?CONN_TABLE) of
+        undefined -> ok;
+        _ -> ets:delete(?CONN_TABLE, Ref)
+    end,
+    case Conn of
+        undefined -> ok;
+        _ -> catch quic_h3:close(Conn)
+    end,
+    ok.
+
+%%====================================================================
+%% Internal adapter helpers
+%%====================================================================
+
+build_h3_opts(Host, Opts) ->
+    HostStr = binary_to_list(Host),
+    Verify = case maps:get(insecure_skip_verify, Opts, false) of
+        true -> verify_none;
+        false ->
+            case maps:get(verify, Opts, verify_peer) of
+                verify_peer -> verify_peer;
+                verify_none -> verify_none;
+                true -> verify_peer;
+                false -> verify_none
+            end
+    end,
+    QuicOpts0 = #{server_name_indication => HostStr},
+    QuicOpts = case maps:get(cacerts, Opts, undefined) of
+        undefined ->
+            case maps:get(cacertfile, Opts, undefined) of
+                undefined -> QuicOpts0;
+                File -> QuicOpts0#{cacertfile => File}
+            end;
+        CACerts -> QuicOpts0#{cacerts => CACerts}
+    end,
+    Base = #{verify => Verify, quic_opts => QuicOpts},
+    case maps:get(settings, Opts, undefined) of
+        undefined -> Base;
+        Settings -> Base#{settings => Settings}
+    end.
+
+ensure_table() ->
+    case ets:whereis(?CONN_TABLE) of
+        undefined ->
+            try
+                ets:new(?CONN_TABLE,
+                        [named_table, public, set, {read_concurrency, true}])
+            catch
+                error:badarg -> ok
+            end;
+        _ -> ok
+    end.
+
+with_pid(ConnRef, Fun, Default) ->
+    case ets:whereis(?CONN_TABLE) of
+        undefined -> Default;
+        _ ->
+            case ets:lookup(?CONN_TABLE, ConnRef) of
+                [{ConnRef, Pid}] -> Fun(Pid);
+                [] -> Default
+            end
+    end.

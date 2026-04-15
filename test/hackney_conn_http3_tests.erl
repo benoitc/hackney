@@ -38,13 +38,14 @@ http3_conn_test_() ->
             fun setup/0, fun cleanup/1,
             [
                 {"HTTP/3 connection and request", fun test_h3_connection_request/0},
-                {"HTTP/3 get_protocol returns http3", fun test_h3_get_protocol/0}
+                {"HTTP/3 get_protocol returns http3", fun test_h3_get_protocol/0},
+                {"HTTP/3 peername/sockname/peercert", fun test_h3_peer_info/0}
             ]
         }
     }.
 
 test_h3_connection_request() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -88,7 +89,7 @@ test_h3_connection_request() ->
     end.
 
 test_h3_get_protocol() ->
-    case hackney_quic:is_available() of
+    case hackney_h3:is_available() of
         false ->
             {skip, "QUIC NIF not available"};
         true ->
@@ -113,6 +114,29 @@ test_h3_get_protocol() ->
                     ok
             end,
             hackney_conn:stop(Pid)
+    end.
+
+test_h3_peer_info() ->
+    {ok, Pid} = hackney_conn:start_link(#{
+        host => "cloudflare.com",
+        port => 443,
+        transport => hackney_ssl,
+        connect_options => [{protocols, [http3]}],
+        connect_timeout => 15000
+    }),
+    case hackney_conn:connect(Pid, 15000) of
+        ok ->
+            ?assertEqual(http3, hackney_conn:get_protocol(Pid)),
+            ?assertMatch({ok, {_, _}}, hackney_conn:peername(Pid)),
+            ?assertMatch({ok, {_, _}}, hackney_conn:sockname(Pid)),
+            case hackney_conn:peercert(Pid) of
+                {ok, Cert} -> ?assert(is_binary(Cert));
+                {error, no_peercert} -> ok
+            end,
+            hackney_conn:stop(Pid);
+        {error, Reason} ->
+            hackney_conn:stop(Pid),
+            ?debugFmt("H3 peer info test skipped: ~p", [Reason])
     end.
 
 %%====================================================================

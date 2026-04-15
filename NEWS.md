@@ -1,5 +1,30 @@
 # NEWS
 
+UNRELEASED
+----------
+
+### Refactor
+
+- HTTP/3 is now delegated to the `erlang_quic` library's `quic_h3` module
+  (hex `quic` 1.0.0). Hackney no longer ships its own HTTP/3 framing,
+  QPACK codec, control-stream or unidirectional-stream handling:
+  - `hackney_quic.erl` has been merged into `hackney_h3.erl`: the single
+    module now holds both the high-level request API and the gen_server
+    adapter that translates `{quic_h3, Conn, _}` events.
+  - The public low-level message tag is now `{h3, ConnRef, _}` (previously
+    `{quic, ConnRef, _}`). External subscribers to these events must retag
+    their receives.
+  - The public low-level API moves from `hackney_quic:` to `hackney_h3:`
+    (`connect/4`, `send_request/3`, `send_data/4`, `reset_stream/3`,
+    `close/2`, `process/1`).
+  - `hackney_qpack.erl` removed (~622 LOC); the QPACK codec lives in
+    `quic_qpack` in the `quic` dependency.
+  - H3 `peername`/`sockname`/`peercert` are wired through the underlying
+    `quic` connection and work the same as for HTTP/1.1 and HTTP/2.
+    `setopts` still returns `{error, not_supported}` since QUIC has no
+    `{active, once}`-style socket model.
+- `rebar.config`: `quic` dependency pinned to hex `1.0.0`.
+
 3.2.1 - 2026-03-01
 ------------------
 

@@ -378,8 +378,8 @@ redirect_method(_Status, Method) ->
     %% 307 and 308 preserve method
     Method.
 
-%% Simulate hackney_quic:build_quic_opts for testing
-%% This mirrors the logic in hackney_quic.erl
+%% Simulate hackney_h3:build_h3_opts for testing
+%% This mirrors the logic in hackney_h3.erl
 build_test_quic_opts(Host, Opts) ->
     BaseOpts = #{alpn => [<<"h3">>]},
     Verify = case maps:get(insecure_skip_verify, Opts, false) of
