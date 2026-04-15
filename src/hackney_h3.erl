@@ -55,7 +55,10 @@
     reset_stream/3,
     handle_timeout/2,
     process/1,
-    get_fd/1
+    get_fd/1,
+    peername/1,
+    sockname/1,
+    peercert/1
 ]).
 
 %% gen_server callbacks
@@ -602,6 +605,25 @@ handle_timeout(_ConnRef, _NowMs) ->
 process(_ConnRef) ->
     infinity.
 
+-spec peername(reference()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+peername(ConnRef) ->
+    quic_call(ConnRef, peername).
+
+-spec sockname(reference()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+sockname(ConnRef) ->
+    quic_call(ConnRef, sockname).
+
+-spec peercert(reference()) -> {ok, binary()} | {error, term()}.
+peercert(ConnRef) ->
+    quic_call(ConnRef, peercert).
+
+quic_call(ConnRef, Op) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, {quic_op, Op}) end,
+             {error, not_connected}).
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -639,6 +661,15 @@ handle_call({send_data, StreamId, Data, Fin}, _From, #state{h3_conn = Conn} = St
 
 handle_call({reset_stream, StreamId, ErrorCode}, _From, #state{h3_conn = Conn} = State) ->
     {reply, quic_h3:cancel(Conn, StreamId, ErrorCode), State};
+
+handle_call({quic_op, Op}, _From, #state{h3_conn = Conn} = State)
+  when Op =:= peername; Op =:= sockname; Op =:= peercert ->
+    Reply = try
+        quic:Op(quic_h3:get_quic_conn(Conn))
+    catch
+        _:Reason -> {error, Reason}
+    end,
+    {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

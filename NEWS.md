@@ -19,8 +19,10 @@ UNRELEASED
     `close/2`, `process/1`).
   - `hackney_qpack.erl` removed (~622 LOC); the QPACK codec lives in
     `quic_qpack` in the `quic` dependency.
-  - H3 peername/sockname/setopts/peercert now return `{error, not_supported}`:
-    the underlying `quic_h3` connection does not expose them.
+  - H3 `peername`/`sockname`/`peercert` are wired through the underlying
+    `quic` connection and work the same as for HTTP/1.1 and HTTP/2.
+    `setopts` still returns `{error, not_supported}` since QUIC has no
+    `{active, once}`-style socket model.
 - `rebar.config`: `quic` dependency pinned to hex `1.0.0`.
 
 3.2.1 - 2026-03-01

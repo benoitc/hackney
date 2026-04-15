@@ -1509,19 +1509,19 @@ handle_common({call, From}, sockname, _State, #conn_data{transport = Transport, 
     Result = Transport:sockname(Socket),
     {keep_state_and_data, [{reply, From, Result}]};
 
-%% HTTP/3 socket operations — peername/sockname/peercert/setopts not exposed
-%% by the underlying quic_h3 connection.
+%% HTTP/3 socket operations — peername/sockname/peercert delegated to the
+%% underlying quic connection; setopts has no analog over QUIC.
 handle_common({call, From}, peername, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
+    {keep_state_and_data, [{reply, From, hackney_h3:peername(H3Conn)}]};
 
 handle_common({call, From}, sockname, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
+    {keep_state_and_data, [{reply, From, hackney_h3:sockname(H3Conn)}]};
 
 handle_common({call, From}, peercert, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
-    {keep_state_and_data, [{reply, From, {error, not_supported}}]};
+    {keep_state_and_data, [{reply, From, hackney_h3:peercert(H3Conn)}]};
 
 handle_common({call, From}, {setopts, _Opts}, _State,
               #conn_data{h3_conn = H3Conn} = _Data) when H3Conn =/= undefined ->
