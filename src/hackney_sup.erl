@@ -39,9 +39,6 @@ init([]) ->
   %% initialize the config table
   _ = ets:new(?CONFIG, [set, named_table, public]),
 
-  %% initialize the metric engine
-  hackney_metrics:init(),
-
   %% initialize per-host load regulation
   hackney_load_regulation:init(),
 
