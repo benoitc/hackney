@@ -80,22 +80,34 @@ parse(Header) when is_binary(Header) ->
     parse_entries(Header, []).
 
 %% @doc Parse Alt-Svc header from response headers and cache if h3 found.
-%% Returns {ok, h3, Port} if HTTP/3 is available, or none.
+%%
+%% Honors RFC 7838: a `clear' value invalidates any cached entry for the
+%% origin. Multiple `Alt-Svc' headers are merged before parsing as if
+%% they had been comma-concatenated (RFC 7230 §3.2.2).
+%%
+%% Returns `{ok, h3, Port}' if HTTP/3 is now cached for the origin,
+%% `cleared' if the cache was invalidated, or `none' otherwise.
 -spec parse_and_cache(Host :: binary() | string(), Port :: inet:port_number(),
                       Headers :: [{binary(), binary()}]) ->
-    {ok, h3, inet:port_number()} | none.
+    {ok, h3, inet:port_number()} | cleared | none.
 parse_and_cache(Host, OrigPort, Headers) ->
-    case find_altsvc_header(Headers) of
-        undefined ->
+    case collect_altsvc_headers(Headers) of
+        <<>> ->
             none;
-        Value ->
-            Entries = parse(Value),
-            case find_h3_entry(Entries) of
-                {ok, H3Port, MaxAge} ->
-                    cache(Host, OrigPort, H3Port, MaxAge),
-                    {ok, h3, H3Port};
-                none ->
-                    none
+        Combined ->
+            case is_clear_directive(Combined) of
+                true ->
+                    clear(Host, OrigPort),
+                    cleared;
+                false ->
+                    Entries = parse(Combined),
+                    case find_h3_entry(Entries) of
+                        {ok, H3Port, MaxAge} ->
+                            cache(Host, OrigPort, H3Port, MaxAge),
+                            {ok, h3, H3Port};
+                        none ->
+                            none
+                    end
             end
     end.
 
@@ -174,12 +186,27 @@ make_key(Host, Port) when is_list(Host) ->
 make_key(Host, Port) when is_binary(Host) ->
     {string:lowercase(Host), Port}.
 
-find_altsvc_header([]) ->
-    undefined;
-find_altsvc_header([{Key, Value} | Rest]) ->
-    case string:lowercase(Key) of
-        <<"alt-svc">> -> Value;
-        _ -> find_altsvc_header(Rest)
+%% Collect every alt-svc header value and join with ", " so multiple
+%% header lines are parsed as a single combined entry list per RFC 7230.
+collect_altsvc_headers(Headers) ->
+    Values = [to_binary(V) || {K, V} <- Headers,
+                              string:lowercase(to_binary(K)) =:= <<"alt-svc">>],
+    join_with_comma(Values).
+
+join_with_comma([]) -> <<>>;
+join_with_comma([V]) -> V;
+join_with_comma([V | Rest]) ->
+    iolist_to_binary([V, ", ", join_with_comma(Rest)]).
+
+to_binary(B) when is_binary(B) -> B;
+to_binary(L) when is_list(L) -> iolist_to_binary(L).
+
+%% RFC 7838 §3: a value of "clear" (case-insensitive) invalidates the
+%% origin's cached alternatives. Surrounding whitespace is allowed.
+is_clear_directive(Value) ->
+    case string:lowercase(string:trim(Value)) of
+        <<"clear">> -> true;
+        _ -> false
     end.
 
 find_h3_entry([]) ->

@@ -79,7 +79,13 @@ cache_test_() ->
                 {"cache and lookup", fun test_cache_lookup/0},
                 {"lookup returns none when not cached", fun test_lookup_none/0},
                 {"clear removes entry", fun test_clear/0},
-                {"parse_and_cache from headers", fun test_parse_and_cache/0}
+                {"parse_and_cache from headers", fun test_parse_and_cache/0},
+                {"clear directive invalidates cached entry",
+                 fun test_parse_and_cache_clear/0},
+                {"multiple Alt-Svc headers are merged",
+                 fun test_parse_and_cache_multi_header/0},
+                {"clear directive case-insensitive with whitespace",
+                 fun test_parse_and_cache_clear_loose/0}
             ]
         }
     }.
@@ -105,6 +111,31 @@ test_parse_and_cache() ->
     ?assertEqual({ok, h3, 443}, Result),
     %% Verify it's cached
     ?assertEqual({ok, h3, 443}, hackney_altsvc:lookup(<<"cached.example.com">>, 443)).
+
+test_parse_and_cache_clear() ->
+    Host = <<"clear-via-header.example.com">>,
+    hackney_altsvc:cache(Host, 443, 8443, 3600),
+    ?assertEqual({ok, h3, 8443}, hackney_altsvc:lookup(Host, 443)),
+    Headers = [{<<"alt-svc">>, <<"clear">>}],
+    ?assertEqual(cleared,
+                 hackney_altsvc:parse_and_cache(Host, 443, Headers)),
+    ?assertEqual(none, hackney_altsvc:lookup(Host, 443)).
+
+test_parse_and_cache_multi_header() ->
+    %% Two separate Alt-Svc headers must be treated as one combined list.
+    Headers = [{<<"alt-svc">>, <<"h2=\":443\"">>},
+               {<<"alt-svc">>, <<"h3=\":8443\"; ma=600">>}],
+    Result = hackney_altsvc:parse_and_cache(<<"multi.example.com">>, 443, Headers),
+    ?assertEqual({ok, h3, 8443}, Result),
+    ?assertEqual({ok, h3, 8443}, hackney_altsvc:lookup(<<"multi.example.com">>, 443)).
+
+test_parse_and_cache_clear_loose() ->
+    Host = <<"clear-loose.example.com">>,
+    hackney_altsvc:cache(Host, 443, 443, 3600),
+    Headers = [{<<"Alt-Svc">>, <<"  CLEAR  ">>}],
+    ?assertEqual(cleared,
+                 hackney_altsvc:parse_and_cache(Host, 443, Headers)),
+    ?assertEqual(none, hackney_altsvc:lookup(Host, 443)).
 
 %%====================================================================
 %% Blocked Cache Tests
