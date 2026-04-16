@@ -44,7 +44,7 @@ Payload = <<"{\"key\": \"value\"}">>,
 ### Mix
 
 ```elixir
-{:hackney, "~> 3.0"}
+{:hackney, "~> 4.0"}
 ```
 
 ## Documentation
