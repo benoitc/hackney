@@ -11,7 +11,6 @@
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
 -export([privdir/0]).
--export([mod_metrics/0]).
 -export([default_protocols/0]).
 -export([to_atom/1]).
 
@@ -100,14 +99,6 @@ privdir() ->
       AppPath = filename:dirname(EbinDir),
       filename:join(AppPath, "priv");
     Dir -> Dir
-  end.
-
-mod_metrics() ->
-  case application:get_env(hackney, metrics_backend) of
-    {ok, prometheus} -> hackney_metrics_prometheus;
-    {ok, dummy} -> hackney_metrics_dummy;
-    {ok, Mod} -> Mod;
-    undefined -> hackney_metrics_dummy
   end.
 
 %% @doc Get the default protocols for HTTP connections.

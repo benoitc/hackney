@@ -8,6 +8,9 @@
 - **`with_body` option**: Deprecated and ignored
 - **`hackney:body/1,2` and `hackney:stream_body/1`**: Deprecated - use async mode for streaming
 - **Async mode**: Now works consistently across HTTP/1.1, HTTP/2, and HTTP/3
+- **Metrics removed**: `hackney_metrics` and the prometheus/dummy
+  backends are gone. Metrics are now user-supplied middleware. See the
+  [Middleware Guide](middleware.md) for the prometheus migration recipe.
 
 ### Breaking Changes
 

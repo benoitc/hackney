@@ -119,7 +119,6 @@ connect_direct(Transport, Host, Port, Options) ->
     {ok, ConnPid} ->
       case hackney_conn:connect(ConnPid) of
         ok ->
-          hackney_manager:start_request(Host),
           {ok, ConnPid};
         {error, Reason} ->
           catch hackney_conn:stop(ConnPid),
@@ -152,7 +151,6 @@ connect_pool(Transport, Host, Port, Options) ->
       %% Check HTTP/3 first if allowed
       case H3Allowed andalso try_h3_connection(Host, Port, Transport, Options, PoolHandler) of
         {ok, H3Pid} ->
-          hackney_manager:start_request(Host),
           {ok, H3Pid};
         _ when H2Allowed ->
           %% Try HTTP/2 multiplexing
@@ -162,8 +160,7 @@ connect_pool(Transport, Host, Port, Options) ->
               %% (OTP 28 on FreeBSD may have timing issues with SSL connections)
               case hackney_conn:get_state(H2Pid) of
                 {ok, connected} ->
-                  hackney_manager:start_request(Host),
-                  {ok, H2Pid};
+                          {ok, H2Pid};
                 _ ->
                   %% Connection not ready, unregister and create new
                   PoolHandler:unregister_h2(H2Pid, Options),
@@ -275,8 +272,7 @@ connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
             ok ->
               %% Check if HTTP/2 was negotiated, register for multiplexing
               maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
-              hackney_manager:start_request(Host),
-              {ok, ConnPid};
+                  {ok, ConnPid};
             {error, Reason} ->
               %% Upgrade failed - release slot and close connection
               hackney_load_regulation:release(Host, Port),
@@ -374,7 +370,6 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
     {ok, ConnPid} ->
-      hackney_manager:start_request(Host),
       {ok, ConnPid};
     {error, Reason} ->
       {error, Reason}
@@ -473,6 +468,17 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                             {body, Body},
                             {options, Options0}]),
 
+  Req = #{method  => Method,
+          url     => URL,
+          headers => Headers0,
+          body    => Body,
+          options => Options0},
+  Chain = hackney_middleware:resolve_chain(Options0),
+  hackney_middleware:apply_chain(Chain, Req, fun do_dispatch/1).
+
+%% @private Terminal of the middleware chain: the actual request dispatch.
+do_dispatch(#{method := Method, url := URL,
+              headers := Headers0, body := Body, options := Options0}) ->
   #hackney_url{transport=Transport,
                scheme = Scheme,
                host = Host,
@@ -775,7 +781,7 @@ location(ConnPid) when is_pid(ConnPid) ->
 %% Internal functions
 %%====================================================================
 
-do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
+do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, _Host) ->
   %% Build headers
   Headers1 = hackney_headers:new(Headers0),
   Headers2 = add_host_header(URL, Headers1),
@@ -798,9 +804,7 @@ do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
   %% Convert method to binary
   MethodBin = hackney_bstr:to_upper(hackney_bstr:to_binary(Method)),
 
-  StartTime = os:timestamp(),
-
-  Result = case Async of
+  case Async of
     false ->
       %% Sync request with redirect handling
       sync_request_with_redirect(ConnPid, MethodBin, Path, Headers3, Body, WithBody,
@@ -808,20 +812,6 @@ do_request(ConnPid, Method, Path, Headers0, Body, Options, URL, Host) ->
     _ ->
       %% Async request with optional redirect handling
       async_request(ConnPid, MethodBin, Path, Headers3, Body, Async, StreamTo, FollowRedirect, Options)
-  end,
-
-  case Result of
-    {ok, _, _, _} ->
-      hackney_manager:finish_request(Host, StartTime),
-      Result;
-    {ok, _, _} ->
-      hackney_manager:finish_request(Host, StartTime),
-      Result;
-    {ok, _} ->
-      Result;  % Async - don't finish yet
-    {error, _} ->
-      hackney_manager:finish_request(Host, StartTime),
-      Result
   end.
 
 sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Options, URL,

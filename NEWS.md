@@ -3,6 +3,19 @@
 UNRELEASED
 ----------
 
+### Breaking
+
+- Removed the built-in metrics subsystem (`hackney_metrics`,
+  `hackney_metrics_backend`, `hackney_metrics_prometheus`,
+  `hackney_metrics_dummy`). Hackney no longer emits request or pool
+  metrics on its own and the `metrics_backend` app-env is no longer
+  read. In its place, `hackney:request/1..5` runs a chain of
+  user-supplied middleware (Go-style `RoundTripper`) configured via the
+  `{middleware, [Fun, ...]}` option or `application:set_env(hackney,
+  middleware, [...])`. See `guides/middleware.md` for the API, chain
+  semantics, and worked prometheus / telemetry recipes. Pool state is
+  still observable via `hackney_pool:get_stats/1`.
+
 ### Bug Fixes
 
 - Fix HTTP/2 pooled connections wedging under sustained concurrent load

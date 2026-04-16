@@ -202,17 +202,3 @@ privdir_test_() ->
              ?assert(length(Dir) > 0)
          end}
     ].
-
-%% mod_metrics/0 test
-mod_metrics_test_() ->
-    {setup,
-     fun() -> ok end,
-     fun(_) -> ok end,
-     [
-        {"returns metrics_dummy by default",
-         fun() ->
-             Result = hackney_util:mod_metrics(),
-             %% Default should be metrics_dummy or configured value
-             ?assert(is_atom(Result))
-         end}
-     ]}.
