@@ -1196,6 +1196,7 @@ receiving(internal, do_recv_response_async, Data) ->
     case recv_status_and_headers(DataWithParser) of
         {ok, Status, Headers, NewData} ->
             HeadersList = hackney_headers:to_list(Headers),
+            maybe_record_altsvc(HeadersList, NewData),
             %% Check if this is a redirect and we should handle it
             case maybe_handle_async_redirect(Status, Method, Headers, FollowRedirect) of
                 {redirect, Location} ->
@@ -1656,6 +1657,7 @@ do_recv_response_impl(Data, IncludePid) ->
         {ok, Status, Headers, NewData} ->
             From = NewData#conn_data.request_from,
             HeadersList = hackney_headers:to_list(Headers),
+            maybe_record_altsvc(HeadersList, NewData),
             Reply = case IncludePid of
                 true -> {ok, Status, HeadersList, self()};
                 false -> {ok, Status, HeadersList}
@@ -2485,6 +2487,7 @@ handle_h2_event(_Other, Data) ->
     {keep_state, Data}.
 
 h2_on_response(StreamId, Status, Headers, Data) ->
+    maybe_record_altsvc(Headers, Data),
     #conn_data{h2_streams = Streams} = Data,
     case maps:get(StreamId, Streams, undefined) of
         {From, {sync, waiting_headers}} ->
@@ -2815,6 +2818,7 @@ handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
         {ok, Status, RespHeaders} ->
             %% RespHeaders from hackney_h3:parse_response_headers is already a list
             HeadersList = RespHeaders,
+            maybe_record_altsvc(HeadersList, Data),
             case maps:get(StreamId, Streams, undefined) of
                 {From, waiting_headers} ->
                     case Fin of
@@ -3083,3 +3087,14 @@ handle_h3_termination(Error, Data) ->
                     {next_state, closed, NewData, [{reply, From, {error, Error}} | Actions]}
             end
     end.
+
+%% @private Hand response headers to the Alt-Svc cache so server-advertised
+%% HTTP/3 endpoints get recorded for future requests. Fires for every
+%% protocol so the cache TTL stays fresh while h3 is in use and `clear'
+%% directives are honored even on h3 responses.
+maybe_record_altsvc(Headers, #conn_data{host = Host, port = Port})
+  when is_list(Headers) ->
+    _ = catch hackney_altsvc:parse_and_cache(Host, Port, Headers),
+    ok;
+maybe_record_altsvc(_Headers, _Data) ->
+    ok.

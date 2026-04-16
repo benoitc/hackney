@@ -18,6 +18,13 @@ UNRELEASED
 
 ### Bug Fixes
 
+- Wire `hackney_altsvc:parse_and_cache/3` into the response path so
+  server-advertised HTTP/3 endpoints are actually recorded. Previously
+  the cache was only populated by manual `cache/4` calls; the HTTP/3
+  guide claimed automatic discovery but it never fired. Same hook
+  honors RFC 7838 `clear` (invalidates the cached entry) and merges
+  multiple `Alt-Svc` headers per RFC 7230 §3.2.2. Fires on every
+  protocol so the cache TTL stays fresh while h3 is in use.
 - Fix HTTP/2 pooled connections wedging under sustained concurrent load
   (#836). The pool checks out a TCP connection first then upgrades to
   SSL+ALPN; `connected(enter)` armed the 2s pool idle timer while the
