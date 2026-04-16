@@ -1,7 +1,17 @@
 # NEWS
 
-UNRELEASED
-----------
+4.0.0 - 2026-04-16
+------------------
+
+Hackney 4 trims the client down. The HTTP/2 and HTTP/3 stacks are now
+delegated to `erlang_h2` and `erlang_quic`, so hackney no longer ships
+its own framing, HPACK / QPACK codecs, control streams or state
+machines. The HTTP/3 path is fully spec-compliant via `quic_h3`, with
+ALPN negotiation, Alt-Svc discovery (RFC 7838), and the same
+`hackney:request/5` API as HTTP/1.1. The bundled metrics subsystem is
+gone too, replaced by a Go-style middleware chain that lets users plug
+in prometheus, telemetry or anything else without hackney owning the
+policy. See `guides/middleware.md` and `guides/http3_guide.md`.
 
 ### Breaking
 

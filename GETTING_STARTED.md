@@ -17,7 +17,7 @@ Add hackney to your `rebar.config`:
 Add to your `mix.exs`:
 
 ```elixir
-{:hackney, "~> 3.0"}
+{:hackney, "~> 4.0"}
 ```
 
 ## Starting hackney
