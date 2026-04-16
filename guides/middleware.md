@@ -7,7 +7,7 @@ no registry, no deps.
 
 ```erlang
 -type request() :: #{method  := atom() | binary(),
-                     url     := hackney_url:hackney_url(),
+                     url     := #hackney_url{},
                      headers := [{binary(), binary()}],
                      body    := term(),
                      options := [term()]}.

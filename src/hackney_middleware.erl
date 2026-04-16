@@ -39,8 +39,10 @@
 
 -export_type([request/0, response/0, next/0, middleware/0]).
 
+-include("hackney_lib.hrl").
+
 -type request() :: #{method  := atom() | binary(),
-                     url     := hackney_url:hackney_url(),
+                     url     := #hackney_url{},
                      headers := [{binary(), binary()}],
                      body    := term(),
                      options := [term()]}.
