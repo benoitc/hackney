@@ -261,6 +261,10 @@ Sponsorship ensures continued development, timely security patches, and compatib
 
 **Corporate sponsors:** If hackney is part of your infrastructure, [reach out](mailto:benoitc@enki-multimedia.eu) for sponsored support options.
 
+## Sponsors
+
+<a href="https://enki-multimedia.eu"><img src="guides/images/enki-multimedia.svg" alt="Enki Multimedia" height="50" /></a>
+
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) and [NOTICE](NOTICE)
