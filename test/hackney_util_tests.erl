@@ -88,6 +88,12 @@ to_atom_test_() ->
          fun() ->
              %% hackney is an existing atom
              ?assertEqual(hackney, hackney_util:to_atom("hackney"))
+         end},
+        {"GHSA-6rmf: unknown names raise instead of minting an atom",
+         fun() ->
+             Unknown = "ghsa6rmf_" ++ integer_to_list(erlang:unique_integer([positive])),
+             ?assertError(badarg, hackney_util:to_atom(Unknown)),
+             ?assertError(badarg, hackney_util:to_atom(list_to_binary(Unknown)))
          end}
     ].
 

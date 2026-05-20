@@ -118,12 +118,14 @@ default_protocols() ->
     _ -> [http2, http1]
   end.
 
+%% GHSA-6rmf: never fall back to list_to_atom/1. Minting a fresh atom for
+%% every unique caller-supplied string (header field-names, tokens, JSON
+%% keys, ...) lets an attacker exhaust the fixed-size, never-GC'd atom table
+%% and crash the whole VM. Unknown names raise badarg, the same contract as
+%% list_to_existing_atom/1; callers that need new atoms must create them
+%% explicitly.
 to_atom(V) when is_list(V) ->
-  try
-    list_to_existing_atom(V)
-  catch
-    _:_ -> list_to_atom(V)
-  end;
+  list_to_existing_atom(V);
 to_atom(V) when is_binary(V) ->
   to_atom(binary_to_list(V));
 to_atom(V) when is_atom(V) ->
