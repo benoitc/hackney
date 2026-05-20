@@ -261,7 +261,25 @@ request(Pid, Method, Path, Headers, Body, Timeout) ->
 -spec request(pid(), binary(), binary(), list(), binary() | iolist(), timeout(), list()) ->
     {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body, Timeout, ReqOpts) ->
-    gen_statem:call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout).
+    case valid_request_target(Path) of
+        ok -> gen_statem:call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout);
+        Err -> Err
+    end.
+
+%% @private GHSA-j9wq: the request target (path + query) is written verbatim
+%% into the HTTP/1.1 request line and the HTTP/2 / HTTP/3 :path pseudo-header.
+%% Raw CR, LF or NUL bytes let a caller-controlled URL inject extra header
+%% lines or split the request. RFC 3986 requires those bytes to be
+%% percent-encoded; reject them rather than emit a malformed request.
+valid_request_target(Path) when is_binary(Path) ->
+    case binary:match(Path, [<<"\r">>, <<"\n">>, <<0>>]) of
+        nomatch -> ok;
+        _ -> {error, {invalid_request_target, Path}}
+    end;
+valid_request_target(Path) when is_list(Path) ->
+    valid_request_target(iolist_to_binary(Path));
+valid_request_target(_) ->
+    ok.
 
 %% @doc Send an HTTP/3 request and return headers immediately.
 %% Returns {ok, Status, Headers} and allows subsequent stream_body/1 calls.
@@ -269,14 +287,20 @@ request(Pid, Method, Path, Headers, Body, Timeout, ReqOpts) ->
 -spec request_streaming(pid(), binary(), binary(), list(), binary() | iolist()) ->
     {ok, integer(), list()} | {error, term()}.
 request_streaming(Pid, Method, Path, Headers, Body) ->
-    gen_statem:call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity).
+    case valid_request_target(Path) of
+        ok -> gen_statem:call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity);
+        Err -> Err
+    end.
 
 %% @doc Send only the request headers (for streaming body mode).
 %% After this, use send_body_chunk/2 and finish_send_body/1 to send the body,
 %% then start_response/1 to receive the response.
 -spec send_request_headers(pid(), binary(), binary(), list()) -> ok | {error, term()}.
 send_request_headers(Pid, Method, Path, Headers) ->
-    gen_statem:call(Pid, {send_headers, Method, Path, Headers}, infinity).
+    case valid_request_target(Path) of
+        ok -> gen_statem:call(Pid, {send_headers, Method, Path, Headers}, infinity);
+        Err -> Err
+    end.
 
 %% @doc Send a chunk of the request body.
 -spec send_body_chunk(pid(), iodata()) -> ok | {error, term()}.
@@ -332,12 +356,18 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean()) ->
     {ok, reference()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
-    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}).
+    case valid_request_target(Path) of
+        ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect});
+        Err -> Err
+    end.
 
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean(), list()) ->
     {ok, reference()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts) ->
-    gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}).
+    case valid_request_target(Path) of
+        ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts});
+        Err -> Err
+    end.
 
 %% @doc Request the next message in {async, once} mode.
 -spec stream_next(pid()) -> ok | {error, term()}.

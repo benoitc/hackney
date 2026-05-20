@@ -46,6 +46,7 @@ hackney_conn_integration_test_() ->
       {"stream body with stateful function", {timeout, 30, fun test_stream_body_stateful_fun/0}},
       {"stream body function returns error", {timeout, 30, fun test_stream_body_fun_error/0}},
       {"HEAD request", {timeout, 30, fun test_head_request/0}},
+      {"GHSA-j9wq: CRLF in request target rejected", {timeout, 30, fun test_crlf_request_target_rejected/0}},
       {"request returns to connected state", {timeout, 30, fun test_request_state_cycle/0}},
       %% Async tests
       {"async request continuous", {timeout, 30, fun test_async_continuous/0}},
@@ -258,6 +259,28 @@ test_get_request() ->
     ?assert(is_binary(Body)),
     ?assert(byte_size(Body) > 0),
 
+    hackney_conn:stop(Pid).
+
+%% GHSA-j9wq: a request target carrying raw CR/LF (e.g. from an
+%% unsanitised query string) must be refused before anything is written to
+%% the socket, otherwise the bytes split the request line into extra header
+%% lines.
+test_crlf_request_target_rejected() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    Evil = <<"/get?q=x HTTP/1.1\r\nX-Injected: yes\r\nX:">>,
+    ?assertEqual({error, {invalid_request_target, Evil}},
+                 hackney_conn:request(Pid, <<"GET">>, Evil, [], <<>>)),
+    %% Connection survives the rejection and still serves a clean request.
+    {ok, Status, _} = hackney_conn:request(Pid, <<"GET">>, <<"/get">>, [], <<>>),
+    ?assert(Status >= 200 andalso Status < 400),
     hackney_conn:stop(Pid).
 
 test_post_request() ->
