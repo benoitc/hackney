@@ -30,10 +30,14 @@ run_concurrent_tight_loop() ->
         ok = h2:send_data(Conn, Sid, <<"ok">>, true)
     end,
     Certs = cert_dir(),
+    %% h2 0.6.0 defaults SETTINGS_MAX_CONCURRENT_STREAMS to 100 (RFC 9113
+    %% §5.1.2 floor); this tight-loop test multiplexes more than that and
+    %% would otherwise hit {error, max_streams_exceeded}.
     {ok, Server} = h2:start_server(0, #{
         cert => filename:join(Certs, "server.pem"),
         key  => filename:join(Certs, "server.key"),
-        handler => Handler
+        handler => Handler,
+        settings => #{max_concurrent_streams => unlimited}
     }),
     Port = h2:server_port(Server),
     Pool = hackney_h2_concurrency_pool,
