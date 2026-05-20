@@ -1,6 +1,6 @@
 -record(hackney_url, {
  transport        :: atom(),
- scheme           :: atom(),
+ scheme           :: atom() | binary(),
  netloc   = <<>>  :: binary(),
  raw_path         :: binary() | undefined,
  path = <<>>      :: binary() | undefined | nil,

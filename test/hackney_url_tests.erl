@@ -592,3 +592,22 @@ unsupported_scheme_test_() ->
         ?assertEqual(Expected#hackney_url.transport, R#hackney_url.transport),
         ?assertEqual(Expected#hackney_url.scheme, R#hackney_url.scheme)
      end} || {V, Expected} <- Tests].
+
+%% GHSA-9653: parse_url must not mint a fresh atom for every attacker-supplied
+%% scheme. binary_to_existing_atom keeps the atom table bounded; unknown
+%% schemes are returned as the lowercased binary instead.
+parse_url_does_not_intern_attacker_schemes_test() ->
+    Before = erlang:system_info(atom_count),
+    Schemes = [iolist_to_binary(["zzghsa9653-", integer_to_list(I)])
+               || I <- lists:seq(1, 200)],
+    lists:foreach(
+      fun(S) ->
+              U = hackney_url:parse_url(<<S/binary, "://host/p">>),
+              Scheme = U#hackney_url.scheme,
+              ?assert(is_binary(Scheme) orelse is_atom(Scheme)),
+              ?assertEqual(undefined, U#hackney_url.transport)
+      end, Schemes),
+    Delta = erlang:system_info(atom_count) - Before,
+    %% Allow a small slack for any unrelated atoms minted during the loop;
+    %% a regression would mint ~200 (one per unique scheme).
+    ?assert(Delta < 20).

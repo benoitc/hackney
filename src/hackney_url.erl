@@ -64,8 +64,16 @@ parse_url(URL) ->
       case is_valid_scheme(Scheme) of
         true ->
           SchemeLower = hackney_bstr:to_lower(Scheme),
-          SchemeAtom = binary_to_atom(SchemeLower, utf8),
-          parse_url(Rest, #hackney_url{transport=undefined, scheme=SchemeAtom});
+          %% GHSA-9653: never mint a fresh atom for an attacker-supplied
+          %% scheme. `binary_to_existing_atom` only matches schemes that
+          %% have already been registered (i.e. ones the runtime, this
+          %% module, or the caller has explicitly seen). Anything else
+          %% stays as a binary; the dispatcher rejects it as
+          %% unsupported_scheme either way.
+          SchemeRef = try binary_to_existing_atom(SchemeLower, utf8)
+                      catch error:badarg -> SchemeLower
+                      end,
+          parse_url(Rest, #hackney_url{transport=undefined, scheme=SchemeRef});
         false ->
           %% Not a valid scheme, treat as path-like URL
           parse_url(URL, #hackney_url{transport=hackney_tcp, scheme=http})
