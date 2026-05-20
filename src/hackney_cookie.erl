@@ -46,11 +46,24 @@ setcookie(Name, Value, Opts) ->
               end,
   DomainBin = case lists:keyfind(domain, 1, Opts) of
                 false -> <<>>;
-                {_, Domain} -> [<<"; Domain=">>, Domain]
+                {_, Domain} ->
+                  %% GHSA-mp55: Name/Value are guarded above; Domain and
+                  %% Path must reject the same line-terminating bytes (and
+                  %% ';', which would start a new attribute) so a
+                  %% request-derived domain/path cannot inject a second
+                  %% Set-Cookie header.
+                  nomatch = binary:match(iolist_to_binary(Domain),
+                                         [<<$;>>, <<$\s>>, <<$\t>>, <<$\r>>,
+                                          <<$\n>>, <<$\013>>, <<$\014>>, <<0>>]),
+                  [<<"; Domain=">>, Domain]
               end,
   PathBin = case lists:keyfind(path, 1, Opts) of
               false -> <<>>;
-              {_, Path} -> [<<"; Path=">>, Path]
+              {_, Path} ->
+                nomatch = binary:match(iolist_to_binary(Path),
+                                       [<<$;>>, <<$\r>>, <<$\n>>,
+                                        <<$\013>>, <<$\014>>, <<0>>]),
+                [<<"; Path=">>, Path]
             end,
   SecureBin = case lists:keyfind(secure, 1, Opts) of
                 false -> <<>>;

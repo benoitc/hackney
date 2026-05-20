@@ -99,3 +99,20 @@ setcookie_failures_test_() ->
     [{iolist_to_binary(io_lib:format("{~p, ~p} failure", [N, V])),
       fun() -> true = F(N, V) end}
      || {N, V} <- Tests].
+
+%% GHSA-mp55: domain/path options must reject CR/LF/VT/FF/';' so a
+%% request-derived value cannot split the Set-Cookie header.
+setcookie_domain_path_injection_test_() ->
+    F = fun(Opts) ->
+            try hackney_cookie:setcookie(<<"sid">>, <<"abc">>, Opts) of
+                _ -> false
+            catch _:_ -> true
+            end
+    end,
+    Tests = [
+            {"path CRLF", [{path, <<"/x\r\nSet-Cookie: admin=1; Path=/">>}]},
+            {"path semicolon", [{path, <<"/x; Domain=evil">>}]},
+            {"domain CRLF", [{domain, <<"x.example\r\nSet-Cookie: a=1">>}]},
+            {"domain space", [{domain, <<"x.example evil">>}]}
+            ],
+    [{Name, fun() -> true = F(Opts) end} || {Name, Opts} <- Tests].
