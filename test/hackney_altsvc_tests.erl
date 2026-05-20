@@ -40,7 +40,9 @@ parse_test_() ->
                 {"parse h3 with ma parameter", fun test_parse_h3_ma/0},
                 {"parse multiple entries", fun test_parse_multiple/0},
                 {"parse clear", fun test_parse_clear/0},
-                {"parse h3-29 variant", fun test_parse_h3_variant/0}
+                {"parse h3-29 variant", fun test_parse_h3_variant/0},
+                {"GHSA-6cp8: non-token lead byte terminates",
+                 fun test_parse_non_token_lead_byte/0}
             ]
         }
     }.
@@ -64,6 +66,15 @@ test_parse_clear() ->
 test_parse_h3_variant() ->
     Result = hackney_altsvc:parse(<<"h3-29=\":443\"">>),
     ?assertEqual([{h3, same, 443, 86400}], Result).
+
+%% GHSA-6cp8: a leading non-token byte used to spin parse_entries/2 forever.
+%% The parser must terminate, and must still recover entries that follow a
+%% malformed one.
+test_parse_non_token_lead_byte() ->
+    [?assertEqual([], hackney_altsvc:parse(B))
+     || B <- [<<"!">>, <<"@">>, <<"=">>, <<";">>, <<".">>]],
+    ?assertEqual([{h3, same, 443, 86400}],
+                 hackney_altsvc:parse(<<"!, h3=\":443\"">>)).
 
 %%====================================================================
 %% Cache Tests

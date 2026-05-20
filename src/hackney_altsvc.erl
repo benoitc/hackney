@@ -225,11 +225,24 @@ is_h3_protocol(_) -> false.
 parse_entries(<<>>, Acc) ->
     lists:reverse(Acc);
 parse_entries(Data, Acc) ->
-    {Entry, Rest} = parse_entry(skip_ws(Data)),
+    Stripped = skip_ws(Data),
+    {Entry, Rest} = parse_entry(Stripped),
+    %% GHSA-6cp8: ensure forward progress. A leading non-token byte
+    %% (`!`, `@`, `=`, `;`, `.`, ...) makes parse_entry return
+    %% {undefined, Rest=Stripped}, which would otherwise loop forever.
+    %% Skip to the next ',' so at most one malformed entry is dropped.
+    Rest1 = case Entry of
+                undefined when Rest =:= Stripped -> seek_next_entry(Stripped);
+                _ -> Rest
+            end,
     case Entry of
-        undefined -> parse_entries(skip_comma(Rest), Acc);
-        _ -> parse_entries(skip_comma(Rest), [Entry | Acc])
+        undefined -> parse_entries(skip_comma(Rest1), Acc);
+        _ -> parse_entries(skip_comma(Rest1), [Entry | Acc])
     end.
+
+seek_next_entry(<<>>) -> <<>>;
+seek_next_entry(<<$,, _/binary>> = Data) -> Data;
+seek_next_entry(<<_, Rest/binary>>) -> seek_next_entry(Rest).
 
 %% Parse a single Alt-Svc entry: protocol="host:port"; ma=N
 parse_entry(<<>>) ->
