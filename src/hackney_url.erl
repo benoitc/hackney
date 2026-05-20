@@ -176,6 +176,18 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                                  urldecode(unicode:characters_to_binary(Host0))
                                 ),
 
+                       %% GHSA-pj7v: a non-IP host that decodes to an IP
+                       %% literal (e.g. `%31%32%37%2E%30%2E%30%2E%31` ->
+                       %% `127.0.0.1`) bypasses any caller-side SSRF
+                       %% allowlist that ran inet:parse_address on the
+                       %% pre-normalised host. Pct-encoding an IP literal
+                       %% has no legitimate use; reject the differential.
+                       %% IDN / pct-encoded UTF-8 hosts still flow through.
+                       case inet_parse:address(Host1) of
+                         {ok, _} -> error({invalid_url_host, Host0});
+                         _ -> ok
+                       end,
+
                        %% encode domain if needed
                        Host2 = case Scheme of
                                  http_unix -> Host1;

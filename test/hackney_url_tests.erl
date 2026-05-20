@@ -593,6 +593,20 @@ unsupported_scheme_test_() ->
         ?assertEqual(Expected#hackney_url.scheme, R#hackney_url.scheme)
      end} || {V, Expected} <- Tests].
 
+%% GHSA-pj7v: normalize/2 must refuse hosts that don't parse as an IP literal
+%% but decode to one - the parser-differential that lets percent-encoded IPs
+%% sneak past caller-side SSRF allowlists.
+normalize_rejects_pct_encoded_ip_host_test_() ->
+    Cases = [
+        <<"http://%31%32%37%2E%30%2E%30%2E%31/admin">>,           %% 127.0.0.1
+        <<"http://%31%36%39%2E%32%35%34%2E%31%36%39%2E%32%35%34/">>, %% 169.254.169.254
+        <<"http://%31%30%2E%30%2E%30%2E%35/">>                    %% 10.0.0.5
+    ],
+    [{Url, fun() ->
+        ?assertError({invalid_url_host, _},
+                     hackney_url:normalize(Url))
+     end} || Url <- Cases].
+
 %% GHSA-9653: parse_url must not mint a fresh atom for every attacker-supplied
 %% scheme. binary_to_existing_atom keeps the atom table bounded; unknown
 %% schemes are returned as the lowercased binary instead.
