@@ -92,10 +92,12 @@ ws_integration_test_() ->
     {setup,
      fun start_ws_server/0,
      fun stop_ws_server/1,
-     fun({_ListenerName, _Port, WsUrl}) ->
+     fun({_ListenerName, Port, WsUrl}) ->
          [
           {"Connect and disconnect",
            fun() -> test_connect_disconnect(WsUrl) end},
+          {"GHSA-f9vr: CRLF in upgrade header rejected",
+           fun() -> test_handshake_header_injection(Port) end},
           {"Send and receive text message",
            fun() -> test_text_message(WsUrl) end},
           {"Send and receive binary message",
@@ -114,6 +116,19 @@ ws_integration_test_() ->
            fun() -> test_active_true(WsUrl) end}
          ]
      end}.
+
+%% GHSA-f9vr: a CRLF-bearing extra header must abort the upgrade before any
+%% bytes are written, not splice an injected header onto the wire.
+test_handshake_header_injection(Port) ->
+    {ok, Ws} = hackney_ws:start_link(#{
+        host => "localhost",
+        port => Port,
+        transport => hackney_tcp,
+        path => <<"/ws">>,
+        headers => [{<<"X-Evil">>, <<"v\r\nX-Injected: yes">>}]
+    }),
+    ?assertEqual({error, invalid_handshake_header},
+                 hackney_ws:connect(Ws, 5000)).
 
 test_connect_disconnect(WsUrl) ->
     {ok, Ws} = hackney:ws_connect(WsUrl),

@@ -565,7 +565,7 @@ do_connect_via_socks5(Transport, Host, Port, ProxyHost, ProxyPort,
     end.
 
 %% @private Perform WebSocket handshake
-do_handshake(#ws_data{socket = Socket, transport = Transport, host = Host,
+do_handshake(#ws_data{transport = Transport, host = Host,
                       port = Port, path = Path, headers = ExtraHeaders,
                       protocols = Protocols} = Data) ->
     %% Generate random key
@@ -605,15 +605,42 @@ do_handshake(#ws_data{socket = Socket, transport = Transport, host = Host,
     %% Add extra headers
     Headers2 = Headers1 ++ ExtraHeaders,
 
-    %% Build request
-    HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- Headers2],
-    Request = [
-        <<"GET ">>, Path, <<" HTTP/1.1\r\n">>,
-        HeaderLines,
-        <<"\r\n">>
-    ],
+    %% GHSA-f9vr: the upgrade request is assembled by raw concatenation, so
+    %% a caller-supplied host, path, sub-protocol or extra header carrying
+    %% CR/LF/NUL would splice in extra header lines or rewrite the request
+    %% line. Reject those bytes before anything reaches the socket.
+    case valid_handshake_fields(Path, Headers2) of
+        ok ->
+            %% Build request
+            HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- Headers2],
+            Request = [
+                <<"GET ">>, Path, <<" HTTP/1.1\r\n">>,
+                HeaderLines,
+                <<"\r\n">>
+            ],
+            do_send_handshake(Data, Key, Request);
+        {error, _} = Err ->
+            Err
+    end.
 
-    %% Send request
+%% @private GHSA-f9vr: reject CR/LF/NUL in the request line path and in any
+%% header name/value used to build the WebSocket upgrade request.
+valid_handshake_fields(Path, Headers) ->
+    Fields = [Path | lists:flatmap(fun({N, V}) -> [N, V] end, Headers)],
+    case lists:any(fun has_ctl_bytes/1, Fields) of
+        true -> {error, invalid_handshake_header};
+        false -> ok
+    end.
+
+has_ctl_bytes(Bin) when is_binary(Bin) ->
+    binary:match(Bin, [<<"\r">>, <<"\n">>, <<0>>]) =/= nomatch;
+has_ctl_bytes(L) when is_list(L) ->
+    has_ctl_bytes(iolist_to_binary(L));
+has_ctl_bytes(_) ->
+    false.
+
+%% @private Send the assembled upgrade request and process the response.
+do_send_handshake(#ws_data{socket = Socket, transport = Transport} = Data, Key, Request) ->
     case Transport:send(Socket, Request) of
         ok ->
             %% Read response
