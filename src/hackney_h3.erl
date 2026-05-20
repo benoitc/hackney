@@ -66,6 +66,7 @@
 
 -ifdef(TEST).
 -export([maybe_strip_redirect_headers/4]).
+-export([body_within_limit/2, remaining/1]).
 -endif.
 
 -record(state, {
@@ -76,6 +77,13 @@
 }).
 
 -define(CONN_TABLE, hackney_h3_conns).
+
+%% GHSA-jq4m: default ceiling on a buffered HTTP/3 response body. The
+%% non-streaming await path holds the whole body in memory, so without a cap
+%% a peer that trickles data forever drives the node to OOM. Configurable via
+%% the `max_body_size' option (`infinity' disables it); very large downloads
+%% should use the streaming API instead.
+-define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
 
 -type h3_conn() :: reference().
 -type stream_id() :: non_neg_integer().
@@ -141,10 +149,11 @@ do_request_with_redirect(Method, Url, Headers, Body, Opts, FollowRedirect, MaxRe
         _ -> <<PathBin/binary, "?", Qs/binary>>
     end,
     Timeout = maps:get(timeout, Opts, 30000),
+    MaxBodySize = maps:get(max_body_size, Opts, ?DEFAULT_MAX_BODY_SIZE),
     case connect(HostBin, Port, Opts) of
         {ok, Conn} ->
             try
-                case do_request(Conn, Method, HostBin, FullPath, Headers, Body, Timeout) of
+                case do_request(Conn, Method, HostBin, FullPath, Headers, Body, Timeout, MaxBodySize) of
                     {ok, Status, RespHeaders, RespBody} when Status >= 301, Status =< 308 ->
                         %% Redirect response
                         handle_redirect(Status, RespHeaders, RespBody, Method, Url, Headers, Body, Opts,
@@ -311,7 +320,7 @@ connect(Host, Port, Opts) when is_binary(Host) ->
 -spec await_response(reference(), non_neg_integer()) ->
     {ok, integer(), headers(), binary()} | {error, term()}.
 await_response(ConnRef, StreamId) ->
-    await_response_loop(ConnRef, StreamId, 30000, undefined, [], <<>>).
+    await_response_loop(ConnRef, StreamId, 30000, ?DEFAULT_MAX_BODY_SIZE).
 
 %%====================================================================
 %% Request operations (used by hackney_conn)
@@ -444,7 +453,7 @@ wait_connected(ConnRef, Timeout, StartTime) ->
         {error, timeout}
     end.
 
-do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
+do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize) ->
     AllHeaders = build_request_headers(Method, Host, Path, Headers),
     HasBody = Body =/= <<>> andalso Body =/= [],
     Fin = not HasBody,
@@ -452,25 +461,33 @@ do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout) ->
         {ok, StreamId} when HasBody ->
             case send_data(ConnRef, StreamId, Body, true) of
                 ok ->
-                    await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
+                    await_response_loop(ConnRef, StreamId, Timeout, MaxBodySize);
                 {error, _} = Error ->
                     Error
             end;
         {ok, StreamId} ->
-            await_response_loop(ConnRef, StreamId, Timeout, undefined, [], <<>>);
+            await_response_loop(ConnRef, StreamId, Timeout, MaxBodySize);
         {error, _} = Error ->
             Error
     end.
 
 %% @private Wait for HTTP/3 response.
-%% Timeout is per-chunk - resets each time data is received.
-%% This allows large responses to complete as long as data keeps flowing.
-%% Note: For very large responses, use hackney_conn with streaming mode instead.
-await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
+%% GHSA-jq4m: `Timeout' is an absolute wall-clock deadline for the whole
+%% response, not a per-chunk timer; a peer that dribbles a byte just before
+%% each chunk deadline used to reset it forever. The accumulated body is also
+%% capped at MaxBodySize so a slow- or fast-drip cannot exhaust memory.
+await_response_loop(ConnRef, StreamId, Timeout, MaxBodySize) ->
+    Deadline = case Timeout of
+                   infinity -> infinity;
+                   _ -> erlang:monotonic_time(millisecond) + Timeout
+               end,
+    await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, undefined, [], <<>>).
+
+await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody) ->
     receive
         {select, _Resource, _Ref, ready_input} ->
             _ = process(ConnRef),
-            await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody);
+            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody);
         {h3, ConnRef, {stream_headers, StreamId, RespHeaders, Fin}} ->
             NewStatus = get_status(RespHeaders),
             FilteredHeaders = filter_pseudo_headers(RespHeaders),
@@ -479,15 +496,20 @@ await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
                     %% Headers with Fin=true means no body (e.g., HEAD response, 204, 304)
                     {ok, NewStatus, FilteredHeaders, AccBody};
                 false ->
-                    await_response_loop(ConnRef, StreamId, Timeout, NewStatus, FilteredHeaders, AccBody)
+                    await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, NewStatus, FilteredHeaders, AccBody)
             end;
         {h3, ConnRef, {stream_data, StreamId, Data, Fin}} ->
             NewBody = <<AccBody/binary, Data/binary>>,
-            case Fin of
-                true ->
-                    {ok, Status, Headers, NewBody};
+            case body_within_limit(byte_size(NewBody), MaxBodySize) of
                 false ->
-                    await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, NewBody)
+                    {error, body_too_large};
+                true ->
+                    case Fin of
+                        true ->
+                            {ok, Status, Headers, NewBody};
+                        false ->
+                            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, NewBody)
+                    end
             end;
         {h3, ConnRef, {stream_reset, StreamId, _ErrorCode}} ->
             {error, stream_reset};
@@ -495,13 +517,21 @@ await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody) ->
             {error, {connection_closed, Reason}};
         {h3, ConnRef, {settings, _Settings}} ->
             %% HTTP/3 SETTINGS frame - ignore and continue waiting
-            await_response_loop(ConnRef, StreamId, Timeout, Status, Headers, AccBody);
+            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody);
         {h3, ConnRef, {goaway, _StreamId2}} ->
             %% GOAWAY frame - connection is shutting down
             {error, goaway}
-    after Timeout ->
+    after remaining(Deadline) ->
         {error, timeout}
     end.
+
+%% @private Milliseconds left until the absolute deadline.
+remaining(infinity) -> infinity;
+remaining(Deadline) -> max(0, Deadline - erlang:monotonic_time(millisecond)).
+
+%% @private GHSA-jq4m: bound the buffered body size.
+body_within_limit(_Size, infinity) -> true;
+body_within_limit(Size, Max) -> Size =< Max.
 
 %% @private Build HTTP/3 request headers including pseudo-headers.
 -spec build_request_headers(method(), binary(), binary(), headers()) -> headers().

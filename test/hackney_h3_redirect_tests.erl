@@ -239,6 +239,44 @@ cross_origin_header_strip_test_() ->
     ].
 
 %%====================================================================
+%% GHSA-jq4m: response body cap + wall-clock deadline
+%%====================================================================
+
+body_cap_test_() ->
+    [
+     {"accepts body at or under the cap",
+      fun() ->
+          ?assert(hackney_h3:body_within_limit(0, 100)),
+          ?assert(hackney_h3:body_within_limit(100, 100))
+      end},
+     {"rejects body over the cap",
+      fun() ->
+          ?assertNot(hackney_h3:body_within_limit(101, 100))
+      end},
+     {"infinity disables the cap",
+      fun() ->
+          ?assert(hackney_h3:body_within_limit(1 bsl 40, infinity))
+      end}
+    ].
+
+deadline_test_() ->
+    [
+     {"infinity stays infinity",
+      fun() -> ?assertEqual(infinity, hackney_h3:remaining(infinity)) end},
+     {"past deadline clamps to zero",
+      fun() ->
+          Past = erlang:monotonic_time(millisecond) - 1000,
+          ?assertEqual(0, hackney_h3:remaining(Past))
+      end},
+     {"future deadline returns a positive remaining",
+      fun() ->
+          Future = erlang:monotonic_time(millisecond) + 5000,
+          R = hackney_h3:remaining(Future),
+          ?assert(R > 0 andalso R =< 5000)
+      end}
+    ].
+
+%%====================================================================
 %% TLS Option Tests
 %%====================================================================
 
