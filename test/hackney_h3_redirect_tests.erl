@@ -191,6 +191,54 @@ test_method_preservation() ->
     end, [307, 308]).
 
 %%====================================================================
+%% GHSA-h73q: cross-origin credential stripping
+%%====================================================================
+
+cross_origin_header_strip_test_() ->
+    [
+     {"strips Authorization/Cookie/Proxy-Authorization across origin",
+      fun() ->
+          Headers = [{<<"authorization">>, <<"Bearer secret">>},
+                     {<<"cookie">>, <<"session=abc">>},
+                     {<<"proxy-authorization">>, <<"Basic xyz">>},
+                     {<<"user-agent">>, <<"hackney">>}],
+          Result = hackney_h3:maybe_strip_redirect_headers(
+                     <<"https://victim.example/me">>,
+                     <<"https://attacker.example/collect">>,
+                     Headers, #{}),
+          ?assertEqual([{<<"user-agent">>, <<"hackney">>}], Result)
+      end},
+     {"keeps headers on same-origin redirect",
+      fun() ->
+          Headers = [{<<"authorization">>, <<"Bearer secret">>},
+                     {<<"user-agent">>, <<"hackney">>}],
+          Result = hackney_h3:maybe_strip_redirect_headers(
+                     <<"https://victim.example/me">>,
+                     <<"https://victim.example/other">>,
+                     Headers, #{}),
+          ?assertEqual(Headers, Result)
+      end},
+     {"strips on port change",
+      fun() ->
+          Headers = [{<<"cookie">>, <<"s=1">>}],
+          Result = hackney_h3:maybe_strip_redirect_headers(
+                     <<"https://victim.example:443/me">>,
+                     <<"https://victim.example:8443/me">>,
+                     Headers, #{}),
+          ?assertEqual([], Result)
+      end},
+     {"location_trusted keeps credentials cross-origin",
+      fun() ->
+          Headers = [{<<"authorization">>, <<"Bearer secret">>}],
+          Result = hackney_h3:maybe_strip_redirect_headers(
+                     <<"https://victim.example/me">>,
+                     <<"https://attacker.example/collect">>,
+                     Headers, #{location_trusted => true}),
+          ?assertEqual(Headers, Result)
+      end}
+    ].
+
+%%====================================================================
 %% TLS Option Tests
 %%====================================================================
 

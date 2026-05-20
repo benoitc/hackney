@@ -64,6 +64,10 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
+-ifdef(TEST).
+-export([maybe_strip_redirect_headers/4]).
+-endif.
+
 -record(state, {
     h3_conn :: pid() | undefined,
     conn_ref :: reference(),
@@ -174,8 +178,11 @@ handle_redirect(Status, RespHeaders, _RespBody, Method, Url, Headers, Body, Opts
                 get when Method =/= get -> <<>>;
                 _ -> Body
             end,
+            %% GHSA-h73q: do not forward credential headers to a different
+            %% origin unless the caller opted into location_trusted.
+            NewHeaders = maybe_strip_redirect_headers(Url, NewUrl, Headers, Opts),
             %% Follow the redirect
-            do_request_with_redirect(NewMethod, NewUrl, Headers, NewBody, Opts,
+            do_request_with_redirect(NewMethod, NewUrl, NewHeaders, NewBody, Opts,
                                      true, MaxRedirect, RedirectCount + 1);
         {error, no_location} ->
             %% No Location header, return as-is
@@ -193,6 +200,38 @@ get_redirect_location(Headers) ->
                 false -> {error, no_location}
             end
     end.
+
+%% @private GHSA-h73q: strip Authorization / Cookie / Proxy-Authorization
+%% before following a redirect to a different origin (scheme, host or port).
+%% location_trusted lets a caller opt back into forwarding them.
+maybe_strip_redirect_headers(OldUrl, NewUrl, Headers, Opts) ->
+    case maps:get(location_trusted, Opts, false) of
+        true -> Headers;
+        false ->
+            case same_origin(OldUrl, NewUrl) of
+                true -> Headers;
+                false -> drop_credential_headers(Headers)
+            end
+    end.
+
+same_origin(UrlA, UrlB) ->
+    #hackney_url{scheme = SchemeA, host = HostA, port = PortA} =
+        hackney_url:parse_url(UrlA),
+    #hackney_url{scheme = SchemeB, host = HostB, port = PortB} =
+        hackney_url:parse_url(UrlB),
+    {SchemeA, string:to_lower(HostA), PortA} =:=
+        {SchemeB, string:to_lower(HostB), PortB}.
+
+drop_credential_headers(Headers) ->
+    Sensitive = [<<"authorization">>, <<"cookie">>, <<"proxy-authorization">>],
+    lists:filter(
+      fun({Name, _Value}) ->
+              not lists:member(hackney_bstr:to_lower(to_bin(Name)), Sensitive)
+      end, Headers).
+
+to_bin(B) when is_binary(B) -> B;
+to_bin(L) when is_list(L) -> list_to_binary(L);
+to_bin(A) when is_atom(A) -> atom_to_binary(A, utf8).
 
 %% @private Resolve redirect URL relative to original URL
 resolve_redirect_url(Location, OriginalUrl) when is_binary(Location) ->
