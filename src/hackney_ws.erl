@@ -57,6 +57,13 @@
 -define(RECV_TIMEOUT, infinity).
 -define(CLOSE_TIMEOUT, 5000).
 
+%% GHSA-q8jg: bound attacker-controlled buffers. A single frame's declared
+%% length, the cumulative size of a fragmented message, and the handshake
+%% response are all capped so a hostile server cannot drive the client to OOM.
+-define(DEFAULT_MAX_FRAME_SIZE, 16#1000000).      %% 16 MiB per frame
+-define(DEFAULT_MAX_MESSAGE_SIZE, 16#4000000).    %% 64 MiB per fragmented message
+-define(MAX_HANDSHAKE_RESPONSE_SIZE, 65536).      %% 64 KiB of upgrade headers
+
 %% WebSocket frame types (for documentation)
 -type ws_frame() :: {text, binary()}
                   | {binary, binary()}
@@ -105,8 +112,13 @@
     %% Frame parsing state (for hackney_ws_proto)
     frag_state = undefined :: term(),
     frag_buffer = [] :: list(),  %% Accumulated fragment payloads
+    frag_size = 0 :: non_neg_integer(),  %% Bytes buffered in frag_buffer
     utf8_state = 0 :: integer(),
     extensions = #{} :: map(),
+
+    %% GHSA-q8jg: buffer caps (bytes), infinity disables the cap
+    max_frame_size = ?DEFAULT_MAX_FRAME_SIZE :: non_neg_integer() | infinity,
+    max_message_size = ?DEFAULT_MAX_MESSAGE_SIZE :: non_neg_integer() | infinity,
 
     %% Pending requests
     connect_from :: {pid(), reference()} | undefined,
@@ -220,7 +232,9 @@ init([Owner, Opts]) ->
         proxy = maps:get(proxy, Opts, false),
         active = maps:get(active, Opts, false),
         headers = maps:get(headers, Opts, []),
-        protocols = maps:get(protocols, Opts, [])
+        protocols = maps:get(protocols, Opts, []),
+        max_frame_size = maps:get(max_frame_size, Opts, ?DEFAULT_MAX_FRAME_SIZE),
+        max_message_size = maps:get(max_message_size, Opts, ?DEFAULT_MAX_MESSAGE_SIZE)
     },
     {ok, idle, Data}.
 
@@ -680,6 +694,11 @@ read_handshake_response(Socket, Transport, Buffer) ->
                     HeaderPart = binary:part(Buffer1, 0, Pos),
                     Rest = binary:part(Buffer1, Pos + 4, byte_size(Buffer1) - Pos - 4),
                     parse_handshake_response(HeaderPart, Rest);
+                nomatch when byte_size(Buffer1) > ?MAX_HANDSHAKE_RESPONSE_SIZE ->
+                    %% GHSA-q8jg: a server that streams bytes without ever
+                    %% sending the CRLFCRLF terminator would otherwise grow
+                    %% this buffer without bound.
+                    {error, handshake_response_too_large};
                 nomatch ->
                     read_handshake_response(Socket, Transport, Buffer1)
             end;
@@ -787,6 +806,12 @@ do_recv_frame(Buffer, #ws_data{socket = Socket, transport = Transport,
             end;
         error ->
             {error, invalid_frame};
+        {_Type, _FragState1, _Rsv, Len, _MaskKey, _Rest} when is_integer(Len),
+                                                              is_integer(Data#ws_data.max_frame_size),
+                                                              Len > Data#ws_data.max_frame_size ->
+            %% GHSA-q8jg: refuse an oversized declared frame length before
+            %% buffering its payload (a peer may announce up to 2^63-1).
+            {error, {frame_too_big, Len}};
         {Type, FragState1, Rsv, Len, MaskKey, Rest} ->
             %% Parse payload
             parse_payload(Type, FragState1, Rsv, Len, MaskKey, Rest, Data, Timeout, Utf8State)
@@ -803,37 +828,48 @@ do_recv_frame(Buffer, #ws_data{socket = Socket, transport = Transport,
 %%   {error, Reason}
 parse_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
               #ws_data{socket = Socket, transport = Transport,
-                       extensions = Exts, frag_buffer = FragBuffer} = Data,
+                       extensions = Exts, frag_buffer = FragBuffer,
+                       frag_size = FragSize} = Data,
               Timeout, Utf8State) ->
     %% ParsedLen = 0 for new frames
     case hackney_ws_proto:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
         {ok, CloseCode, Payload, Utf8State1, Rest} when Type =:= close ->
             %% Close frame with code
             Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                 frag_buffer = [], utf8_state = Utf8State1},
+                                 frag_buffer = [], frag_size = 0,
+                                 utf8_state = Utf8State1},
             {close, CloseCode, Payload, Data1};
         {ok, Payload, Utf8State1, Rest} ->
             %% Non-close frame completed
             case FragState1 of
                 {nofin, _FragType, _Rsv} ->
                     %% This is a fragment, accumulate
-                    Data1 = Data#ws_data{buffer = Rest, frag_state = FragState1,
-                                         frag_buffer = [Payload | FragBuffer],
-                                         utf8_state = Utf8State1},
-                    do_recv_frame(Rest, Data1, Timeout);
+                    NewFragSize = FragSize + byte_size(Payload),
+                    case message_within_limit(NewFragSize, Data) of
+                        ok ->
+                            Data1 = Data#ws_data{buffer = Rest, frag_state = FragState1,
+                                                 frag_buffer = [Payload | FragBuffer],
+                                                 frag_size = NewFragSize,
+                                                 utf8_state = Utf8State1},
+                            do_recv_frame(Rest, Data1, Timeout);
+                        Err ->
+                            Err
+                    end;
                 {fin, FragType, _Rsv} ->
                     %% Final fragment - assemble full message
                     AllPayloads = lists:reverse([Payload | FragBuffer]),
                     FullPayload = iolist_to_binary(AllPayloads),
                     Frame = hackney_ws_proto:make_frame(FragType, FullPayload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                         frag_buffer = [], utf8_state = Utf8State1},
+                                         frag_buffer = [], frag_size = 0,
+                                         utf8_state = Utf8State1},
                     handle_received_frame(Frame, Data1, Timeout);
                 undefined ->
                     %% Complete non-fragmented frame
                     Frame = hackney_ws_proto:make_frame(Type, Payload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                         frag_buffer = [], utf8_state = Utf8State1},
+                                         frag_buffer = [], frag_size = 0,
+                                         utf8_state = Utf8State1},
                     handle_received_frame(Frame, Data1, Timeout)
             end;
         {more, _PartialPayload, Utf8State1} ->
@@ -916,6 +952,11 @@ parse_active_frames(#ws_data{buffer = Buffer, frag_state = FragState,
             {ok, lists:reverse(Acc), Data};
         error ->
             {error, invalid_frame};
+        {_Type, _FragState1, _Rsv, Len, _MaskKey, _Rest} when is_integer(Len),
+                                                              is_integer(Data#ws_data.max_frame_size),
+                                                              Len > Data#ws_data.max_frame_size ->
+            %% GHSA-q8jg: refuse an oversized declared frame length.
+            {error, {frame_too_big, Len}};
         {Type, FragState1, Rsv, Len, MaskKey, Rest} ->
             case parse_active_payload(Type, FragState1, Rsv, Len, MaskKey, Rest, Data, Utf8State) of
                 {ok, Frame, Data1} ->
@@ -937,43 +978,65 @@ parse_active_frames(#ws_data{buffer = Buffer, frag_state = FragState,
                     parse_active_frames(Data1, Acc);
                 more ->
                     {ok, lists:reverse(Acc), Data};
+                {error, Reason} ->
+                    {error, Reason};
                 error ->
                     {error, invalid_payload}
             end
     end.
 
+%% @private GHSA-q8jg: bound the cumulative size of a fragmented message so a
+%% peer cannot stream unbounded non-final continuation frames.
+message_within_limit(_Size, #ws_data{max_message_size = infinity}) ->
+    ok;
+message_within_limit(Size, #ws_data{max_message_size = Max}) when Size > Max ->
+    {error, {message_too_big, Size}};
+message_within_limit(_Size, _Data) ->
+    ok.
+
 %% @private Parse payload in active mode (non-blocking)
 parse_active_payload(Type, FragState1, Rsv, Len, MaskKey, Buffer,
-                     #ws_data{extensions = Exts, frag_buffer = FragBuffer} = Data,
+                     #ws_data{extensions = Exts, frag_buffer = FragBuffer,
+                              frag_size = FragSize} = Data,
                      Utf8State) ->
     case hackney_ws_proto:parse_payload(Buffer, MaskKey, Utf8State, 0, Type, Len, FragState1, Exts, Rsv) of
         {ok, CloseCode, Payload, Utf8State1, Rest} when Type =:= close ->
             %% Close frame with code
             Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                 frag_buffer = [], utf8_state = Utf8State1},
+                                 frag_buffer = [], frag_size = 0,
+                                 utf8_state = Utf8State1},
             {ok, {close, CloseCode, Payload}, Data1};
         {ok, Payload, Utf8State1, Rest} ->
             %% Non-close frame completed
             case FragState1 of
                 {nofin, _FragType, _Rsv} ->
                     %% This is a fragment, accumulate
-                    Data1 = Data#ws_data{buffer = Rest, frag_state = FragState1,
-                                         frag_buffer = [Payload | FragBuffer],
-                                         utf8_state = Utf8State1},
-                    {fragment, Data1};
+                    NewFragSize = FragSize + byte_size(Payload),
+                    case message_within_limit(NewFragSize, Data) of
+                        ok ->
+                            Data1 = Data#ws_data{buffer = Rest, frag_state = FragState1,
+                                                 frag_buffer = [Payload | FragBuffer],
+                                                 frag_size = NewFragSize,
+                                                 utf8_state = Utf8State1},
+                            {fragment, Data1};
+                        Err ->
+                            Err
+                    end;
                 {fin, FragType, _Rsv} ->
                     %% Final fragment
                     AllPayloads = lists:reverse([Payload | FragBuffer]),
                     FullPayload = iolist_to_binary(AllPayloads),
                     Frame = hackney_ws_proto:make_frame(FragType, FullPayload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                         frag_buffer = [], utf8_state = Utf8State1},
+                                         frag_buffer = [], frag_size = 0,
+                                         utf8_state = Utf8State1},
                     {ok, Frame, Data1};
                 undefined ->
                     %% Complete non-fragmented frame
                     Frame = hackney_ws_proto:make_frame(Type, Payload, undefined, undefined),
                     Data1 = Data#ws_data{buffer = Rest, frag_state = undefined,
-                                         frag_buffer = [], utf8_state = Utf8State1},
+                                         frag_buffer = [], frag_size = 0,
+                                         utf8_state = Utf8State1},
                     {ok, Frame, Data1}
             end;
         {more, _PartialPayload, _Utf8State1} ->

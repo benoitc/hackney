@@ -98,6 +98,8 @@ ws_integration_test_() ->
            fun() -> test_connect_disconnect(WsUrl) end},
           {"GHSA-f9vr: CRLF in upgrade header rejected",
            fun() -> test_handshake_header_injection(Port) end},
+          {"GHSA-q8jg: oversized frame rejected",
+           fun() -> test_max_frame_size(Port) end},
           {"Send and receive text message",
            fun() -> test_text_message(WsUrl) end},
           {"Send and receive binary message",
@@ -129,6 +131,20 @@ test_handshake_header_injection(Port) ->
     }),
     ?assertEqual({error, invalid_handshake_header},
                  hackney_ws:connect(Ws, 5000)).
+
+%% GHSA-q8jg: a frame whose payload exceeds the configured max_frame_size
+%% must be refused rather than buffered without bound.
+test_max_frame_size(Port) ->
+    {ok, Ws} = hackney_ws:start_link(#{
+        host => "localhost",
+        port => Port,
+        transport => hackney_tcp,
+        path => <<"/ws">>,
+        max_frame_size => 100
+    }),
+    ok = hackney_ws:connect(Ws, 5000),
+    ok = hackney_ws:send(Ws, {text, <<"large:5000">>}),
+    ?assertMatch({error, {frame_too_big, _}}, hackney_ws:recv(Ws, 5000)).
 
 test_connect_disconnect(WsUrl) ->
     {ok, Ws} = hackney:ws_connect(WsUrl),
