@@ -61,8 +61,11 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
           case Transport of
             hackney_ssl ->
               SSLOpts = ssl_opts(Host, Opts),
-              %% upgrade the tcp connection
-              case ssl:connect(Socket, SSLOpts) of
+              %% upgrade the tcp connection. GHSA-gp9c: forward the
+              %% caller's timeout; the 2-arg ssl:connect defaults to
+              %% infinity, so a stalled proxy upstream could pin the
+              %% process and socket on the TLS handshake forever.
+              case ssl:connect(Socket, SSLOpts, Timeout) of
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->

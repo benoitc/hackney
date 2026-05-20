@@ -56,7 +56,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
   ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
 
   %% connect to the proxy (TCP or TLS based on proxy_transport)
-  case connect_to_proxy(ProxyHost, ProxyPort, ProxyTransport, ConnectOpts, Opts) of
+  case connect_to_proxy(ProxyHost, ProxyPort, ProxyTransport, ConnectOpts, Opts, Timeout) of
     {ok, ProxySocket} ->
       case do_handshake(ProxySocket, ProxyTransport, Host, Port, Opts) of
         ok ->
@@ -65,8 +65,10 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
           case Transport of
             hackney_ssl ->
               SSLOpts = ssl_opts(Host, Opts),
-              %% upgrade the tunnel to TLS
-              case ssl:connect(ProxySocket, SSLOpts) of
+              %% upgrade the tunnel to TLS. GHSA-gp9c: forward the
+              %% caller's timeout so a stalled proxy upstream cannot pin
+              %% the process on the TLS handshake forever.
+              case ssl:connect(ProxySocket, SSLOpts, Timeout) of
                 {ok, SslSocket} ->
                   {ok, {Transport, SslSocket}};
                 Error ->
@@ -92,14 +94,15 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
   end.
 
 %% Connect to proxy using TCP or TLS
-connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts) ->
+connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts, Timeout) ->
   %% HTTPS proxy: connect with TLS
-  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts) of
+  case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, TcpSocket} ->
       ProxySslOpts = proplists:get_value(proxy_ssl_options, Opts, []),
       %% Add SNI for the proxy
       SslOpts = [{server_name_indication, ProxyHost} | ProxySslOpts],
-      case ssl:connect(TcpSocket, SslOpts) of
+      %% GHSA-gp9c: forward the timeout to the proxy TLS handshake too.
+      case ssl:connect(TcpSocket, SslOpts, Timeout) of
         {ok, SslSocket} ->
           {ok, SslSocket};
         Error ->
@@ -109,9 +112,9 @@ connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts) ->
     Error ->
       Error
   end;
-connect_to_proxy(ProxyHost, ProxyPort, tcp, ConnectOpts, _Opts) ->
+connect_to_proxy(ProxyHost, ProxyPort, tcp, ConnectOpts, _Opts, Timeout) ->
   %% HTTP proxy: plain TCP connection
-  hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts).
+  hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout).
 
 %% Close proxy socket based on transport type
 close_proxy_socket(Socket, ssl) ->
