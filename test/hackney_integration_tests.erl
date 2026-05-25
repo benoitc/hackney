@@ -38,7 +38,8 @@ all_tests() ->
    fun test_frees_manager_ets_when_body_is_in_response/0,
    fun test_307_redirect_pool_cleanup/0,
    fun iolist_body_request/0,
-   fun json_encode_body_request/0].
+   fun json_encode_body_request/0,
+   fun streamed_request_body_read/0].
 
 http_requests_test_() ->
     {setup,
@@ -277,6 +278,21 @@ test_custom_host_headers() ->
   Obj = jsx:decode(JsonBody, [return_maps]),
   ReqHeaders = maps:get(<<"headers">>, Obj),
   ?assertEqual(<<"myhost.com">>, maps:get(<<"host">>, ReqHeaders)).
+
+%% #849: after streaming the request body, hackney:body/1 reads the full
+%% response body from the connection PID returned by start_response/1.
+streamed_request_body_read() ->
+  URL = url(<<"/post">>),
+  Headers = [{<<"content-type">>, <<"text/plain">>}],
+  {ok, ConnPid} = hackney:request(post, URL, Headers, stream, [{pool, false}]),
+  ok = hackney:send_body(ConnPid, <<"hello ">>),
+  ok = hackney:send_body(ConnPid, <<"world">>),
+  ok = hackney:finish_send_body(ConnPid),
+  {ok, 200, _RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+  {ok, RespBody} = hackney:body(ConnPid),
+  ?assert(is_binary(RespBody)),
+  Obj = jsx:decode(RespBody, [return_maps]),
+  ?assertEqual(<<"hello world">>, maps:get(<<"data">>, Obj)).
 
 test_frees_manager_ets_when_body_is_in_client() ->
     %% In 3.x, body is always returned directly, so this test now verifies

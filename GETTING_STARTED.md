@@ -32,22 +32,21 @@ application:ensure_all_started(hackney).
 
 ### Simple GET
 
+The response body is returned directly in the response tuple:
+
 ```erlang
-{ok, 200, Headers, Ref} = hackney:get(<<"https://httpbin.org/get">>).
+{ok, 200, Headers, Body} = hackney:get(<<"https://httpbin.org/get">>).
 ```
 
-### Reading the Body
+### Reading the Body of a Streamed Request
+
+When you stream the request body, `start_response/1` returns a connection
+PID. Read the full response body with `hackney:body/1` (or `stream_body/1`
+for chunk-by-chunk):
 
 ```erlang
-{ok, Body} = hackney:body(Ref).
-```
-
-### One-Step Request with Body
-
-Use `with_body` to get the body directly:
-
-```erlang
-{ok, 200, Headers, Body} = hackney:get(URL, [], <<>>, [with_body]).
+{ok, Status, RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+{ok, Body} = hackney:body(ConnPid).
 ```
 
 ## POST Requests
@@ -108,8 +107,8 @@ hackney:get(URL, [], <<>>, [{pool, false}]).
 
 ```erlang
 case hackney:get(URL) of
-    {ok, Status, Headers, Ref} ->
-        {ok, Body} = hackney:body(Ref);
+    {ok, Status, Headers, Body} ->
+        handle_response(Status, Headers, Body);
     {error, timeout} ->
         handle_timeout();
     {error, Reason} ->

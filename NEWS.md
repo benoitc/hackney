@@ -10,6 +10,10 @@
   `set_owner` race and falls through to a fresh connection instead of crashing
   on a bad match, and an async ownership handoff to an already-closed pooled
   connection stops it promptly so the pool drops it from rotation.
+- Expose `hackney:body/1,2` and `hackney:stream_body/1` again so the response
+  body can be read after `start_response/1` in streaming body mode (#849).
+  The migration guide and examples referenced these but they were not
+  exported.
 
 4.0.1 - 2026-05-25
 ------------------
