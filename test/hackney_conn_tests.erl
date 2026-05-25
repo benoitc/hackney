@@ -28,7 +28,11 @@ hackney_conn_test_() ->
       {"pre-established socket starts connected", fun test_preestablished_socket/0},
       {"connect timeout", fun test_connect_timeout/0},
       {"connect to invalid host", fun test_connect_invalid/0},
-      {"owner death stops connection", fun test_owner_death/0}
+      {"owner death stops connection", fun test_owner_death/0},
+      {"set_owner on closed connection returns invalid_state (#850)",
+       fun test_set_owner_closed_returns_error/0},
+      {"set_owner_async stops a closed pooled connection (#850)",
+       fun test_set_owner_async_closed_pooled_stops/0}
      ]}.
 
 %% Integration tests - use embedded Cowboy server
@@ -231,6 +235,46 @@ test_owner_death() ->
 
     %% Connection should have stopped
     ?assertNot(is_process_alive(Pid)).
+
+%% #850: when a checkout races a server-side close, the pool calls set_owner on
+%% a connection that has just transitioned to `closed`. It must get
+%% {error, invalid_state} back (so the pool can fall through to a fresh
+%% connection) rather than crash. A non-pooled connection has no grace timer,
+%% so it stays in `closed` to answer.
+test_set_owner_closed_returns_error() ->
+    {Pid, ListenSock} = connected_conn(#{}),
+    ?assertEqual({ok, connected}, hackney_conn:get_state(Pid)),
+    ok = hackney_conn:close(Pid),
+    ?assertEqual({ok, closed}, hackney_conn:get_state(Pid)),
+    ?assertEqual({error, invalid_state}, hackney_conn:set_owner(Pid, self())),
+    hackney_conn:stop(Pid),
+    gen_tcp:close(ListenSock).
+
+%% #850: the async ownership handoff (pool checkin/prewarm) to a *pooled*
+%% connection that already closed must stop it promptly so the pool's monitor
+%% removes it from `available`, instead of lingering through the grace window.
+%% Dying within ~10 ms (well under ?CLOSED_GRACE_MS = 50 ms) shows the cast
+%% stopped it, not the grace timer.
+test_set_owner_async_closed_pooled_stops() ->
+    {Pid, ListenSock} = connected_conn(#{pool_pid => self()}),
+    ?assertEqual({ok, connected}, hackney_conn:get_state(Pid)),
+    ok = hackney_conn:close(Pid),
+    hackney_conn:set_owner_async(Pid, self()),
+    timer:sleep(10),
+    ?assertNot(is_process_alive(Pid)),
+    gen_tcp:close(ListenSock).
+
+%% Start a hackney_conn already in `connected` state via a pre-established
+%% local socket pair (no server needed). Extra opts are merged in.
+connected_conn(Extra) ->
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}]),
+    {ok, Port} = inet:port(ListenSock),
+    {ok, ClientSock} = gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}]),
+    {ok, _ServerSock} = gen_tcp:accept(ListenSock, 1000),
+    Opts = maps:merge(#{host => "127.0.0.1", port => Port,
+                        transport => hackney_tcp, socket => ClientSock}, Extra),
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    {Pid, ListenSock}.
 
 %%====================================================================
 %% Request/Response Tests

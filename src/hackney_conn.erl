@@ -459,7 +459,7 @@ release_to_pool(Pid) ->
 %% This updates the process being monitored - if the new owner crashes,
 %% the connection will terminate. Used by the pool when checking out
 %% a connection to a new requester.
--spec set_owner(pid(), pid()) -> ok.
+-spec set_owner(pid(), pid()) -> ok | {error, invalid_state}.
 set_owner(Pid, NewOwner) ->
     gen_statem:call(Pid, {set_owner, NewOwner}, 5000).
 
@@ -1494,6 +1494,14 @@ closed({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, closed}}]};
 
 closed(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
+    {stop, normal, Data};
+
+closed(cast, {set_owner, _NewOwner}, #conn_data{pool_pid = PoolPid} = Data)
+  when is_pid(PoolPid) ->
+    %% #850: the pool tried to hand ownership to a pooled connection that
+    %% already closed (async checkin/prewarm raced a server-side close). Stop
+    %% now so the pool's monitor removes us from `available` promptly, instead
+    %% of lingering through the grace window and being handed out again.
     {stop, normal, Data};
 
 closed(EventType, Event, Data) ->
