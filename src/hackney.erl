@@ -17,6 +17,7 @@
          send_request/2,
          cookies/1,
          send_body/2, finish_send_body/1, start_response/1,
+         body/1, body/2, stream_body/1,
          setopts/2]).
 
 %% WebSocket API
@@ -561,6 +562,23 @@ finish_send_body(ConnPid) when is_pid(ConnPid) ->
 -spec start_response(conn()) -> {ok, integer(), list(), conn()} | {error, term()}.
 start_response(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:start_response(ConnPid).
+
+%% @doc Read the full response body after start_response/1.
+%% Consumes the response stream and returns it as a single binary.
+-spec body(conn()) -> {ok, binary()} | {error, term()}.
+body(ConnPid) when is_pid(ConnPid) ->
+  hackney_conn:body(ConnPid).
+
+%% @doc Same as body/1 with a receive timeout.
+-spec body(conn(), timeout()) -> {ok, binary()} | {error, term()}.
+body(ConnPid, Timeout) when is_pid(ConnPid) ->
+  hackney_conn:body(ConnPid, Timeout).
+
+%% @doc Read the response body one chunk at a time after start_response/1.
+%% Returns {ok, Chunk} per chunk and done when the body is fully consumed.
+-spec stream_body(conn()) -> {ok, binary()} | done | {error, term()}.
+stream_body(ConnPid) when is_pid(ConnPid) ->
+  hackney_conn:stream_body(ConnPid).
 
 %%====================================================================
 %% Async Streaming API

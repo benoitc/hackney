@@ -102,7 +102,8 @@ Stream request bodies for uploads:
 hackney:send_body(Ref, <<"chunk 1">>),
 hackney:send_body(Ref, <<"chunk 2">>),
 hackney:finish_send_body(Ref),
-{ok, Status, _, Ref} = hackney:start_response(Ref).
+{ok, Status, _, Ref} = hackney:start_response(Ref),
+{ok, Body} = hackney:body(Ref).
 ```
 
 Sync responses return the full body directly. To receive a large response
