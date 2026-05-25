@@ -1,5 +1,64 @@
 # NEWS
 
+4.0.1 - 2026-05-25
+------------------
+
+Security release. Fixes 10 reported vulnerabilities (5 high, 4 medium,
+1 low) plus one hardening change. No API changes; drop-in for 4.0.0. It
+also rolls up the dependency and documentation changes landed since 4.0.0.
+
+### Security
+
+- CVE-2026-47066 (GHSA-6cp8): Alt-Svc response parser entered an infinite
+  loop on a header starting with a non-token byte, pinning a scheduler at
+  100% CPU. The parser now rejects the malformed entry instead of looping.
+- CVE-2026-47067 (GHSA-9653): URL scheme parsing called binary_to_atom on
+  attacker-controlled prefixes, allowing atom-table exhaustion and a BEAM
+  crash. Unknown schemes no longer create atoms.
+- CVE-2026-47073 (GHSA-q8jg): WebSocket frame, message and handshake buffers
+  were unbounded. Added max_frame_size (16 MiB), max_message_size (64 MiB,
+  cumulative across fragments) and a 64 KiB handshake-response cap.
+- CVE-2026-47074 (GHSA-jq4m): the per-chunk HTTP/3 read timeout reset on
+  every chunk while the full body buffered in memory, enabling a slow-drip
+  OOM. Buffered bodies are now capped by max_body_size.
+- CVE-2026-47071 (GHSA-gp9c): the post-handshake TLS upgrade over a proxy
+  CONNECT tunnel used ssl:connect with no timeout, so a stalled peer hung the
+  caller forever. The connect timeout is now forwarded.
+- CVE-2026-47076 (GHSA-pj7v): hackney_url:normalize/2 decoded percent-escapes
+  in the host after the SSRF allowlist ran, letting an encoded host bypass
+  the check and resolve to a blocked IP. Hosts that decode to an IP are now
+  refused.
+- CVE-2026-47072 (GHSA-f9vr): the WebSocket upgrade request did not validate
+  the target, allowing CR/LF/NUL header injection. These bytes are now
+  rejected.
+- CVE-2026-47075 (GHSA-j9wq): the HTTP request target (path and query) was
+  not validated, allowing CR/LF injection and request splitting. CR/LF/NUL
+  are now rejected.
+- CVE-2026-47070 (GHSA-h73q): cross-origin HTTP/3 redirects forwarded
+  Authorization, Cookie and Proxy-Authorization. These are now stripped when
+  the redirect target origin differs, unless location_trusted is set. As with
+  curl and the HTTP/1.1 path, the request body is still forwarded on 307/308.
+- CVE-2026-47069 (GHSA-mp55): cookie domain and path options were not
+  validated, allowing CR/LF header injection. These are now rejected.
+- Hardening: to_atom/1 no longer falls back to list_to_atom/1, removing an
+  atom-leak path (GHSA-6rmf, no CVE assigned).
+
+### Dependencies
+
+- Bump quic to 1.4.3.
+- Bump h2 to 0.6.0.
+
+### Docs
+
+- Add SECURITY.md describing private vulnerability reporting.
+- Add a sponsor section to the README.
+- Fix exdoc generation: drop the unsupported source_ref and skip the
+  NEWS/MIGRATION warnings.
+
+### Chore
+
+- Drop stray files (nat2, lifecycle.json, .gitlab-ci.yml).
+
 4.0.0 - 2026-04-16
 ------------------
 
