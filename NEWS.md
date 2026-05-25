@@ -1,5 +1,16 @@
 # NEWS
 
+4.0.2 - unreleased
+------------------
+
+### Bug Fixes
+
+- Fix an intermittent pool crash when a server closes a pooled keep-alive
+  connection during checkout (#850). The checkout now tolerates the
+  `set_owner` race and falls through to a fresh connection instead of crashing
+  on a bad match, and an async ownership handoff to an already-closed pooled
+  connection stops it promptly so the pool drops it from rotation.
+
 4.0.1 - 2026-05-25
 ------------------
 

@@ -447,9 +447,23 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
         {ok, Pid, Available2} ->
             %% Found an available connection - update owner to new requester
             ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
-            ok = hackney_conn:set_owner(Pid, Requester),
-            InUse2 = maps:put(Pid, Key, InUse),
-            {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
+            case hackney_conn:set_owner(Pid, Requester) of
+                ok ->
+                    InUse2 = maps:put(Pid, Key, InUse),
+                    {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
+                {error, _} ->
+                    %% #850: the connection closed between is_ready and
+                    %% set_owner (server-side close race). It is already out of
+                    %% Available2; drop it and start a fresh connection rather
+                    %% than crashing the pool on a bad match.
+                    case start_connection(Key, Requester, Opts, State#state{available=Available2}) of
+                        {ok, Pid2, State2} ->
+                            InUse2 = maps:put(Pid2, Key, State2#state.in_use),
+                            {reply, {ok, Pid2}, State2#state{in_use=InUse2}};
+                        {error, Reason} ->
+                            {reply, {error, Reason}, State#state{available=Available2}}
+                    end
+            end;
         none when TotalInUse >= MaxConn ->
             %% At max connections - return error immediately (no queue)
             %% Note: In the new architecture, load_regulation handles waiting
