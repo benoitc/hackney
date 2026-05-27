@@ -2280,41 +2280,17 @@ try_h3_connect(Host, Port, Timeout, ConnectOpts) ->
             Error
     end.
 
-%% @private Map hackney's TLS options to the QUIC client verification
-%% options. quic >= 1.4.4 verifies the server certificate by default, so an
-%% insecure connection must opt out explicitly. The trust store defaults to
-%% certifi to match the HTTPS path instead of relying on the OS store.
+%% @private Map hackney's insecure option to the QUIC client verification.
+%% quic >= 1.4.4 verifies the server certificate against its default trust
+%% store; an insecure connection must opt out explicitly. When not insecure
+%% we pass nothing and let quic apply its default verification.
 h3_tls_opts(ConnectOpts) ->
     SslOpts = proplists:get_value(ssl_options, ConnectOpts, []),
     Insecure = proplists:get_value(insecure, ConnectOpts,
                  proplists:get_value(insecure, SslOpts, false)),
     case Insecure of
         true -> #{verify => verify_none};
-        false -> maps:put(verify, verify_peer, h3_ca_opts(SslOpts))
-    end.
-
-%% @private Resolve the CA trust store for an H3 verification. quic only
-%% accepts DER-encoded CAs (cacerts), so a cacertfile is decoded here.
-h3_ca_opts(SslOpts) ->
-    case proplists:get_value(cacerts, SslOpts) of
-        undefined ->
-            case proplists:get_value(cacertfile, SslOpts) of
-                undefined -> #{cacerts => certifi:cacerts()};
-                File -> #{cacerts => cacertfile_ders(File)}
-            end;
-        CACerts ->
-            #{cacerts => CACerts}
-    end.
-
-%% @private Read a PEM cacertfile into a list of DER certificates. A missing
-%% or unreadable file yields an empty trust store so verification fails
-%% closed rather than silently falling back to another store.
-cacertfile_ders(File) ->
-    case file:read_file(File) of
-        {ok, Pem} ->
-            [Der || {'Certificate', Der, _} <- public_key:pem_decode(Pem)];
-        {error, _} ->
-            []
+        false -> #{}
     end.
 
 %% @private Drive QUIC event loop until connected
