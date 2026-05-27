@@ -570,7 +570,7 @@ terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport,
                 undefined -> ok;
                 _ -> erlang:demonitor(H2Mon, [flush])
             end,
-            catch h2_connection:close(H2Conn)
+            close_h2(H2Conn)
     end,
     %% Close HTTP/3 connection if present
     case H3Conn of
@@ -2270,14 +2270,51 @@ skip_response_body(Data) ->
 
 %% @private Try HTTP/3 connection via QUIC
 %% lsquic handles its own UDP socket creation and DNS resolution.
-try_h3_connect(Host, Port, Timeout, _ConnectOpts) ->
+try_h3_connect(Host, Port, Timeout, ConnectOpts) ->
     HostBin = if is_list(Host) -> list_to_binary(Host); true -> Host end,
-    case hackney_h3:connect(HostBin, Port, #{}, self()) of
+    case hackney_h3:connect(HostBin, Port, h3_tls_opts(ConnectOpts), self()) of
         {ok, ConnRef} ->
             %% Drive event loop until connected
             wait_h3_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
         {error, _} = Error ->
             Error
+    end.
+
+%% @private Map hackney's TLS options to the QUIC client verification
+%% options. quic >= 1.4.4 verifies the server certificate by default, so an
+%% insecure connection must opt out explicitly. The trust store defaults to
+%% certifi to match the HTTPS path instead of relying on the OS store.
+h3_tls_opts(ConnectOpts) ->
+    SslOpts = proplists:get_value(ssl_options, ConnectOpts, []),
+    Insecure = proplists:get_value(insecure, ConnectOpts,
+                 proplists:get_value(insecure, SslOpts, false)),
+    case Insecure of
+        true -> #{verify => verify_none};
+        false -> maps:put(verify, verify_peer, h3_ca_opts(SslOpts))
+    end.
+
+%% @private Resolve the CA trust store for an H3 verification. quic only
+%% accepts DER-encoded CAs (cacerts), so a cacertfile is decoded here.
+h3_ca_opts(SslOpts) ->
+    case proplists:get_value(cacerts, SslOpts) of
+        undefined ->
+            case proplists:get_value(cacertfile, SslOpts) of
+                undefined -> #{cacerts => certifi:cacerts()};
+                File -> #{cacerts => cacertfile_ders(File)}
+            end;
+        CACerts ->
+            #{cacerts => CACerts}
+    end.
+
+%% @private Read a PEM cacertfile into a list of DER certificates. A missing
+%% or unreadable file yields an empty trust store so verification fails
+%% closed rather than silently falling back to another store.
+cacertfile_ders(File) ->
+    case file:read_file(File) of
+        {ok, Pem} ->
+            [Der || {'Certificate', Der, _} <- public_key:pem_decode(Pem)];
+        {error, _} ->
+            []
     end.
 
 %% @private Drive QUIC event loop until connected
@@ -2379,11 +2416,11 @@ start_h2_connection(Socket, Data, From, Origin) ->
                                      [CancelIdle, {reply, From, ok}]}
                             end;
                         {error, WaitErr} ->
-                            catch h2_connection:close(H2Conn),
+                            close_h2(H2Conn),
                             h2_start_failure(Origin, From, WaitErr)
                     end;
                 {error, ActivateErr} ->
-                    catch h2_connection:close(H2Conn),
+                    close_h2(H2Conn),
                     h2_start_failure(Origin, From, ActivateErr)
             end;
         {error, Reason} ->
@@ -2394,6 +2431,10 @@ h2_start_failure(first_connect, From, Reason) ->
     {stop_and_reply, normal, [{reply, From, {error, Reason}}]};
 h2_start_failure(after_upgrade, From, Reason) ->
     {keep_state_and_data, [{reply, From, {error, Reason}}]}.
+
+%% @private Close an HTTP/2 connection, tolerating an already-closed one.
+close_h2(H2Conn) ->
+    try h2_connection:close(H2Conn) catch _:_ -> ok end.
 
 %% @private Send an HTTP/2 request via the h2 library.
 do_h2_request(From, Method, Path, Headers, Body, Data) ->
@@ -3132,7 +3173,7 @@ handle_h3_termination(Error, Data) ->
 %% directives are honored even on h3 responses.
 maybe_record_altsvc(Headers, #conn_data{host = Host, port = Port})
   when is_list(Headers) ->
-    _ = catch hackney_altsvc:parse_and_cache(Host, Port, Headers),
+    _ = (try hackney_altsvc:parse_and_cache(Host, Port, Headers) catch _:_ -> ok end),
     ok;
 maybe_record_altsvc(_Headers, _Data) ->
     ok.

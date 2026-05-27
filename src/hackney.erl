@@ -122,7 +122,7 @@ connect_direct(Transport, Host, Port, Options) ->
         ok ->
           {ok, ConnPid};
         {error, Reason} ->
-          catch hackney_conn:stop(ConnPid),
+          stop_conn(ConnPid),
           {error, Reason}
       end;
     {error, Reason} ->
@@ -235,19 +235,24 @@ try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
       case hackney_conn:connect(ConnPid, ConnectTimeout) of
         ok ->
           %% Verify it's HTTP/3
-          case catch hackney_conn:get_protocol(ConnPid) of
+          try hackney_conn:get_protocol(ConnPid) of
             http3 ->
               %% Register for multiplexing
               PoolHandler:register_h3(Host, Port, Transport, ConnPid, Options),
               {ok, ConnPid};
             _ ->
-              %% Not HTTP/3 or connection terminated, close and fail
-              catch hackney_conn:stop(ConnPid),
+              %% Not HTTP/3, close and fail
+              stop_conn(ConnPid),
+              hackney_altsvc:mark_h3_blocked(Host, Port),
+              false
+          catch
+            _:_ ->
+              %% Connection terminated before we could check
               hackney_altsvc:mark_h3_blocked(Host, Port),
               false
           end;
         {error, _Reason} ->
-          catch hackney_conn:stop(ConnPid),
+          stop_conn(ConnPid),
           hackney_altsvc:mark_h3_blocked(Host, Port),
           false
       end;
@@ -277,7 +282,7 @@ connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
             {error, Reason} ->
               %% Upgrade failed - release slot and close connection
               hackney_load_regulation:release(Host, Port),
-              catch hackney_conn:stop(ConnPid),
+              stop_conn(ConnPid),
               {error, Reason}
           end;
         {error, Reason} ->
@@ -290,17 +295,18 @@ connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
   end.
 
 %% @private Register HTTP/2 connection for multiplexing if applicable
-%% Uses catch to handle race condition where connection terminates before call
+%% Wrapped in try to handle a race where the connection terminates before the call
 maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
-  case catch hackney_conn:get_protocol(ConnPid) of
+  try hackney_conn:get_protocol(ConnPid) of
     http2 ->
       %% HTTP/2 negotiated - register for connection sharing
       PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options);
     http1 ->
       ok;
     http3 ->
-      ok;
-    {'EXIT', _} ->
+      ok
+  catch
+    _:_ ->
       %% Connection terminated before we could check - ignore
       ok
   end.
@@ -315,17 +321,29 @@ maybe_upgrade_ssl(hackney_ssl, ConnPid, Host, Options) ->
     _ -> [{protocols, Protocols} | SslOpts]
   end,
   %% Check if connection is already SSL (e.g., reused SSL connection)
-  case catch hackney_conn:is_upgraded_ssl(ConnPid) of
+  try hackney_conn:is_upgraded_ssl(ConnPid) of
     true ->
       %% Already SSL, no upgrade needed
       ok;
     _ ->
       %% Upgrade TCP to SSL with ALPN
       hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts2])
+  catch
+    _:_ ->
+      %% Connection terminated, attempt upgrade anyway
+      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts2])
   end;
 maybe_upgrade_ssl(_, _ConnPid, _Host, _Options) ->
   %% Not SSL, no upgrade needed
   ok.
+
+%% @private Stop a connection, tolerating an already-dead process.
+stop_conn(ConnPid) ->
+  try hackney_conn:stop(ConnPid) catch _:_ -> ok end.
+
+%% @private Signal the websocket process to shut down, ignoring errors.
+shutdown_ws(WsPid) ->
+  try exit(WsPid, shutdown) catch _:_ -> ok end.
 
 %% @doc Close a connection.
 -spec close(conn()) -> ok.
@@ -678,11 +696,11 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
         ok ->
           {ok, WsPid};
         {error, Reason} ->
-          catch exit(WsPid, shutdown),
+          shutdown_ws(WsPid),
           {error, Reason}
       catch
         exit:{timeout, _} ->
-          catch exit(WsPid, shutdown),
+          shutdown_ws(WsPid),
           {error, connect_timeout};
         exit:{noproc, _} ->
           {error, {ws_process_died, noproc}}

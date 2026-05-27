@@ -102,7 +102,7 @@ do_connect_2(Pid, MRef, Timeout) ->
   end.
 
 connect_gc(Pid, MRef) ->
-  catch exit(Pid, normal),
+  (try exit(Pid, normal) catch _:_ -> ok end),
   erlang:demonitor(MRef, [flush]).
 
 
@@ -129,20 +129,26 @@ getaddrs(Name) ->
 
 getbyname(Hostname, Type) ->
   %% First try DNS resolution using inet_res:getbyname
-  case (catch inet_res:getbyname(Hostname, Type)) of
+  try inet_res:getbyname(Hostname, Type) of
     {'ok', #hostent{h_addr_list=AddrList}} ->
       AddrList;
-    {error, _Reason} -> 
+    {error, _Reason} ->
       %% DNS failed, try fallback to /etc/hosts using inet:gethostbyname
       %% This fixes NXDOMAIN errors in Docker Compose environments where
       %% hostnames are resolved via /etc/hosts entries
       fallback_hosts_lookup(Hostname, Type);
     Else ->
-      %% ERLANG 22 has an issue when g matching some DNS server messages
       ?report_debug("DNS error", [{hostname, Hostname}
                                  ,{type, Type}
                                  ,{error, Else}]),
-      %% Try fallback on unexpected errors too
+      %% Try fallback on unexpected results too
+      fallback_hosts_lookup(Hostname, Type)
+  catch
+    Class:Reason ->
+      ?report_debug("DNS error", [{hostname, Hostname}
+                                 ,{type, Type}
+                                 ,{error, {Class, Reason}}]),
+      %% Try fallback on resolver crashes too
       fallback_hosts_lookup(Hostname, Type)
   end.
 
@@ -152,10 +158,13 @@ fallback_hosts_lookup(Hostname, Type) ->
     a -> inet;
     aaaa -> inet6
   end,
-  case (catch inet:gethostbyname(Hostname, InetType)) of
+  try inet:gethostbyname(Hostname, InetType) of
     {'ok', #hostent{h_addr_list=AddrList}} ->
       AddrList;
-    _ -> 
+    _ ->
+      []
+  catch
+    _:_ ->
       []
   end.
 

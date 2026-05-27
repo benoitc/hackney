@@ -3,6 +3,18 @@
 4.0.3 - 2026-05-28
 ------------------
 
+### Security
+
+- HTTP/3 now verifies the server certificate. quic 1.4.4 authenticates the
+  server by default; hackney passes its TLS options through to the QUIC
+  connection so the request's `insecure` option and CA configuration are
+  honored, with certifi as the default trust store to match the HTTPS path.
+
+### Changed
+
+- Replace the deprecated `catch Expr` form with `try ... catch` so hackney
+  compiles cleanly on OTP 29.
+
 ### Dependencies
 
 - Bump quic to 1.4.4.
