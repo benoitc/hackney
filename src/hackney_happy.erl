@@ -136,12 +136,6 @@ getbyname(Hostname, Type) ->
       %% DNS failed, try fallback to /etc/hosts using inet:gethostbyname
       %% This fixes NXDOMAIN errors in Docker Compose environments where
       %% hostnames are resolved via /etc/hosts entries
-      fallback_hosts_lookup(Hostname, Type);
-    Else ->
-      ?report_debug("DNS error", [{hostname, Hostname}
-                                 ,{type, Type}
-                                 ,{error, Else}]),
-      %% Try fallback on unexpected results too
       fallback_hosts_lookup(Hostname, Type)
   catch
     Class:Reason ->

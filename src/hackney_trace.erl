@@ -165,9 +165,10 @@ handle_trace(Event, Fd) ->
   safe(fun() -> print_trace(Fd, Event) end),
   Fd.
 
-%% @private Run a best-effort trace side effect, ignoring any failure.
+%% @private Run a best-effort trace side effect, ignoring its result and any failure.
 safe(Fun) ->
-  try Fun() catch _:_ -> ok end.
+  _ = (try Fun() catch _:_ -> ok end),
+  ok.
 
 
 print_hackney_trace({Service, Fd},
