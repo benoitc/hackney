@@ -19,7 +19,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27.2", "28.0", "29.0"]
-        rebar3: ['3.24.0']
+        rebar3: ['3.25.0']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27.2"]
-        rebar3: ['3.24.0']
+        rebar3: ['3.25.0']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,7 +69,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27"]
-        rebar3: ['3.24.0']
+        rebar3: ['3.25.0']
     steps:
       - name: Install Erlang and Go
         env:
