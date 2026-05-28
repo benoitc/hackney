@@ -677,7 +677,7 @@ terminate(_Reason, #state{available=Available,
     maps:foreach(
         fun(_Key, Pids) ->
             lists:foreach(fun(Pid) ->
-                catch hackney_conn:stop(Pid)
+                stop_conn(Pid)
             end, Pids)
         end,
         Available
@@ -686,7 +686,7 @@ terminate(_Reason, #state{available=Available,
     %% Stop all HTTP/2 connections
     maps:foreach(
         fun(_Key, Pid) ->
-            catch hackney_conn:stop(Pid)
+            stop_conn(Pid)
         end,
         H2Conns
     ),
@@ -694,7 +694,7 @@ terminate(_Reason, #state{available=Available,
     %% Stop all HTTP/3 connections
     maps:foreach(
         fun(_Key, Pid) ->
-            catch hackney_conn:stop(Pid)
+            stop_conn(Pid)
         end,
         H3Conns
     ),
@@ -710,6 +710,10 @@ terminate(_Reason, #state{available=Available,
 connection_key(Host0, Port, Transport) ->
     Host = string:lowercase(Host0),
     {Host, Port, Transport}.
+
+%% @private Stop a connection, tolerating an already-dead process.
+stop_conn(Pid) ->
+    try hackney_conn:stop(Pid) catch _:_ -> ok end.
 
 find_available(Key, Available) ->
     case maps:find(Key, Available) of
@@ -772,7 +776,7 @@ start_connection(Key, Owner, Opts, State) ->
                     PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
                     {ok, Pid, State#state{pid_monitors=PidMonitors}};
                 {error, Reason} ->
-                    catch hackney_conn:stop(Pid),
+                    stop_conn(Pid),
                     {error, Reason}
             end;
         {error, Reason} ->
@@ -798,12 +802,12 @@ do_checkin(Pid, State) ->
                     %% Check if this connection should not be reused:
                     %% - SSL upgraded connections (security requirement)
                     %% - Proxy tunnel connections (SOCKS5, HTTP CONNECT - issue #283)
-                    ShouldClose = (catch hackney_conn:is_upgraded_ssl(Pid)) =:= true orelse
-                                  (catch hackney_conn:is_no_reuse(Pid)) =:= true,
+                    ShouldClose = (try hackney_conn:is_upgraded_ssl(Pid) catch _:_ -> false end) =:= true orelse
+                                  (try hackney_conn:is_no_reuse(Pid) catch _:_ -> false end) =:= true,
                     case ShouldClose of
                         true ->
                             %% Connection should not be reused - close it
-                            catch hackney_conn:stop(Pid),
+                            stop_conn(Pid),
                             %% Remove monitor if exists
                             PidMonitors2 = case maps:take(Pid, PidMonitors) of
                                 {MonRef, PM} ->
@@ -1038,7 +1042,7 @@ prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
                     %% Checkin the new connection to the pool
                     gen_server:cast(PoolPid, {prewarm_checkin, Pid, {Host, Port, hackney_tcp}});
                 {error, _Reason} ->
-                    catch hackney_conn:stop(Pid)
+                    stop_conn(Pid)
             end;
         {error, _Reason} ->
             ok

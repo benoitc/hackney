@@ -129,41 +129,46 @@ handle_trace({trace_ts, _Who, call,
     [_Sev, "stop trace", stop_trace, [stop_trace]]},
   Timestamp},
   {_, standard_io} = Fd) ->
-  (catch io:format(standard_io, "stop trace at ~s~n", [format_timestamp(Timestamp)])),
+  safe(fun() -> io:format(standard_io, "stop trace at ~s~n", [format_timestamp(Timestamp)]) end),
   Fd;
 handle_trace({trace_ts, _Who, call,
   {?MODULE, report_event,
     [_Sev, "stop trace", stop_trace, [stop_trace]]},
   Timestamp},
   standard_io = Fd) ->
-  (catch io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)])),
+  safe(fun() -> io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)]) end),
   Fd;
 handle_trace({trace_ts, _Who, call,
   {?MODULE, report_event,
     [_Sev, "stop trace", stop_trace, [stop_trace]]},
   Timestamp},
   {_Service, Fd}) ->
-  (catch io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)])),
-  (catch file:close(Fd)),
+  safe(fun() -> io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)]) end),
+  safe(fun() -> file:close(Fd) end),
   closed_file;
 handle_trace({trace_ts, _Who, call,
   {?MODULE, report_event,
     [_Sev, "stop trace", stop_trace, [stop_trace]]},
   Timestamp},
   Fd) ->
-  (catch io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)])),
-  (catch file:close(Fd)),
+  safe(fun() -> io:format(Fd, "stop trace at ~s~n", [format_timestamp(Timestamp)]) end),
+  safe(fun() -> file:close(Fd) end),
   closed_file;
 handle_trace({trace_ts, Who, call,
   {?MODULE, report_event,
     [Sev, Label, Service, Content]}, Timestamp},
   Fd) ->
-  (catch print_hackney_trace(Fd, Sev, Timestamp, Who,
-    Label, Service, Content)),
+  safe(fun() -> print_hackney_trace(Fd, Sev, Timestamp, Who,
+                                    Label, Service, Content) end),
   Fd;
 handle_trace(Event, Fd) ->
-  (catch print_trace(Fd, Event)),
+  safe(fun() -> print_trace(Fd, Event) end),
   Fd.
+
+%% @private Run a best-effort trace side effect, ignoring its result and any failure.
+safe(Fun) ->
+  _ = (try Fun() catch _:_ -> ok end),
+  ok.
 
 
 print_hackney_trace({Service, Fd},

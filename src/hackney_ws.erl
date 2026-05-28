@@ -241,8 +241,8 @@ init([Owner, Opts]) ->
 %% @private
 terminate(_Reason, _State, #ws_data{socket = undefined}) ->
     ok;
-terminate(_Reason, _State, #ws_data{socket = Socket, transport = Transport}) ->
-    catch Transport:close(Socket),
+terminate(_Reason, _State, #ws_data{} = WsData) ->
+    close_socket(WsData),
     ok.
 
 %% @private
@@ -1073,5 +1073,5 @@ set_socket_active(#ws_data{socket = Socket}, Mode) ->
 close_socket(#ws_data{socket = undefined}) ->
     ok;
 close_socket(#ws_data{socket = Socket, transport = Transport}) ->
-    catch Transport:close(Socket),
+    try Transport:close(Socket) catch _:_ -> ok end,
     ok.

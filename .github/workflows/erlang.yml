@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: ["27.2", "28.0"]
-        rebar3: ['3.24.0']
+        otp: ["27.2", "28.0", "29.0"]
+        rebar3: ['3.25.0']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27.2"]
-        rebar3: ['3.24.0']
+        rebar3: ['3.25.0']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,7 +69,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27"]
-        rebar3: ['3.24.0']
+        rebar3: ['3.25.0']
     steps:
       - name: Install Erlang and Go
         env:
@@ -101,7 +101,7 @@ jobs:
           release: "14.2"
           usesh: true
           prepare: |
-            pkg install -y pcre2 erlang-runtime28 rebar3 cmake git gmake go llvm18
+            pkg install -y pcre2 erlang-runtime28 rebar3 cmake git gmake go llvm18 ca_root_nss
           run: |
             # Ensure Erlang 28 is in PATH
             export PATH="/usr/local/lib/erlang28/bin:$PATH"

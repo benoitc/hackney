@@ -744,7 +744,7 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({close, _Reason}, #state{h3_conn = Conn} = State) ->
-    catch quic_h3:close(Conn),
+    close_h3(Conn),
     {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -795,7 +795,7 @@ handle_info({quic_h3, Conn, {error, Code, Reason}},
 
 handle_info({'DOWN', MonRef, process, _Pid, _Reason},
             #state{owner_mon = MonRef, h3_conn = Conn} = State) ->
-    catch quic_h3:close(Conn),
+    close_h3(Conn),
     {stop, normal, State};
 
 handle_info(_Info, State) ->
@@ -808,13 +808,17 @@ terminate(_Reason, #state{conn_ref = Ref, h3_conn = Conn}) ->
     end,
     case Conn of
         undefined -> ok;
-        _ -> catch quic_h3:close(Conn)
+        _ -> close_h3(Conn)
     end,
     ok.
 
 %%====================================================================
 %% Internal adapter helpers
 %%====================================================================
+
+%% @private Close a QUIC/HTTP3 connection, tolerating an already-closed one.
+close_h3(Conn) ->
+    try quic_h3:close(Conn) catch _:_ -> ok end.
 
 build_h3_opts(Host, Opts) ->
     HostStr = binary_to_list(Host),

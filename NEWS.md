@@ -3,9 +3,23 @@
 4.0.3 - 2026-05-28
 ------------------
 
+### Security
+
+- HTTP/3 now verifies the server certificate. quic 1.4.4 authenticates the
+  server by default; hackney passes the request's `insecure` option and any
+  configured CA (`cacerts`/`cacertfile` in `ssl_options`) through to the QUIC
+  connection, so verification can be disabled or pointed at a custom trust
+  store. Without a configured CA, quic uses its default trust store.
+
+### Changed
+
+- Replace the deprecated `catch Expr` form with `try ... catch` so hackney
+  compiles cleanly on OTP 29.
+
 ### Dependencies
 
-- Bump quic to 1.4.4.
+- Bump quic to 1.4.5.
+- Bump h2 to 0.6.1.
 
 4.0.2 - 2026-05-25
 ------------------
