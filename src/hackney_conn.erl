@@ -2280,17 +2280,38 @@ try_h3_connect(Host, Port, Timeout, ConnectOpts) ->
             Error
     end.
 
-%% @private Map hackney's insecure option to the QUIC client verification.
-%% quic >= 1.4.4 verifies the server certificate against its default trust
-%% store; an insecure connection must opt out explicitly. When not insecure
-%% we pass nothing and let quic apply its default verification.
+%% @private Map hackney's TLS options to the QUIC client verification.
+%% quic >= 1.4.4 verifies the server certificate. An insecure connection opts
+%% out; an explicitly configured CA (cacerts/cacertfile) is used as the trust
+%% store; otherwise quic verifies against its own default (OS) trust store.
 h3_tls_opts(ConnectOpts) ->
     SslOpts = proplists:get_value(ssl_options, ConnectOpts, []),
     Insecure = proplists:get_value(insecure, ConnectOpts,
                  proplists:get_value(insecure, SslOpts, false)),
     case Insecure of
         true -> #{verify => verify_none};
-        false -> #{}
+        false -> h3_ca_opts(SslOpts)
+    end.
+
+%% @private Use an explicitly configured CA as the H3 trust store. quic only
+%% accepts DER cacerts, so a cacertfile is decoded here. With no CA configured
+%% the map is empty and quic falls back to its default trust store.
+h3_ca_opts(SslOpts) ->
+    case proplists:get_value(cacerts, SslOpts) of
+        undefined ->
+            case proplists:get_value(cacertfile, SslOpts) of
+                undefined -> #{};
+                File -> #{cacerts => cacertfile_ders(File)}
+            end;
+        CACerts ->
+            #{cacerts => CACerts}
+    end.
+
+%% @private Read a PEM cacertfile into a list of DER certificates.
+cacertfile_ders(File) ->
+    case file:read_file(File) of
+        {ok, Pem} -> [Der || {'Certificate', Der, _} <- public_key:pem_decode(Pem)];
+        {error, _} -> []
     end.
 
 %% @private Drive QUIC event loop until connected

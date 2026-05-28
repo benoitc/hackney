@@ -6,8 +6,10 @@
 ### Security
 
 - HTTP/3 now verifies the server certificate. quic 1.4.4 authenticates the
-  server by default; hackney passes the request's `insecure` option through to
-  the QUIC connection so verification can still be disabled when needed.
+  server by default; hackney passes the request's `insecure` option and any
+  configured CA (`cacerts`/`cacertfile` in `ssl_options`) through to the QUIC
+  connection, so verification can be disabled or pointed at a custom trust
+  store. Without a configured CA, quic uses its default trust store.
 
 ### Changed
 
