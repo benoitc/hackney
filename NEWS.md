@@ -18,7 +18,7 @@
 
 ### Dependencies
 
-- Bump quic to 1.4.4.
+- Bump quic to 1.4.5.
 - Bump h2 to 0.6.1.
 
 4.0.2 - 2026-05-25
