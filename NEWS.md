@@ -1,7 +1,7 @@
 # NEWS
 
-Unreleased
-----------
+4.1.0 - unreleased
+------------------
 
 ### Added
 
