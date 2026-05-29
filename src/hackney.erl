@@ -27,6 +27,21 @@
          ws_setopts/2,
          ws_close/1, ws_close/2]).
 
+%% WebTransport API
+-export([wt_connect/1, wt_connect/2,
+         wt_send/2,
+         wt_recv/1, wt_recv/2,
+         wt_setopts/2,
+         wt_close/1, wt_close/2,
+         wt_open_stream/2,
+         wt_stream_send/3, wt_stream_send/4,
+         wt_stream_recv/2, wt_stream_recv/3,
+         wt_close_stream/2,
+         wt_reset_stream/3,
+         wt_stop_sending/3,
+         wt_send_datagram/2,
+         wt_session_info/1]).
+
 -export([redirect_location/1, location/1]).
 
 -export([get_version/0]).
@@ -745,6 +760,240 @@ ws_close(WsPid) when is_pid(WsPid) ->
 -spec ws_close(pid(), {integer(), binary()}) -> ok.
 ws_close(WsPid, {Code, Reason}) when is_pid(WsPid) ->
   hackney_ws:close(WsPid, {Code, Reason}).
+
+%%====================================================================
+%% WebTransport API
+%%====================================================================
+
+%% @doc Connect to a WebTransport server.
+%%
+%% The URL must use the https:// scheme (wss:// is accepted as an alias so
+%% existing ws_* code can switch over by changing only the function name).
+%% WebTransport always runs over TLS.
+%%
+%% Options:
+%% <ul>
+%%   <li>transport: h3 (default) or h2</li>
+%%   <li>active: false | true | once (default false)</li>
+%%   <li>headers: extra headers for the CONNECT request</li>
+%%   <li>connect_timeout: connection timeout in ms (default 8000)</li>
+%%   <li>recv_timeout: default receive timeout in ms (default infinity)</li>
+%%   <li>ssl_options: TLS options (verify, cacerts/cacertfile, cert/certfile,
+%%       key/keyfile)</li>
+%%   <li>verify: verify_peer (default) | verify_none</li>
+%%   <li>compat_mode: latest (default) | legacy_browser_compat</li>
+%%   <li>max_recv_buffer: passive buffer cap in bytes (default 64 MiB)</li>
+%% </ul>
+%%
+%% Returns `{ok, WtPid}' on success, where WtPid is the hackney_wt process.
+-spec wt_connect(binary() | string()) -> {ok, pid()} | {error, term()}.
+wt_connect(URL) ->
+  wt_connect(URL, []).
+
+-spec wt_connect(binary() | string(), list()) -> {ok, pid()} | {error, term()}.
+wt_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
+  #hackney_url{
+    scheme = Scheme,
+    host = Host,
+    port = Port,
+    path = Path0,
+    qs = Query
+  } = hackney_url:parse_url(URL),
+
+  %% WebTransport runs over HTTP/3 or HTTP/2, both TLS-only.
+  case Scheme of
+    https -> ok;
+    wss -> ok;
+    _ -> error({invalid_webtransport_scheme, Scheme})
+  end,
+
+  Path = case Query of
+    <<>> -> Path0;
+    _ -> <<Path0/binary, "?", Query/binary>>
+  end,
+
+  Headers = normalize_ws_headers(proplists:get_value(headers, Options, [])),
+
+  %% Mirror the WebSocket GHSA-f9vr guard: reject CR/LF/NUL in the request
+  %% path or in any caller-supplied header before it reaches the wire.
+  case valid_wt_fields(Host, Path, Headers) of
+    ok ->
+      Transport = proplists:get_value(transport, Options, h3),
+      ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+      WtOpts = #{
+        host => Host,
+        port => Port,
+        path => Path,
+        transport => Transport,
+        connect_opts => build_wt_connect_opts(Options, Headers),
+        connect_timeout => ConnectTimeout,
+        recv_timeout => proplists:get_value(recv_timeout, Options, infinity),
+        active => proplists:get_value(active, Options, false),
+        max_recv_buffer => proplists:get_value(max_recv_buffer, Options, 16#4000000)
+      },
+      case hackney_wt:start_link(WtOpts) of
+        {ok, WtPid} ->
+          try hackney_wt:connect(WtPid, ConnectTimeout) of
+            ok ->
+              {ok, WtPid};
+            {error, Reason} ->
+              shutdown_wt(WtPid),
+              {error, Reason}
+          catch
+            exit:{noproc, _} ->
+              {error, {wt_process_died, noproc}}
+          end;
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, _} = Err ->
+      Err
+  end.
+
+%% @doc Send on a WebTransport connection.
+%% Frame forms: `{text, Data}', `{binary, Data}', `Data' (write to the
+%% default stream); `{datagram, Data}'; `{stream, StreamId, Data}' or
+%% `{stream, StreamId, Data, fin|nofin}'.
+-spec wt_send(pid(), hackney_wt:wt_frame()) -> ok | {error, term()}.
+wt_send(WtPid, Frame) when is_pid(WtPid) ->
+  hackney_wt:send(WtPid, Frame).
+
+%% @doc Receive the next message on the default channel (passive mode).
+-spec wt_recv(pid()) -> {ok, hackney_wt:wt_msg()} | {error, term()}.
+wt_recv(WtPid) when is_pid(WtPid) ->
+  hackney_wt:recv(WtPid).
+
+-spec wt_recv(pid(), timeout()) -> {ok, hackney_wt:wt_msg()} | {error, term()}.
+wt_recv(WtPid, Timeout) when is_pid(WtPid) ->
+  hackney_wt:recv(WtPid, Timeout).
+
+%% @doc Set WebTransport options. Supported: [{active, true | false | once}]
+-spec wt_setopts(pid(), list()) -> ok | {error, term()}.
+wt_setopts(WtPid, Opts) when is_pid(WtPid) ->
+  hackney_wt:setopts(WtPid, Opts).
+
+%% @doc Close a WebTransport session gracefully.
+-spec wt_close(pid()) -> ok.
+wt_close(WtPid) when is_pid(WtPid) ->
+  hackney_wt:close(WtPid).
+
+-spec wt_close(pid(), {non_neg_integer(), binary()}) -> ok.
+wt_close(WtPid, {Code, Reason}) when is_pid(WtPid) ->
+  hackney_wt:close(WtPid, {Code, Reason}).
+
+%% @doc Open a new stream multiplexed over the session.
+-spec wt_open_stream(pid(), bidi | uni) -> {ok, non_neg_integer()} | {error, term()}.
+wt_open_stream(WtPid, Type) when is_pid(WtPid) ->
+  hackney_wt:open_stream(WtPid, Type).
+
+%% @doc Write to a stream (no FIN).
+-spec wt_stream_send(pid(), non_neg_integer(), iodata()) -> ok | {error, term()}.
+wt_stream_send(WtPid, StreamId, Data) when is_pid(WtPid) ->
+  hackney_wt:stream_send(WtPid, StreamId, Data).
+
+%% @doc Write to a stream, optionally closing the write side (FIN).
+-spec wt_stream_send(pid(), non_neg_integer(), iodata(), fin | nofin) -> ok | {error, term()}.
+wt_stream_send(WtPid, StreamId, Data, Fin) when is_pid(WtPid) ->
+  hackney_wt:stream_send(WtPid, StreamId, Data, Fin).
+
+%% @doc Receive the next chunk on a stream (passive mode).
+-spec wt_stream_recv(pid(), non_neg_integer()) -> hackney_wt:stream_msg().
+wt_stream_recv(WtPid, StreamId) when is_pid(WtPid) ->
+  hackney_wt:stream_recv(WtPid, StreamId).
+
+-spec wt_stream_recv(pid(), non_neg_integer(), timeout()) -> hackney_wt:stream_msg().
+wt_stream_recv(WtPid, StreamId, Timeout) when is_pid(WtPid) ->
+  hackney_wt:stream_recv(WtPid, StreamId, Timeout).
+
+%% @doc Close a stream gracefully (send FIN).
+-spec wt_close_stream(pid(), non_neg_integer()) -> ok | {error, term()}.
+wt_close_stream(WtPid, StreamId) when is_pid(WtPid) ->
+  hackney_wt:close_stream(WtPid, StreamId).
+
+%% @doc Abruptly terminate a stream with an error code.
+-spec wt_reset_stream(pid(), non_neg_integer(), non_neg_integer()) -> ok | {error, term()}.
+wt_reset_stream(WtPid, StreamId, ErrorCode) when is_pid(WtPid) ->
+  hackney_wt:reset_stream(WtPid, StreamId, ErrorCode).
+
+%% @doc Ask the peer to stop sending on a stream.
+-spec wt_stop_sending(pid(), non_neg_integer(), non_neg_integer()) -> ok | {error, term()}.
+wt_stop_sending(WtPid, StreamId, ErrorCode) when is_pid(WtPid) ->
+  hackney_wt:stop_sending(WtPid, StreamId, ErrorCode).
+
+%% @doc Send an unreliable datagram.
+-spec wt_send_datagram(pid(), iodata()) -> ok | {error, term()}.
+wt_send_datagram(WtPid, Data) when is_pid(WtPid) ->
+  hackney_wt:send_datagram(WtPid, Data).
+
+%% @doc Return WebTransport session information.
+-spec wt_session_info(pid()) -> {ok, map()} | {error, term()}.
+wt_session_info(WtPid) when is_pid(WtPid) ->
+  hackney_wt:session_info(WtPid).
+
+%% @private Signal the WebTransport process to shut down, ignoring errors.
+shutdown_wt(WtPid) ->
+  try exit(WtPid, shutdown) catch _:_ -> ok end.
+
+%% @private Reject CR/LF/NUL in the authority, request path, or any
+%% caller-supplied header used in the WebTransport CONNECT request
+%% (GHSA-f9vr analog).
+valid_wt_fields(Host, Path, Headers) ->
+  Fields = [Host, Path | lists:flatmap(fun({N, V}) -> [N, V] end, Headers)],
+  case lists:any(fun has_ctl_bytes/1, Fields) of
+    true -> {error, invalid_handshake_header};
+    false -> ok
+  end.
+
+has_ctl_bytes(Bin) when is_binary(Bin) ->
+  binary:match(Bin, [<<"\r">>, <<"\n">>, <<0>>]) =/= nomatch;
+has_ctl_bytes(L) when is_list(L) ->
+  has_ctl_bytes(iolist_to_binary(L));
+has_ctl_bytes(_) ->
+  false.
+
+%% @private Translate hackney connect options into a webtransport:connect/4
+%% options map. Honours a caller-supplied CA (cacerts/cacertfile); when
+%% verifying with no CA given, fall back to the bundled certifi store.
+build_wt_connect_opts(Options, Headers) ->
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  Verify = proplists:get_value(verify, Options,
+                               proplists:get_value(verify, SslOpts, verify_peer)),
+  Base = #{headers => Headers, verify => Verify},
+  Base1 = case proplists:get_value(compat_mode, Options) of
+    undefined -> Base;
+    CompatMode -> Base#{compat_mode => CompatMode}
+  end,
+  Base2 = wt_ca_opts(Base1, SslOpts, Verify),
+  wt_cert_opts(Base2, SslOpts).
+
+%% @private CA trust store selection.
+wt_ca_opts(Base, SslOpts, Verify) ->
+  case {proplists:get_value(cacertfile, SslOpts),
+        proplists:get_value(cacerts, SslOpts)} of
+    {undefined, undefined} when Verify =:= verify_peer ->
+      Base#{cacerts => certifi:cacerts()};
+    {undefined, undefined} ->
+      Base;
+    {CAFile, _} when CAFile =/= undefined ->
+      Base#{cacertfile => CAFile};
+    {_, CACerts} ->
+      Base#{cacerts => CACerts}
+  end.
+
+%% @private Optional client certificate / key.
+wt_cert_opts(Base, SslOpts) ->
+  Base1 = case {proplists:get_value(certfile, SslOpts),
+                proplists:get_value(cert, SslOpts)} of
+    {CertFile, _} when CertFile =/= undefined -> Base#{certfile => CertFile};
+    {_, Cert} when Cert =/= undefined -> Base#{cert => Cert};
+    _ -> Base
+  end,
+  case {proplists:get_value(keyfile, SslOpts),
+        proplists:get_value(key, SslOpts)} of
+    {KeyFile, _} when KeyFile =/= undefined -> Base1#{keyfile => KeyFile};
+    {_, Key} when Key =/= undefined -> Base1#{key => Key};
+    _ -> Base1
+  end.
 
 %% @private Normalize WebSocket headers to {binary(), binary()} format
 normalize_ws_headers(Headers) ->

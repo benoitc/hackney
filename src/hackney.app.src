@@ -4,7 +4,7 @@
 {application, hackney,
   [
     {description, "Simple HTTP client with HTTP/1.1, HTTP/2, and HTTP/3 support"},
-    {vsn, "4.0.3"},
+    {vsn, "4.1.0"},
     {registered, [hackney_pool]},
     {applications, [kernel,
       stdlib,
@@ -17,7 +17,8 @@
       certifi,
       ssl_verify_fun,
       h2,
-      quic]},
+      quic,
+      webtransport]},
     {included_applications, []},
     {mod, { hackney_app, []}},
     {env, [{timeout, 150000},
