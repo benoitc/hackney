@@ -1,5 +1,25 @@
 # NEWS
 
+Unreleased
+----------
+
+### Added
+
+- WebTransport client API (`hackney:wt_connect/1,2`, `wt_send/2`,
+  `wt_recv/1,2`, `wt_setopts/2`, `wt_close/1,2`). It mirrors the WebSocket
+  API so code can switch by swapping the `ws_` prefix for `wt_`. Runs over
+  HTTP/3 (QUIC) by default, HTTP/2 optional. One session multiplexes many
+  streams (`wt_open_stream/2`, `wt_stream_send/3,4`, `wt_stream_recv/2,3`,
+  `wt_close_stream/2`, `wt_reset_stream/3`, `wt_stop_sending/3`) plus
+  unreliable datagrams (`wt_send_datagram/2`) and `wt_session_info/1`.
+  Backed by the `webtransport` library. Caller-supplied request headers and
+  path are checked for CR/LF/NUL, and a buffer cap bounds unread data.
+  See the WebTransport Guide.
+
+### Dependencies
+
+- Add `webtransport` 0.2.6.
+
 4.0.3 - 2026-05-28
 ------------------
 

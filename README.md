@@ -14,6 +14,7 @@ An HTTP client for Erlang. Simple, reliable, fast.
 - **Streaming** - Stream request bodies, response bodies, or both. Handle large files without loading them in memory.
 - **Async responses** - Get response chunks as messages. Process other work while waiting.
 - **WebSocket support** - Full WebSocket client with the same process-per-connection model.
+- **WebTransport support** - WebTransport client over HTTP/3 (or HTTP/2) with a WebSocket-shaped API; switch by swapping the `ws_` prefix for `wt_`.
 - **IPv6 first** - Happy Eyeballs algorithm tries IPv6 before IPv4 for faster connections on modern networks.
 - **SSL by default** - Secure connections with certificate verification using Mozilla's CA bundle.
 - **Automatic decompression** - Transparently decompress gzip/deflate responses with `{auto_decompress, true}`.
@@ -56,6 +57,7 @@ Payload = <<"{\"key\": \"value\"}">>,
 | [HTTP/2 Guide](guides/http2_guide.md) | HTTP/2 protocol, ALPN, multiplexing, flow control |
 | [HTTP/3 Guide](guides/http3_guide.md) | HTTP/3 over QUIC, opt-in configuration, Alt-Svc |
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
+| [WebTransport Guide](guides/webtransport_guide.md) | Streams, datagrams, multiplexing, server handlers |
 | [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
 | [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x |
 | [API Reference](https://hexdocs.pm/hackney) | Full module documentation |
@@ -138,6 +140,17 @@ receive_body(Ref) ->
 ok = hackney:ws_send(Conn, {text, <<"hello">>}),
 {ok, {text, <<"hello">>}} = hackney:ws_recv(Conn),
 hackney:ws_close(Conn).
+```
+
+### WebTransport
+
+Same shape as WebSocket, over HTTP/3 (QUIC). Swap `ws_` for `wt_`:
+
+```erlang
+{ok, Conn} = hackney:wt_connect(<<"https://example.com/wt">>),
+ok = hackney:wt_send(Conn, {binary, <<"hello">>}),
+{ok, {binary, <<"hello">>}} = hackney:wt_recv(Conn),
+hackney:wt_close(Conn).
 ```
 
 ### HTTP/2
