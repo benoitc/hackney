@@ -344,17 +344,17 @@ stream_body(Pid) ->
 %%   - {hackney_response, Ref, {see_other, Location, Headers}} for 303 with POST
 %% AsyncMode: true (continuous) or once (one message at a time, use stream_next/1)
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once) ->
-    {ok, reference()} | {error, term()}.
+    {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode) ->
     request_async(Pid, Method, Path, Headers, Body, AsyncMode, self(), false).
 
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid()) ->
-    {ok, reference()} | {error, term()}.
+    {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
     request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, false).
 
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean()) ->
-    {ok, reference()} | {error, term()}.
+    {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
     case valid_request_target(Path) of
         ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect});
@@ -362,7 +362,7 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedir
     end.
 
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean(), list()) ->
-    {ok, reference()} | {error, term()}.
+    {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts) ->
     case valid_request_target(Path) of
         ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts});
