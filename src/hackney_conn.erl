@@ -141,7 +141,6 @@
     pool_pid :: pid() | undefined,  %% If set, connection is from a pool
 
     %% Request tracking
-    request_ref :: reference() | undefined,
     request_from :: {pid(), reference()} | undefined,
     method :: binary() | undefined,
     path :: binary() | undefined,

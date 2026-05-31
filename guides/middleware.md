@@ -14,8 +14,7 @@ no registry, no deps.
 
 -type response() :: {ok, integer(), list(), binary()}
                   | {ok, integer(), list()}         %% HEAD
-                  | {ok, reference()}               %% async
-                  | {ok, pid()}                     %% streaming upload
+                  | {ok, pid()}                     %% async or streaming upload
                   | {error, term()}.
 
 -type next()       :: fun((request()) -> response()).
