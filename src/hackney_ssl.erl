@@ -82,14 +82,9 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),
-  %% Wrap ssl_verify_hostname to rewrite {bad_cert, cert_expired} to
-  %% {bad_cert, root_cert_expired} before delegating. OTP's cross-sign
-  %% recovery (ssl_certificate:find_cross_sign_root_paths/4) only runs
-  %% when path validation reports root_cert_expired; ssl_verify_hostname
-  %% returns cert_expired verbatim, which causes the handshake to fail
-  %% before recovery can trigger. Affected chains include Let's Encrypt
-  %% endpoints that present the ISRG Root X2 cross-signed by ISRG Root X1
-  %% (validity 2020-09-04 to 2025-09-15, now expired).
+  %% Rewrite cert_expired -> root_cert_expired so OTP's cross-sign recovery
+  %% (find_cross_sign_root_paths/4) triggers; ssl_verify_hostname returns
+  %% cert_expired verbatim, which bypasses it entirely.
   VerifyFun = {
     fun(_Cert, {bad_cert, cert_expired}, _State) ->
             {fail, {bad_cert, root_cert_expired}};
