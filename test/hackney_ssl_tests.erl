@@ -81,4 +81,5 @@ verify_fun_passes_through_other_bad_cert_test() ->
     %% Other bad_cert reasons must not be silently rewritten.
     Opts = hackney_ssl:check_hostname_opts("example.com"),
     {VerifyFun, InitState} = proplists:get_value(verify_fun, Opts),
-    {fail, _} = VerifyFun(fake_cert, {bad_cert, unknown_ca}, InitState).
+    ?assertEqual({fail, {bad_cert, unknown_ca}},
+                 VerifyFun(fake_cert, {bad_cert, unknown_ca}, InitState)).
