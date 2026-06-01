@@ -67,3 +67,18 @@ check_hostname_opts_test() ->
     Opts = hackney_ssl:check_hostname_opts("example.com"),
     ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
     ?assert(lists:keymember(cacerts, 1, Opts) orelse lists:keymember(cacertfile, 1, Opts)).
+
+verify_fun_rewrites_cert_expired_test() ->
+    %% cert_expired must be rewritten to root_cert_expired so OTP's
+    %% ssl_certificate:find_cross_sign_root_paths/4 recovery can trigger
+    %% (e.g. expired ISRG Root X2 cross-signed anchor in Let's Encrypt chains).
+    Opts = hackney_ssl:check_hostname_opts("example.com"),
+    {VerifyFun, InitState} = proplists:get_value(verify_fun, Opts),
+    ?assertEqual({fail, {bad_cert, root_cert_expired}},
+                 VerifyFun(fake_cert, {bad_cert, cert_expired}, InitState)).
+
+verify_fun_passes_through_other_bad_cert_test() ->
+    %% Other bad_cert reasons must not be silently rewritten.
+    Opts = hackney_ssl:check_hostname_opts("example.com"),
+    {VerifyFun, InitState} = proplists:get_value(verify_fun, Opts),
+    {fail, _} = VerifyFun(fake_cert, {bad_cert, unknown_ca}, InitState).
