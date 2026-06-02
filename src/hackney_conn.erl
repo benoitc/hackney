@@ -102,6 +102,10 @@
     closed/3
 ]).
 
+-ifdef(TEST).
+-export([h3_tls_opts/2]).
+-endif.
+
 -include("hackney.hrl").
 -include("hackney_lib.hrl").
 
@@ -194,7 +198,13 @@
     %% Current HTTP/3 stream ID for streaming body mode
     h3_stream_id :: non_neg_integer() | undefined,
     %% Whether to try HTTP/3 (requires UDP)
-    try_http3 = false :: boolean()
+    try_http3 = false :: boolean(),
+    %% Pool name + handler module, so the connection can cache the H3
+    %% 0-RTT/resumption session ticket it receives.
+    pool_name = default :: term(),
+    pool_handler :: module() | undefined,
+    %% Last H3 session ticket delivered by hackney_h3 (opaque term).
+    h3_session_ticket :: term() | undefined
 }).
 
 %%====================================================================
@@ -546,6 +556,8 @@ init([DefaultOwner, Opts]) ->
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
         pool_pid = maps:get(pool_pid, Opts, undefined),
+        pool_name = maps:get(pool_name, Opts, default),
+        pool_handler = maps:get(pool_handler, Opts, undefined),
         no_reuse = maps:get(no_reuse, Opts, false),
         inform_fun = maps:get(inform_fun, Opts, undefined),
         auto_decompress = maps:get(auto_decompress, Opts, false)
@@ -603,6 +615,7 @@ idle({call, From}, connect, Data) ->
         transport = Transport,
         connect_timeout = Timeout,
         connect_options = ConnectOpts,
+        ssl_options = SslOpts,
         try_http3 = TryHttp3
     } = Data,
 
@@ -613,7 +626,7 @@ idle({call, From}, connect, Data) ->
     case ShouldTryHttp3 of
         true ->
             %% Try HTTP/3 first
-            case try_h3_connect(Host, Port, Timeout, ConnectOpts) of
+            case try_h3_connect(Host, Port, Timeout, ConnectOpts, SslOpts) of
                 {ok, H3Conn} ->
                     NewData = Data#conn_data{
                         h3_conn = H3Conn,
@@ -1631,6 +1644,23 @@ handle_common(info, {select, _Resource, _Ref, ready_input},
     _ = hackney_h3:process(ConnRef),
     keep_state_and_data;
 
+%% HTTP/3 0-RTT/resumption: cache the session ticket in the pool so the next
+%% connection to this host can resume. Handled here (common to all H3 states)
+%% since the ticket can arrive at any point after the handshake.
+handle_common(info, {h3, ConnRef, {session_ticket, Ticket}}, _State,
+              #conn_data{h3_conn = ConnRef} = Data) ->
+    maybe_store_h3_session(Ticket, Data),
+    {keep_state, Data#conn_data{h3_session_ticket = Ticket}};
+
+%% HTTP/3 0-RTT rejection. Requests on this path are sent at 1-RTT, so this is
+%% not expected; if it arrives, invalidate the cached ticket and fail any
+%% matching in-flight stream so the caller can retry.
+handle_common(info, {h3, ConnRef, {early_data_rejected, StreamIds}}, _State,
+              #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
+    maybe_delete_h3_session(Data),
+    {NewStreams, Actions} = fail_rejected_h3_streams(StreamIds, Streams),
+    {keep_state, Data#conn_data{h3_streams = NewStreams}, Actions};
+
 %% With trap_exit = true, an EXIT signal from any linked process (other than
 %% h2_conn, handled in connected/3) arrives here. Swallow it rather than
 %% propagating — avoids tearing down the gen_statem on stray links.
@@ -2270,9 +2300,9 @@ skip_response_body(Data) ->
 
 %% @private Try HTTP/3 connection via QUIC
 %% lsquic handles its own UDP socket creation and DNS resolution.
-try_h3_connect(Host, Port, Timeout, ConnectOpts) ->
+try_h3_connect(Host, Port, Timeout, ConnectOpts, SslOpts) ->
     HostBin = if is_list(Host) -> list_to_binary(Host); true -> Host end,
-    case hackney_h3:connect(HostBin, Port, h3_tls_opts(ConnectOpts), self()) of
+    case hackney_h3:connect(HostBin, Port, h3_tls_opts(ConnectOpts, SslOpts), self()) of
         {ok, ConnRef} ->
             %% Drive event loop until connected
             wait_h3_connected(ConnRef, Timeout, erlang:monotonic_time(millisecond));
@@ -2284,13 +2314,24 @@ try_h3_connect(Host, Port, Timeout, ConnectOpts) ->
 %% quic >= 1.4.4 verifies the server certificate. An insecure connection opts
 %% out; an explicitly configured CA (cacerts/cacertfile) is used as the trust
 %% store; otherwise quic verifies against its own default (OS) trust store.
-h3_tls_opts(ConnectOpts) ->
-    SslOpts = proplists:get_value(ssl_options, ConnectOpts, []),
+%% `family' (inet|inet6) and a `session_ticket' (for resumption) are forwarded
+%% when present in either the connect options or the ssl options.
+h3_tls_opts(ConnectOpts, SslOpts) ->
     Insecure = proplists:get_value(insecure, ConnectOpts,
                  proplists:get_value(insecure, SslOpts, false)),
-    case Insecure of
+    Base = case Insecure of
         true -> #{verify => verify_none};
         false -> h3_ca_opts(SslOpts)
+    end,
+    Base1 = case proplists:get_value(family, ConnectOpts,
+                   proplists:get_value(family, SslOpts, undefined)) of
+        undefined -> Base;
+        Family -> Base#{family => Family}
+    end,
+    case proplists:get_value(session_ticket, ConnectOpts,
+           proplists:get_value(session_ticket, SslOpts, undefined)) of
+        undefined -> Base1;
+        Ticket -> Base1#{session_ticket => Ticket}
     end.
 
 %% @private Use an explicitly configured CA as the H3 trust store. quic only
@@ -3111,6 +3152,78 @@ handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
             {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined}};
         _ ->
             {keep_state, Data}
+    end.
+
+%% @private Cache the H3 session ticket in the pool (best effort, guarded so a
+%% custom pool handler without the callback degrades to no caching).
+maybe_store_h3_session(_Ticket, #conn_data{pool_handler = undefined}) ->
+    ok;
+maybe_store_h3_session(Ticket, #conn_data{pool_handler = PoolHandler, host = Host,
+                                          port = Port, transport = Transport,
+                                          pool_name = PoolName}) ->
+    case erlang:function_exported(PoolHandler, store_h3_session, 5) of
+        true ->
+            try PoolHandler:store_h3_session(Host, Port, Transport, Ticket,
+                                             [{pool, PoolName}])
+            catch _:_ -> ok
+            end,
+            ok;
+        false ->
+            ok
+    end.
+
+%% @private Drop a cached H3 session ticket (e.g. after 0-RTT rejection).
+maybe_delete_h3_session(#conn_data{pool_handler = undefined}) ->
+    ok;
+maybe_delete_h3_session(#conn_data{pool_handler = PoolHandler, host = Host,
+                                   port = Port, transport = Transport,
+                                   pool_name = PoolName}) ->
+    case erlang:function_exported(PoolHandler, delete_h3_session, 4) of
+        true ->
+            try PoolHandler:delete_h3_session(Host, Port, Transport,
+                                              [{pool, PoolName}])
+            catch _:_ -> ok
+            end,
+            ok;
+        false ->
+            ok
+    end.
+
+%% @private Fail any in-flight stream whose 0-RTT data the server rejected.
+%% Returns the updated stream map plus gen_statem reply actions for sync
+%% callers; async callers are notified via their StreamTo mailbox directly.
+fail_rejected_h3_streams(StreamIds, Streams) ->
+    Ids = case is_list(StreamIds) of
+              true -> StreamIds;
+              false -> sets:to_list(StreamIds)
+          end,
+    lists:foldl(fun(StreamId, {AccStreams, AccActions}) ->
+                        fail_rejected_h3_stream(StreamId, AccStreams, AccActions)
+                end, {Streams, []}, Ids).
+
+fail_rejected_h3_stream(StreamId, Streams, Actions) ->
+    Err = {error, early_data_rejected},
+    case maps:get(StreamId, Streams, undefined) of
+        undefined ->
+            {Streams, Actions};
+        {From, waiting_headers} ->
+            %% Sync request awaiting headers - reply via the state machine.
+            {maps:remove(StreamId, Streams), [{reply, From, Err} | Actions]};
+        {From, {sending_body, _}} ->
+            {maps:remove(StreamId, Streams), [{reply, From, Err} | Actions]};
+        {From, {waiting_headers_streaming, _}} ->
+            {maps:remove(StreamId, Streams), [{reply, From, Err} | Actions]};
+        {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
+            StreamTo ! {hackney_response, Ref, Err},
+            {maps:remove(StreamId, Streams), Actions};
+        {_, {waiting_headers_async, _AsyncMode, StreamTo, Ref}} ->
+            StreamTo ! {hackney_response, Ref, Err},
+            {maps:remove(StreamId, Streams), Actions};
+        {_, {async, _AsyncMode, StreamTo, Ref, _SubState}} ->
+            StreamTo ! {hackney_response, Ref, Err},
+            {maps:remove(StreamId, Streams), Actions};
+        _ ->
+            {maps:remove(StreamId, Streams), Actions}
     end.
 
 %% @private Handle HTTP/3 connection closed

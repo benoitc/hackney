@@ -29,7 +29,10 @@
 %% HTTP/3 connection pooling
 -export([checkout_h3/4,
          register_h3/5,
-         unregister_h3/2]).
+         unregister_h3/2,
+         get_h3_session/4,
+         store_h3_session/5,
+         delete_h3_session/4]).
 
 -export([
          get_stats/1,
@@ -79,7 +82,10 @@
     h2_connections = #{},
     %% HTTP/3 connections: #{Key => Pid} - one multiplexed QUIC connection per host
     %% These connections are shared across callers (not checked out exclusively)
-    h3_connections = #{}
+    h3_connections = #{},
+    %% HTTP/3 0-RTT/resumption session tickets: #{Key => Ticket} keyed by
+    %% {Host, Port, Transport}. Replayed on the next connect to resume.
+    h3_sessions = #{}
 }).
 
 -define(DEFAULT_MAX_CONNECTIONS, 50).
@@ -218,6 +224,41 @@ unregister_h3(Pid, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
     gen_server:cast(Pool, {unregister_h3, Pid}),
+    ok.
+
+%% @doc Look up a cached HTTP/3 0-RTT/resumption session ticket for a host/port.
+-spec get_h3_session(Host :: string(), Port :: non_neg_integer(),
+                     Transport :: module(), Options :: list()) ->
+    {ok, term()} | none.
+get_h3_session(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    try
+        gen_server:call(Pool, {get_h3_session, Key})
+    catch
+        _:_ -> none
+    end.
+
+%% @doc Cache an HTTP/3 session ticket for a host/port for later resumption.
+-spec store_h3_session(Host :: string(), Port :: non_neg_integer(),
+                       Transport :: module(), Ticket :: term(),
+                       Options :: list()) -> ok.
+store_h3_session(Host, Port, Transport, Ticket, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {store_h3_session, Key, Ticket}),
+    ok.
+
+%% @doc Invalidate a cached HTTP/3 session ticket (e.g. after 0-RTT rejection).
+-spec delete_h3_session(Host :: string(), Port :: non_neg_integer(),
+                        Transport :: module(), Options :: list()) -> ok.
+delete_h3_session(Host, Port, Transport, Options) ->
+    PoolName = proplists:get_value(pool, Options, default),
+    Pool = find_pool(PoolName, Options),
+    Key = {Host, Port, Transport},
+    gen_server:cast(Pool, {delete_h3_session, Key}),
     ok.
 
 get_stats(Pool) ->
@@ -528,6 +569,12 @@ handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State)
             end
     end;
 
+handle_call({get_h3_session, Key}, _From, #state{h3_sessions = Sessions} = State) ->
+    case maps:get(Key, Sessions, undefined) of
+        undefined -> {reply, none, State};
+        Ticket -> {reply, {ok, Ticket}, State}
+    end;
+
 handle_call(unregister_h2_all, _From, State) ->
     %% Clear all HTTP/2 connections (for testing)
     {reply, ok, State#state{h2_connections = #{}}}.
@@ -601,6 +648,12 @@ handle_cast({unregister_h3, Pid}, State) ->
     %% Remove an HTTP/3 connection from the pool
     State2 = do_unregister_h3(Pid, State),
     {noreply, State2};
+
+handle_cast({store_h3_session, Key, Ticket}, #state{h3_sessions = Sessions} = State) ->
+    {noreply, State#state{h3_sessions = maps:put(Key, Ticket, Sessions)}};
+
+handle_cast({delete_h3_session, Key}, #state{h3_sessions = Sessions} = State) ->
+    {noreply, State#state{h3_sessions = maps:remove(Key, Sessions)}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

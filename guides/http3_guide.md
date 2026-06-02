@@ -182,6 +182,58 @@ Like HTTP/2, HTTP/3 multiplexes requests as streams on a single QUIC connection:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## IPv6
+
+DNS resolution and address-family selection are handled by the `quic` library,
+which races IPv6 and IPv4 with RFC 8305 Happy Eyeballs. Hostnames with AAAA
+records, IPv6 tuples, and bracketed literals all work without extra options.
+
+```erlang
+%% Bracketed IPv6 literal
+hackney:get(<<"https://[2606:4700::1111]/">>, [], <<>>, [{protocols, [http3]}]).
+
+%% Force a family with the `family' connect option (inet | inet6)
+hackney:get(<<"https://example.com/">>, [], <<>>,
+            [{protocols, [http3]}, {connect_options, [{family, inet6}]}]).
+```
+
+`family` (and an optional `happy_eyeballs` boolean) may be set in
+`connect_options` or `ssl_options`; both are forwarded to the QUIC layer.
+
+## 0-RTT and Session Resumption
+
+After the first HTTP/3 connection to a host, hackney caches the server's TLS
+session ticket in the pool, keyed by `{host, port, transport}`, and replays it on
+the next connection to resume the handshake. For a **bodyless** request this can
+also send the request as QUIC 0-RTT (in the first flight), saving a round trip.
+
+This is enabled by default and controlled by the `zero_rtt` request option:
+
+```erlang
+%% Default: resumption/0-RTT used automatically when a ticket is cached.
+hackney:get(Url, [], <<>>, [{protocols, [http3]}]).
+
+%% Disable it for a request:
+hackney:get(Url, [], <<>>, [{protocols, [http3]}, {zero_rtt, false}]).
+
+%% Supply a ticket explicitly (overrides the cache):
+hackney:get(Url, [], <<>>,
+            [{protocols, [http3]}, {connect_options, [{session_ticket, Ticket}]}]).
+```
+
+Scope:
+
+  - **Request-in-0-RTT** (request bytes in the first flight) applies only to
+    **bodyless** requests via the one-shot `hackney_h3` API. quic carries only
+    the HEADERS as early data, so a request with a body resumes at 1-RTT.
+  - The **pooled/multiplexed path** uses the ticket for a resumed (abbreviated)
+    handshake; requests are sent at 1-RTT since they arrive after connect.
+  - On 0-RTT rejection, the one-shot path retries once at 1-RTT and the cached
+    ticket is dropped.
+
+For callers managing tickets directly, `hackney_h3` exposes
+`wait_session_ticket/2`, `get_session_ticket/1` and `early_data_accepted/1`.
+
 ## Low-Level Stream API
 
 The high-level `hackney:get/post/...` functions cover the common case. For

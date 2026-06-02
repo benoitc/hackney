@@ -236,14 +236,24 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
 try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
   %% Start HTTP/3 connection via hackney_conn
   ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+  BaseConnectOpts = proplists:get_value(connect_options, Options, []),
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  %% Forward the caller's connect_options (e.g. {family, inet6}) and resolve the
+  %% 0-RTT session ticket (explicit option beats the pool cache).
+  ConnectOpts0 = [{protocols, [http3]} | proplists:delete(protocols, BaseConnectOpts)],
+  ConnectOpts = maybe_inject_h3_session(ConnectOpts0, SslOpts, Host, Port, Transport,
+                                        Options, PoolHandler),
+  PoolName = proplists:get_value(pool, Options, default),
   ConnOpts = #{
     host => Host,
     port => Port,
     transport => Transport,
     connect_timeout => ConnectTimeout,
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    connect_options => [{protocols, [http3]}],
-    ssl_options => proplists:get_value(ssl_options, Options, [])
+    connect_options => ConnectOpts,
+    ssl_options => SslOpts,
+    pool_name => PoolName,
+    pool_handler => PoolHandler
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
     {ok, ConnPid} ->
@@ -274,6 +284,29 @@ try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
     {error, _Reason} ->
       hackney_altsvc:mark_h3_blocked(Host, Port),
       false
+  end.
+
+%% @private Resolve the 0-RTT session ticket for a new H3 connection.
+%% Precedence: an explicit `session_ticket' in connect_options or ssl_options
+%% wins; otherwise, unless `zero_rtt' is disabled, a pool-cached ticket for
+%% {Host, Port, Transport} is injected. The pool lookup is guarded so a custom
+%% pool handler without the callback degrades to no reuse rather than crashing.
+maybe_inject_h3_session(ConnectOpts, SslOpts, Host, Port, Transport, Options, PoolHandler) ->
+  ZeroRtt = proplists:get_value(zero_rtt, Options, true),
+  Explicit = proplists:get_value(session_ticket, ConnectOpts,
+               proplists:get_value(session_ticket, SslOpts, undefined)),
+  case {ZeroRtt, Explicit} of
+    {false, _} -> ConnectOpts;
+    {_, T} when T =/= undefined -> ConnectOpts;
+    _ ->
+      case erlang:function_exported(PoolHandler, get_h3_session, 4) of
+        false -> ConnectOpts;
+        true ->
+          case PoolHandler:get_h3_session(Host, Port, Transport, Options) of
+            {ok, Cached} -> [{session_ticket, Cached} | ConnectOpts];
+            _ -> ConnectOpts
+          end
+      end
   end.
 
 connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->

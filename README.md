@@ -180,6 +180,11 @@ hackney:get(URL, [], <<>>, [{protocols, [http3, http2, http1]}]).
 application:set_env(hackney, default_protocols, [http3, http2, http1]).
 ```
 
+IPv6 works out of the box (Happy Eyeballs); force a family with
+`{connect_options, [{family, inet6}]}`. Session resumption and 0-RTT are on by
+default and cached per host; disable with `{zero_rtt, false}`. See the
+[HTTP/3 Guide](guides/http3_guide.md) for details.
+
 **Note:** HTTP/3 uses QUIC (UDP transport). Some networks may block UDP traffic.
 
 ### Multipart
