@@ -27,6 +27,10 @@
   intermediate still fails, and partial chains keep working.
 - HTTP/3 connections from the pool now apply `ssl_options` (`cacerts`,
   `insecure`) that previously did not reach the QUIC layer.
+- A pooled connection that stops between checkout and the request call no
+  longer leaks `exit:{normal, _}` (or `exit:noproc`) to the caller. The
+  request, body and streaming calls now return `{error, closed}` instead
+  (issue #861).
 
 ### Dependencies
 
