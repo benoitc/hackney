@@ -271,8 +271,29 @@ request(Pid, Method, Path, Headers, Body, Timeout) ->
     {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body, Timeout, ReqOpts) ->
     case valid_request_target(Path) of
-        ok -> gen_statem:call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout);
+        ok -> safe_call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout);
         Err -> Err
+    end.
+
+%% @private gen_statem:call that converts a callee which has already stopped,
+%% or stops while the call is in flight, into `{error, closed}' instead of
+%% letting `exit:{normal, _}' / `exit:noproc' reach the caller. A pooled
+%% connection can stop between checkout and the call (issue #861); the brief
+%% linger in the `closed' state narrows the window but cannot close it. Other
+%% exits (e.g. timeout) propagate unchanged.
+safe_call(Pid, Msg) ->
+    safe_call(Pid, Msg, infinity).
+
+safe_call(Pid, Msg, Timeout) ->
+    try
+        gen_statem:call(Pid, Msg, Timeout)
+    catch
+        exit:noproc -> {error, closed};
+        exit:{noproc, _} -> {error, closed};
+        exit:normal -> {error, closed};
+        exit:{normal, _} -> {error, closed};
+        exit:shutdown -> {error, closed};
+        exit:{shutdown, _} -> {error, closed}
     end.
 
 %% @private GHSA-j9wq: the request target (path + query) is written verbatim
@@ -297,7 +318,7 @@ valid_request_target(_) ->
     {ok, integer(), list()} | {error, term()}.
 request_streaming(Pid, Method, Path, Headers, Body) ->
     case valid_request_target(Path) of
-        ok -> gen_statem:call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity);
+        ok -> safe_call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity);
         Err -> Err
     end.
 
@@ -307,24 +328,24 @@ request_streaming(Pid, Method, Path, Headers, Body) ->
 -spec send_request_headers(pid(), binary(), binary(), list()) -> ok | {error, term()}.
 send_request_headers(Pid, Method, Path, Headers) ->
     case valid_request_target(Path) of
-        ok -> gen_statem:call(Pid, {send_headers, Method, Path, Headers}, infinity);
+        ok -> safe_call(Pid, {send_headers, Method, Path, Headers}, infinity);
         Err -> Err
     end.
 
 %% @doc Send a chunk of the request body.
 -spec send_body_chunk(pid(), iodata()) -> ok | {error, term()}.
 send_body_chunk(Pid, Data) ->
-    gen_statem:call(Pid, {send_body_chunk, Data}, infinity).
+    safe_call(Pid, {send_body_chunk, Data}, infinity).
 
 %% @doc Finish sending the request body.
 -spec finish_send_body(pid()) -> ok | {error, term()}.
 finish_send_body(Pid) ->
-    gen_statem:call(Pid, finish_send_body, infinity).
+    safe_call(Pid, finish_send_body, infinity).
 
 %% @doc Start receiving the response after sending the full body.
 -spec start_response(pid()) -> {ok, integer(), list(), pid()} | {error, term()}.
 start_response(Pid) ->
-    gen_statem:call(Pid, start_response, infinity).
+    safe_call(Pid, start_response, infinity).
 
 %% @doc Get the full response body.
 -spec body(pid()) -> {ok, binary()} | {error, term()}.
@@ -333,13 +354,13 @@ body(Pid) ->
 
 -spec body(pid(), timeout()) -> {ok, binary()} | {error, term()}.
 body(Pid, Timeout) ->
-    gen_statem:call(Pid, body, Timeout).
+    safe_call(Pid, body, Timeout).
 
 %% @doc Stream the response body in chunks.
 %% Returns {ok, Data} for each chunk, {done, Pid} when complete.
 -spec stream_body(pid()) -> {ok, binary()} | done | {error, term()}.
 stream_body(Pid) ->
-    gen_statem:call(Pid, stream_body).
+    safe_call(Pid, stream_body).
 
 %% @doc Send an HTTP request asynchronously.
 %% Returns {ok, Ref} immediately. Response is sent as messages:
@@ -366,7 +387,7 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
     {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
     case valid_request_target(Path) of
-        ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect});
+        ok -> safe_call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect});
         Err -> Err
     end.
 
@@ -374,7 +395,7 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedir
     {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts) ->
     case valid_request_target(Path) of
-        ok -> gen_statem:call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts});
+        ok -> safe_call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts});
         Err -> Err
     end.
 

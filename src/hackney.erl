@@ -1705,17 +1705,17 @@ get_proxy_config(Scheme, TargetHost, Options) ->
       false;
     ProxyUrl when is_binary(ProxyUrl); is_list(ProxyUrl) ->
       parse_proxy_option(ProxyUrl, Scheme, Options);
-    {ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+    {ProxyHost, ProxyPort} when (is_list(ProxyHost) orelse is_atom(ProxyHost) orelse is_binary(ProxyHost)), is_integer(ProxyPort) ->
       %% Simple tuple: use HTTP proxy for http, CONNECT for https
       ProxyAuth = proplists:get_value(proxy_auth, Options),
       ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
-      {proxy_type_for_scheme(Scheme), ProxyHost, ProxyPort, ProxyAuth, ProxyTransport};
-    {connect, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+      {proxy_type_for_scheme(Scheme), normalize_proxy_host(ProxyHost), ProxyPort, ProxyAuth, ProxyTransport};
+    {connect, ProxyHost, ProxyPort} when (is_list(ProxyHost) orelse is_atom(ProxyHost) orelse is_binary(ProxyHost)), is_integer(ProxyPort) ->
       %% Explicit CONNECT tunnel
       ProxyAuth = proplists:get_value(proxy_auth, Options),
       ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
-      {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport};
-    {socks5, ProxyHost, ProxyPort} when is_list(ProxyHost), is_integer(ProxyPort) ->
+      {connect, normalize_proxy_host(ProxyHost), ProxyPort, ProxyAuth, ProxyTransport};
+    {socks5, ProxyHost, ProxyPort} when (is_list(ProxyHost) orelse is_atom(ProxyHost) orelse is_binary(ProxyHost)), is_integer(ProxyPort) ->
       %% SOCKS5 proxy
       User = proplists:get_value(socks5_user, Options),
       Pass = proplists:get_value(socks5_pass, Options, <<>>),
@@ -1724,10 +1724,17 @@ get_proxy_config(Scheme, TargetHost, Options) ->
         _ -> {User, Pass}
       end,
       ProxyTransport = proplists:get_value(proxy_transport, Options, tcp),
-      {socks5, ProxyHost, ProxyPort, Auth, ProxyTransport};
+      {socks5, normalize_proxy_host(ProxyHost), ProxyPort, Auth, ProxyTransport};
     _ ->
       false
   end.
+
+%% @private Accept a proxy host given as a string, a binary or an atom
+%% (e.g. `localhost'), as hackney 1.x did, and normalise it to a string.
+%% A new is_list/1 guard regressed atom hosts to a silent fall-through (#858).
+normalize_proxy_host(H) when is_list(H) -> H;
+normalize_proxy_host(H) when is_atom(H) -> atom_to_list(H);
+normalize_proxy_host(H) when is_binary(H) -> binary_to_list(H).
 
 %% Parse proxy URL and determine type based on target scheme
 parse_proxy_option(ProxyUrl, Scheme, Options) ->

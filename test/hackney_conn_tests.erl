@@ -32,7 +32,11 @@ hackney_conn_test_() ->
       {"set_owner on closed connection returns invalid_state (#850)",
        fun test_set_owner_closed_returns_error/0},
       {"set_owner_async stops a closed pooled connection (#850)",
-       fun test_set_owner_async_closed_pooled_stops/0}
+       fun test_set_owner_async_closed_pooled_stops/0},
+      {"request on a dead connection returns {error, closed} (#861)",
+       fun test_request_dead_conn_returns_error/0},
+      {"body on a dead connection returns {error, closed} (#861)",
+       fun test_body_dead_conn_returns_error/0}
      ]}.
 
 %% Integration tests - use embedded Cowboy server
@@ -263,6 +267,24 @@ test_set_owner_async_closed_pooled_stops() ->
     timer:sleep(10),
     ?assertNot(is_process_alive(Pid)),
     gen_tcp:close(ListenSock).
+
+%% #861: a pooled connection can stop between checkout and the call, so a
+%% request to an already-dead connection must return {error, closed} rather
+%% than letting exit:{normal,_}/noproc crash the caller.
+test_request_dead_conn_returns_error() ->
+    Pid = dead_conn_pid(),
+    ?assertEqual({error, closed},
+                 hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>)).
+
+test_body_dead_conn_returns_error() ->
+    Pid = dead_conn_pid(),
+    ?assertEqual({error, closed}, hackney_conn:body(Pid)).
+
+%% A pid that has already terminated normally.
+dead_conn_pid() ->
+    {Pid, Ref} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN', Ref, process, Pid, _} -> ok after 1000 -> ok end,
+    Pid.
 
 %% Start a hackney_conn already in `connected` state via a pre-established
 %% local socket pair (no server needed). Extra opts are merged in.
