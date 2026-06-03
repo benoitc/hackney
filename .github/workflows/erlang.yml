@@ -43,6 +43,10 @@ jobs:
   linux-arm64:
     name: Linux ARM64 OTP-${{matrix.otp}}
     runs-on: ubuntu-24.04-arm
+    # The arm64 runner reports ImageOS=ubuntu24-arm64, which setup-beam does
+    # not map; pin it to ubuntu24 so it resolves the right prebuilt OTP.
+    env:
+      ImageOS: ubuntu24
     strategy:
       matrix:
         otp: ["27.2"]

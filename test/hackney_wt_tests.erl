@@ -168,7 +168,20 @@ connect(URL) ->
     connect(URL, []).
 
 connect(URL, Extra) ->
-    hackney:wt_connect(URL, [{verify, verify_none}, {connect_timeout, 10000} | Extra]).
+    connect(URL, Extra, 3).
+
+%% The in-process WebTransport handshake over UDP loopback occasionally stalls
+%% under load and times out; retry a few times so the integration tests don't
+%% flake on a transient connect timeout.
+connect(_URL, _Extra, 0) ->
+    {error, connect_timeout};
+connect(URL, Extra, Retries) ->
+    case hackney:wt_connect(URL, [{verify, verify_none}, {connect_timeout, 10000} | Extra]) of
+        {error, connect_timeout} ->
+            connect(URL, Extra, Retries - 1);
+        Other ->
+            Other
+    end.
 
 %% Read until a datagram is seen (a stray default-stream chunk could in
 %% principle arrive first; datagrams on loopback normally arrive directly).

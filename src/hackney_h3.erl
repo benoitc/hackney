@@ -45,6 +45,10 @@
     update_stream_state/3,
     %% Response parsing
     parse_response_headers/1,
+    %% 0-RTT / session resumption
+    early_data_accepted/1,
+    get_session_ticket/1,
+    wait_session_ticket/2,
     %% Connection close
     close/1,
     close/2,
@@ -67,13 +71,16 @@
 -ifdef(TEST).
 -export([maybe_strip_redirect_headers/4]).
 -export([body_within_limit/2, remaining/1]).
+-export([build_h3_opts/2]).
 -endif.
 
 -record(state, {
     h3_conn :: pid() | undefined,
     conn_ref :: reference(),
     owner :: pid(),
-    owner_mon :: reference()
+    owner_mon :: reference(),
+    %% Last 0-RTT/resumption session ticket delivered by quic_h3 (opaque term).
+    session_ticket :: term() | undefined
 }).
 
 -define(CONN_TABLE, hackney_h3_conns).
@@ -150,7 +157,7 @@ do_request_with_redirect(Method, Url, Headers, Body, Opts, FollowRedirect, MaxRe
     end,
     Timeout = maps:get(timeout, Opts, 30000),
     MaxBodySize = maps:get(max_body_size, Opts, ?DEFAULT_MAX_BODY_SIZE),
-    case connect(HostBin, Port, Opts) of
+    case h3_connect_for_request(HostBin, Port, Body, Opts) of
         {ok, Conn} ->
             try
                 case do_request(Conn, Method, HostBin, FullPath, Headers, Body, Timeout, MaxBodySize) of
@@ -447,17 +454,46 @@ wait_connected(ConnRef, Timeout, StartTime) ->
             {error, {transport_error, Code, Msg}};
         {h3, ConnRef, {settings, _Settings}} ->
             %% HTTP/3 SETTINGS frame - ignore and continue waiting
+            wait_connected(ConnRef, Timeout, StartTime);
+        {h3, ConnRef, {session_ticket, _Ticket}} ->
+            %% Resumption ticket - kept in the adapter state; ignore here
+            wait_connected(ConnRef, Timeout, StartTime);
+        {h3, ConnRef, {early_data_rejected, _Ids}} ->
+            %% Not expected before connected on this path; ignore
             wait_connected(ConnRef, Timeout, StartTime)
     after Remaining ->
         close(ConnRef, timeout),
         {error, timeout}
     end.
 
+%% @private Connect for a one-shot request, choosing the 0-RTT no-wait path.
+%% True request-in-0-RTT only carries HEADERS (quic_h3 serves `request' but not
+%% `send_data' in the early_data state), so it is used only for bodyless
+%% requests with `zero_rtt' enabled and a `session_ticket' present. Otherwise we
+%% wait for `connected' (1-RTT; still a resumed/abbreviated handshake when a
+%% ticket is supplied).
+h3_connect_for_request(HostBin, Port, Body, Opts) ->
+    HasBody = Body =/= <<>> andalso Body =/= [],
+    ZeroRtt = maps:get(zero_rtt, Opts, true)
+              andalso maps:is_key(session_ticket, Opts)
+              andalso (not HasBody),
+    case ZeroRtt of
+        true ->
+            %% No-wait: the adapter is started and the request is sent while the
+            %% connection is in early_data, riding 0-RTT.
+            connect(HostBin, Port, Opts, self());
+        false ->
+            connect(HostBin, Port, Opts)
+    end.
+
 do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize) ->
+    do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize, false).
+
+do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize, Retried) ->
     AllHeaders = build_request_headers(Method, Host, Path, Headers),
     HasBody = Body =/= <<>> andalso Body =/= [],
     Fin = not HasBody,
-    case send_request(ConnRef, AllHeaders, Fin) of
+    Result = case send_request(ConnRef, AllHeaders, Fin) of
         {ok, StreamId} when HasBody ->
             case send_data(ConnRef, StreamId, Body, true) of
                 ok ->
@@ -469,6 +505,14 @@ do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize) ->
             await_response_loop(ConnRef, StreamId, Timeout, MaxBodySize);
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        {error, early_data_rejected} when not Retried ->
+            %% Server rejected 0-RTT; the connection is now past the handshake,
+            %% so retry once on the same connection at 1-RTT.
+            do_request(ConnRef, Method, Host, Path, Headers, Body, Timeout, MaxBodySize, true);
+        _ ->
+            Result
     end.
 
 %% @private Wait for HTTP/3 response.
@@ -518,6 +562,17 @@ await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, A
         {h3, ConnRef, {settings, _Settings}} ->
             %% HTTP/3 SETTINGS frame - ignore and continue waiting
             await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody);
+        {h3, ConnRef, {connected, _Info}} ->
+            %% 0-RTT no-wait path: the request was sent before `connected'.
+            %% Ignore the late connected event and keep awaiting the response.
+            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody);
+        {h3, ConnRef, {session_ticket, _Ticket}} ->
+            %% Resumption ticket - kept in the adapter state; ignore here
+            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody);
+        {h3, ConnRef, {early_data_rejected, _Ids}} ->
+            %% Server rejected 0-RTT; the request stream was reset. Surface a
+            %% distinct error so the caller can retry once at 1-RTT.
+            {error, early_data_rejected};
         {h3, ConnRef, {goaway, _StreamId2}} ->
             %% GOAWAY frame - connection is shutting down
             {error, goaway}
@@ -688,6 +743,34 @@ sockname(ConnRef) ->
 peercert(ConnRef) ->
     quic_call(ConnRef, peercert).
 
+%% @doc Whether the server accepted 0-RTT early data, or `unknown' before the
+%% handshake completes.
+-spec early_data_accepted(reference()) -> boolean() | unknown | {error, term()}.
+early_data_accepted(ConnRef) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, early_data_accepted) end,
+             {error, not_connected}).
+
+%% @doc Return the last session ticket delivered for this connection, or
+%% `undefined' if none has arrived yet. See {@link wait_session_ticket/2} to
+%% block until one is available.
+-spec get_session_ticket(reference()) -> term() | undefined | {error, term()}.
+get_session_ticket(ConnRef) ->
+    with_pid(ConnRef,
+             fun(Pid) -> gen_server:call(Pid, get_session_ticket) end,
+             {error, not_connected}).
+
+%% @doc Block until a session ticket is delivered to the owner, up to `Timeout'
+%% ms. The caller must be the connection owner (the process that called
+%% {@link connect/4}). Returns `{ok, Ticket}' or `{error, timeout}'.
+-spec wait_session_ticket(reference(), timeout()) ->
+    {ok, term()} | {error, timeout}.
+wait_session_ticket(ConnRef, Timeout) ->
+    receive
+        {h3, ConnRef, {session_ticket, Ticket}} -> {ok, Ticket}
+    after Timeout -> {error, timeout}
+    end.
+
 quic_call(ConnRef, Op) ->
     with_pid(ConnRef,
              fun(Pid) -> gen_server:call(Pid, {quic_op, Op}) end,
@@ -740,6 +823,15 @@ handle_call({quic_op, Op}, _From, #state{h3_conn = Conn} = State)
     end,
     {reply, Reply, State};
 
+handle_call(early_data_accepted, _From, #state{h3_conn = Conn} = State) ->
+    Reply = try quic_h3:early_data_accepted(Conn)
+            catch _:Reason -> {error, Reason}
+            end,
+    {reply, Reply, State};
+
+handle_call(get_session_ticket, _From, #state{session_ticket = Ticket} = State) ->
+    {reply, Ticket, State};
+
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -781,6 +873,18 @@ handle_info({quic_h3, Conn, {goaway, LastStreamId}},
     {noreply, State};
 
 handle_info({quic_h3, Conn, {goaway_sent, _}}, #state{h3_conn = Conn} = State) ->
+    {noreply, State};
+
+handle_info({quic_h3, Conn, {session_ticket, Ticket}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    %% 0-RTT/resumption: keep the latest ticket and forward to the owner so the
+    %% pooled path (hackney_conn) can cache it.
+    Owner ! {h3, Ref, {session_ticket, Ticket}},
+    {noreply, State#state{session_ticket = Ticket}};
+
+handle_info({quic_h3, Conn, {early_data_rejected, StreamIds}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, {early_data_rejected, StreamIds}},
     {noreply, State};
 
 handle_info({quic_h3, Conn, closed},
@@ -833,13 +937,28 @@ build_h3_opts(Host, Opts) ->
             end
     end,
     QuicOpts0 = #{server_name_indication => HostStr},
-    QuicOpts = case maps:get(cacerts, Opts, undefined) of
+    QuicOpts1 = case maps:get(cacerts, Opts, undefined) of
         undefined ->
             case maps:get(cacertfile, Opts, undefined) of
                 undefined -> QuicOpts0;
                 File -> QuicOpts0#{cacertfile => File}
             end;
         CACerts -> QuicOpts0#{cacerts => CACerts}
+    end,
+    %% IPv6: forward the address family (inet|inet6) and happy_eyeballs toggle
+    %% to quic, which does DNS + RFC 8305 Happy Eyeballs internally.
+    QuicOpts2 = case maps:get(family, Opts, undefined) of
+        undefined -> QuicOpts1;
+        Family -> QuicOpts1#{family => Family}
+    end,
+    QuicOpts3 = case maps:get(happy_eyeballs, Opts, undefined) of
+        undefined -> QuicOpts2;
+        Happy -> QuicOpts2#{happy_eyeballs => Happy}
+    end,
+    %% 0-RTT / resumption: forward an opaque session ticket when supplied.
+    QuicOpts = case maps:get(session_ticket, Opts, undefined) of
+        undefined -> QuicOpts3;
+        Ticket -> QuicOpts3#{session_ticket => Ticket}
     end,
     Base = #{verify => Verify, quic_opts => QuicOpts},
     case maps:get(settings, Opts, undefined) of
