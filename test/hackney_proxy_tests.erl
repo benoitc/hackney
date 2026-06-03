@@ -258,6 +258,21 @@ get_proxy_config_test_() ->
           ]),
           ?assertEqual({socks5, "socks.local", 1080, {<<"user">>, <<"pass">>}, tcp}, Result)
       end},
+     {"SOCKS5 tuple accepts an atom host (#858)",
+      fun() ->
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {socks5, localhost, 1080}}]),
+          ?assertEqual({socks5, "localhost", 1080, undefined, tcp}, Result)
+      end},
+     {"SOCKS5 tuple accepts a binary host (#858)",
+      fun() ->
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {socks5, <<"socks.local">>, 1080}}]),
+          ?assertEqual({socks5, "socks.local", 1080, undefined, tcp}, Result)
+      end},
+     {"plain tuple accepts an atom host (#858)",
+      fun() ->
+          Result = hackney:get_proxy_config(http, "example.com", [{proxy, {localhost, 8080}}]),
+          ?assertEqual({http, "localhost", 8080, undefined, tcp}, Result)
+      end},
      {"HTTP URL proxy for HTTP scheme returns http type",
       fun() ->
           Result = hackney:get_proxy_config(http, "example.com", [{proxy, "http://proxy.local:8080"}]),

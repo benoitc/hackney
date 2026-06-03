@@ -31,6 +31,10 @@
   longer leaks `exit:{normal, _}` (or `exit:noproc`) to the caller. The
   request, body and streaming calls now return `{error, closed}` instead
   (issue #861).
+- A proxy host given as an atom (e.g. `localhost`) or a binary is accepted
+  again for `{ProxyHost, Port}`, `{connect, ...}` and `{socks5, ...}` proxy
+  options, instead of being silently ignored. Regression from a too-strict
+  `is_list/1` guard (issue #858).
 
 ### Dependencies
 
