@@ -83,3 +83,20 @@ verify_fun_passes_through_other_bad_cert_test() ->
     {VerifyFun, InitState} = proplists:get_value(verify_fun, Opts),
     ?assertEqual({fail, {bad_cert, unknown_ca}},
                  VerifyFun(fake_cert, {bad_cert, unknown_ca}, InitState)).
+
+verify_fun_passes_through_valid_test() ->
+    %% Valid and extension events must delegate to ssl_verify_hostname
+    %% unchanged, so valid chains (including partial chains whose anchor is
+    %% accepted) still verify. Only cert_expired is rewritten.
+    Opts = hackney_ssl:check_hostname_opts("example.com"),
+    {VerifyFun, InitState} = proplists:get_value(verify_fun, Opts),
+    ?assertEqual({valid, InitState}, VerifyFun(fake_cert, valid, InitState)),
+    ?assertEqual({unknown, InitState},
+                 VerifyFun(fake_cert, {extension, fake_ext}, InitState)).
+
+partial_chain_preserved_test() ->
+    %% The cross-sign verify_fun change must not drop the partial_chain
+    %% option; partial certificate chains rely on it to pick a trusted anchor.
+    Opts = hackney_ssl:check_hostname_opts("example.com"),
+    PartialChain = proplists:get_value(partial_chain, Opts),
+    ?assert(is_function(PartialChain, 1)).
