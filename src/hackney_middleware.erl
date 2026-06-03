@@ -49,7 +49,6 @@
 
 -type response() :: {ok, integer(), list(), binary()}
                   | {ok, integer(), list()}
-                  | {ok, reference()}
                   | {ok, pid()}
                   | {error, term()}.
 

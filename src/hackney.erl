@@ -76,7 +76,7 @@
 -type request_ret() ::
     {ok, integer(), list(), binary()} | %% response with body
     {ok, integer(), list()} |           %% HEAD request
-    {ok, reference()} |                 %% async mode
+    {ok, conn()} |                      %% async mode or streaming body upload (body = stream)
     {error, term()}.
 -export_type([url/0, conn/0, request_ret/0]).
 
