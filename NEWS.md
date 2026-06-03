@@ -1,5 +1,39 @@
 # NEWS
 
+4.2.0 - 2026-06-03
+------------------
+
+### Added
+
+- IPv6 for HTTP/3. The `family` connect option (`inet` | `inet6`) is forwarded
+  to QUIC, which resolves DNS and races addresses with Happy Eyeballs (RFC
+  8305). IPv6 literals such as `https://[::1]/` work too. `family` may be set in
+  `connect_options` or `ssl_options`.
+- 0-RTT and session resumption for HTTP/3. The server's session ticket is cached
+  in the pool per `{host, port, transport}` and replayed on the next
+  connection; a bodyless one-shot request is then sent as 0-RTT, otherwise the
+  ticket gives a resumed handshake. Enabled by default and controlled by the
+  `zero_rtt` option, with an explicit `session_ticket` taking precedence over
+  the cache. New `hackney_h3` helpers: `early_data_accepted/1`,
+  `get_session_ticket/1`, `wait_session_ticket/2`.
+
+### Fixed
+
+- Recover from an expired cross-signed root instead of failing the handshake
+  (e.g. Let's Encrypt's ISRG Root X2 cross-signed by the expired ISRG Root X1).
+  For HTTP/1.1 and HTTP/2 the verification function rewrites `cert_expired` to
+  `root_cert_expired` so OTP's cross-sign recovery runs; for HTTP/3 and
+  WebTransport the same recovery is in quic 1.6.2. A genuinely expired leaf or
+  intermediate still fails, and partial chains keep working.
+- HTTP/3 connections from the pool now apply `ssl_options` (`cacerts`,
+  `insecure`) that previously did not reach the QUIC layer.
+
+### Dependencies
+
+- quic 1.4.5 -> 1.6.2.
+- h2 0.6.1 -> 0.8.0.
+- webtransport 0.2.6 -> 0.3.0.
+
 4.1.0 - 2026-05-29
 ------------------
 
