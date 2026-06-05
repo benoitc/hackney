@@ -779,15 +779,20 @@ find_available(Key, Available) ->
             case is_process_alive(Pid) of
                 true ->
                     %% is_ready checks both state and socket health in one call
-                    case hackney_conn:is_ready(Pid) of
+                    try hackney_conn:is_ready(Pid) of
                         {ok, connected} -> {ok, Pid, Available2};
                         {ok, closed} ->
                             %% Connection closed, try reconnect
-                            case hackney_conn:connect(Pid) of
+                            try hackney_conn:connect(Pid) of
                                 ok -> {ok, Pid, Available2};
                                 _ -> find_available(Key, Available2)
+                            catch
+                                _:_ -> find_available(Key, Available2)
                             end;
                         _ -> find_available(Key, Available2)
+                    catch 
+                        _:_ -> 
+                            find_available(Key, Available2)
                     end;
                 false ->
                     find_available(Key, Available2)
