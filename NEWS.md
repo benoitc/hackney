@@ -1,5 +1,15 @@
 # NEWS
 
+4.2.2 - 2026-06-07
+------------------
+
+### Fixed
+
+- Pool no longer crashes when a pooled connection dies during the liveness
+  check. `find_available` could call `hackney_conn:is_ready/1` on a connection
+  that died right after the `is_process_alive/1` check, and the resulting
+  `noproc` exit took down the pool. The dead connection is now skipped. (#869)
+
 4.2.1 - 2026-06-05
 ------------------
 
