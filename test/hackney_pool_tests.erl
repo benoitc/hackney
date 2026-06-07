@@ -46,7 +46,9 @@ hackney_pool_integration_test_() ->
       {"prewarm creates connections", fun test_prewarm/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
-      {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}}
+      {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}},
+      {"checkout survives a connection dying mid-liveness-check (PR #869)",
+       {timeout, 30, fun test_checkout_survives_dying_connection/0}}
      ]}.
 
 setup_unit() ->
@@ -281,6 +283,57 @@ test_checkin_resets_owner() ->
     ?assertEqual(1, proplists:get_value(free_count, Stats2)),
 
     ok = hackney_pool:stop_pool(test_pool_checkin_owner).
+
+%% Regression test for PR #869.
+%%
+%% A pooled connection can die in the window between the
+%% is_process_alive/1 check and the hackney_conn:is_ready/1 call in
+%% find_available/2. is_ready/1 is a gen_statem:call, so the call then
+%% exits with {noproc,{gen_statem,call,[_,is_ready,infinity]}}, which
+%% used to crash the whole pool. The dead connection must be skipped.
+test_checkout_survives_dying_connection() ->
+    ok = hackney_pool:start_pool(test_pool_race, [{pool_size, 5}]),
+    Pool = hackney_pool:find_pool(test_pool_race),
+    Opts = [{pool, test_pool_race}],
+
+    %% Seed the free list with a real connection.
+    {ok, PoolInfo, RealPid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ok = hackney_pool:checkin(PoolInfo, RealPid),
+    timer:sleep(20),
+    ?assertEqual(1, proplists:get_value(free_count, hackney_pool:get_stats(test_pool_race))),
+
+    %% Swap the pooled connection for a process that is alive for
+    %% is_process_alive/1 but exits the instant is_ready/1 calls it,
+    %% reproducing the race exactly.
+    Poison = spawn(fun() -> receive _ -> exit(noproc_race) end end),
+    _ = sys:replace_state(Pool, fun(S) -> swap_pid(S, RealPid, Poison) end),
+
+    %% Pre-fix this crashes the pool; post-fix the dead connection is
+    %% skipped and a fresh one is started.
+    Result = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assert(is_process_alive(Pool)),
+    ?assertMatch({ok, _, _}, Result),
+    {ok, _, FreshPid} = Result,
+    ?assertNotEqual(Poison, FreshPid),
+
+    hackney_conn:stop(FreshPid),
+    hackney_conn:stop(RealPid),
+    ok = hackney_pool:stop_pool(test_pool_race).
+
+%% Rewrite a pid Old -> New inside list-valued map fields of the pool
+%% state record. Only #state.available holds pid lists, so this targets
+%% it without depending on the record's field layout.
+swap_pid(State, Old, New) ->
+    list_to_tuple([swap_field(F, Old, New) || F <- tuple_to_list(State)]).
+
+swap_field(M, Old, New) when is_map(M) ->
+    maps:map(fun(_K, V) when is_list(V) -> [swap_one(P, Old, New) || P <- V];
+                (_K, V) -> V
+             end, M);
+swap_field(F, _Old, _New) -> F.
+
+swap_one(Old, Old, New) -> New;
+swap_one(P, _Old, _New) -> P.
 
 %%====================================================================
 %% Prewarm Tests
