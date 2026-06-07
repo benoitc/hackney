@@ -778,7 +778,10 @@ find_available(Key, Available) ->
             %% Verify connection is still alive and usable
             case is_process_alive(Pid) of
                 true ->
-                    %% is_ready checks both state and socket health in one call
+                    %% is_ready checks both state and socket health in one call.
+                    %% The connection can die between is_process_alive/1 above
+                    %% and these gen_statem calls (flaky network); the resulting
+                    %% noproc exit must not crash the pool, so skip and move on.
                     try hackney_conn:is_ready(Pid) of
                         {ok, connected} -> {ok, Pid, Available2};
                         {ok, closed} ->
@@ -790,9 +793,8 @@ find_available(Key, Available) ->
                                 _:_ -> find_available(Key, Available2)
                             end;
                         _ -> find_available(Key, Available2)
-                    catch 
-                        _:_ -> 
-                            find_available(Key, Available2)
+                    catch
+                        _:_ -> find_available(Key, Available2)
                     end;
                 false ->
                     find_available(Key, Available2)
