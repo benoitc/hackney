@@ -1,5 +1,16 @@
 # NEWS
 
+4.2.3 - 2026-06-10
+------------------
+
+### Dependencies
+
+- h2 0.8.0 -> 0.9.0.
+- webtransport 0.3.2 -> 0.3.3.
+- parse_trans 3.4.1 -> 3.4.2.
+- cowboy 2.12.0 -> 2.16.0 (test only); ranch test helper updated for the
+  ranch 2.x protocol callback.
+
 4.2.2 - 2026-06-07
 ------------------
 

@@ -7,10 +7,10 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -behaviour(ranch_protocol).
--export([start_link/4]).
+-export([start_link/3]).
 
-%% Ranch protocol - just accept and hold connection open
-start_link(Ref, _Socket, Transport, _Opts) ->
+%% Ranch protocol (ranch 2.x) - just accept and hold connection open
+start_link(Ref, Transport, _Opts) ->
     Pid = spawn_link(fun() -> init(Ref, Transport) end),
     {ok, Pid}.
 
