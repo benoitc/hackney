@@ -108,7 +108,9 @@ pool_session_test_() ->
       {"get returns none when nothing cached", fun pool_get_none/0},
       {"store then get returns the ticket", fun pool_store_get/0},
       {"delete removes the cached ticket", fun pool_delete/0},
-      {"tickets are keyed by host/port/transport", fun pool_keying/0}
+      {"tickets are keyed by host/port/transport", fun pool_keying/0},
+      {"tickets are keyed by trust projection", fun pool_trust_keying/0},
+      {"explicit h3_tls_key round-trips store/get/delete", fun pool_tls_key_roundtrip/0}
      ]}.
 
 pool_get_none() ->
@@ -135,3 +137,30 @@ pool_keying() ->
     ok = hackney_pool:store_h3_session("c.example", 443, hackney_ssl, T, []),
     ?assertEqual(none,
                  hackney_pool:get_h3_session("c.example", 8443, hackney_ssl, [])).
+
+pool_trust_keying() ->
+    %% Regression for the trust hole: a ticket obtained under verify_none
+    %% must never be served to a verify_peer request, since 0-RTT PSK
+    %% resumption skips certificate validation.
+    T = {ticket, make_ref()},
+    InsecureKey = hackney_ssl:h3_options_key([{insecure, true}], []),
+    VerifyKey = hackney_ssl:h3_options_key([], []),
+    ok = hackney_pool:store_h3_session("d.example", 443, hackney_ssl, T,
+                                       [{h3_tls_key, InsecureKey}]),
+    ?assertEqual(none,
+                 hackney_pool:get_h3_session("d.example", 443, hackney_ssl,
+                                             [{h3_tls_key, VerifyKey}])),
+    ?assertEqual({ok, T},
+                 hackney_pool:get_h3_session("d.example", 443, hackney_ssl,
+                                             [{h3_tls_key, InsecureKey}])).
+
+pool_tls_key_roundtrip() ->
+    T = {ticket, make_ref()},
+    K = hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca.pem"}]),
+    Opts = [{h3_tls_key, K}],
+    ok = hackney_pool:store_h3_session("e.example", 443, hackney_ssl, T, Opts),
+    ?assertEqual({ok, T},
+                 hackney_pool:get_h3_session("e.example", 443, hackney_ssl, Opts)),
+    ok = hackney_pool:delete_h3_session("e.example", 443, hackney_ssl, Opts),
+    ?assertEqual(none,
+                 hackney_pool:get_h3_session("e.example", 443, hackney_ssl, Opts)).

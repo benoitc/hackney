@@ -39,7 +39,9 @@ h3_pool_test_() ->
                 {"checkout_h3 returns none when no connection", fun test_h3_checkout_none/0},
                 {"register_h3 and checkout_h3", fun test_h3_register_checkout/0},
                 {"unregister_h3 removes connection", fun test_h3_unregister/0},
-                {"connection death cleans h3_connections", fun test_h3_connection_death/0}
+                {"connection death cleans h3_connections", fun test_h3_connection_death/0},
+                {"h3_tls_key isolates connections", fun test_h3_tls_key_isolation/0},
+                {"absent h3_tls_key uses default bucket", fun test_h3_tls_key_default_bucket/0}
             ]
         }
     }.
@@ -104,6 +106,41 @@ test_h3_connection_death() ->
 
     %% Checkout should detect the dead connection and return none
     ?assertEqual(none, hackney_pool:checkout_h3("h3death.example.com", 443, hackney_ssl, [])).
+
+test_h3_tls_key_isolation() ->
+    %% A connection registered under one trust key must not be handed out
+    %% for a request carrying a different trust key.
+    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    K1 = hackney_ssl:h3_options_key([{insecure, true}], []),
+    K2 = hackney_ssl:h3_options_key([], []),
+    ok = hackney_pool:register_h3("h3key.example.com", 443, hackney_ssl, DummyConn,
+                                  [{h3_tls_key, K1}]),
+    timer:sleep(50),
+
+    ?assertEqual(none, hackney_pool:checkout_h3("h3key.example.com", 443, hackney_ssl,
+                                                [{h3_tls_key, K2}])),
+    ?assertEqual({ok, DummyConn},
+                 hackney_pool:checkout_h3("h3key.example.com", 443, hackney_ssl,
+                                          [{h3_tls_key, K1}])),
+
+    %% Cleanup
+    DummyConn ! stop.
+
+test_h3_tls_key_default_bucket() ->
+    %% Callers without an h3_tls_key land in the default bucket, isolated
+    %% from explicitly keyed connections.
+    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    K1 = hackney_ssl:h3_options_key([{insecure, true}], []),
+    ok = hackney_pool:register_h3("h3default.example.com", 443, hackney_ssl, DummyConn, []),
+    timer:sleep(50),
+
+    ?assertEqual(none, hackney_pool:checkout_h3("h3default.example.com", 443, hackney_ssl,
+                                                [{h3_tls_key, K1}])),
+    ?assertEqual({ok, DummyConn},
+                 hackney_pool:checkout_h3("h3default.example.com", 443, hackney_ssl, [])),
+
+    %% Cleanup
+    DummyConn ! stop.
 
 %%====================================================================
 %% Multiplexing Tests

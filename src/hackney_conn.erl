@@ -71,9 +71,11 @@
     is_ready/1,
     %% SSL upgrade
     upgrade_to_ssl/2,
+    upgrade_to_ssl/3,
     is_upgraded_ssl/1,
     %% Reuse control
     is_no_reuse/1,
+    checkin_info/1,
     %% Owner management
     set_owner/2,
     set_owner_async/2,
@@ -166,8 +168,12 @@
     follow_redirect = false :: boolean(),
 
     %% SSL upgrade tracking - set when TCP connection is upgraded to SSL
-    %% Upgraded connections should NOT be returned to pool
+    %% Upgraded connections are not returned to the pool unless pool_ssl is set
     upgraded_ssl = false :: boolean(),
+
+    %% Set with upgraded_ssl when the caller opted into ssl_pooling, allowing
+    %% the pool to keep the upgraded HTTPS/1.1 connection instead of closing it
+    pool_ssl = false :: boolean(),
 
     %% No-reuse flag - set for connections that should never be pooled
     %% (e.g., SOCKS5 proxy connections which establish per-request tunnels)
@@ -519,7 +525,17 @@ is_ready(Pid) ->
 %% NOT be returned to the pool (SSL connections are not pooled for security).
 -spec upgrade_to_ssl(pid(), list()) -> ok | {error, term()}.
 upgrade_to_ssl(Pid, SslOpts) ->
-    gen_statem:call(Pid, {upgrade_to_ssl, SslOpts}, infinity).
+    upgrade_to_ssl(Pid, SslOpts, #{final => false}).
+
+%% @doc Upgrade a TCP connection to SSL with explicit upgrade options.
+%% With `#{final => true}' SslOpts is handed to `ssl:connect/2' as-is
+%% (the caller computed it via hackney_ssl:effective_opts/3); the default
+%% `#{final => false}' keeps the legacy behavior of merging defaults and
+%% ALPN options inside the connection process. `#{pool_ssl => true}' marks
+%% the upgraded connection as poolable again (ssl_pooling opt-in).
+-spec upgrade_to_ssl(pid(), list(), map()) -> ok | {error, term()}.
+upgrade_to_ssl(Pid, SslOpts, UpgradeOpts) when is_map(UpgradeOpts) ->
+    gen_statem:call(Pid, {upgrade_to_ssl, SslOpts, UpgradeOpts}, infinity).
 
 %% @doc Check if this connection was upgraded from TCP to SSL.
 %% Upgraded connections should be closed after use, not returned to pool.
@@ -532,6 +548,14 @@ is_upgraded_ssl(Pid) ->
 -spec is_no_reuse(pid()) -> boolean().
 is_no_reuse(Pid) ->
     gen_statem:call(Pid, is_no_reuse).
+
+%% @doc Get the flags the pool needs for its checkin decision in one call:
+%% whether the connection was SSL upgraded, opted into SSL pooling, must not
+%% be reused (proxy tunnels), and the negotiated protocol.
+-spec checkin_info(pid()) -> #{upgraded_ssl := boolean(), no_reuse := boolean(),
+                               pool_ssl := boolean(), protocol := atom()}.
+checkin_info(Pid) ->
+    gen_statem:call(Pid, checkin_info).
 
 %% @doc Get the negotiated protocol for this connection.
 %% Returns http1, http2, or http3 based on ALPN negotiation (SSL connections),
@@ -808,21 +832,29 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
             end
     end;
 
-connected({call, From}, {upgrade_to_ssl, _SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
+connected({call, From}, {upgrade_to_ssl, _SslOpts, _UpgradeOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
     %% Already SSL - no upgrade needed
     {keep_state_and_data, [{reply, From, ok}]};
-connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
+connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
     %% Upgrade TCP socket to SSL (e.g., after CONNECT proxy tunnel)
-    %% Use ssl_opts/2 to properly merge defaults with user options
-    %% (handles cacertfile vs cacerts correctly)
-    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts}]),
-    %% Add ALPN options for HTTP/2 negotiation
-    %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
-    AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
-        [] -> hackney_ssl:alpn_opts(ConnectOpts);
-        Opts -> Opts
+    FinalSslOpts = case maps:get(final, UpgradeOpts, false) of
+        true ->
+            %% Caller computed the exact handshake options with
+            %% hackney_ssl:effective_opts/3; use them as-is so the pool
+            %% tls_key hash matches what the handshake actually used.
+            SslOpts;
+        false ->
+            %% Use ssl_opts/2 to properly merge defaults with user options
+            %% (handles cacertfile vs cacerts correctly)
+            MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts}]),
+            %% Add ALPN options for HTTP/2 negotiation
+            %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
+            AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
+                [] -> hackney_ssl:alpn_opts(ConnectOpts);
+                Opts -> Opts
+            end,
+            hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
     end,
-    FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
     case ssl:connect(Socket, FinalSslOpts) of
         {ok, SslSocket} ->
             %% Detect negotiated protocol
@@ -831,7 +863,8 @@ connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, h
             NewData = Data#conn_data{
                 transport = hackney_ssl,
                 socket = SslSocket,
-                upgraded_ssl = true,  % Mark as upgraded - should NOT return to pool
+                upgraded_ssl = true,  % Mark as upgraded - pooled again only with pool_ssl
+                pool_ssl = maps:get(pool_ssl, UpgradeOpts, false),
                 protocol = Protocol
             },
             %% Initialize HTTP/2 if negotiated
@@ -850,6 +883,9 @@ connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
 
 connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
+
+connected({call, From}, checkin_info, Data) ->
+    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
@@ -1652,6 +1688,9 @@ handle_common({call, From}, is_upgraded_ssl, _State, #conn_data{upgraded_ssl = U
 handle_common({call, From}, is_no_reuse, _State, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
+handle_common({call, From}, checkin_info, _State, Data) ->
+    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
+
 handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol}) ->
     {keep_state_and_data, [{reply, From, Protocol}]};
 
@@ -2249,12 +2288,23 @@ notify_pool_available(#conn_data{pool_pid = PoolPid}) ->
 %% @private Notify pool that connection is available for reuse (sync)
 %% This ensures the pool has processed the checkin before returning.
 %% We pass a "should close" flag to avoid deadlock (pool can't call back to us).
-%% The flag is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
+%% The flag is true for proxy tunnels (no_reuse), for SSL upgrades unless the
+%% caller opted into ssl_pooling, and for non HTTP/1.1 conns (multiplexed
+%% conns never enter the pool's available set).
 notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
     ok;
-notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl, no_reuse = NoReuse}) ->
-    ShouldClose = UpgradedSsl orelse NoReuse,
+notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl,
+                                      no_reuse = NoReuse, pool_ssl = PoolSsl,
+                                      protocol = Protocol}) ->
+    ShouldClose = NoReuse orelse (UpgradedSsl andalso not PoolSsl)
+        orelse Protocol =/= http1,
     gen_server:call(PoolPid, {checkin_sync, self(), ShouldClose}, 5000).
+
+%% @private Flags for the pool's checkin decision, see checkin_info/1.
+checkin_info_map(#conn_data{upgraded_ssl = UpgradedSsl, no_reuse = NoReuse,
+                            pool_ssl = PoolSsl, protocol = Protocol}) ->
+    #{upgraded_ssl => UpgradedSsl, no_reuse => NoReuse,
+      pool_ssl => PoolSsl, protocol => Protocol}.
 
 %% @private Start an async request
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->
@@ -2408,11 +2458,26 @@ do_tcp_connect(From, Data) ->
     TransportOpts = proplists:delete(protocols, ConnectOpts),
     Opts = case Transport of
         hackney_ssl ->
-            %% Use ssl_opts/2 to properly merge defaults with user options
-            %% (handles cacertfile vs cacerts correctly)
-            MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
-            AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
-            FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
+            FinalSslOpts = case SslOpts0 of
+                [] ->
+                    %% Default TLS config: build the handshake options like the
+                    %% pooled path does, which also makes the connection
+                    %% eligible for TLS 1.3 session resumption.
+                    SslOpts1 = case proplists:get_value(protocols, ConnectOpts) of
+                        undefined -> [];
+                        Protocols -> [{protocols, Protocols}]
+                    end,
+                    hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts);
+                _ ->
+                    %% Keep the legacy build for custom ssl_options: routing
+                    %% them through effective_opts would change the
+                    %% hostname-verification target for a user-supplied
+                    %% server_name_indication (merge_ssl_opts takes the first
+                    %% SNI occurrence).
+                    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
+                    AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+                    hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
+            end,
             TransportOpts ++ [{ssl_options, FinalSslOpts}];
         _ -> TransportOpts
     end,
@@ -3180,11 +3245,17 @@ maybe_store_h3_session(_Ticket, #conn_data{pool_handler = undefined}) ->
     ok;
 maybe_store_h3_session(Ticket, #conn_data{pool_handler = PoolHandler, host = Host,
                                           port = Port, transport = Transport,
-                                          pool_name = PoolName}) ->
+                                          pool_name = PoolName,
+                                          connect_options = ConnectOpts,
+                                          ssl_options = SslOpts}) ->
     case erlang:function_exported(PoolHandler, store_h3_session, 5) of
         true ->
+            %% connect_options may carry the injected per-resumption
+            %% session_ticket; h3_options_key ignores it, so this key matches
+            %% the one the request side computes without the ticket.
+            K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
             try PoolHandler:store_h3_session(Host, Port, Transport, Ticket,
-                                             [{pool, PoolName}])
+                                             [{pool, PoolName}, {h3_tls_key, K3}])
             catch _:_ -> ok
             end,
             ok;
@@ -3197,11 +3268,14 @@ maybe_delete_h3_session(#conn_data{pool_handler = undefined}) ->
     ok;
 maybe_delete_h3_session(#conn_data{pool_handler = PoolHandler, host = Host,
                                    port = Port, transport = Transport,
-                                   pool_name = PoolName}) ->
+                                   pool_name = PoolName,
+                                   connect_options = ConnectOpts,
+                                   ssl_options = SslOpts}) ->
     case erlang:function_exported(PoolHandler, delete_h3_session, 4) of
         true ->
+            K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
             try PoolHandler:delete_h3_session(Host, Port, Transport,
-                                              [{pool, PoolName}])
+                                              [{pool, PoolName}, {h3_tls_key, K3}])
             catch _:_ -> ok
             end,
             ok;

@@ -164,13 +164,19 @@ connect_pool(Transport, Host, Port, Options) ->
   %% For SSL connections, try multiplexed protocols (HTTP/3 first, then HTTP/2)
   case Transport of
     hackney_ssl ->
+      %% Compute the exact TLS handshake options once; their hash keys the
+      %% shared HTTP/2 connection so requests with different ssl_options
+      %% never share a connection. FinalSslOpts is passed alongside Options
+      %% (not inside it) to keep the large CA material out of the pool state.
+      {FinalSslOpts, TlsKey} = effective_ssl_opts(Host, Options),
+      Options2 = [{tls_key, TlsKey} | Options],
       %% Check HTTP/3 first if allowed
       case H3Allowed andalso try_h3_connection(Host, Port, Transport, Options, PoolHandler) of
         {ok, H3Pid} ->
           {ok, H3Pid};
         _ when H2Allowed ->
           %% Try HTTP/2 multiplexing
-          case PoolHandler:checkout_h2(Host, Port, Transport, Options) of
+          case PoolHandler:checkout_h2(Host, Port, Transport, Options2) of
             {ok, H2Pid} ->
               %% Verify connection is actually in connected state
               %% (OTP 28 on FreeBSD may have timing issues with SSL connections)
@@ -179,30 +185,50 @@ connect_pool(Transport, Host, Port, Options) ->
                           {ok, H2Pid};
                 _ ->
                   %% Connection not ready, unregister and create new
-                  PoolHandler:unregister_h2(H2Pid, Options),
-                  connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+                  PoolHandler:unregister_h2(H2Pid, Options2),
+                  connect_pool_new(Transport, Host, Port, Options2, FinalSslOpts, PoolHandler)
               end;
             none ->
-              connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+              connect_pool_new(Transport, Host, Port, Options2, FinalSslOpts, PoolHandler)
           end;
         _ ->
           %% No multiplexed protocols allowed or available
-          connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+          connect_pool_new(Transport, Host, Port, Options2, FinalSslOpts, PoolHandler)
       end;
     _ ->
       %% Non-SSL, use normal pool
-      connect_pool_new(Transport, Host, Port, Options, PoolHandler)
+      connect_pool_new(Transport, Host, Port, Options, undefined, PoolHandler)
   end.
+
+%% @private Build the exact TLS handshake options for a pooled SSL request,
+%% plus their memoized pool key hash. Single source of truth: replicates
+%% what maybe_upgrade_ssl used to build inline, including the optional
+%% protocols entry for ALPN.
+effective_ssl_opts(Host, Options) ->
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  SslOpts2 = case proplists:get_value(protocols, Options, undefined) of
+    undefined -> SslOpts;
+    Protocols -> [{protocols, Protocols} | SslOpts]
+  end,
+  ConnectOpts = proplists:get_value(connect_options, Options, []),
+  hackney_ssl:effective_opts_and_key(Host, SslOpts2, ConnectOpts).
 
 %% @private Try to get or establish an HTTP/3 connection
 try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
+  %% Hash the QUIC trust projection once; it keys both the shared H3
+  %% connection and the 0-RTT ticket cache so requests with differing
+  %% trust configs never share either.
+  ConnectOpts = proplists:get_value(connect_options, Options, []),
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
+  Options2 = [{h3_tls_key, K3} | Options],
   %% Check if HTTP/3 is blocked for this host (negative cache)
   case hackney_altsvc:is_h3_blocked(Host, Port) of
     true ->
       false;
     false ->
       %% Check if we have an existing HTTP/3 connection
-      case PoolHandler:checkout_h3(Host, Port, Transport, Options) of
+      case PoolHandler:checkout_h3(Host, Port, Transport, Options2) of
         {ok, H3Pid} ->
           %% Verify connection is actually in connected state
           case hackney_conn:get_state(H3Pid) of
@@ -210,21 +236,21 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
               {ok, H3Pid};
             _ ->
               %% Connection not ready, unregister and try new connection
-              PoolHandler:unregister_h3(H3Pid, Options),
-              try_new_h3_connection(Host, Port, Transport, Options, PoolHandler)
+              PoolHandler:unregister_h3(H3Pid, Options2),
+              try_new_h3_connection(Host, Port, Transport, Options2, PoolHandler)
           end;
         none ->
           %% Check Alt-Svc cache for known HTTP/3 endpoint
           case hackney_altsvc:lookup(Host, Port) of
             {ok, h3, H3Port} ->
               %% Alt-Svc says HTTP/3 is available, try connecting
-              try_new_h3_connection(Host, H3Port, Transport, Options, PoolHandler);
+              try_new_h3_connection(Host, H3Port, Transport, Options2, PoolHandler);
             none ->
               %% No Alt-Svc cached, only try H3 if explicitly requested
               case lists:member(http3, proplists:get_value(protocols, Options, [])) of
                 true ->
                   %% User explicitly wants HTTP/3, try it
-                  try_new_h3_connection(Host, Port, Transport, Options, PoolHandler);
+                  try_new_h3_connection(Host, Port, Transport, Options2, PoolHandler);
                 false ->
                   false
               end
@@ -309,7 +335,7 @@ maybe_inject_h3_session(ConnectOpts, SslOpts, Host, Port, Transport, Options, Po
       end
   end.
 
-connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
+connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
   MaxPerHost = proplists:get_value(max_per_host, Options, 50),
   CheckoutTimeout = proplists:get_value(checkout_timeout, Options,
                       proplists:get_value(connect_timeout, Options, 8000)),
@@ -318,28 +344,63 @@ connect_pool_new(Transport, Host, Port, Options, PoolHandler) ->
   case hackney_load_regulation:acquire(Host, Port, MaxPerHost, CheckoutTimeout) of
     ok ->
       %% Slot acquired - now get connection from pool
-      %% Always checkout as TCP - pool only stores TCP connections
-      case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
-        {ok, _PoolRef, ConnPid} ->
-          %% Got TCP connection - upgrade to SSL if needed
-          case maybe_upgrade_ssl(Transport, ConnPid, Host, Options) of
-            ok ->
-              %% Check if HTTP/2 was negotiated, register for multiplexing
-              maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
+      SslPooling = proplists:get_value(ssl_pooling, Options,
+                     hackney_app:get_app_env(ssl_pooling, false)),
+      case Transport =:= hackney_ssl andalso SslPooling =:= true
+           andalso erlang:function_exported(PoolHandler, checkout_ssl, 4) of
+        true ->
+          %% Opt-in ssl_pooling: pooled HTTPS/1.1 connections are reused on
+          %% an exact match of the TLS options hash (tls_key in Options)
+          connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler);
+        false ->
+          %% Always checkout as TCP - pool only stores TCP connections
+          case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
+            {ok, _PoolRef, ConnPid} ->
+              %% Got TCP connection - upgrade to SSL if needed
+              case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
+                ok ->
+                  %% Check if HTTP/2 was negotiated, register for multiplexing
+                  maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
                   {ok, ConnPid};
+                {error, Reason} ->
+                  %% Upgrade failed - release slot and close connection
+                  hackney_load_regulation:release(Host, Port),
+                  stop_conn(ConnPid),
+                  {error, Reason}
+              end;
             {error, Reason} ->
-              %% Upgrade failed - release slot and close connection
+              %% Checkout failed - release slot
               hackney_load_regulation:release(Host, Port),
-              stop_conn(ConnPid),
               {error, Reason}
-          end;
-        {error, Reason} ->
-          %% Checkout failed - release slot
-          hackney_load_regulation:release(Host, Port),
-          {error, Reason}
+          end
       end;
     {error, timeout} ->
       {error, checkout_timeout}
+  end.
+
+%% @private SSL-pooling checkout. A `ready' conn is an already-upgraded
+%% HTTPS/1.1 connection reused on an exact tls_key match; it was registered
+%% for h2 at creation if applicable, so it is not re-registered here. A
+%% `needs_upgrade' conn is a TCP connection upgraded with pool_ssl so it can
+%% return to the pool at checkin.
+connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
+  case PoolHandler:checkout_ssl(Host, Port, Transport, Options) of
+    {ok, _PoolRef, ConnPid, ready} ->
+      {ok, ConnPid};
+    {ok, _PoolRef, ConnPid, needs_upgrade} ->
+      case hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts,
+                                       #{final => true, pool_ssl => true}) of
+        ok ->
+          maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
+          {ok, ConnPid};
+        {error, Reason} ->
+          hackney_load_regulation:release(Host, Port),
+          stop_conn(ConnPid),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      hackney_load_regulation:release(Host, Port),
+      {error, Reason}
   end.
 
 %% @private Register HTTP/2 connection for multiplexing if applicable
@@ -359,15 +420,10 @@ maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
       ok
   end.
 
-%% @private Upgrade TCP connection to SSL if needed
-maybe_upgrade_ssl(hackney_ssl, ConnPid, Host, Options) ->
-  SslOpts = proplists:get_value(ssl_options, Options, []),
-  %% Add protocols option for ALPN negotiation if specified
-  Protocols = proplists:get_value(protocols, Options, undefined),
-  SslOpts2 = case Protocols of
-    undefined -> SslOpts;
-    _ -> [{protocols, Protocols} | SslOpts]
-  end,
+%% @private Upgrade TCP connection to SSL if needed.
+%% FinalSslOpts is precomputed by effective_ssl_opts/2 so the handshake uses
+%% exactly the options hashed into the pool tls_key.
+maybe_upgrade_ssl(hackney_ssl, ConnPid, FinalSslOpts) ->
   %% Check if connection is already SSL (e.g., reused SSL connection)
   try hackney_conn:is_upgraded_ssl(ConnPid) of
     true ->
@@ -375,13 +431,13 @@ maybe_upgrade_ssl(hackney_ssl, ConnPid, Host, Options) ->
       ok;
     _ ->
       %% Upgrade TCP to SSL with ALPN
-      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts2])
+      hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts, #{final => true})
   catch
     _:_ ->
       %% Connection terminated, attempt upgrade anyway
-      hackney_conn:upgrade_to_ssl(ConnPid, [{server_name_indication, Host} | SslOpts2])
+      hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts, #{final => true})
   end;
-maybe_upgrade_ssl(_, _ConnPid, _Host, _Options) ->
+maybe_upgrade_ssl(_, _ConnPid, _FinalSslOpts) ->
   %% Not SSL, no upgrade needed
   ok.
 

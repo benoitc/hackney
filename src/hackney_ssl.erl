@@ -23,6 +23,14 @@
 -export([check_hostname_opts/1]).
 -export([cipher_opts/0]).
 -export([ssl_opts/2]).
+-export([effective_opts/3]).
+-export([effective_opts_and_key/3]).
+-export([init_key_cache/0]).
+-export([options_key/1]).
+-export([h3_options_key/2]).
+
+-define(TLS_KEY_CACHE, hackney_tls_keys).
+-define(TLS_KEY_CACHE_MAX, 512).
 
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
@@ -77,8 +85,153 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
       MergedOpts
   end.
 
+%% @doc Build the exact options handed to `ssl:connect/2' for an SSL upgrade.
+%% SslOpts is the caller's ssl_options, with an optional `{protocols, P}'
+%% entry prepended when the request carries one. ConnectOpts is only used
+%% as the ALPN fallback when SslOpts yields no ALPN protocols. Computing
+%% the final list once, caller-side, lets `options_key/1' hash the same
+%% term the handshake uses.
+%%
+%% Requests on hackney's default TLS config (no user ssl_options) also get
+%% `{session_tickets, auto}' for TLS 1.3 session resumption, unless the
+%% `tls_session_resumption' application env is set to false or the node
+%% pins the ssl app to versions without 'tlsv1.3'. Custom ssl_options
+%% deliberately never get resumption: OTP's automatic ticket store is
+%% global per node and keyed by SNI, not by trust options, and a
+%% PSK-resumed handshake skips certificate validation. Restricting it to
+%% the default config means every participant in the store has identical
+%% trust, so trust configs cannot cross by construction.
+-spec effective_opts(string(), list(), list()) -> list().
+effective_opts(Host, SslOpts, ConnectOpts) ->
+  SslOpts1 = [{server_name_indication, Host} | SslOpts],
+  Merged = ssl_opts(Host, [{ssl_options, SslOpts1}]),
+  Alpn = case alpn_opts(SslOpts1) of
+    [] -> alpn_opts(ConnectOpts);
+    AlpnOpts -> AlpnOpts
+  end,
+  Final0 = hackney_util:merge_opts(Merged, Alpn),
+  %% `protocols' is a hackney option, not an ssl one; keep it out of the
+  %% handshake options.
+  Final = proplists:delete(protocols, Final0),
+  case resumption_allowed(SslOpts) of
+    true -> [{session_tickets, auto} | Final];
+    false -> Final
+  end.
 
+%% @private Resumption only for the default TLS config: the caller injects
+%% at most a `protocols' entry, so deleting it leaves [] exactly when the
+%% user passed no ssl_options (hence no insecure, versions or
+%% session_tickets overrides by construction).
+resumption_allowed(SslOpts) ->
+  proplists:delete(protocols, SslOpts) =:= []
+    andalso hackney_app:get_app_env(tls_session_resumption, true) =:= true
+    andalso tlsv13_allowed().
 
+%% @private OTP rejects `session_tickets' when 'tlsv1.3' is not among the
+%% effective versions (ssl_config asserts the version dependency), so honor
+%% a node-wide ssl `protocol_version' pin that excludes TLS 1.3.
+tlsv13_allowed() ->
+  case application:get_env(ssl, protocol_version) of
+    undefined -> true;
+    {ok, 'tlsv1.3'} -> true;
+    {ok, Versions} when is_list(Versions) -> lists:member('tlsv1.3', Versions);
+    {ok, _} -> false
+  end.
+
+%% @doc Create the TLS key memo table used by `effective_opts_and_key/3'.
+%% Idempotent; called from hackney_sup:init/1.
+-spec init_key_cache() -> ok.
+init_key_cache() ->
+  case ets:info(?TLS_KEY_CACHE) of
+    undefined ->
+      ?TLS_KEY_CACHE = ets:new(?TLS_KEY_CACHE,
+                               [set, public, named_table,
+                                {read_concurrency, true}]),
+      ok;
+    _ ->
+      ok
+  end.
+
+%% @doc Like `effective_opts/3' but also return `options_key/1' of the
+%% result, memoized in a bounded ETS cache. Building the options is cheap;
+%% hashing them is not (sha256 over the full term, dominated by the certifi
+%% CA bundle), so only the hash is cached. The memo key is the small
+%% pre-merge inputs plus `env_fingerprint/0', so a runtime env flip yields
+%% a fresh key instead of hashing connections into wrong pool buckets.
+-spec effective_opts_and_key(string(), list(), list()) -> {list(), binary()}.
+effective_opts_and_key(Host, SslOpts, ConnectOpts) ->
+  Final = effective_opts(Host, SslOpts, ConnectOpts),
+  MemoKey = {Host, SslOpts, ConnectOpts, env_fingerprint()},
+  try
+    case ets:lookup(?TLS_KEY_CACHE, MemoKey) of
+      [{_, Key}] ->
+        {Final, Key};
+      [] ->
+        Key = options_key(Final),
+        %% The bound is soft under concurrency; the cache is best-effort.
+        case ets:info(?TLS_KEY_CACHE, size) >= ?TLS_KEY_CACHE_MAX of
+          true -> _ = ets:delete_all_objects(?TLS_KEY_CACHE);
+          false -> ok
+        end,
+        _ = ets:insert(?TLS_KEY_CACHE, {MemoKey, Key}),
+        {Final, Key}
+    end
+  catch
+    %% Table absent: hackney used as a library without the app started.
+    error:badarg ->
+      {Final, options_key(Final)}
+  end.
+
+%% @private Invariant: this tuple must cover every mutable read inside
+%% effective_opts/3 (default_protocols via alpn_opts, the
+%% tls_session_resumption env via resumption_allowed, the ssl
+%% protocol_version env via tlsv13_allowed). Extend it whenever
+%% effective_opts/3 grows a new env read, or stale keys get served.
+env_fingerprint() ->
+  {hackney_util:default_protocols(),
+   hackney_app:get_app_env(tls_session_resumption, true),
+   application:get_env(ssl, protocol_version, undefined)}.
+
+%% @doc Hash the effective TLS options into a pool key component.
+%% 2-tuples are ukeysorted (first occurrence wins, preserving proplists
+%% lookup semantics) so option order does not change the key, while
+%% conflicting duplicates such as `[{verify,A},{verify,B}]' and its
+%% reverse still hash differently.
+-spec options_key(list()) -> binary().
+options_key(FinalSslOpts) ->
+  {Tuples, Rest} = lists:partition(
+    fun(T) -> is_tuple(T) andalso tuple_size(T) =:= 2 end,
+    FinalSslOpts),
+  crypto:hash(sha256, term_to_binary({lists:ukeysort(1, Tuples), lists:usort(Rest)})).
+
+%% @doc Hash the QUIC trust projection of an HTTP/3 connection into a pool
+%% key component. Includes exactly what decides server trust on the QUIC
+%% handshake, mirroring `hackney_conn:h3_tls_opts/2': the verify mode
+%% derived from the `insecure' flag (read from ConnectOpts first, then
+%% SslOpts) and the CA source from SslOpts (the `cacerts' list, else the
+%% `cacertfile' path, else the default trust store). The cacertfile path is
+%% hashed as given, without reading the file. Deliberately excluded:
+%% `session_ticket' (injected per resumption, so the conn-side store key
+%% must not depend on it), and `family' and `happy_eyeballs' (connectivity
+%% options that do not affect trust).
+-spec h3_options_key(list(), list()) -> binary().
+h3_options_key(ConnectOpts, SslOpts) ->
+  Insecure = proplists:get_value(insecure, ConnectOpts,
+               proplists:get_value(insecure, SslOpts, false)),
+  VerifyMode = case Insecure of
+    true -> verify_none;
+    false -> verify_peer
+  end,
+  CaSource = case proplists:get_value(cacerts, SslOpts) of
+    undefined ->
+      case proplists:get_value(cacertfile, SslOpts) of
+        undefined -> default;
+        File -> {cacertfile, File}
+      end;
+    CACerts ->
+      {cacerts, CACerts}
+  end,
+  crypto:hash(sha256, term_to_binary({VerifyMode, CaSource})).
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),
