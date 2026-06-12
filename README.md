@@ -95,6 +95,17 @@ hackney:get(URL, [], <<>>, [{pool, api_pool}]).
 hackney:get(URL, [], <<>>, [{pool, false}]).
 ```
 
+By default only plain TCP connections stay in the pool: an HTTPS request
+upgrades a pooled TCP connection and the SSL connection is closed after use.
+Set `{ssl_pooling, true}` per request (or the `ssl_pooling` application env)
+to also pool HTTPS/1.1 connections. Pooled SSL connections are keyed by their
+TLS options, so only requests with identical `ssl_options` reuse them:
+
+```erlang
+%% Reuse HTTPS/1.1 connections, skipping the TLS handshake
+hackney:get(URL, [], <<>>, [{ssl_pooling, true}]).
+```
+
 ### Streaming
 
 Stream request bodies for uploads:

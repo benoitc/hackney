@@ -13,6 +13,7 @@
 -include("hackney.hrl").
 
 -define(PORT, 8123).
+-define(SSL_PORT, 8129).
 
 %%====================================================================
 %% Test fixtures
@@ -59,7 +60,33 @@ hackney_pool_integration_test_() ->
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}},
       {"checkout survives a connection dying mid-liveness-check (PR #869)",
-       {timeout, 30, fun test_checkout_survives_dying_connection/0}}
+       {timeout, 30, fun test_checkout_survives_dying_connection/0}},
+      {"checkout_ssl without pooled conns returns needs_upgrade",
+       fun test_checkout_ssl_needs_upgrade/0},
+      {"checkin of an SSL-keyed conn that was never upgraded closes it",
+       fun test_checkout_ssl_unupgraded_closes/0},
+      {"checkin pools an upgraded HTTPS/1.1 conn under its SSL key",
+       fun test_checkin_ssl_pooled_stub/0},
+      {"checkin closes an SSL-keyed no_reuse conn",
+       fun test_checkin_ssl_no_reuse_stub/0},
+      {"checkin closes an SSL-keyed non-http1 conn",
+       fun test_checkin_ssl_wrong_protocol_stub/0},
+      {"count/2 aggregates legacy 3-tuples and host_stats spans buckets",
+       fun test_count_mixed_buckets/0}
+     ]}.
+
+%% HTTPS/1.1 ssl_pooling integration tests - require a TLS server
+hackney_pool_ssl_pooling_test_() ->
+    {setup,
+     fun setup_ssl/0,
+     fun teardown_ssl/1,
+     [
+      {"https conn is pooled and reused with ssl_pooling",
+       {timeout, 30, fun test_ssl_pooling_reuse/0}},
+      {"https conn closes at checkin without ssl_pooling",
+       {timeout, 30, fun test_ssl_pooling_default_off/0}},
+      {"different ssl_options never share a pooled conn",
+       {timeout, 30, fun test_ssl_pooling_isolation/0}}
      ]}.
 
 setup_unit() ->
@@ -88,6 +115,29 @@ teardown_integration(_) ->
     application:stop(hackney),
     error_logger:tty(true),
     ok.
+
+setup_ssl() ->
+    error_logger:tty(false),
+    {ok, _} = application:ensure_all_started(cowboy),
+    {ok, _} = application:ensure_all_started(hackney),
+    CertDir = cert_dir(),
+    Dispatch = cowboy_router:compile([{'_', [{"/[...]", test_http_resource, []}]}]),
+    {ok, _} = cowboy:start_tls(pool_ssl_test_server,
+                               [{port, ?SSL_PORT},
+                                {certfile, filename:join(CertDir, "server.pem")},
+                                {keyfile, filename:join(CertDir, "server.key")}],
+                               #{env => #{dispatch => Dispatch}}),
+    ok.
+
+teardown_ssl(_) ->
+    cowboy:stop_listener(pool_ssl_test_server),
+    application:stop(cowboy),
+    application:stop(hackney),
+    error_logger:tty(true),
+    ok.
+
+cert_dir() ->
+    filename:join([filename:dirname(code:which(?MODULE)), "..", "test", "certs"]).
 
 %%====================================================================
 %% Unit Tests
@@ -408,6 +458,220 @@ swap_field(F, _Old, _New) -> F.
 
 swap_one(Old, Old, New) -> New;
 swap_one(P, _Old, _New) -> P.
+
+%%====================================================================
+%% SSL Pooling Tests (checkout_ssl / checkin branching)
+%%====================================================================
+
+%% Stub conn that answers hackney_conn:checkin_info/1 with canned flags. It
+%% also ignores casts (set_owner_async, stop) and cooperates with
+%% gen_statem:stop/1 (system terminate) so the pool's close path never
+%% blocks on it.
+stub_conn(Info) ->
+    spawn(fun() -> stub_conn_loop(Info) end).
+
+stub_conn_loop(Info) ->
+    receive
+        {'$gen_call', From, checkin_info} ->
+            gen_statem:reply(From, Info),
+            stub_conn_loop(Info);
+        {system, From, {terminate, Reason}} ->
+            gen_statem:reply(From, ok),
+            exit(Reason);
+        {'$gen_cast', stop} ->
+            ok;
+        {'$gen_cast', _} ->
+            stub_conn_loop(Info);
+        stop ->
+            ok
+    end.
+
+%% Rename a pid key Old -> New in every pid-keyed map field of the pool
+%% state (in_use and pid_monitors), so a stub process can stand in for a
+%% checked out conn at checkin time.
+rename_pid_key(State, Old, New) ->
+    list_to_tuple([rename_key_field(F, Old, New) || F <- tuple_to_list(State)]).
+
+rename_key_field(M, Old, New) when is_map(M) ->
+    case maps:take(Old, M) of
+        {V, M2} -> maps:put(New, V, M2);
+        error -> M
+    end;
+rename_key_field(F, _Old, _New) -> F.
+
+%% Checkout an SSL-keyed conn and swap a stub in before checkin, so the
+%% checkin decision sees the stub's canned checkin_info flags.
+checkout_ssl_with_stub(PoolName, TlsKey, Info) ->
+    Pool = hackney_pool:find_pool(PoolName),
+    Opts = [{pool, PoolName}, {tls_key, TlsKey}],
+    {ok, PoolInfo, RealPid, needs_upgrade} =
+        hackney_pool:checkout_ssl("127.0.0.1", ?PORT, hackney_ssl, Opts),
+    Stub = stub_conn(Info),
+    _ = sys:replace_state(Pool, fun(S) -> rename_pid_key(S, RealPid, Stub) end),
+    {PoolInfo, RealPid, Stub}.
+
+test_checkout_ssl_needs_upgrade() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_co, [{pool_size, 5}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-co">>),
+    Opts = [{pool, test_pool_ssl_co}, {tls_key, TlsKey}],
+    Result = hackney_pool:checkout_ssl("127.0.0.1", ?PORT, hackney_ssl, Opts),
+    ?assertMatch({ok, {test_pool_ssl_co, {"127.0.0.1", ?PORT, hackney_ssl, TlsKey}, _, hackney_ssl},
+                  _, needs_upgrade}, Result),
+    {ok, _, Pid, needs_upgrade} = Result,
+    ?assert(is_process_alive(Pid)),
+    Stats = hackney_pool:get_stats(test_pool_ssl_co),
+    ?assertEqual(1, proplists:get_value(in_use_count, Stats)),
+    hackney_conn:stop(Pid),
+    ok = hackney_pool:stop_pool(test_pool_ssl_co).
+
+test_checkout_ssl_unupgraded_closes() ->
+    %% Anomaly guard: an SSL-keyed conn checked in without being upgraded
+    %% must be closed, never pooled.
+    ok = hackney_pool:start_pool(test_pool_ssl_anom, [{pool_size, 5}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-anom">>),
+    Opts = [{pool, test_pool_ssl_anom}, {tls_key, TlsKey}],
+    {ok, PoolInfo, Pid, needs_upgrade} =
+        hackney_pool:checkout_ssl("127.0.0.1", ?PORT, hackney_ssl, Opts),
+    ok = hackney_pool:checkin(PoolInfo, Pid),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Pid)),
+    ?assertEqual(0, hackney_pool:count(test_pool_ssl_anom, {"127.0.0.1", ?PORT, hackney_ssl})),
+    ?assertEqual(0, proplists:get_value(free_count, hackney_pool:get_stats(test_pool_ssl_anom))),
+    ok = hackney_pool:stop_pool(test_pool_ssl_anom).
+
+test_checkin_ssl_pooled_stub() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_ci1, [{pool_size, 5}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-ci-1">>),
+    {PoolInfo, RealPid, Stub} = checkout_ssl_with_stub(test_pool_ssl_ci1, TlsKey,
+        #{upgraded_ssl => true, no_reuse => false, pool_ssl => true, protocol => http1}),
+    ok = hackney_pool:checkin(PoolInfo, Stub),
+    timer:sleep(50),
+    ?assert(is_process_alive(Stub)),
+    SslKey = {"127.0.0.1", ?PORT, hackney_ssl, TlsKey},
+    ?assertEqual(1, hackney_pool:count(test_pool_ssl_ci1, SslKey)),
+    ?assertEqual(1, hackney_pool:count(test_pool_ssl_ci1, {"127.0.0.1", ?PORT, hackney_ssl})),
+    ?assertEqual(1, proplists:get_value(free_count, hackney_pool:get_stats(test_pool_ssl_ci1))),
+    stop_dummy(Stub),
+    hackney_conn:stop(RealPid),
+    ok = hackney_pool:stop_pool(test_pool_ssl_ci1).
+
+test_checkin_ssl_no_reuse_stub() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_ci2, [{pool_size, 5}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-ci-2">>),
+    {PoolInfo, RealPid, Stub} = checkout_ssl_with_stub(test_pool_ssl_ci2, TlsKey,
+        #{upgraded_ssl => true, no_reuse => true, pool_ssl => true, protocol => http1}),
+    ok = hackney_pool:checkin(PoolInfo, Stub),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Stub)),
+    ?assertEqual(0, hackney_pool:count(test_pool_ssl_ci2, {"127.0.0.1", ?PORT, hackney_ssl})),
+    hackney_conn:stop(RealPid),
+    ok = hackney_pool:stop_pool(test_pool_ssl_ci2).
+
+test_checkin_ssl_wrong_protocol_stub() ->
+    %% An ALPN-negotiated h2 conn multiplexes via h2_connections and must
+    %% never enter the available map, even under an SSL key.
+    ok = hackney_pool:start_pool(test_pool_ssl_ci3, [{pool_size, 5}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-ci-3">>),
+    {PoolInfo, RealPid, Stub} = checkout_ssl_with_stub(test_pool_ssl_ci3, TlsKey,
+        #{upgraded_ssl => true, no_reuse => false, pool_ssl => true, protocol => http2}),
+    ok = hackney_pool:checkin(PoolInfo, Stub),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Stub)),
+    ?assertEqual(0, hackney_pool:count(test_pool_ssl_ci3, {"127.0.0.1", ?PORT, hackney_ssl})),
+    hackney_conn:stop(RealPid),
+    ok = hackney_pool:stop_pool(test_pool_ssl_ci3).
+
+test_count_mixed_buckets() ->
+    ok = hackney_pool:start_pool(test_pool_mixed, [{pool_size, 10}, {prewarm_count, 0}]),
+    KeyA = crypto:hash(sha256, <<"bucket-a">>),
+    KeyB = crypto:hash(sha256, <<"bucket-b">>),
+    Poolable = #{upgraded_ssl => true, no_reuse => false, pool_ssl => true, protocol => http1},
+    %% Two SSL buckets with different TLS hashes
+    {PoolInfoA, RealA, StubA} = checkout_ssl_with_stub(test_pool_mixed, KeyA, Poolable),
+    {PoolInfoB, RealB, StubB} = checkout_ssl_with_stub(test_pool_mixed, KeyB, Poolable),
+    ok = hackney_pool:checkin(PoolInfoA, StubA),
+    ok = hackney_pool:checkin(PoolInfoB, StubB),
+    %% One plain TCP conn
+    TcpOpts = [{pool, test_pool_mixed}],
+    {ok, PoolInfoT, TcpPid} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, TcpOpts),
+    ok = hackney_pool:checkin(PoolInfoT, TcpPid),
+    timer:sleep(50),
+    %% Exact 4-tuple lookups see only their bucket
+    ?assertEqual(1, hackney_pool:count(test_pool_mixed, {"127.0.0.1", ?PORT, hackney_ssl, KeyA})),
+    ?assertEqual(1, hackney_pool:count(test_pool_mixed, {"127.0.0.1", ?PORT, hackney_ssl, KeyB})),
+    %% Legacy 3-tuples aggregate across buckets per transport
+    ?assertEqual(2, hackney_pool:count(test_pool_mixed, {"127.0.0.1", ?PORT, hackney_ssl})),
+    ?assertEqual(1, hackney_pool:count(test_pool_mixed, {"127.0.0.1", ?PORT, hackney_tcp})),
+    %% host_stats spans every bucket of the host
+    HostStats = hackney_pool:host_stats(test_pool_mixed, "127.0.0.1", ?PORT),
+    ?assertEqual(0, proplists:get_value(in_use, HostStats)),
+    ?assertEqual(3, proplists:get_value(free, HostStats)),
+    stop_dummy(StubA),
+    stop_dummy(StubB),
+    hackney_conn:stop(RealA),
+    hackney_conn:stop(RealB),
+    ok = hackney_pool:stop_pool(test_pool_mixed).
+
+%%====================================================================
+%% HTTPS/1.1 ssl_pooling Integration Tests
+%%====================================================================
+
+ssl_pool_url() ->
+    iolist_to_binary([<<"https://localhost:">>, integer_to_list(?SSL_PORT), <<"/get">>]).
+
+ssl_pool_opts(PoolName, ExtraSslOpts) ->
+    [{pool, PoolName},
+     {protocols, [http1]},
+     {ssl_options, [{insecure, true}, {verify, verify_none} | ExtraSslOpts]}].
+
+ssl_request(Opts) ->
+    {ok, 200, _, Body} = hackney:request(get, ssl_pool_url(), [], <<>>, Opts),
+    ?assert(is_binary(Body)),
+    ok.
+
+test_ssl_pooling_reuse() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_reuse, [{pool_size, 5}, {prewarm_count, 0}]),
+    Opts = [{ssl_pooling, true} | ssl_pool_opts(test_pool_ssl_reuse, [])],
+    SslTriple = {"localhost", ?SSL_PORT, hackney_ssl},
+    ok = ssl_request(Opts),
+    timer:sleep(50),
+    %% The upgraded conn went back to the pool under its SSL key
+    ?assertEqual(1, hackney_pool:count(test_pool_ssl_reuse, SslTriple)),
+    ok = ssl_request(Opts),
+    timer:sleep(50),
+    %% Same TLS options: the pooled conn was reused, no second conn appeared
+    ?assertEqual(1, hackney_pool:count(test_pool_ssl_reuse, SslTriple)),
+    Stats = hackney_pool:get_stats(test_pool_ssl_reuse),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(1, proplists:get_value(free_count, Stats)),
+    ok = hackney_pool:stop_pool(test_pool_ssl_reuse).
+
+test_ssl_pooling_default_off() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_off, [{pool_size, 5}, {prewarm_count, 0}]),
+    Opts = ssl_pool_opts(test_pool_ssl_off, []),
+    ok = ssl_request(Opts),
+    timer:sleep(50),
+    %% Without ssl_pooling the upgraded conn is closed at checkin, as before
+    ?assertEqual(0, hackney_pool:count(test_pool_ssl_off, {"localhost", ?SSL_PORT, hackney_ssl})),
+    Stats = hackney_pool:get_stats(test_pool_ssl_off),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(0, proplists:get_value(free_count, Stats)),
+    ok = hackney_pool:stop_pool(test_pool_ssl_off).
+
+test_ssl_pooling_isolation() ->
+    ok = hackney_pool:start_pool(test_pool_ssl_iso, [{pool_size, 5}, {prewarm_count, 0}]),
+    OptsX = [{ssl_pooling, true} | ssl_pool_opts(test_pool_ssl_iso, [])],
+    OptsY = [{ssl_pooling, true} | ssl_pool_opts(test_pool_ssl_iso, [{depth, 3}])],
+    SslTriple = {"localhost", ?SSL_PORT, hackney_ssl},
+    ok = ssl_request(OptsX),
+    timer:sleep(50),
+    ?assertEqual(1, hackney_pool:count(test_pool_ssl_iso, SslTriple)),
+    %% Different ssl_options hash to a different bucket: the pooled conn is
+    %% not reused and a second conn shows up
+    ok = ssl_request(OptsY),
+    timer:sleep(50),
+    ?assertEqual(2, hackney_pool:count(test_pool_ssl_iso, SslTriple)),
+    ok = hackney_pool:stop_pool(test_pool_ssl_iso).
 
 %%====================================================================
 %% Prewarm Tests

@@ -1,5 +1,24 @@
 # NEWS
 
+unreleased
+----------
+
+### Added
+
+- Opt-in pooling of HTTPS/1.1 connections. With `{ssl_pooling, true}` (request
+  option, or the `ssl_pooling` application env; default false) an upgraded SSL
+  connection returns to the pool keyed by the hash of its effective TLS
+  options and is reused only on an exact match, skipping the TLS handshake on
+  follow-up requests. The default is unchanged: SSL connections are closed at
+  checkin. (#872)
+
+### Changed
+
+- Shared HTTP/2 connections are keyed by the effective TLS options, and shared
+  HTTP/3 connections plus cached 0-RTT session tickets by the QUIC trust
+  options. Requests with different `ssl_options` no longer share a multiplexed
+  connection or resume each other's tickets.
+
 4.2.3 - 2026-06-10
 ------------------
 

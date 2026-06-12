@@ -75,6 +75,7 @@
     is_upgraded_ssl/1,
     %% Reuse control
     is_no_reuse/1,
+    checkin_info/1,
     %% Owner management
     set_owner/2,
     set_owner_async/2,
@@ -167,8 +168,12 @@
     follow_redirect = false :: boolean(),
 
     %% SSL upgrade tracking - set when TCP connection is upgraded to SSL
-    %% Upgraded connections should NOT be returned to pool
+    %% Upgraded connections are not returned to the pool unless pool_ssl is set
     upgraded_ssl = false :: boolean(),
+
+    %% Set with upgraded_ssl when the caller opted into ssl_pooling, allowing
+    %% the pool to keep the upgraded HTTPS/1.1 connection instead of closing it
+    pool_ssl = false :: boolean(),
 
     %% No-reuse flag - set for connections that should never be pooled
     %% (e.g., SOCKS5 proxy connections which establish per-request tunnels)
@@ -526,7 +531,8 @@ upgrade_to_ssl(Pid, SslOpts) ->
 %% With `#{final => true}' SslOpts is handed to `ssl:connect/2' as-is
 %% (the caller computed it via hackney_ssl:effective_opts/3); the default
 %% `#{final => false}' keeps the legacy behavior of merging defaults and
-%% ALPN options inside the connection process.
+%% ALPN options inside the connection process. `#{pool_ssl => true}' marks
+%% the upgraded connection as poolable again (ssl_pooling opt-in).
 -spec upgrade_to_ssl(pid(), list(), map()) -> ok | {error, term()}.
 upgrade_to_ssl(Pid, SslOpts, UpgradeOpts) when is_map(UpgradeOpts) ->
     gen_statem:call(Pid, {upgrade_to_ssl, SslOpts, UpgradeOpts}, infinity).
@@ -542,6 +548,14 @@ is_upgraded_ssl(Pid) ->
 -spec is_no_reuse(pid()) -> boolean().
 is_no_reuse(Pid) ->
     gen_statem:call(Pid, is_no_reuse).
+
+%% @doc Get the flags the pool needs for its checkin decision in one call:
+%% whether the connection was SSL upgraded, opted into SSL pooling, must not
+%% be reused (proxy tunnels), and the negotiated protocol.
+-spec checkin_info(pid()) -> #{upgraded_ssl := boolean(), no_reuse := boolean(),
+                               pool_ssl := boolean(), protocol := atom()}.
+checkin_info(Pid) ->
+    gen_statem:call(Pid, checkin_info).
 
 %% @doc Get the negotiated protocol for this connection.
 %% Returns http1, http2, or http3 based on ALPN negotiation (SSL connections),
@@ -849,7 +863,8 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
             NewData = Data#conn_data{
                 transport = hackney_ssl,
                 socket = SslSocket,
-                upgraded_ssl = true,  % Mark as upgraded - should NOT return to pool
+                upgraded_ssl = true,  % Mark as upgraded - pooled again only with pool_ssl
+                pool_ssl = maps:get(pool_ssl, UpgradeOpts, false),
                 protocol = Protocol
             },
             %% Initialize HTTP/2 if negotiated
@@ -868,6 +883,9 @@ connected({call, From}, is_upgraded_ssl, #conn_data{upgraded_ssl = Upgraded}) ->
 
 connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
+
+connected({call, From}, checkin_info, Data) ->
+    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
@@ -1670,6 +1688,9 @@ handle_common({call, From}, is_upgraded_ssl, _State, #conn_data{upgraded_ssl = U
 handle_common({call, From}, is_no_reuse, _State, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
+handle_common({call, From}, checkin_info, _State, Data) ->
+    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
+
 handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol}) ->
     {keep_state_and_data, [{reply, From, Protocol}]};
 
@@ -2267,12 +2288,23 @@ notify_pool_available(#conn_data{pool_pid = PoolPid}) ->
 %% @private Notify pool that connection is available for reuse (sync)
 %% This ensures the pool has processed the checkin before returning.
 %% We pass a "should close" flag to avoid deadlock (pool can't call back to us).
-%% The flag is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
+%% The flag is true for proxy tunnels (no_reuse), for SSL upgrades unless the
+%% caller opted into ssl_pooling, and for non HTTP/1.1 conns (multiplexed
+%% conns never enter the pool's available set).
 notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
     ok;
-notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl, no_reuse = NoReuse}) ->
-    ShouldClose = UpgradedSsl orelse NoReuse,
+notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl,
+                                      no_reuse = NoReuse, pool_ssl = PoolSsl,
+                                      protocol = Protocol}) ->
+    ShouldClose = NoReuse orelse (UpgradedSsl andalso not PoolSsl)
+        orelse Protocol =/= http1,
     gen_server:call(PoolPid, {checkin_sync, self(), ShouldClose}, 5000).
+
+%% @private Flags for the pool's checkin decision, see checkin_info/1.
+checkin_info_map(#conn_data{upgraded_ssl = UpgradedSsl, no_reuse = NoReuse,
+                            pool_ssl = PoolSsl, protocol = Protocol}) ->
+    #{upgraded_ssl => UpgradedSsl, no_reuse => NoReuse,
+      pool_ssl => PoolSsl, protocol => Protocol}.
 
 %% @private Start an async request
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->

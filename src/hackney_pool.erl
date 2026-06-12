@@ -18,6 +18,7 @@
 %% PUBLIC API
 -export([start/0,
          checkout/4,
+         checkout_ssl/4,
          checkin/2]).
 
 %% HTTP/2 connection pooling
@@ -84,7 +85,7 @@
     %% These connections are shared across callers (not checked out exclusively)
     h3_connections = #{},
     %% HTTP/3 0-RTT/resumption session tickets: #{Key => Ticket} keyed by
-    %% {Host, Port, Transport}. Replayed on the next connect to resume.
+    %% h3_connection_key/4. Replayed on the next connect to resume.
     h3_sessions = #{}
 }).
 
@@ -127,6 +128,45 @@ do_checkout(Requester, Host, Port, Transport, Opts) ->
             %% Return pool info for later checkin
             PoolInfo = {PoolName, Key, Pool, Transport},
             {ok, PoolInfo, Pid};
+        {error, _} = Error ->
+            Error;
+        {'EXIT', {timeout, _}} ->
+            {error, checkout_timeout}
+    end.
+
+%% @doc Checkout a connection for an HTTPS request with SSL pooling enabled.
+%% Reuses a pooled upgraded HTTPS/1.1 connection when the hash of its TLS
+%% options (`tls_key' in Options) matches exactly, returning `ready'.
+%% Otherwise a TCP connection is handed out as `needs_upgrade' and the
+%% caller performs the TLS upgrade.
+-spec checkout_ssl(Host :: string(), Port :: non_neg_integer(),
+                   Transport :: module(), Options :: list()) ->
+    {ok, term(), pid(), ready | needs_upgrade} | {error, term()}.
+checkout_ssl(Host, Port, Transport, Options) ->
+    Requester = self(),
+    try
+        do_checkout_ssl(Requester, Host, Port, Transport, Options)
+    catch
+        exit:{timeout, _} ->
+            ?report_trace("pool: checkout_ssl timeout", []),
+            {error, checkout_timeout};
+        _:Error ->
+            ?report_trace("pool: checkout_ssl failure", [{error, Error}]),
+            {error, checkout_failure}
+    end.
+
+do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
+    ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
+    CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
+    PoolName = proplists:get_value(pool, Opts, default),
+    Pool = find_pool(PoolName, Opts),
+    TlsKey = proplists:get_value(tls_key, Opts, default),
+    SslKey = connection_key(Host, Port, Transport, TlsKey),
+
+    case gen_server:call(Pool, {checkout_ssl, SslKey, Requester, Opts}, CheckoutTimeout) of
+        {ok, Pid, ConnState} ->
+            PoolInfo = {PoolName, SslKey, Pool, Transport},
+            {ok, PoolInfo, Pid, ConnState};
         {error, _} = Error ->
             Error;
         {'EXIT', {timeout, _}} ->
@@ -308,7 +348,9 @@ count(Name) ->
         Pid -> gen_server:call(Pid, count)
     end.
 
-%% @doc get the number of connections in the pool for `{Host, Port, Transport}'
+%% @doc get the number of connections in the pool for a key. A legacy
+%% `{Host, Port, Transport}' tuple aggregates over all TLS buckets of the
+%% triple; a `{Host, Port, Transport, TlsKey}' tuple counts one bucket.
 count(Name, Key) ->
     case find_pool(Name) of
         undefined -> 0;
@@ -455,6 +497,15 @@ handle_call(timeout, _From, #state{keepalive_timeout=Timeout}=State) ->
 handle_call(max_connections, _From, #state{max_connections=MaxConn}=State) ->
     {reply, MaxConn, State};
 
+handle_call({count, {Host, Port, Transport}}, _From, #state{available=Available}=State) ->
+    %% Legacy 3-tuple key: aggregate over all TLS buckets for the triple
+    Count = maps:fold(
+        fun({H, P, T, _K}, Pids, Acc) when H =:= Host, P =:= Port, T =:= Transport ->
+                Acc + length(Pids);
+           (_, _, Acc) -> Acc
+        end, 0, Available),
+    {reply, Count, State};
+
 handle_call({count, Key}, _From, #state{available=Available}=State) ->
     Count = case maps:find(Key, Available) of
                 {ok, Pids} -> length(Pids);
@@ -466,11 +517,11 @@ handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=
     %% Count in_use and free for this host (any transport)
     HostLower = string:lowercase(Host),
     InUseCount = maps:fold(
-        fun(_Pid, {H, P, _T}, Acc) when H =:= HostLower, P =:= Port -> Acc + 1;
+        fun(_Pid, {H, P, _T, _K}, Acc) when H =:= HostLower, P =:= Port -> Acc + 1;
            (_, _, Acc) -> Acc
         end, 0, InUse),
     FreeCount = maps:fold(
-        fun({H, P, _T}, Pids, Acc) when H =:= HostLower, P =:= Port -> Acc + length(Pids);
+        fun({H, P, _T, _K}, Pids, Acc) when H =:= HostLower, P =:= Port -> Acc + length(Pids);
            (_, _, Acc) -> Acc
         end, 0, Available),
     {reply, {InUseCount, FreeCount}, State};
@@ -520,6 +571,32 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end
+    end;
+
+handle_call({checkout_ssl, SslKey, Requester, Opts}, _From, State) ->
+    #state{name=PoolName, available=Available, in_use=InUse} = State,
+
+    ?report_trace("pool: checkout_ssl request", [{pool, PoolName}, {key, SslKey},
+        {total_in_use, maps:size(InUse)}]),
+
+    case find_available_ssl(SslKey, Available) of
+        {ok, Pid, Available2} ->
+            %% Found a pooled SSL connection with the same TLS options hash
+            ?report_debug("pool: reusing ssl connection", [{pool, PoolName}, {pid, Pid}]),
+            case hackney_conn:set_owner(Pid, Requester) of
+                ok ->
+                    InUse2 = maps:put(Pid, SslKey, InUse),
+                    {reply, {ok, Pid, ready},
+                     State#state{available=Available2, in_use=InUse2}};
+                {error, _} ->
+                    %% #850: the connection closed between is_ready and
+                    %% set_owner. It is already out of Available2; fall back
+                    %% to the TCP bucket with the dead conn dropped.
+                    checkout_ssl_fallback(SslKey, Requester, Opts,
+                                          State#state{available=Available2})
+            end;
+        none ->
+            checkout_ssl_fallback(SslKey, Requester, Opts, State)
     end;
 
 handle_call({checkin_sync, Pid}, _From, State) ->
@@ -681,7 +758,7 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
     InUse2 = case maps:take(Pid, InUse) of
         {Key, NewInUse} ->
             %% Connection died while in use - release the load_regulation slot
-            {Host, Port, _Transport} = Key,
+            {Host, Port} = key_host_port(Key),
             hackney_load_regulation:release(Host, Port),
             NewInUse;
         error ->
@@ -760,9 +837,19 @@ terminate(_Reason, #state{available=Available,
 %% Internal functions
 %%====================================================================
 
-connection_key(Host0, Port, Transport) ->
+%% @private Key for pooled connections. The 4th element buckets pooled SSL
+%% connections by the hash of their effective TLS options (ssl_pooling);
+%% plain TCP connections all use the `default' bucket.
+connection_key(Host, Port, Transport) ->
+    connection_key(Host, Port, Transport, default).
+
+connection_key(Host0, Port, Transport, TlsKey) ->
     Host = string:lowercase(Host0),
-    {Host, Port, Transport}.
+    {Host, Port, Transport, TlsKey}.
+
+%% @private Host and port of a pool connection key.
+key_host_port({Host, Port, _Transport, _TlsKey}) ->
+    {Host, Port}.
 
 %% @private Key for shared HTTP/2 connections. Includes the hash of the
 %% effective TLS options (tls_key) so requests with different ssl_options
@@ -787,6 +874,16 @@ stop_conn(Pid) ->
     try hackney_conn:stop(Pid) catch _:_ -> ok end.
 
 find_available(Key, Available) ->
+    find_available(Key, Available, true).
+
+%% @private Like find_available/2 but never redials a closed connection.
+%% Used for SSL buckets: hackney_conn:connect/1 on an upgraded conn would
+%% reconnect the raw transport without the upgrade handshake options, so a
+%% closed conn is stopped and dropped instead.
+find_available_ssl(Key, Available) ->
+    find_available(Key, Available, false).
+
+find_available(Key, Available, Redial) ->
     case maps:find(Key, Available) of
         {ok, [Pid | Rest]} ->
             Available2 = case Rest of
@@ -802,20 +899,23 @@ find_available(Key, Available) ->
                     %% noproc exit must not crash the pool, so skip and move on.
                     try hackney_conn:is_ready(Pid) of
                         {ok, connected} -> {ok, Pid, Available2};
-                        {ok, closed} ->
+                        {ok, closed} when Redial ->
                             %% Connection closed, try reconnect
                             try hackney_conn:connect(Pid) of
                                 ok -> {ok, Pid, Available2};
-                                _ -> find_available(Key, Available2)
+                                _ -> find_available(Key, Available2, Redial)
                             catch
-                                _:_ -> find_available(Key, Available2)
+                                _:_ -> find_available(Key, Available2, Redial)
                             end;
-                        _ -> find_available(Key, Available2)
+                        {ok, closed} ->
+                            stop_conn(Pid),
+                            find_available(Key, Available2, Redial);
+                        _ -> find_available(Key, Available2, Redial)
                     catch
-                        _:_ -> find_available(Key, Available2)
+                        _:_ -> find_available(Key, Available2, Redial)
                     end;
                 false ->
-                    find_available(Key, Available2)
+                    find_available(Key, Available2, Redial)
             end;
         {ok, []} ->
             none;
@@ -823,8 +923,56 @@ find_available(Key, Available) ->
             none
     end.
 
+%% @private SSL checkout miss: reuse or dial a TCP connection for the caller
+%% to upgrade. It is recorded in in_use under the SSL key so the checkin
+%% decision can tell it apart from plain TCP checkouts.
+checkout_ssl_fallback(SslKey, Requester, Opts, State) ->
+    #state{name=PoolName, max_connections=MaxConn,
+           available=Available, in_use=InUse} = State,
+    {Host, Port} = key_host_port(SslKey),
+    TcpKey = connection_key(Host, Port, hackney_tcp),
+    TotalInUse = maps:size(InUse),
+
+    case find_available(TcpKey, Available) of
+        {ok, Pid, Available2} ->
+            case hackney_conn:set_owner(Pid, Requester) of
+                ok ->
+                    InUse2 = maps:put(Pid, SslKey, InUse),
+                    {reply, {ok, Pid, needs_upgrade},
+                     State#state{available=Available2, in_use=InUse2}};
+                {error, _} ->
+                    %% #850 race again: drop the dead conn and dial fresh
+                    start_ssl_checkout_conn(SslKey, Requester, Opts,
+                                            State#state{available=Available2})
+            end;
+        none when TotalInUse >= MaxConn ->
+            ?report_trace("pool: at max connections", [{pool, PoolName}, {in_use, TotalInUse}]),
+            {reply, {error, checkout_timeout}, State};
+        none ->
+            ?report_trace("pool: starting new connection", [{pool, PoolName}]),
+            start_ssl_checkout_conn(SslKey, Requester, Opts, State)
+    end.
+
+%% @private Dial a fresh TCP connection for an SSL checkout. The caller
+%% upgrades it, so the dialed transport is TCP even though the in_use key
+%% carries hackney_ssl.
+start_ssl_checkout_conn(SslKey, Requester, Opts, State) ->
+    {Host, Port} = key_host_port(SslKey),
+    case start_connection(Host, Port, hackney_tcp, Requester, Opts, State) of
+        {ok, Pid, State2} ->
+            InUse2 = maps:put(Pid, SslKey, State2#state.in_use),
+            {reply, {ok, Pid, needs_upgrade}, State2#state{in_use=InUse2}};
+        {error, Reason} ->
+            {reply, {error, Reason}, State}
+    end.
+
 start_connection(Key, Owner, Opts, State) ->
-    {Host, Port, Transport} = Key,
+    %% Plain checkouts dial the key's transport; SSL-bucket checkouts dial
+    %% TCP explicitly via start_connection/6.
+    {Host, Port, Transport, _TlsKey} = Key,
+    start_connection(Host, Port, Transport, Owner, Opts, State).
+
+start_connection(Host, Port, Transport, Owner, Opts, State) ->
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
     RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
     IdleTimeout = State#state.keepalive_timeout,
@@ -861,60 +1009,33 @@ start_connection(Key, Owner, Opts, State) ->
             {error, Reason}
     end.
 
-%% @private Process a checkin - return connection to pool
-%% Only TCP connections are stored. SSL upgraded connections are closed.
+%% @private Process a checkin - return connection to pool.
+%% Plain TCP connections are stored under their TCP key. An SSL upgraded
+%% connection is stored only when it was checked out through checkout_ssl
+%% (its in_use key carries hackney_ssl plus the TLS options hash) and still
+%% speaks HTTP/1.1; any other SSL conn is closed as before.
 %% Always releases the load_regulation slot since connection is no longer in use.
 do_checkin(Pid, State) ->
-    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+    #state{in_use=InUse} = State,
 
     %% Get the key from in_use and remove
     case maps:take(Pid, InUse) of
         {Key, InUse2} ->
             %% Release load_regulation slot - connection is no longer in active use
-            {Host, Port, _Transport} = Key,
+            {Host, Port} = key_host_port(Key),
             hackney_load_regulation:release(Host, Port),
 
             %% Check if connection is still alive
             case is_process_alive(Pid) of
                 true ->
-                    %% Check if this connection should not be reused:
-                    %% - SSL upgraded connections (security requirement)
-                    %% - Proxy tunnel connections (SOCKS5, HTTP CONNECT - issue #283)
-                    ShouldClose = (try hackney_conn:is_upgraded_ssl(Pid) catch _:_ -> false end) =:= true orelse
-                                  (try hackney_conn:is_no_reuse(Pid) catch _:_ -> false end) =:= true,
-                    case ShouldClose of
+                    %% One call fetches every flag the decision needs
+                    Info = try hackney_conn:checkin_info(Pid) catch _:_ -> #{} end,
+                    case checkin_poolable(Key, Info) of
                         true ->
-                            %% Connection should not be reused - close it
+                            checkin_pool(Pid, Key, InUse2, State);
+                        false ->
                             stop_conn(Pid),
-                            %% Remove monitor if exists
-                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
-                                {MonRef, PM} ->
-                                    erlang:demonitor(MonRef, [flush]),
-                                    PM;
-                                error -> PidMonitors
-                            end,
-                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
-                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
-                            TcpKey = {Host, Port, hackney_tcp},
-                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
-                        _ ->
-                            %% Regular TCP connection - store in pool
-                            %% Set owner to pool so connection doesn't die if previous requester crashes.
-                            %% Use async version to avoid deadlock when called from checkin_sync
-                            hackney_conn:set_owner_async(Pid, self()),
-                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
-
-                            %% Ensure we're monitoring this pid
-                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
-                                true -> PidMonitors;
-                                false ->
-                                    MonRef = erlang:monitor(process, Pid),
-                                    maps:put(Pid, MonRef, PidMonitors)
-                            end,
-
-                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
-                            %% Maintain prewarm for activated hosts
-                            maybe_maintain_prewarm(Key, State2)
+                            checkin_close(Pid, Key, InUse2, State)
                     end;
                 false ->
                     State#state{in_use=InUse2}
@@ -923,17 +1044,76 @@ do_checkin(Pid, State) ->
             State
     end.
 
+%% @private Decide at checkin whether a conn can go back to the pool.
+%% The key shape records the checkout decision: an SSL-bucket key means the
+%% caller opted into ssl_pooling, so the conn is poolable only as an
+%% upgraded HTTPS/1.1 conn (HTTP/2 conns multiplex via h2_connections and
+%% must never enter `available'). A TCP key keeps the previous rule: never
+%% pool a conn that was SSL upgraded or marked no_reuse (proxy tunnels,
+%% issue #283). A failed checkin_info call defaults to the safe side of
+%% each rule: close for SSL keys, pool for TCP keys as before.
+checkin_poolable({_Host, _Port, hackney_ssl, _TlsKey}, Info) ->
+    maps:get(no_reuse, Info, true) =:= false andalso
+        maps:get(upgraded_ssl, Info, false) =:= true andalso
+        maps:get(protocol, Info, undefined) =:= http1;
+checkin_poolable(_TcpKey, Info) ->
+    maps:get(no_reuse, Info, false) =:= false andalso
+        maps:get(upgraded_ssl, Info, false) =:= false.
+
+%% @private Close branch of a checkin: drop the monitor and keep the host's
+%% TCP prewarm warm (the replacement for a closed conn is a TCP conn that
+%% gets upgraded on its next SSL checkout). The conn itself is stopped by
+%% the caller: stop_conn for async checkin, a stop cast for sync checkin
+%% where the conn is blocked waiting on the pool's reply.
+checkin_close(Pid, Key, InUse2, State) ->
+    #state{pid_monitors=PidMonitors} = State,
+    PidMonitors2 = case maps:take(Pid, PidMonitors) of
+        {MonRef, PM} ->
+            erlang:demonitor(MonRef, [flush]),
+            PM;
+        error -> PidMonitors
+    end,
+    State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
+    {Host, Port} = key_host_port(Key),
+    TcpKey = connection_key(Host, Port, hackney_tcp),
+    maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2)).
+
+%% @private Pool branch of a checkin: hand ownership to the pool and store
+%% the conn under its checkout key (TCP or SSL bucket).
+%% set_owner is async so the sync checkin path never calls back into a conn
+%% that is blocked waiting on our reply.
+checkin_pool(Pid, Key, InUse2, State) ->
+    #state{available=Available, pid_monitors=PidMonitors} = State,
+    hackney_conn:set_owner_async(Pid, self()),
+    Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
+
+    %% Ensure we're monitoring this pid
+    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+        true -> PidMonitors;
+        false ->
+            MonRef = erlang:monitor(process, Pid),
+            maps:put(Pid, MonRef, PidMonitors)
+    end,
+
+    State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
+    %% Maintain prewarm for activated hosts. No-op for SSL keys: only TCP
+    %% keys are ever activated for prewarm.
+    maybe_maintain_prewarm(Key, State2).
+
 %% @private Process a checkin with known "should close" flag - avoids calling back to connection
 %% Used for sync checkin to prevent deadlock when connection calls pool.
-%% ShouldClose is true if connection was SSL upgraded or is a proxy tunnel (no_reuse).
+%% The conn computes the flag itself: true for proxy tunnels (no_reuse), SSL
+%% upgrades without ssl_pooling, and non HTTP/1.1 conns. A conn reaching the
+%% pool branch with an SSL key is therefore an upgraded HTTPS/1.1 conn that
+%% opted into ssl_pooling.
 do_checkin_with_close_flag(Pid, ShouldClose, State) ->
-    #state{in_use=InUse, available=Available, pid_monitors=PidMonitors} = State,
+    #state{in_use=InUse} = State,
 
     %% Get the key from in_use and remove
     case maps:take(Pid, InUse) of
         {Key, InUse2} ->
             %% Release load_regulation slot - connection is no longer in active use
-            {Host, Port, _Transport} = Key,
+            {Host, Port} = key_host_port(Key),
             hackney_load_regulation:release(Host, Port),
 
             %% Check if connection is still alive
@@ -945,34 +1125,9 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
                             %% Connection should not be reused - close it
                             %% Use cast to avoid deadlock (connection is waiting for our reply)
                             gen_statem:cast(Pid, stop),
-                            %% Remove monitor if exists
-                            PidMonitors2 = case maps:take(Pid, PidMonitors) of
-                                {MonRef, PM} ->
-                                    erlang:demonitor(MonRef, [flush]),
-                                    PM;
-                                error -> PidMonitors
-                            end,
-                            State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
-                            %% Still trigger prewarm for TCP connections (for future SSL upgrades)
-                            TcpKey = {Host, Port, hackney_tcp},
-                            maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2));
+                            checkin_close(Pid, Key, InUse2, State);
                         _ ->
-                            %% Regular connection - store in pool
-                            %% Set owner to pool so connection doesn't die if previous requester crashes.
-                            hackney_conn:set_owner_async(Pid, self()),
-                            Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
-
-                            %% Ensure we're monitoring this pid
-                            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
-                                true -> PidMonitors;
-                                false ->
-                                    MonRef = erlang:monitor(process, Pid),
-                                    maps:put(Pid, MonRef, PidMonitors)
-                            end,
-
-                            State2 = State#state{in_use=InUse2, available=Available2, pid_monitors=PidMonitors2},
-                            %% Maintain prewarm for activated hosts
-                            maybe_maintain_prewarm(Key, State2)
+                            checkin_pool(Pid, Key, InUse2, State)
                     end;
                 false ->
                     State#state{in_use=InUse2}
@@ -1088,7 +1243,7 @@ maybe_maintain_prewarm(Key, State) ->
             end,
             case CurrentCount < PrewarmCount of
                 true ->
-                    {Host, Port, _Transport} = Key,
+                    {Host, Port} = key_host_port(Key),
                     do_prewarm(Host, Port, PrewarmCount, State);
                 false ->
                     State
@@ -1118,7 +1273,8 @@ prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
             case hackney_conn:connect(Pid) of
                 ok ->
                     %% Checkin the new connection to the pool
-                    gen_server:cast(PoolPid, {prewarm_checkin, Pid, {Host, Port, hackney_tcp}});
+                    gen_server:cast(PoolPid, {prewarm_checkin, Pid,
+                                              connection_key(Host, Port, hackney_tcp)});
                 {error, _Reason} ->
                     stop_conn(Pid)
             end;

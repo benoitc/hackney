@@ -344,28 +344,63 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
   case hackney_load_regulation:acquire(Host, Port, MaxPerHost, CheckoutTimeout) of
     ok ->
       %% Slot acquired - now get connection from pool
-      %% Always checkout as TCP - pool only stores TCP connections
-      case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
-        {ok, _PoolRef, ConnPid} ->
-          %% Got TCP connection - upgrade to SSL if needed
-          case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
-            ok ->
-              %% Check if HTTP/2 was negotiated, register for multiplexing
-              maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
+      SslPooling = proplists:get_value(ssl_pooling, Options,
+                     hackney_app:get_app_env(ssl_pooling, false)),
+      case Transport =:= hackney_ssl andalso SslPooling =:= true
+           andalso erlang:function_exported(PoolHandler, checkout_ssl, 4) of
+        true ->
+          %% Opt-in ssl_pooling: pooled HTTPS/1.1 connections are reused on
+          %% an exact match of the TLS options hash (tls_key in Options)
+          connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler);
+        false ->
+          %% Always checkout as TCP - pool only stores TCP connections
+          case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
+            {ok, _PoolRef, ConnPid} ->
+              %% Got TCP connection - upgrade to SSL if needed
+              case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
+                ok ->
+                  %% Check if HTTP/2 was negotiated, register for multiplexing
+                  maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
                   {ok, ConnPid};
+                {error, Reason} ->
+                  %% Upgrade failed - release slot and close connection
+                  hackney_load_regulation:release(Host, Port),
+                  stop_conn(ConnPid),
+                  {error, Reason}
+              end;
             {error, Reason} ->
-              %% Upgrade failed - release slot and close connection
+              %% Checkout failed - release slot
               hackney_load_regulation:release(Host, Port),
-              stop_conn(ConnPid),
               {error, Reason}
-          end;
-        {error, Reason} ->
-          %% Checkout failed - release slot
-          hackney_load_regulation:release(Host, Port),
-          {error, Reason}
+          end
       end;
     {error, timeout} ->
       {error, checkout_timeout}
+  end.
+
+%% @private SSL-pooling checkout. A `ready' conn is an already-upgraded
+%% HTTPS/1.1 connection reused on an exact tls_key match; it was registered
+%% for h2 at creation if applicable, so it is not re-registered here. A
+%% `needs_upgrade' conn is a TCP connection upgraded with pool_ssl so it can
+%% return to the pool at checkin.
+connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
+  case PoolHandler:checkout_ssl(Host, Port, Transport, Options) of
+    {ok, _PoolRef, ConnPid, ready} ->
+      {ok, ConnPid};
+    {ok, _PoolRef, ConnPid, needs_upgrade} ->
+      case hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts,
+                                       #{final => true, pool_ssl => true}) of
+        ok ->
+          maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
+          {ok, ConnPid};
+        {error, Reason} ->
+          hackney_load_regulation:release(Host, Port),
+          stop_conn(ConnPid),
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      hackney_load_regulation:release(Host, Port),
+      {error, Reason}
   end.
 
 %% @private Register HTTP/2 connection for multiplexing if applicable
