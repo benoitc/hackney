@@ -2398,10 +2398,15 @@ h3_tls_opts(ConnectOpts, SslOpts) ->
         undefined -> Base;
         Family -> Base#{family => Family}
     end,
-    case proplists:get_value(session_ticket, ConnectOpts,
-           proplists:get_value(session_ticket, SslOpts, undefined)) of
+    Base2 = case proplists:get_value(session_ticket, ConnectOpts,
+              proplists:get_value(session_ticket, SslOpts, undefined)) of
         undefined -> Base1;
         Ticket -> Base1#{session_ticket => Ticket}
+    end,
+    %% Forward a user SNI so build_h3_opts can honor it (hostname or `disable').
+    case proplists:get_value(server_name_indication, SslOpts, undefined) of
+        undefined -> Base2;
+        Sni -> Base2#{server_name_indication => Sni}
     end.
 
 %% @private Use an explicitly configured CA as the H3 trust store. quic only
@@ -2469,11 +2474,9 @@ do_tcp_connect(From, Data) ->
                     end,
                     hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts);
                 _ ->
-                    %% Keep the legacy build for custom ssl_options: routing
-                    %% them through effective_opts would change the
-                    %% hostname-verification target for a user-supplied
-                    %% server_name_indication (merge_ssl_opts takes the first
-                    %% SNI occurrence).
+                    %% Custom ssl_options keep the direct ssl_opts build (no
+                    %% session resumption); ssl_opts honors a user SNI as both
+                    %% the wire value and the verify target.
                     MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
                     AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
                     hackney_util:merge_opts(MergedSslOpts, AlpnOpts)

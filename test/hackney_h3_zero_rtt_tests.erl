@@ -21,7 +21,12 @@ build_opts_test_() ->
      {"no family leaves quic_opts without a family key", fun no_family/0},
      {"happy_eyeballs is forwarded into quic_opts", fun happy_eyeballs/0},
      {"session_ticket is forwarded into quic_opts", fun session_ticket/0},
-     {"family and session_ticket can be combined", fun family_and_ticket/0}
+     {"family and session_ticket can be combined", fun family_and_ticket/0},
+     {"hostname sets SNI", fun sni_hostname/0},
+     {"ipv4 host omits SNI", fun sni_ipv4/0},
+     {"ipv6 host omits SNI", fun sni_ipv6/0},
+     {"user SNI override wins", fun sni_override/0},
+     {"disable suppresses SNI", fun sni_disable/0}
     ].
 
 family_inet6() ->
@@ -58,6 +63,28 @@ family_and_ticket() ->
     ?assertEqual(inet6, maps:get(family, QuicOpts)),
     ?assertEqual(Ticket, maps:get(session_ticket, QuicOpts)).
 
+sni_hostname() ->
+    QuicOpts = maps:get(quic_opts, hackney_h3:build_h3_opts(<<"example.com">>, #{})),
+    ?assertEqual("example.com", maps:get(server_name_indication, QuicOpts)).
+
+sni_ipv4() ->
+    QuicOpts = maps:get(quic_opts, hackney_h3:build_h3_opts(<<"127.0.0.1">>, #{})),
+    ?assertNot(maps:is_key(server_name_indication, QuicOpts)).
+
+sni_ipv6() ->
+    QuicOpts = maps:get(quic_opts, hackney_h3:build_h3_opts(<<"::1">>, #{})),
+    ?assertNot(maps:is_key(server_name_indication, QuicOpts)).
+
+sni_override() ->
+    QuicOpts = maps:get(quic_opts, hackney_h3:build_h3_opts(
+                 <<"example.com">>, #{server_name_indication => "alt.example"})),
+    ?assertEqual("alt.example", maps:get(server_name_indication, QuicOpts)).
+
+sni_disable() ->
+    QuicOpts = maps:get(quic_opts, hackney_h3:build_h3_opts(
+                 <<"example.com">>, #{server_name_indication => disable})),
+    ?assertNot(maps:is_key(server_name_indication, QuicOpts)).
+
 %%====================================================================
 %% hackney_conn:h3_tls_opts/2 - family/session_ticket from either list
 %%====================================================================
@@ -68,7 +95,8 @@ tls_opts_test_() ->
      {"family from ssl_options", fun tls_family_ssl/0},
      {"session_ticket from connect_options", fun tls_ticket_connect/0},
      {"session_ticket from ssl_options", fun tls_ticket_ssl/0},
-     {"insecure maps to verify_none", fun tls_insecure/0}
+     {"insecure maps to verify_none", fun tls_insecure/0},
+     {"user SNI from ssl_options is forwarded", fun tls_sni_ssl/0}
     ].
 
 tls_family_connect() ->
@@ -92,6 +120,10 @@ tls_ticket_ssl() ->
 tls_insecure() ->
     M = hackney_conn:h3_tls_opts([{insecure, true}], []),
     ?assertEqual(verify_none, maps:get(verify, M)).
+
+tls_sni_ssl() ->
+    M = hackney_conn:h3_tls_opts([], [{server_name_indication, "alt.example"}]),
+    ?assertEqual("alt.example", maps:get(server_name_indication, M)).
 
 %%====================================================================
 %% hackney_pool - H3 session ticket cache

@@ -220,6 +220,79 @@ h3_options_key_deterministic_across_processes_test() ->
     ?assertEqual(Key1, hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-a.pem"}])).
 
 %%====================================================================
+%% SNI Tests (Unit tests)
+%%====================================================================
+
+%% @private check_hostname target bound into the verify_fun init state.
+sni_verify_host(Opts) ->
+    case proplists:get_value(verify_fun, Opts) of
+        {_Fun, State} -> proplists:get_value(check_hostname, State);
+        _ -> undefined
+    end.
+
+effective_opts_sni_hostname_test() ->
+    Opts = hackney_ssl:effective_opts("example.com", [], []),
+    ?assertEqual("example.com", proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual("example.com", sni_verify_host(Opts)).
+
+effective_opts_no_sni_for_ipv4_test() ->
+    Opts = hackney_ssl:effective_opts("127.0.0.1", [], []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
+    ?assert(lists:keymember(cacerts, 1, Opts) orelse lists:keymember(cacertfile, 1, Opts)).
+
+effective_opts_no_sni_for_bare_ipv6_test() ->
+    Opts1 = hackney_ssl:effective_opts("::1", [], []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts1)),
+    Opts2 = hackney_ssl:effective_opts("2001:db8::1", [], []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts2)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts2)).
+
+effective_opts_no_sni_for_bracketed_ipv6_test() ->
+    Opts = hackney_ssl:effective_opts("[::1]", [], []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts)).
+
+effective_opts_user_sni_override_test() ->
+    %% A user SNI drives both the wire value and the verify target.
+    Opts = hackney_ssl:effective_opts(
+             "example.com", [{server_name_indication, "alt.example"}], []),
+    ?assertEqual("alt.example", proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual("alt.example", sni_verify_host(Opts)).
+
+effective_opts_user_sni_disable_test() ->
+    Opts = hackney_ssl:effective_opts(
+             "example.com", [{server_name_indication, disable}], []),
+    %% `disable' means no wire SNI; verification stays bound to the host.
+    ?assertEqual(disable, proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual("example.com", sni_verify_host(Opts)).
+
+merge_ssl_opts_verify_target_follows_user_sni_test() ->
+    %% Regression: the verify target must follow the user SNI, not the host.
+    Opts = hackney_ssl:ssl_opts(
+             "example.com", [{ssl_options, [{server_name_indication, "x.example"}]}]),
+    ?assertEqual("x.example", sni_verify_host(Opts)),
+    ?assertEqual("x.example", proplists:get_value(server_name_indication, Opts)).
+
+check_hostname_opts_no_sni_for_ip_test() ->
+    %% Suppressing SNI for an IP must not weaken verification.
+    Opts = hackney_ssl:check_hostname_opts("127.0.0.1"),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
+    ?assertEqual("127.0.0.1", sni_verify_host(Opts)).
+
+options_key_ip_differs_from_hostname_test() ->
+    KeyIp = hackney_ssl:options_key(hackney_ssl:effective_opts("127.0.0.1", [], [])),
+    KeyHost = hackney_ssl:options_key(hackney_ssl:effective_opts("example.com", [], [])),
+    ?assertNotEqual(KeyIp, KeyHost).
+
+h3_options_key_sni_override_differs_test() ->
+    Default = hackney_ssl:h3_options_key([], []),
+    OverrideX = hackney_ssl:h3_options_key([], [{server_name_indication, "x"}]),
+    OverrideY = hackney_ssl:h3_options_key([], [{server_name_indication, "y"}]),
+    ?assertNotEqual(Default, OverrideX),
+    ?assertNotEqual(OverrideX, OverrideY).
+
+%%====================================================================
 %% TLS 1.3 session resumption Tests (Unit tests)
 %%====================================================================
 

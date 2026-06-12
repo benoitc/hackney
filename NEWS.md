@@ -29,6 +29,13 @@ unreleased
 - The TLS options hash computed for every pooled HTTPS request is memoized in
   a bounded ETS cache keyed by the pre-merge inputs and the relevant
   application envs, skipping a sha256 over the full CA bundle on cache hits.
+- SNI handling. No `server_name_indication` is sent when the host is an IP
+  literal (RFC 6066), on HTTP/1.1, HTTP/2 and HTTP/3. A user-supplied
+  `server_name_indication` in `ssl_options` is now honored consistently as
+  both the wire value and the hostname-verification target, works on the
+  HTTP/3 path too, and `disable` suppresses SNI without weakening
+  verification.
+- Bump `quic` to 1.6.5 and `webtransport` to 0.4.0.
 
 4.2.3 - 2026-06-10
 ------------------

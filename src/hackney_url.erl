@@ -25,6 +25,7 @@
          property/2]).
 
 -export([idnconvert_hostname/1]).
+-export([is_ip_literal/1]).
 
 -include("hackney_lib.hrl").
 
@@ -224,6 +225,22 @@ idnconvert_hostname(Host) ->
     false ->
       idna:utf8_to_ascii(Host)
   end.
+
+%% @doc True when Host is an IPv4/IPv6 literal. RFC 6066 forbids sending SNI
+%% for IP literals. Hosts reach the TLS layer bracket-stripped, but strip a
+%% stray bracket pair defensively.
+-spec is_ip_literal(binary() | string()) -> boolean().
+is_ip_literal(Host) when is_binary(Host) ->
+  is_ip_literal(binary_to_list(Host));
+is_ip_literal("[" ++ Rest) ->
+  is_ip_literal(string:trim(Rest, trailing, "]"));
+is_ip_literal(Host) when is_list(Host) ->
+  case inet:parse_address(Host) of
+    {ok, _} -> true;
+    {error, _} -> false
+  end;
+is_ip_literal(_) ->
+  false.
 
 unparse_url(#hackney_url{}=Url) ->
   #hackney_url{scheme = Scheme,

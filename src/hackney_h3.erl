@@ -936,7 +936,17 @@ build_h3_opts(Host, Opts) ->
                 false -> verify_none
             end
     end,
-    QuicOpts0 = #{server_name_indication => HostStr},
+    %% SNI: a user override wins (`disable' suppresses it); otherwise default
+    %% to the host, unless it is an IP literal (RFC 6066 forbids SNI for IPs).
+    QuicOpts0 = case maps:get(server_name_indication, Opts, undefined) of
+        undefined ->
+            case hackney_url:is_ip_literal(HostStr) of
+                true -> #{};
+                false -> #{server_name_indication => HostStr}
+            end;
+        disable -> #{};
+        Sni -> #{server_name_indication => Sni}
+    end,
     QuicOpts1 = case maps:get(cacerts, Opts, undefined) of
         undefined ->
             case maps:get(cacertfile, Opts, undefined) of

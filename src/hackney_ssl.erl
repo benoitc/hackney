@@ -61,7 +61,11 @@ ssl_opts_1(Host, Options) ->
   end.
 
 merge_ssl_opts(Host, OverrideOpts, Options) ->
-  VerifyHost = case proplists:get_value(server_name_indication, OverrideOpts, disable) of
+  %% Verify against the chosen SNI: a user hostname wins, `disable' and no
+  %% SNI both verify against Host. effective_opts no longer prepends a
+  %% duplicate SNI, so the wire SNI and the verify target now agree.
+  VerifyHost = case proplists:get_value(server_name_indication, OverrideOpts) of
+    undefined -> Host;
     disable -> Host;
     SNI -> SNI
   end,
@@ -103,7 +107,17 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
 %% trust, so trust configs cannot cross by construction.
 -spec effective_opts(string(), list(), list()) -> list().
 effective_opts(Host, SslOpts, ConnectOpts) ->
-  SslOpts1 = [{server_name_indication, Host} | SslOpts],
+  %% Resolve SNI once: a user-supplied server_name_indication (a hostname or
+  %% `disable') wins; otherwise default to Host, unless Host is an IP literal
+  %% (RFC 6066 forbids SNI for IP literals), in which case emit none.
+  SslOpts1 = case lists:keymember(server_name_indication, 1, SslOpts) of
+    true -> SslOpts;
+    false ->
+      case hackney_url:is_ip_literal(Host) of
+        true -> SslOpts;
+        false -> [{server_name_indication, Host} | SslOpts]
+      end
+  end,
   Merged = ssl_opts(Host, [{ssl_options, SslOpts1}]),
   Alpn = case alpn_opts(SslOpts1) of
     [] -> alpn_opts(ConnectOpts);
@@ -213,7 +227,10 @@ options_key(FinalSslOpts) ->
 %% hashed as given, without reading the file. Deliberately excluded:
 %% `session_ticket' (injected per resumption, so the conn-side store key
 %% must not depend on it), and `family' and `happy_eyeballs' (connectivity
-%% options that do not affect trust).
+%% options that do not affect trust). A user-supplied
+%% `server_name_indication' is included so requests to one host:port with
+%% different SNI do not share a QUIC connection; the default SNI is the host
+%% itself, already part of the outer pool key.
 -spec h3_options_key(list(), list()) -> binary().
 h3_options_key(ConnectOpts, SslOpts) ->
   Insecure = proplists:get_value(insecure, ConnectOpts,
@@ -231,7 +248,8 @@ h3_options_key(ConnectOpts, SslOpts) ->
     CACerts ->
       {cacerts, CACerts}
   end,
-  crypto:hash(sha256, term_to_binary({VerifyMode, CaSource})).
+  Sni = proplists:get_value(server_name_indication, SslOpts, default),
+  crypto:hash(sha256, term_to_binary({VerifyMode, CaSource, Sni})).
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),
@@ -290,7 +308,10 @@ check_hostname_opt(_Host, Opts) ->
 server_name_indication_opt(_Host, Opts) -> Opts.
 -else.
 server_name_indication_opt(Host, Opts) ->
-  [{server_name_indication, Host} | Opts].
+  case hackney_url:is_ip_literal(Host) of
+    true -> Opts;
+    false -> [{server_name_indication, Host} | Opts]
+  end.
 -endif.
 
 %% code from rebar3 undert BSD license
