@@ -18,6 +18,7 @@
   close/1,
   shutdown/2,
   sockname/1]).
+-export([proxy_ssl_opts/2]).
 
 -define(DEFAULT_RECV_TIMEOUT, infinity).
 
@@ -27,6 +28,20 @@
 %% Use hackney_ssl for SSL options (was hackney_connection)
 ssl_opts(Host, Opts) ->
   hackney_ssl:ssl_opts(Host, Opts).
+
+%% @doc TLS options for the proxy leg. Add SNI for the proxy host unless the
+%% user already set one or the proxy is addressed by IP literal (RFC 6066
+%% forbids SNI for IP literals).
+-spec proxy_ssl_opts(string() | binary(), list()) -> list().
+proxy_ssl_opts(ProxyHost, ProxySslOpts) ->
+  case lists:keymember(server_name_indication, 1, ProxySslOpts) of
+    true -> ProxySslOpts;
+    false ->
+      case hackney_url:is_ip_literal(ProxyHost) of
+        true -> ProxySslOpts;
+        false -> [{server_name_indication, ProxyHost} | ProxySslOpts]
+      end
+  end.
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages({hackney_ssl, _}) ->
@@ -99,8 +114,7 @@ connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts, Timeout) ->
   case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, TcpSocket} ->
       ProxySslOpts = proplists:get_value(proxy_ssl_options, Opts, []),
-      %% Add SNI for the proxy
-      SslOpts = [{server_name_indication, ProxyHost} | ProxySslOpts],
+      SslOpts = proxy_ssl_opts(ProxyHost, ProxySslOpts),
       %% GHSA-gp9c: forward the timeout to the proxy TLS handshake too.
       case ssl:connect(TcpSocket, SslOpts, Timeout) of
         {ok, SslSocket} ->
