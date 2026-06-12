@@ -23,6 +23,8 @@
 -export([check_hostname_opts/1]).
 -export([cipher_opts/0]).
 -export([ssl_opts/2]).
+-export([effective_opts/3]).
+-export([options_key/1]).
 
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
@@ -77,8 +79,36 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
       MergedOpts
   end.
 
+%% @doc Build the exact options handed to `ssl:connect/2' for an SSL upgrade.
+%% SslOpts is the caller's ssl_options, with an optional `{protocols, P}'
+%% entry prepended when the request carries one. ConnectOpts is only used
+%% as the ALPN fallback when SslOpts yields no ALPN protocols. Computing
+%% the final list once, caller-side, lets `options_key/1' hash the same
+%% term the handshake uses.
+-spec effective_opts(string(), list(), list()) -> list().
+effective_opts(Host, SslOpts, ConnectOpts) ->
+  SslOpts1 = [{server_name_indication, Host} | SslOpts],
+  Merged = ssl_opts(Host, [{ssl_options, SslOpts1}]),
+  Alpn = case alpn_opts(SslOpts1) of
+    [] -> alpn_opts(ConnectOpts);
+    AlpnOpts -> AlpnOpts
+  end,
+  Final0 = hackney_util:merge_opts(Merged, Alpn),
+  %% `protocols' is a hackney option, not an ssl one; keep it out of the
+  %% handshake options.
+  proplists:delete(protocols, Final0).
 
-
+%% @doc Hash the effective TLS options into a pool key component.
+%% 2-tuples are ukeysorted (first occurrence wins, preserving proplists
+%% lookup semantics) so option order does not change the key, while
+%% conflicting duplicates such as `[{verify,A},{verify,B}]' and its
+%% reverse still hash differently.
+-spec options_key(list()) -> binary().
+options_key(FinalSslOpts) ->
+  {Tuples, Rest} = lists:partition(
+    fun(T) -> is_tuple(T) andalso tuple_size(T) =:= 2 end,
+    FinalSslOpts),
+  crypto:hash(sha256, term_to_binary({lists:ukeysort(1, Tuples), lists:usort(Rest)})).
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),

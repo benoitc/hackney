@@ -100,3 +100,69 @@ partial_chain_preserved_test() ->
     Opts = hackney_ssl:check_hostname_opts("example.com"),
     PartialChain = proplists:get_value(partial_chain, Opts),
     ?assert(is_function(PartialChain, 1)).
+
+%%====================================================================
+%% effective_opts / options_key Tests (Unit tests)
+%%====================================================================
+
+effective_opts_default_test() ->
+    Opts = hackney_ssl:effective_opts("example.com", [], []),
+    ?assertEqual("example.com", proplists:get_value(server_name_indication, Opts)),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
+    ?assert(lists:keymember(cacerts, 1, Opts) orelse lists:keymember(cacertfile, 1, Opts)).
+
+effective_opts_no_protocols_leak_test() ->
+    %% The hackney-level protocols option must not reach ssl:connect,
+    %% but it must still drive the advertised ALPN protocols.
+    Opts = hackney_ssl:effective_opts("example.com", [{protocols, [http2, http1]}], []),
+    ?assertNot(proplists:is_defined(protocols, Opts)),
+    ?assertEqual([<<"h2">>, <<"http/1.1">>],
+                 proplists:get_value(alpn_advertised_protocols, Opts)).
+
+options_key_deterministic_across_processes_test() ->
+    Parent = self(),
+    Compute = fun() ->
+        Key = hackney_ssl:options_key(
+                hackney_ssl:effective_opts("example.com", [], [])),
+        Parent ! {key, self(), Key}
+    end,
+    Pid1 = spawn(Compute),
+    Pid2 = spawn(Compute),
+    Key1 = receive {key, Pid1, K1} -> K1 after 5000 -> error(timeout) end,
+    Key2 = receive {key, Pid2, K2} -> K2 after 5000 -> error(timeout) end,
+    ?assertEqual(Key1, Key2),
+    ?assertEqual(Key1, hackney_ssl:options_key(
+                         hackney_ssl:effective_opts("example.com", [], []))).
+
+options_key_differs_per_host_test() ->
+    KeyA = hackney_ssl:options_key(hackney_ssl:effective_opts("a.example.com", [], [])),
+    KeyB = hackney_ssl:options_key(hackney_ssl:effective_opts("b.example.com", [], [])),
+    ?assertNotEqual(KeyA, KeyB).
+
+options_key_differs_on_verify_test() ->
+    Default = hackney_ssl:options_key(
+                hackney_ssl:effective_opts("example.com", [], [])),
+    NoVerify = hackney_ssl:options_key(
+                 hackney_ssl:effective_opts("example.com", [{verify, verify_none}], [])),
+    ?assertNotEqual(Default, NoVerify).
+
+options_key_differs_on_alpn_test() ->
+    Default = hackney_ssl:options_key(
+                hackney_ssl:effective_opts("example.com", [], [])),
+    Http1Only = hackney_ssl:options_key(
+                  hackney_ssl:effective_opts("example.com", [{protocols, [http1]}], [])),
+    ?assertNotEqual(Default, Http1Only).
+
+options_key_duplicate_order_test() ->
+    %% ukeysort keeps the first occurrence (proplists semantics), so
+    %% conflicting duplicates must hash differently depending on order.
+    Base = [{server_name_indication, "example.com"}],
+    Key1 = hackney_ssl:options_key([{verify, verify_none}, {verify, verify_peer} | Base]),
+    Key2 = hackney_ssl:options_key([{verify, verify_peer}, {verify, verify_none} | Base]),
+    ?assertNotEqual(Key1, Key2).
+
+options_key_order_insensitive_test() ->
+    %% Reordering distinct options must not change the key.
+    Opts1 = [{verify, verify_none}, {server_name_indication, "example.com"}],
+    Opts2 = [{server_name_indication, "example.com"}, {verify, verify_none}],
+    ?assertEqual(hackney_ssl:options_key(Opts1), hackney_ssl:options_key(Opts2)).

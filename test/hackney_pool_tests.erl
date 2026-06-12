@@ -31,6 +31,17 @@ hackney_pool_unit_test_() ->
       {"timeout setting", fun test_timeout_setting/0}
      ]}.
 
+%% HTTP/2 tls_key bucket tests - no server required
+hackney_pool_h2_tls_key_test_() ->
+    {setup,
+     fun setup_unit/0,
+     fun teardown_unit/1,
+     [
+      {"h2 checkout with a different tls_key returns none", fun test_h2_tls_key_mismatch/0},
+      {"h2 checkout with the matching tls_key returns the conn", fun test_h2_tls_key_match/0},
+      {"h2 default bucket is isolated from keyed bucket", fun test_h2_tls_key_default_bucket/0}
+     ]}.
+
 %% Integration tests - require server
 hackney_pool_integration_test_() ->
     {setup,
@@ -127,6 +138,69 @@ test_timeout_setting() ->
     timer:sleep(10),
     ?assertEqual(2000, hackney_pool:timeout(test_pool_5)),  % Capped at 2s
     ok = hackney_pool:stop_pool(test_pool_5).
+
+%%====================================================================
+%% HTTP/2 tls_key Bucket Tests
+%%====================================================================
+
+%% Dummy connection that answers hackney_conn:get_state/1 (used by the
+%% pool's h2_conn_usable liveness check) with {ok, connected}.
+dummy_h2_conn() ->
+    spawn(fun dummy_h2_loop/0).
+
+dummy_h2_loop() ->
+    receive
+        {'$gen_call', From, get_state} ->
+            gen_statem:reply(From, {ok, connected}),
+            dummy_h2_loop();
+        stop ->
+            ok
+    end.
+
+stop_dummy(Conn) ->
+    Conn ! stop,
+    timer:sleep(50).
+
+test_h2_tls_key_mismatch() ->
+    ok = hackney_pool:start_pool(test_pool_h2_key_1, []),
+    Conn = dummy_h2_conn(),
+    Opts1 = [{pool, test_pool_h2_key_1}, {tls_key, crypto:hash(sha256, <<"opts-one">>)}],
+    Opts2 = [{pool, test_pool_h2_key_1}, {tls_key, crypto:hash(sha256, <<"opts-two">>)}],
+    ok = hackney_pool:register_h2("h2key.example.com", 443, hackney_ssl, Conn, Opts1),
+    timer:sleep(50),
+    %% A request carrying different TLS options must not get this conn
+    ?assertEqual(none, hackney_pool:checkout_h2("h2key.example.com", 443, hackney_ssl, Opts2)),
+    stop_dummy(Conn),
+    ok = hackney_pool:stop_pool(test_pool_h2_key_1).
+
+test_h2_tls_key_match() ->
+    ok = hackney_pool:start_pool(test_pool_h2_key_2, []),
+    Conn = dummy_h2_conn(),
+    Opts = [{pool, test_pool_h2_key_2}, {tls_key, crypto:hash(sha256, <<"opts-one">>)}],
+    ok = hackney_pool:register_h2("h2key.example.com", 443, hackney_ssl, Conn, Opts),
+    timer:sleep(50),
+    ?assertEqual({ok, Conn}, hackney_pool:checkout_h2("h2key.example.com", 443, hackney_ssl, Opts)),
+    stop_dummy(Conn),
+    ok = hackney_pool:stop_pool(test_pool_h2_key_2).
+
+test_h2_tls_key_default_bucket() ->
+    %% Callers that pass no tls_key land in the default bucket, isolated
+    %% from keyed registrations.
+    ok = hackney_pool:start_pool(test_pool_h2_key_3, []),
+    KeyedConn = dummy_h2_conn(),
+    DefaultConn = dummy_h2_conn(),
+    KeyedOpts = [{pool, test_pool_h2_key_3}, {tls_key, crypto:hash(sha256, <<"opts-one">>)}],
+    DefaultOpts = [{pool, test_pool_h2_key_3}],
+    ok = hackney_pool:register_h2("h2def.example.com", 443, hackney_ssl, KeyedConn, KeyedOpts),
+    ok = hackney_pool:register_h2("h2def.example.com", 443, hackney_ssl, DefaultConn, DefaultOpts),
+    timer:sleep(50),
+    ?assertEqual({ok, DefaultConn},
+                 hackney_pool:checkout_h2("h2def.example.com", 443, hackney_ssl, DefaultOpts)),
+    ?assertEqual({ok, KeyedConn},
+                 hackney_pool:checkout_h2("h2def.example.com", 443, hackney_ssl, KeyedOpts)),
+    stop_dummy(KeyedConn),
+    stop_dummy(DefaultConn),
+    ok = hackney_pool:stop_pool(test_pool_h2_key_3).
 
 %%====================================================================
 %% Connection Tests

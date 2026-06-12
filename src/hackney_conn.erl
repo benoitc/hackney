@@ -71,6 +71,7 @@
     is_ready/1,
     %% SSL upgrade
     upgrade_to_ssl/2,
+    upgrade_to_ssl/3,
     is_upgraded_ssl/1,
     %% Reuse control
     is_no_reuse/1,
@@ -519,7 +520,16 @@ is_ready(Pid) ->
 %% NOT be returned to the pool (SSL connections are not pooled for security).
 -spec upgrade_to_ssl(pid(), list()) -> ok | {error, term()}.
 upgrade_to_ssl(Pid, SslOpts) ->
-    gen_statem:call(Pid, {upgrade_to_ssl, SslOpts}, infinity).
+    upgrade_to_ssl(Pid, SslOpts, #{final => false}).
+
+%% @doc Upgrade a TCP connection to SSL with explicit upgrade options.
+%% With `#{final => true}' SslOpts is handed to `ssl:connect/2' as-is
+%% (the caller computed it via hackney_ssl:effective_opts/3); the default
+%% `#{final => false}' keeps the legacy behavior of merging defaults and
+%% ALPN options inside the connection process.
+-spec upgrade_to_ssl(pid(), list(), map()) -> ok | {error, term()}.
+upgrade_to_ssl(Pid, SslOpts, UpgradeOpts) when is_map(UpgradeOpts) ->
+    gen_statem:call(Pid, {upgrade_to_ssl, SslOpts, UpgradeOpts}, infinity).
 
 %% @doc Check if this connection was upgraded from TCP to SSL.
 %% Upgraded connections should be closed after use, not returned to pool.
@@ -808,21 +818,29 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
             end
     end;
 
-connected({call, From}, {upgrade_to_ssl, _SslOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
+connected({call, From}, {upgrade_to_ssl, _SslOpts, _UpgradeOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
     %% Already SSL - no upgrade needed
     {keep_state_and_data, [{reply, From, ok}]};
-connected({call, From}, {upgrade_to_ssl, SslOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
+connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
     %% Upgrade TCP socket to SSL (e.g., after CONNECT proxy tunnel)
-    %% Use ssl_opts/2 to properly merge defaults with user options
-    %% (handles cacertfile vs cacerts correctly)
-    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts}]),
-    %% Add ALPN options for HTTP/2 negotiation
-    %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
-    AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
-        [] -> hackney_ssl:alpn_opts(ConnectOpts);
-        Opts -> Opts
+    FinalSslOpts = case maps:get(final, UpgradeOpts, false) of
+        true ->
+            %% Caller computed the exact handshake options with
+            %% hackney_ssl:effective_opts/3; use them as-is so the pool
+            %% tls_key hash matches what the handshake actually used.
+            SslOpts;
+        false ->
+            %% Use ssl_opts/2 to properly merge defaults with user options
+            %% (handles cacertfile vs cacerts correctly)
+            MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts}]),
+            %% Add ALPN options for HTTP/2 negotiation
+            %% Check both SslOpts (from upgrade call) and ConnectOpts (from initial config)
+            AlpnOpts = case hackney_ssl:alpn_opts(SslOpts) of
+                [] -> hackney_ssl:alpn_opts(ConnectOpts);
+                Opts -> Opts
+            end,
+            hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
     end,
-    FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
     case ssl:connect(Socket, FinalSslOpts) of
         {ok, SslSocket} ->
             %% Detect negotiated protocol

@@ -152,7 +152,7 @@ checkout_h2(Host, Port, Transport, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h2_connection_key(Host, Port, Transport, Options),
     try
         gen_server:call(Pool, {checkout_h2, Key}, ConnectTimeout)
     catch
@@ -167,7 +167,7 @@ checkout_h2(Host, Port, Transport, Options) ->
 register_h2(Host, Port, Transport, Pid, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h2_connection_key(Host, Port, Transport, Options),
     gen_server:cast(Pool, {register_h2, Key, Pid}),
     ok.
 
@@ -763,6 +763,14 @@ terminate(_Reason, #state{available=Available,
 connection_key(Host0, Port, Transport) ->
     Host = string:lowercase(Host0),
     {Host, Port, Transport}.
+
+%% @private Key for shared HTTP/2 connections. Includes the hash of the
+%% effective TLS options (tls_key) so requests with different ssl_options
+%% never share a connection. Callers that pass no tls_key all land in the
+%% `default' bucket, preserving the previous behavior.
+h2_connection_key(Host0, Port, Transport, Options) ->
+    Host = string:lowercase(Host0),
+    {Host, Port, Transport, proplists:get_value(tls_key, Options, default)}.
 
 %% @private Stop a connection, tolerating an already-dead process.
 stop_conn(Pid) ->
