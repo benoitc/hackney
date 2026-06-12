@@ -2398,10 +2398,15 @@ h3_tls_opts(ConnectOpts, SslOpts) ->
         undefined -> Base;
         Family -> Base#{family => Family}
     end,
-    case proplists:get_value(session_ticket, ConnectOpts,
-           proplists:get_value(session_ticket, SslOpts, undefined)) of
+    Base2 = case proplists:get_value(session_ticket, ConnectOpts,
+              proplists:get_value(session_ticket, SslOpts, undefined)) of
         undefined -> Base1;
         Ticket -> Base1#{session_ticket => Ticket}
+    end,
+    %% Forward a user SNI so build_h3_opts can honor it (hostname or `disable').
+    case proplists:get_value(server_name_indication, SslOpts, undefined) of
+        undefined -> Base2;
+        Sni -> Base2#{server_name_indication => Sni}
     end.
 
 %% @private Use an explicitly configured CA as the H3 trust store. quic only
@@ -2458,26 +2463,15 @@ do_tcp_connect(From, Data) ->
     TransportOpts = proplists:delete(protocols, ConnectOpts),
     Opts = case Transport of
         hackney_ssl ->
-            FinalSslOpts = case SslOpts0 of
-                [] ->
-                    %% Default TLS config: build the handshake options like the
-                    %% pooled path does, which also makes the connection
-                    %% eligible for TLS 1.3 session resumption.
-                    SslOpts1 = case proplists:get_value(protocols, ConnectOpts) of
-                        undefined -> [];
-                        Protocols -> [{protocols, Protocols}]
-                    end,
-                    hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts);
-                _ ->
-                    %% Keep the legacy build for custom ssl_options: routing
-                    %% them through effective_opts would change the
-                    %% hostname-verification target for a user-supplied
-                    %% server_name_indication (merge_ssl_opts takes the first
-                    %% SNI occurrence).
-                    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
-                    AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
-                    hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
+            %% effective_opts is the single builder of ssl:connect options for
+            %% both default and custom ssl_options. It resolves SNI and ALPN
+            %% and adds TLS 1.3 resumption only for the default config (custom
+            %% ssl_options leave it off, see resumption_allowed/1).
+            SslOpts1 = case proplists:get_value(protocols, ConnectOpts) of
+                undefined -> SslOpts0;
+                Protocols -> [{protocols, Protocols} | SslOpts0]
             end,
+            FinalSslOpts = hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts),
             TransportOpts ++ [{ssl_options, FinalSslOpts}];
         _ -> TransportOpts
     end,

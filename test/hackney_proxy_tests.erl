@@ -1052,3 +1052,24 @@ has_auth_header(Data) ->
         nomatch -> false
     end.
 
+%%====================================================================
+%% Proxy-leg SNI selection
+%%====================================================================
+
+proxy_ssl_opts_hostname_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("proxy.example", []),
+    ?assertEqual("proxy.example", proplists:get_value(server_name_indication, Opts)).
+
+proxy_ssl_opts_ipv4_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("10.0.0.1", []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts)).
+
+proxy_ssl_opts_ipv6_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("::1", []),
+    ?assertNot(proplists:is_defined(server_name_indication, Opts)).
+
+proxy_ssl_opts_user_sni_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts(
+             "proxy.example", [{server_name_indication, "set.by.user"}]),
+    ?assertEqual("set.by.user", proplists:get_value(server_name_indication, Opts)).
+
