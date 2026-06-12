@@ -3198,11 +3198,17 @@ maybe_store_h3_session(_Ticket, #conn_data{pool_handler = undefined}) ->
     ok;
 maybe_store_h3_session(Ticket, #conn_data{pool_handler = PoolHandler, host = Host,
                                           port = Port, transport = Transport,
-                                          pool_name = PoolName}) ->
+                                          pool_name = PoolName,
+                                          connect_options = ConnectOpts,
+                                          ssl_options = SslOpts}) ->
     case erlang:function_exported(PoolHandler, store_h3_session, 5) of
         true ->
+            %% connect_options may carry the injected per-resumption
+            %% session_ticket; h3_options_key ignores it, so this key matches
+            %% the one the request side computes without the ticket.
+            K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
             try PoolHandler:store_h3_session(Host, Port, Transport, Ticket,
-                                             [{pool, PoolName}])
+                                             [{pool, PoolName}, {h3_tls_key, K3}])
             catch _:_ -> ok
             end,
             ok;
@@ -3215,11 +3221,14 @@ maybe_delete_h3_session(#conn_data{pool_handler = undefined}) ->
     ok;
 maybe_delete_h3_session(#conn_data{pool_handler = PoolHandler, host = Host,
                                    port = Port, transport = Transport,
-                                   pool_name = PoolName}) ->
+                                   pool_name = PoolName,
+                                   connect_options = ConnectOpts,
+                                   ssl_options = SslOpts}) ->
     case erlang:function_exported(PoolHandler, delete_h3_session, 4) of
         true ->
+            K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
             try PoolHandler:delete_h3_session(Host, Port, Transport,
-                                              [{pool, PoolName}])
+                                              [{pool, PoolName}, {h3_tls_key, K3}])
             catch _:_ -> ok
             end,
             ok;

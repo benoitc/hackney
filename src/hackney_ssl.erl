@@ -25,6 +25,7 @@
 -export([ssl_opts/2]).
 -export([effective_opts/3]).
 -export([options_key/1]).
+-export([h3_options_key/2]).
 
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
@@ -109,6 +110,35 @@ options_key(FinalSslOpts) ->
     fun(T) -> is_tuple(T) andalso tuple_size(T) =:= 2 end,
     FinalSslOpts),
   crypto:hash(sha256, term_to_binary({lists:ukeysort(1, Tuples), lists:usort(Rest)})).
+
+%% @doc Hash the QUIC trust projection of an HTTP/3 connection into a pool
+%% key component. Includes exactly what decides server trust on the QUIC
+%% handshake, mirroring `hackney_conn:h3_tls_opts/2': the verify mode
+%% derived from the `insecure' flag (read from ConnectOpts first, then
+%% SslOpts) and the CA source from SslOpts (the `cacerts' list, else the
+%% `cacertfile' path, else the default trust store). The cacertfile path is
+%% hashed as given, without reading the file. Deliberately excluded:
+%% `session_ticket' (injected per resumption, so the conn-side store key
+%% must not depend on it), and `family' and `happy_eyeballs' (connectivity
+%% options that do not affect trust).
+-spec h3_options_key(list(), list()) -> binary().
+h3_options_key(ConnectOpts, SslOpts) ->
+  Insecure = proplists:get_value(insecure, ConnectOpts,
+               proplists:get_value(insecure, SslOpts, false)),
+  VerifyMode = case Insecure of
+    true -> verify_none;
+    false -> verify_peer
+  end,
+  CaSource = case proplists:get_value(cacerts, SslOpts) of
+    undefined ->
+      case proplists:get_value(cacertfile, SslOpts) of
+        undefined -> default;
+        File -> {cacertfile, File}
+      end;
+    CACerts ->
+      {cacerts, CACerts}
+  end,
+  crypto:hash(sha256, term_to_binary({VerifyMode, CaSource})).
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),

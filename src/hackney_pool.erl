@@ -199,7 +199,7 @@ checkout_h3(Host, Port, Transport, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h3_connection_key(Host, Port, Transport, Options),
     try
         gen_server:call(Pool, {checkout_h3, Key}, ConnectTimeout)
     catch
@@ -214,7 +214,7 @@ checkout_h3(Host, Port, Transport, Options) ->
 register_h3(Host, Port, Transport, Pid, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h3_connection_key(Host, Port, Transport, Options),
     gen_server:cast(Pool, {register_h3, Key, Pid}),
     ok.
 
@@ -233,7 +233,7 @@ unregister_h3(Pid, Options) ->
 get_h3_session(Host, Port, Transport, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h3_connection_key(Host, Port, Transport, Options),
     try
         gen_server:call(Pool, {get_h3_session, Key})
     catch
@@ -247,7 +247,7 @@ get_h3_session(Host, Port, Transport, Options) ->
 store_h3_session(Host, Port, Transport, Ticket, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h3_connection_key(Host, Port, Transport, Options),
     gen_server:cast(Pool, {store_h3_session, Key, Ticket}),
     ok.
 
@@ -257,7 +257,7 @@ store_h3_session(Host, Port, Transport, Ticket, Options) ->
 delete_h3_session(Host, Port, Transport, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
     Pool = find_pool(PoolName, Options),
-    Key = {Host, Port, Transport},
+    Key = h3_connection_key(Host, Port, Transport, Options),
     gen_server:cast(Pool, {delete_h3_session, Key}),
     ok.
 
@@ -771,6 +771,16 @@ connection_key(Host0, Port, Transport) ->
 h2_connection_key(Host0, Port, Transport, Options) ->
     Host = string:lowercase(Host0),
     {Host, Port, Transport, proplists:get_value(tls_key, Options, default)}.
+
+%% @private Key for shared HTTP/3 connections and cached 0-RTT session
+%% tickets. Includes the hash of the QUIC trust projection (h3_tls_key) so
+%% requests with differing trust configs never share a connection, and a
+%% ticket obtained under one trust config is never resumed under another.
+%% Callers that pass no h3_tls_key all land in the `default' bucket,
+%% preserving the previous behavior.
+h3_connection_key(Host0, Port, Transport, Options) ->
+    Host = string:lowercase(Host0),
+    {Host, Port, Transport, proplists:get_value(h3_tls_key, Options, default)}.
 
 %% @private Stop a connection, tolerating an already-dead process.
 stop_conn(Pid) ->

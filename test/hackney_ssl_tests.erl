@@ -166,3 +166,55 @@ options_key_order_insensitive_test() ->
     Opts1 = [{verify, verify_none}, {server_name_indication, "example.com"}],
     Opts2 = [{server_name_indication, "example.com"}, {verify, verify_none}],
     ?assertEqual(hackney_ssl:options_key(Opts1), hackney_ssl:options_key(Opts2)).
+
+%%====================================================================
+%% h3_options_key Tests (Unit tests)
+%%====================================================================
+
+h3_options_key_insecure_differs_test() ->
+    Default = hackney_ssl:h3_options_key([], []),
+    InsecureConnect = hackney_ssl:h3_options_key([{insecure, true}], []),
+    InsecureSsl = hackney_ssl:h3_options_key([], [{insecure, true}]),
+    ?assertNotEqual(Default, InsecureConnect),
+    ?assertNotEqual(Default, InsecureSsl),
+    %% Same trust projection regardless of which list carries the flag.
+    ?assertEqual(InsecureConnect, InsecureSsl).
+
+h3_options_key_cacertfile_test() ->
+    Default = hackney_ssl:h3_options_key([], []),
+    FileA = hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-a.pem"}]),
+    FileB = hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-b.pem"}]),
+    ?assertNotEqual(Default, FileA),
+    ?assertNotEqual(FileA, FileB).
+
+h3_options_key_cacerts_test() ->
+    Default = hackney_ssl:h3_options_key([], []),
+    CertsA = hackney_ssl:h3_options_key([], [{cacerts, [<<"der-a">>]}]),
+    CertsB = hackney_ssl:h3_options_key([], [{cacerts, [<<"der-b">>]}]),
+    ?assertNotEqual(Default, CertsA),
+    ?assertNotEqual(CertsA, CertsB).
+
+h3_options_key_ignores_non_trust_opts_test() ->
+    %% session_ticket is injected per resumption and family/happy_eyeballs
+    %% are connectivity options; none of them affect trust, so none of them
+    %% may change the key.
+    Default = hackney_ssl:h3_options_key([], []),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([{session_ticket, foo}], [])),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([], [{session_ticket, foo}])),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([{family, inet6}], [])),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([], [{family, inet6}])),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([{happy_eyeballs, false}], [])),
+    ?assertEqual(Default, hackney_ssl:h3_options_key([], [{happy_eyeballs, false}])).
+
+h3_options_key_deterministic_across_processes_test() ->
+    Parent = self(),
+    Compute = fun() ->
+        Key = hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-a.pem"}]),
+        Parent ! {h3_key, self(), Key}
+    end,
+    Pid1 = spawn(Compute),
+    Pid2 = spawn(Compute),
+    Key1 = receive {h3_key, Pid1, K1} -> K1 after 5000 -> error(timeout) end,
+    Key2 = receive {h3_key, Pid2, K2} -> K2 after 5000 -> error(timeout) end,
+    ?assertEqual(Key1, Key2),
+    ?assertEqual(Key1, hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-a.pem"}])).

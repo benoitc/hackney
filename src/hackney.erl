@@ -215,13 +215,20 @@ effective_ssl_opts(Host, Options) ->
 
 %% @private Try to get or establish an HTTP/3 connection
 try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
+  %% Hash the QUIC trust projection once; it keys both the shared H3
+  %% connection and the 0-RTT ticket cache so requests with differing
+  %% trust configs never share either.
+  ConnectOpts = proplists:get_value(connect_options, Options, []),
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  K3 = hackney_ssl:h3_options_key(ConnectOpts, SslOpts),
+  Options2 = [{h3_tls_key, K3} | Options],
   %% Check if HTTP/3 is blocked for this host (negative cache)
   case hackney_altsvc:is_h3_blocked(Host, Port) of
     true ->
       false;
     false ->
       %% Check if we have an existing HTTP/3 connection
-      case PoolHandler:checkout_h3(Host, Port, Transport, Options) of
+      case PoolHandler:checkout_h3(Host, Port, Transport, Options2) of
         {ok, H3Pid} ->
           %% Verify connection is actually in connected state
           case hackney_conn:get_state(H3Pid) of
@@ -229,21 +236,21 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
               {ok, H3Pid};
             _ ->
               %% Connection not ready, unregister and try new connection
-              PoolHandler:unregister_h3(H3Pid, Options),
-              try_new_h3_connection(Host, Port, Transport, Options, PoolHandler)
+              PoolHandler:unregister_h3(H3Pid, Options2),
+              try_new_h3_connection(Host, Port, Transport, Options2, PoolHandler)
           end;
         none ->
           %% Check Alt-Svc cache for known HTTP/3 endpoint
           case hackney_altsvc:lookup(Host, Port) of
             {ok, h3, H3Port} ->
               %% Alt-Svc says HTTP/3 is available, try connecting
-              try_new_h3_connection(Host, H3Port, Transport, Options, PoolHandler);
+              try_new_h3_connection(Host, H3Port, Transport, Options2, PoolHandler);
             none ->
               %% No Alt-Svc cached, only try H3 if explicitly requested
               case lists:member(http3, proplists:get_value(protocols, Options, [])) of
                 true ->
                   %% User explicitly wants HTTP/3, try it
-                  try_new_h3_connection(Host, Port, Transport, Options, PoolHandler);
+                  try_new_h3_connection(Host, Port, Transport, Options2, PoolHandler);
                 false ->
                   false
               end
