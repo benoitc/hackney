@@ -257,6 +257,25 @@ hackney_pool:start_pool(my_api, [
 hackney:get(URL, [], <<>>, [{pool, my_api}]).
 ```
 
+### Pooling HTTPS Connections
+
+Only plain TCP connections are pooled by default: an HTTPS request upgrades a
+pooled TCP connection and closes the SSL connection after use. Set
+`{ssl_pooling, true}` (per request or via the `ssl_pooling` application env)
+to also pool HTTPS/1.1 connections, keyed by their TLS options so only
+requests with identical `ssl_options` reuse them:
+
+```erlang
+hackney:get(URL, [], <<>>, [{ssl_pooling, true}]).
+```
+
+Requests on hackney's default TLS config (no `ssl_options`) also use TLS 1.3
+session resumption, so a fresh connection to a recently contacted server
+skips the full handshake. Set the `tls_session_resumption` application env to
+`false` to disable it. Requests with custom `ssl_options` never resume: the
+OTP ticket store is node-wide and a resumed session skips certificate
+validation, so it is reserved for the shared default trust config.
+
 ## Manual Connection Management
 
 For fine-grained control, you can create a connection and reuse it for multiple requests. This works for both HTTP/1.1 and HTTP/2.
@@ -362,7 +381,23 @@ hackney:get(URL, [], <<>>, [
 ### Skip Verification
 
 ```erlang
-hackney:get(URL, [], <<>>, [insecure]).
+hackney:get(URL, [], <<>>, [
+    {ssl_options, [{verify, verify_none}]}
+]).
+```
+
+### SNI
+
+The TLS `server_name_indication` defaults to the request host and is omitted
+for IP-literal hosts (RFC 6066). Set it explicitly to present a different
+name; the value drives both the wire SNI and the certificate
+hostname-verification target. Use `disable` to suppress SNI without weakening
+verification. This applies to HTTP/1.1, HTTP/2 and HTTP/3.
+
+```erlang
+hackney:get("https://93.184.216.34", [], <<>>, [
+    {ssl_options, [{server_name_indication, "example.com"}]}
+]).
 ```
 
 ## Timeouts

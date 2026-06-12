@@ -264,8 +264,31 @@ hackney:get(URL, [], <<>>, [
 ]).
 
 %% Skip verification (development only)
-hackney:get(URL, [], <<>>, [insecure]).
+hackney:get(URL, [], <<>>, [
+    {ssl_options, [{verify, verify_none}]}
+]).
 ```
+
+#### SNI
+
+By default the TLS `server_name_indication` is the request host, and it is
+omitted when the host is an IP literal (RFC 6066 forbids SNI for IP
+addresses). Set it explicitly to present a different name; the value is used
+both on the wire and as the certificate hostname-verification target, which
+is useful when connecting to an IP or a proxy while validating a hostname:
+
+```erlang
+hackney:get("https://93.184.216.34", [], <<>>, [
+    {ssl_options, [{server_name_indication, "example.com"}]}
+]).
+
+%% Suppress SNI without weakening verification
+hackney:get(URL, [], <<>>, [
+    {ssl_options, [{server_name_indication, disable}]}
+]).
+```
+
+This applies to HTTP/1.1, HTTP/2 and HTTP/3.
 
 ## Modules
 
