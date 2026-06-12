@@ -86,6 +86,16 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
 %% as the ALPN fallback when SslOpts yields no ALPN protocols. Computing
 %% the final list once, caller-side, lets `options_key/1' hash the same
 %% term the handshake uses.
+%%
+%% Requests on hackney's default TLS config (no user ssl_options) also get
+%% `{session_tickets, auto}' for TLS 1.3 session resumption, unless the
+%% `tls_session_resumption' application env is set to false or the node
+%% pins the ssl app to versions without 'tlsv1.3'. Custom ssl_options
+%% deliberately never get resumption: OTP's automatic ticket store is
+%% global per node and keyed by SNI, not by trust options, and a
+%% PSK-resumed handshake skips certificate validation. Restricting it to
+%% the default config means every participant in the store has identical
+%% trust, so trust configs cannot cross by construction.
 -spec effective_opts(string(), list(), list()) -> list().
 effective_opts(Host, SslOpts, ConnectOpts) ->
   SslOpts1 = [{server_name_indication, Host} | SslOpts],
@@ -97,7 +107,31 @@ effective_opts(Host, SslOpts, ConnectOpts) ->
   Final0 = hackney_util:merge_opts(Merged, Alpn),
   %% `protocols' is a hackney option, not an ssl one; keep it out of the
   %% handshake options.
-  proplists:delete(protocols, Final0).
+  Final = proplists:delete(protocols, Final0),
+  case resumption_allowed(SslOpts) of
+    true -> [{session_tickets, auto} | Final];
+    false -> Final
+  end.
+
+%% @private Resumption only for the default TLS config: the caller injects
+%% at most a `protocols' entry, so deleting it leaves [] exactly when the
+%% user passed no ssl_options (hence no insecure, versions or
+%% session_tickets overrides by construction).
+resumption_allowed(SslOpts) ->
+  proplists:delete(protocols, SslOpts) =:= []
+    andalso hackney_app:get_app_env(tls_session_resumption, true) =:= true
+    andalso tlsv13_allowed().
+
+%% @private OTP rejects `session_tickets' when 'tlsv1.3' is not among the
+%% effective versions (ssl_config asserts the version dependency), so honor
+%% a node-wide ssl `protocol_version' pin that excludes TLS 1.3.
+tlsv13_allowed() ->
+  case application:get_env(ssl, protocol_version) of
+    undefined -> true;
+    {ok, 'tlsv1.3'} -> true;
+    {ok, Versions} when is_list(Versions) -> lists:member('tlsv1.3', Versions);
+    {ok, _} -> false
+  end.
 
 %% @doc Hash the effective TLS options into a pool key component.
 %% 2-tuples are ukeysorted (first occurrence wins, preserving proplists

@@ -106,6 +106,14 @@ TLS options, so only requests with identical `ssl_options` reuse them:
 hackney:get(URL, [], <<>>, [{ssl_pooling, true}]).
 ```
 
+Requests using hackney's default TLS config (no `ssl_options` passed) also
+enable TLS 1.3 session resumption (`{session_tickets, auto}`), so fresh
+connections to a recently contacted server skip the full handshake. Set the
+`tls_session_resumption` application env to `false` to turn this off.
+Requests with custom `ssl_options` never use resumption: the OTP ticket
+store is shared node-wide and a resumed session skips certificate
+validation, so it is reserved for the identical default trust config.
+
 ### Streaming
 
 Stream request bodies for uploads:

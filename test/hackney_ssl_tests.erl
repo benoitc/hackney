@@ -218,3 +218,148 @@ h3_options_key_deterministic_across_processes_test() ->
     Key2 = receive {h3_key, Pid2, K2} -> K2 after 5000 -> error(timeout) end,
     ?assertEqual(Key1, Key2),
     ?assertEqual(Key1, hackney_ssl:h3_options_key([], [{cacertfile, "/tmp/ca-a.pem"}])).
+
+%%====================================================================
+%% TLS 1.3 session resumption Tests (Unit tests)
+%%====================================================================
+
+effective_opts_resumption_default_test() ->
+    Opts = hackney_ssl:effective_opts("example.com", [], []),
+    ?assertEqual(auto, proplists:get_value(session_tickets, Opts)).
+
+effective_opts_resumption_with_protocols_test() ->
+    %% A caller-injected protocols entry is still the default TLS config.
+    Opts = hackney_ssl:effective_opts("example.com", [{protocols, [http2, http1]}], []),
+    ?assertEqual(auto, proplists:get_value(session_tickets, Opts)).
+
+effective_opts_no_resumption_with_custom_ssl_opts_test() ->
+    %% Any user-supplied ssl_options must opt the request out of the
+    %% node-global ticket store (trust isolation).
+    lists:foreach(
+      fun(SslOpts) ->
+          Opts = hackney_ssl:effective_opts("example.com", SslOpts, []),
+          ?assertNot(proplists:is_defined(session_tickets, Opts))
+      end,
+      [[{verify, verify_none}],
+       [{versions, ['tlsv1.2']}],
+       [{insecure, true}]]).
+
+effective_opts_resumption_kill_switch_test() ->
+    application:set_env(hackney, tls_session_resumption, false),
+    try
+        Opts = hackney_ssl:effective_opts("example.com", [], []),
+        ?assertNot(proplists:is_defined(session_tickets, Opts))
+    after
+        application:unset_env(hackney, tls_session_resumption)
+    end.
+
+effective_opts_resumption_requires_tlsv13_test() ->
+    %% OTP rejects session_tickets when 'tlsv1.3' is not among the
+    %% versions, so a node-wide ssl protocol_version pin must disable it.
+    application:set_env(ssl, protocol_version, ['tlsv1.2']),
+    try
+        Opts = hackney_ssl:effective_opts("example.com", [], []),
+        ?assertNot(proplists:is_defined(session_tickets, Opts))
+    after
+        application:unset_env(ssl, protocol_version)
+    end.
+
+options_key_differs_on_resumption_test() ->
+    %% Resumption-enabled and resumption-disabled connections are
+    %% handshaken differently and must not share pool buckets.
+    On = hackney_ssl:options_key(hackney_ssl:effective_opts("example.com", [], [])),
+    application:set_env(hackney, tls_session_resumption, false),
+    Off = try
+        hackney_ssl:options_key(hackney_ssl:effective_opts("example.com", [], []))
+    after
+        application:unset_env(hackney, tls_session_resumption)
+    end,
+    ?assertNotEqual(On, Off).
+
+%%====================================================================
+%% TLS 1.3 session resumption (integration, local TLS listener)
+%%====================================================================
+
+%% Resolve test cert dir from the module's beam location so the paths work
+%% regardless of where eunit is run from.
+cert_dir() ->
+    BeamDir = filename:dirname(code:which(?MODULE)),
+    %% _build/test/lib/hackney/test -> project root -> test/certs
+    Root = filename:join([BeamDir, "..", "..", "..", "..", ".."]),
+    filename:join([filename:absname(Root), "test", "certs"]).
+
+tls13_session_resumption_integration_test_() ->
+    {timeout, 15, fun run_tls13_session_resumption/0}.
+
+run_tls13_session_resumption() ->
+    {ok, _} = application:ensure_all_started(ssl),
+    Certs = cert_dir(),
+    {ok, ListenSock} = ssl:listen(0,
+        [binary, {active, false}, {reuseaddr, true},
+         {certfile, filename:join(Certs, "server.pem")},
+         {keyfile, filename:join(Certs, "server.key")},
+         {versions, ['tlsv1.3', 'tlsv1.2']},
+         {session_tickets, stateless}]),
+    {ok, {_, Port}} = ssl:sockname(ListenSock),
+    Acceptor = spawn_link(fun() -> tls13_accept_loop(ListenSock) end),
+    try
+        S1 = tls13_connect(Port),
+        %% NewSessionTicket messages arrive asynchronously after the
+        %% handshake; give the client ticket store a moment to record one.
+        timer:sleep(300),
+        ok = ssl:close(S1),
+        ?assert(tls13_resumed(Port, 10))
+    after
+        unlink(Acceptor),
+        exit(Acceptor, kill),
+        ssl:close(ListenSock)
+    end.
+
+%% Upgrade-style connect, like hackney does: raw TCP first, then
+%% ssl:connect/3 on the socket. verify_none avoids certifi validation of
+%% the localhost test cert.
+tls13_connect(Port) ->
+    {ok, Sock} = gen_tcp:connect("127.0.0.1", Port,
+                                 [binary, {active, false}], 2000),
+    {ok, SslSock} = ssl:connect(Sock,
+                                [{verify, verify_none},
+                                 {session_tickets, auto},
+                                 {versions, ['tlsv1.3']}], 2000),
+    SslSock.
+
+tls13_resumed(_Port, 0) ->
+    false;
+tls13_resumed(Port, Retries) ->
+    S = tls13_connect(Port),
+    Info = ssl:connection_information(S, [session_resumption]),
+    ok = ssl:close(S),
+    case Info of
+        {ok, [{session_resumption, true}]} ->
+            true;
+        _ ->
+            timer:sleep(200),
+            tls13_resumed(Port, Retries - 1)
+    end.
+
+tls13_accept_loop(ListenSock) ->
+    case ssl:transport_accept(ListenSock, 10000) of
+        {ok, TSock} ->
+            Pid = spawn_link(fun() ->
+                receive
+                    {go, Sock} ->
+                        case ssl:handshake(Sock, 5000) of
+                            {ok, SslSock} ->
+                                %% Hold the connection until the client
+                                %% closes it.
+                                _ = ssl:recv(SslSock, 0, 10000);
+                            _ ->
+                                ok
+                        end
+                end
+            end),
+            ok = ssl:controlling_process(TSock, Pid),
+            Pid ! {go, TSock},
+            tls13_accept_loop(ListenSock);
+        {error, _} ->
+            ok
+    end.

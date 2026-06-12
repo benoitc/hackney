@@ -11,6 +11,14 @@ unreleased
   options and is reused only on an exact match, skipping the TLS handshake on
   follow-up requests. The default is unchanged: SSL connections are closed at
   checkin. (#872)
+- TLS 1.3 session resumption for requests using hackney's default TLS config.
+  When no `ssl_options` are passed, connections are opened with
+  `{session_tickets, auto}` so fresh connections to the same server resume
+  the session instead of paying a full handshake. Disable with the
+  `tls_session_resumption` application env (default true). Requests with
+  custom `ssl_options` deliberately get no resumption: OTP's ticket store is
+  node-global and a resumed handshake skips certificate validation, so only
+  the shared default trust config may use it (trust isolation). (#872)
 
 ### Changed
 

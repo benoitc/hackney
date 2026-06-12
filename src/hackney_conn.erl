@@ -2458,11 +2458,26 @@ do_tcp_connect(From, Data) ->
     TransportOpts = proplists:delete(protocols, ConnectOpts),
     Opts = case Transport of
         hackney_ssl ->
-            %% Use ssl_opts/2 to properly merge defaults with user options
-            %% (handles cacertfile vs cacerts correctly)
-            MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
-            AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
-            FinalSslOpts = hackney_util:merge_opts(MergedSslOpts, AlpnOpts),
+            FinalSslOpts = case SslOpts0 of
+                [] ->
+                    %% Default TLS config: build the handshake options like the
+                    %% pooled path does, which also makes the connection
+                    %% eligible for TLS 1.3 session resumption.
+                    SslOpts1 = case proplists:get_value(protocols, ConnectOpts) of
+                        undefined -> [];
+                        Protocols -> [{protocols, Protocols}]
+                    end,
+                    hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts);
+                _ ->
+                    %% Keep the legacy build for custom ssl_options: routing
+                    %% them through effective_opts would change the
+                    %% hostname-verification target for a user-supplied
+                    %% server_name_indication (merge_ssl_opts takes the first
+                    %% SNI occurrence).
+                    MergedSslOpts = hackney_ssl:ssl_opts(Host, [{ssl_options, SslOpts0}]),
+                    AlpnOpts = hackney_ssl:alpn_opts(ConnectOpts),
+                    hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
+            end,
             TransportOpts ++ [{ssl_options, FinalSslOpts}];
         _ -> TransportOpts
     end,
