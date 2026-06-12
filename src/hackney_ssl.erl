@@ -24,8 +24,13 @@
 -export([cipher_opts/0]).
 -export([ssl_opts/2]).
 -export([effective_opts/3]).
+-export([effective_opts_and_key/3]).
+-export([init_key_cache/0]).
 -export([options_key/1]).
 -export([h3_options_key/2]).
+
+-define(TLS_KEY_CACHE, hackney_tls_keys).
+-define(TLS_KEY_CACHE_MAX, 512).
 
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
@@ -132,6 +137,60 @@ tlsv13_allowed() ->
     {ok, Versions} when is_list(Versions) -> lists:member('tlsv1.3', Versions);
     {ok, _} -> false
   end.
+
+%% @doc Create the TLS key memo table used by `effective_opts_and_key/3'.
+%% Idempotent; called from hackney_sup:init/1.
+-spec init_key_cache() -> ok.
+init_key_cache() ->
+  case ets:info(?TLS_KEY_CACHE) of
+    undefined ->
+      ?TLS_KEY_CACHE = ets:new(?TLS_KEY_CACHE,
+                               [set, public, named_table,
+                                {read_concurrency, true}]),
+      ok;
+    _ ->
+      ok
+  end.
+
+%% @doc Like `effective_opts/3' but also return `options_key/1' of the
+%% result, memoized in a bounded ETS cache. Building the options is cheap;
+%% hashing them is not (sha256 over the full term, dominated by the certifi
+%% CA bundle), so only the hash is cached. The memo key is the small
+%% pre-merge inputs plus `env_fingerprint/0', so a runtime env flip yields
+%% a fresh key instead of hashing connections into wrong pool buckets.
+-spec effective_opts_and_key(string(), list(), list()) -> {list(), binary()}.
+effective_opts_and_key(Host, SslOpts, ConnectOpts) ->
+  Final = effective_opts(Host, SslOpts, ConnectOpts),
+  MemoKey = {Host, SslOpts, ConnectOpts, env_fingerprint()},
+  try
+    case ets:lookup(?TLS_KEY_CACHE, MemoKey) of
+      [{_, Key}] ->
+        {Final, Key};
+      [] ->
+        Key = options_key(Final),
+        %% The bound is soft under concurrency; the cache is best-effort.
+        case ets:info(?TLS_KEY_CACHE, size) >= ?TLS_KEY_CACHE_MAX of
+          true -> _ = ets:delete_all_objects(?TLS_KEY_CACHE);
+          false -> ok
+        end,
+        _ = ets:insert(?TLS_KEY_CACHE, {MemoKey, Key}),
+        {Final, Key}
+    end
+  catch
+    %% Table absent: hackney used as a library without the app started.
+    error:badarg ->
+      {Final, options_key(Final)}
+  end.
+
+%% @private Invariant: this tuple must cover every mutable read inside
+%% effective_opts/3 (default_protocols via alpn_opts, the
+%% tls_session_resumption env via resumption_allowed, the ssl
+%% protocol_version env via tlsv13_allowed). Extend it whenever
+%% effective_opts/3 grows a new env read, or stale keys get served.
+env_fingerprint() ->
+  {hackney_util:default_protocols(),
+   hackney_app:get_app_env(tls_session_resumption, true),
+   application:get_env(ssl, protocol_version, undefined)}.
 
 %% @doc Hash the effective TLS options into a pool key component.
 %% 2-tuples are ukeysorted (first occurrence wins, preserving proplists

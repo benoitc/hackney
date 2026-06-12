@@ -277,6 +277,83 @@ options_key_differs_on_resumption_test() ->
     ?assertNotEqual(On, Off).
 
 %%====================================================================
+%% effective_opts_and_key memoization Tests (Unit tests)
+%%====================================================================
+
+%% The absent-table test deletes and recreates the cache, so it must run
+%% last; the funs in this fixture run in order.
+tls_key_cache_test_() ->
+    {setup,
+     fun() -> ok = hackney_ssl:init_key_cache() end,
+     fun(_) -> ok end,
+     [fun tls_key_cache_matches_unmemoized/0,
+      fun tls_key_cache_hit_path/0,
+      fun tls_key_cache_distinct_inputs/0,
+      fun tls_key_cache_env_fingerprint/0,
+      fun tls_key_cache_cap_flush/0,
+      fun tls_key_cache_absent_table/0]}.
+
+tls_key_cache_matches_unmemoized() ->
+    true = ets:delete_all_objects(hackney_tls_keys),
+    {F, K} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+    ?assertEqual(hackney_ssl:effective_opts("example.com", [], []), F),
+    ?assertEqual(hackney_ssl:options_key(F), K).
+
+tls_key_cache_hit_path() ->
+    true = ets:delete_all_objects(hackney_tls_keys),
+    {_, K1} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+    ?assertEqual(1, ets:info(hackney_tls_keys, size)),
+    {_, K2} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+    ?assertEqual(K1, K2),
+    ?assertEqual(1, ets:info(hackney_tls_keys, size)).
+
+tls_key_cache_distinct_inputs() ->
+    true = ets:delete_all_objects(hackney_tls_keys),
+    {_, KA} = hackney_ssl:effective_opts_and_key("a.example.com", [], []),
+    {_, KB} = hackney_ssl:effective_opts_and_key("b.example.com", [], []),
+    {_, KC} = hackney_ssl:effective_opts_and_key(
+                "a.example.com", [{verify, verify_none}], []),
+    ?assertNotEqual(KA, KB),
+    ?assertNotEqual(KA, KC),
+    ?assertEqual(3, ets:info(hackney_tls_keys, size)).
+
+tls_key_cache_env_fingerprint() ->
+    %% A runtime env flip changes the effective options, so the memo must
+    %% not serve the key cached under the previous env.
+    true = ets:delete_all_objects(hackney_tls_keys),
+    {_, On} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+    application:set_env(hackney, tls_session_resumption, false),
+    Off = try
+        {_, K} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+        K
+    after
+        application:unset_env(hackney, tls_session_resumption)
+    end,
+    ?assertNotEqual(On, Off).
+
+tls_key_cache_cap_flush() ->
+    true = ets:delete_all_objects(hackney_tls_keys),
+    lists:foreach(
+      fun(I) ->
+          Host = "host-" ++ integer_to_list(I) ++ ".example.com",
+          {_, _} = hackney_ssl:effective_opts_and_key(Host, [], [])
+      end,
+      lists:seq(1, 600)),
+    ?assert(ets:info(hackney_tls_keys, size) =< 512).
+
+tls_key_cache_absent_table() ->
+    %% Without the app started the table does not exist; the function must
+    %% still return correct results.
+    true = ets:delete(hackney_tls_keys),
+    try
+        {F, K} = hackney_ssl:effective_opts_and_key("example.com", [], []),
+        ?assertEqual(hackney_ssl:effective_opts("example.com", [], []), F),
+        ?assertEqual(hackney_ssl:options_key(F), K)
+    after
+        ok = hackney_ssl:init_key_cache()
+    end.
+
+%%====================================================================
 %% TLS 1.3 session resumption (integration, local TLS listener)
 %%====================================================================
 

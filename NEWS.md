@@ -26,6 +26,9 @@ unreleased
   HTTP/3 connections plus cached 0-RTT session tickets by the QUIC trust
   options. Requests with different `ssl_options` no longer share a multiplexed
   connection or resume each other's tickets.
+- The TLS options hash computed for every pooled HTTPS request is memoized in
+  a bounded ETS cache keyed by the pre-merge inputs and the relevant
+  application envs, skipping a sha256 over the full CA bundle on cache hits.
 
 4.2.3 - 2026-06-10
 ------------------

@@ -42,6 +42,9 @@ init([]) ->
   %% initialize per-host load regulation
   hackney_load_regulation:init(),
 
+  %% initialize the TLS options key memo table
+  ok = hackney_ssl:init_key_cache(),
+
   Specs = [
            %% manager
            ?CHILD(hackney_manager, worker),

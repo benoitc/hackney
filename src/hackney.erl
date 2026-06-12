@@ -168,8 +168,7 @@ connect_pool(Transport, Host, Port, Options) ->
       %% shared HTTP/2 connection so requests with different ssl_options
       %% never share a connection. FinalSslOpts is passed alongside Options
       %% (not inside it) to keep the large CA material out of the pool state.
-      FinalSslOpts = effective_ssl_opts(Host, Options),
-      TlsKey = hackney_ssl:options_key(FinalSslOpts),
+      {FinalSslOpts, TlsKey} = effective_ssl_opts(Host, Options),
       Options2 = [{tls_key, TlsKey} | Options],
       %% Check HTTP/3 first if allowed
       case H3Allowed andalso try_h3_connection(Host, Port, Transport, Options, PoolHandler) of
@@ -201,9 +200,10 @@ connect_pool(Transport, Host, Port, Options) ->
       connect_pool_new(Transport, Host, Port, Options, undefined, PoolHandler)
   end.
 
-%% @private Build the exact TLS handshake options for a pooled SSL request.
-%% Single source of truth: replicates what maybe_upgrade_ssl used to build
-%% inline, including the optional protocols entry for ALPN.
+%% @private Build the exact TLS handshake options for a pooled SSL request,
+%% plus their memoized pool key hash. Single source of truth: replicates
+%% what maybe_upgrade_ssl used to build inline, including the optional
+%% protocols entry for ALPN.
 effective_ssl_opts(Host, Options) ->
   SslOpts = proplists:get_value(ssl_options, Options, []),
   SslOpts2 = case proplists:get_value(protocols, Options, undefined) of
@@ -211,7 +211,7 @@ effective_ssl_opts(Host, Options) ->
     Protocols -> [{protocols, Protocols} | SslOpts]
   end,
   ConnectOpts = proplists:get_value(connect_options, Options, []),
-  hackney_ssl:effective_opts(Host, SslOpts2, ConnectOpts).
+  hackney_ssl:effective_opts_and_key(Host, SslOpts2, ConnectOpts).
 
 %% @private Try to get or establish an HTTP/3 connection
 try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
