@@ -283,6 +283,43 @@ Each chunk is sent as a DATA frame and the request stream is closed with
 END_STREAM on `finish_send_body/1`. The `h2` connection buffers beyond the
 peer's flow-control window and drains as WINDOW_UPDATEs arrive.
 
+## Bidirectional Streaming (gRPC-style)
+
+For full-duplex streams, where the client sends and receives on the same
+stream interleaved (as gRPC bidi RPCs do), use the `h2_*` API. It mirrors the
+`ws_*` / `wt_*` APIs: `h2_open` returns a pid, `h2_send` writes DATA frames,
+`h2_recv` reads inbound messages, and `h2_send_trailers` / `h2_send(_, _, fin)`
+half-close the send side. The URL must be `https` (HTTP/2 is negotiated over
+ALPN), and each `h2_open` uses its own dedicated connection.
+
+```erlang
+{ok, S} = hackney:h2_open(<<"https://host/pkg.Service/BidiMethod">>,
+                          [{<<"content-type">>, <<"application/grpc">>},
+                           {<<"te">>, <<"trailers">>}],
+                          [{ssl_options, [...]}]),
+
+{ok, {response, 200, _Headers}} = hackney:h2_recv(S),
+ok = hackney:h2_send(S, Frame1),
+{ok, {data, Reply1}} = hackney:h2_recv(S),
+ok = hackney:h2_send(S, Frame2),          %% keep sending while receiving
+{ok, {data, Reply2}} = hackney:h2_recv(S),
+ok = hackney:h2_send(S, <<>>, fin),        %% half-close the request
+{ok, {trailers, Trailers}} = hackney:h2_recv(S),
+{ok, done} = hackney:h2_recv(S),
+ok = hackney:h2_close(S).
+```
+
+`h2_recv/1,2` returns `{response, Status, Headers}`, `{data, Data}`,
+`{trailers, Trailers}`, or `done` (the peer ended the stream); after `done` it
+returns `{error, closed}`. With `{active, true | once}` the same messages are
+delivered to the owner as `{hackney_h2, Pid, Msg}` instead (errors as
+`{hackney_h2_error, Pid, Reason}`).
+
+Open with `{flow_control, manual}` to apply receive backpressure: the window is
+only replenished when you call `h2_consume(Pid, NBytes)` for the bytes you have
+processed. The API carries raw bytes; gRPC message framing is the caller's
+responsibility.
+
 ## Flow Control
 
 HTTP/2 has built-in flow control to prevent fast senders from overwhelming slow receivers. Hackney handles this automatically:
