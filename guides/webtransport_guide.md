@@ -268,4 +268,3 @@ run(URL) ->
 - [WebSocket Guide](websocket_guide.md)
 - [HTTP/3 Guide](http3_guide.md)
 - [Getting Started](../GETTING_STARTED.md)
-```
