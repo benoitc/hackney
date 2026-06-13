@@ -42,6 +42,15 @@
          wt_send_datagram/2,
          wt_session_info/1]).
 
+%% HTTP/2 bidirectional (gRPC-style) stream API
+-export([h2_open/2, h2_open/3, h2_open/4,
+         h2_send/2, h2_send/3,
+         h2_send_trailers/2,
+         h2_recv/1, h2_recv/2,
+         h2_consume/2,
+         h2_setopts/2,
+         h2_close/1]).
+
 -export([redirect_location/1, location/1]).
 
 -export([get_version/0]).
@@ -1022,6 +1031,131 @@ wt_session_info(WtPid) when is_pid(WtPid) ->
 %% @private Signal the WebTransport process to shut down, ignoring errors.
 shutdown_wt(WtPid) ->
   try exit(WtPid, shutdown) catch _:_ -> ok end.
+
+%%====================================================================
+%% HTTP/2 bidirectional (gRPC-style) stream API
+%%====================================================================
+
+%% @doc Open a full-duplex HTTP/2 stream (gRPC-style bidirectional streaming).
+%% Establishes a dedicated HTTP/2 connection (ALPN, so an https URL) and opens
+%% one stream on it. Returns a pid driven with h2_send/h2_recv etc. The method
+%% defaults to POST.
+%%
+%% Options: connect_timeout, recv_timeout, connect_options, ssl_options,
+%% {flow_control, auto | manual}, {active, true | false | once},
+%% {max_recv_buffer, bytes | infinity}.
+-spec h2_open(binary() | string(), list()) -> {ok, pid()} | {error, term()}.
+h2_open(URL, Opts) ->
+  h2_open(post, URL, [], Opts).
+
+-spec h2_open(binary() | string(), list(), list()) -> {ok, pid()} | {error, term()}.
+h2_open(URL, Headers, Opts) ->
+  h2_open(post, URL, Headers, Opts).
+
+-spec h2_open(atom() | binary() | string(), binary() | string(), list(), list()) ->
+  {ok, pid()} | {error, term()}.
+h2_open(Method, URL, Headers, Opts) ->
+  #hackney_url{
+    transport = Transport,
+    scheme = Scheme,
+    host = Host,
+    port = Port,
+    path = Path0,
+    qs = Query
+  } = hackney_url:parse_url(URL),
+  case Transport of
+    hackney_ssl ->
+      Path = case Query of
+        <<>> -> Path0;
+        _ -> <<Path0/binary, "?", Query/binary>>
+      end,
+      H2Opts = #{
+        method => h2_method_bin(Method),
+        host => Host,
+        port => Port,
+        transport => Transport,
+        path => Path,
+        headers => Headers,
+        connect_timeout => proplists:get_value(connect_timeout, Opts, 8000),
+        recv_timeout => proplists:get_value(recv_timeout, Opts, infinity),
+        connect_options => proplists:get_value(connect_options, Opts, []),
+        ssl_options => proplists:get_value(ssl_options, Opts, []),
+        flow_control => proplists:get_value(flow_control, Opts, auto),
+        active => proplists:get_value(active, Opts, false),
+        max_recv_buffer => proplists:get_value(max_recv_buffer, Opts, 16#4000000)
+      },
+      case hackney_h2_stream:start_link(H2Opts) of
+        {ok, Pid} ->
+          Timeout = maps:get(connect_timeout, H2Opts),
+          try hackney_h2_stream:connect(Pid, Timeout) of
+            ok ->
+              {ok, Pid};
+            {error, Reason} ->
+              shutdown_h2(Pid),
+              {error, Reason}
+          catch
+            exit:{timeout, _} ->
+              shutdown_h2(Pid),
+              {error, connect_timeout};
+            exit:{noproc, _} ->
+              {error, {h2_process_died, noproc}}
+          end;
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    _ ->
+      {error, {scheme_not_supported, Scheme}}
+  end.
+
+%% @doc Send a DATA frame on the stream (no END_STREAM).
+-spec h2_send(pid(), iodata()) -> ok | {error, term()}.
+h2_send(Pid, Data) when is_pid(Pid) ->
+  hackney_h2_stream:send(Pid, Data).
+
+%% @doc Send a DATA frame, optionally half-closing the send side (`fin').
+-spec h2_send(pid(), iodata(), fin | nofin) -> ok | {error, term()}.
+h2_send(Pid, Data, Fin) when is_pid(Pid) ->
+  hackney_h2_stream:send(Pid, Data, Fin).
+
+%% @doc Send trailing HEADERS, half-closing the send side (gRPC trailers).
+-spec h2_send_trailers(pid(), list()) -> ok | {error, term()}.
+h2_send_trailers(Pid, Trailers) when is_pid(Pid) ->
+  hackney_h2_stream:send_trailers(Pid, Trailers).
+
+%% @doc Receive the next inbound message: {response, Status, Headers} |
+%% {data, Data} | {trailers, Trailers} | done. After done, returns
+%% {error, closed}. Passive mode only.
+-spec h2_recv(pid()) -> {ok, hackney_h2_stream:h2_msg()} | {error, term()}.
+h2_recv(Pid) when is_pid(Pid) ->
+  hackney_h2_stream:recv(Pid).
+
+-spec h2_recv(pid(), timeout()) -> {ok, hackney_h2_stream:h2_msg()} | {error, term()}.
+h2_recv(Pid, Timeout) when is_pid(Pid) ->
+  hackney_h2_stream:recv(Pid, Timeout).
+
+%% @doc Acknowledge N consumed bytes (manual flow control only).
+-spec h2_consume(pid(), non_neg_integer()) -> ok | {error, term()}.
+h2_consume(Pid, NBytes) when is_pid(Pid) ->
+  hackney_h2_stream:consume(Pid, NBytes).
+
+%% @doc Set options. Supported: [{active, true | false | once}].
+-spec h2_setopts(pid(), list()) -> ok | {error, term()}.
+h2_setopts(Pid, Opts) when is_pid(Pid) ->
+  hackney_h2_stream:setopts(Pid, Opts).
+
+%% @doc Cancel the stream and tear down its connection.
+-spec h2_close(pid()) -> ok.
+h2_close(Pid) when is_pid(Pid) ->
+  hackney_h2_stream:close(Pid).
+
+%% @private Normalize an HTTP method to an uppercase binary.
+h2_method_bin(M) when is_binary(M) -> M;
+h2_method_bin(M) when is_atom(M) -> list_to_binary(string:to_upper(atom_to_list(M)));
+h2_method_bin(M) when is_list(M) -> list_to_binary(string:to_upper(M)).
+
+%% @private Signal the HTTP/2 stream process to shut down, ignoring errors.
+shutdown_h2(Pid) ->
+  try exit(Pid, shutdown) catch _:_ -> ok end.
 
 %% @private Reject CR/LF/NUL in the authority, request path, or any
 %% caller-supplied header used in the WebTransport CONNECT request

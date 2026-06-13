@@ -42,6 +42,8 @@
     send_body_chunk/2,
     finish_send_body/1,
     start_response/1,
+    %% HTTP/2 bidirectional stream (handler-routed, for hackney_h2_stream)
+    open_h2_stream/6,
     %% Async streaming
     request_async/6,
     request_async/7,
@@ -360,6 +362,18 @@ finish_send_body(Pid) ->
 -spec start_response(pid()) -> {ok, integer(), list(), pid()} | {error, term()}.
 start_response(Pid) ->
     safe_call(Pid, start_response, infinity).
+
+%% @doc Open an HTTP/2 stream whose events are routed to HandlerPid (the gRPC
+%% bidi model), returning the underlying h2_connection pid and stream id so the
+%% handler can drive send_data/send_trailers/consume directly. Used by
+%% hackney_h2_stream; the stream is not tracked in this gen_statem.
+-spec open_h2_stream(pid(), binary(), binary(), list(), pid(), map()) ->
+    {ok, pid(), pos_integer()} | {error, term()}.
+open_h2_stream(Pid, Method, Path, Headers, HandlerPid, Opts) ->
+    case valid_request_target(Path) of
+        ok -> safe_call(Pid, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts}, infinity);
+        Err -> Err
+    end.
 
 %% @doc Get the full response body.
 -spec body(pid()) -> {ok, binary()} | {error, term()}.
@@ -988,6 +1002,25 @@ connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protoc
     %% HTTP/2 streaming body - send headers without END_STREAM, then accept body
     %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
     do_h2_send_headers(From, Method, Path, Headers, Data);
+
+connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts},
+          #conn_data{protocol = http2, h2_conn = H2Conn} = Data) ->
+    %% Open a stream routed to HandlerPid (gRPC bidi). The handler owns the
+    %% stream end to end; we do not track it in h2_streams. Returns the
+    %% h2_connection pid + stream id so the handler drives it directly.
+    {_, _, H2Headers} = build_h2_request_headers(Method, Path, Headers, Data),
+    FlowControl = maps:get(flow_control, Opts, auto),
+    StreamOpts = #{handler => HandlerPid, flow_control => FlowControl},
+    Reply = try
+        case h2_connection:send_request_headers(H2Conn, H2Headers, false, StreamOpts) of
+            {ok, StreamId} -> {ok, H2Conn, StreamId};
+            {error, _} = E -> E
+        end
+    catch
+        exit:{ExitReason, _} -> {error, {closed, ExitReason}};
+        exit:ExitReason      -> {error, {closed, ExitReason}}
+    end,
+    {keep_state_and_data, [{reply, From, Reply}]};
 
 connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
     %% Send only headers for streaming body mode (HTTP/1.1)
