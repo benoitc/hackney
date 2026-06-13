@@ -15,6 +15,7 @@ An HTTP client for Erlang. Simple, reliable, fast.
 - **Async responses** - Get response chunks as messages. Process other work while waiting.
 - **WebSocket support** - Full WebSocket client with the same process-per-connection model.
 - **WebTransport support** - WebTransport client over HTTP/3 (or HTTP/2) with a WebSocket-shaped API; switch by swapping the `ws_` prefix for `wt_`.
+- **HTTP/2 bidirectional streams** - Full-duplex gRPC-style streaming with the `h2_*` API; send and receive interleaved on one stream, with trailers and flow control.
 - **IPv6 first** - Happy Eyeballs algorithm tries IPv6 before IPv4 for faster connections on modern networks.
 - **SSL by default** - Secure connections with certificate verification using Mozilla's CA bundle.
 - **Automatic decompression** - Transparently decompress gzip/deflate responses with `{auto_decompress, true}`.

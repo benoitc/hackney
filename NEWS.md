@@ -1,5 +1,28 @@
 # NEWS
 
+4.4.0 - 2026-06-13
+------------------
+
+### Added
+
+- HTTP/2 streaming request bodies and streaming response reads. Passing
+  `stream` as the body now works over HTTP/2, as it already did for HTTP/1.1
+  and HTTP/3: send the request body in chunks with `send_body/2` then
+  `finish_send_body/1`, and read the response with `start_response/1` followed
+  by `body/1` or `stream_body/1`. (#875)
+- Full-duplex HTTP/2 bidirectional streaming (gRPC-style) via a new `h2_*`
+  API: `h2_open`, `h2_send`, `h2_recv`, `h2_send_trailers`, `h2_consume`,
+  `h2_setopts` and `h2_close`, mirroring the `ws_*` and `wt_*` APIs. A single
+  stream sends and receives interleaved, sends trailers, delivers messages in
+  passive or active mode, and applies receive backpressure with
+  `{flow_control, manual}` plus `h2_consume/2`. Backed by the new
+  `hackney_h2_stream` module. (#876)
+
+### Dependencies
+
+- h2 0.9.0 -> ~> 0.10.0. The requirement now accepts every patched 0.10
+  release without a further bump.
+
 4.3.0 - 2026-06-12
 ------------------
 
