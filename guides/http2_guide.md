@@ -249,6 +249,40 @@ underlying `h2` library. The `enable_push` option is accepted for
 backwards-compatibility but is a no-op; pushes from the server are silently
 refused.
 
+## Streaming Request and Response Bodies
+
+HTTP/2 supports the same streaming API as HTTP/1.1 and HTTP/3. Pass `stream` as
+the body to send the request body in chunks, then read the response either in
+full or chunk by chunk.
+
+```erlang
+{ok, ConnRef} = hackney:request(post, URL, Headers, stream,
+                                [{protocols, [http2]}]),
+ok = hackney:send_body(ConnRef, <<"part 1">>),
+ok = hackney:send_body(ConnRef, <<"part 2">>),
+ok = hackney:finish_send_body(ConnRef),
+{ok, Status, RespHeaders, ConnRef} = hackney:start_response(ConnRef),
+
+%% Read the whole body:
+{ok, Body} = hackney:body(ConnRef).
+
+%% Or pull it chunk by chunk:
+stream_loop(ConnRef) ->
+    case hackney:stream_body(ConnRef) of
+        {ok, Chunk} -> handle(Chunk), stream_loop(ConnRef);
+        done        -> ok;
+        {error, R}  -> {error, R}
+    end.
+```
+
+`send_body/2` also accepts a producer fun (`fun() -> {ok, Data} | eof end` or
+`{fun(State) -> {ok, Data, NewState} | eof end, State}`), matching the
+HTTP/1.1 behaviour.
+
+Each chunk is sent as a DATA frame and the request stream is closed with
+END_STREAM on `finish_send_body/1`. The `h2` connection buffers beyond the
+peer's flow-control window and drains as WINDOW_UPDATEs arrive.
+
 ## Flow Control
 
 HTTP/2 has built-in flow control to prevent fast senders from overwhelming slow receivers. Hackney handles this automatically:

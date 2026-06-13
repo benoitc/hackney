@@ -188,12 +188,20 @@
     %% if the h2 lib crashes.
     h2_mon :: reference() | undefined,
     %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
-    %% StreamState:
+    %% StreamState (one-shot request/response):
     %%   {sync, waiting_headers}
     %%   {sync, body, Status, Headers, AccBody}
     %%   {async, AsyncMode, StreamTo, Ref, waiting_headers}
     %%   {async, AsyncMode, StreamTo, Ref, streaming, Status, Headers}
+    %% StreamState (streaming body, body = stream):
+    %%   {stream, sending}
+    %%   {stream, waiting_headers, From}
+    %%   {stream, headers, Status, Headers, Buffer, Pending}
+    %%   {stream, body_full, Status, Headers, Acc, From}
+    %%   {stream, done, Status, Headers, Buffer}
     h2_streams = #{} :: #{pos_integer() => {term(), tuple()}},
+    %% Current HTTP/2 stream ID for streaming body mode (body = stream)
+    h2_stream_id :: pos_integer() | undefined,
 
     %% HTTP/3 support (QUIC)
     %% HTTP/3 connection reference from hackney_h3
@@ -976,6 +984,11 @@ connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protoc
     %% HTTP/3 streaming body - send headers only via QUIC
     do_h3_send_headers(From, Method, Path, Headers, Data);
 
+connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 streaming body - send headers without END_STREAM, then accept body
+    %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
+    do_h2_send_headers(From, Method, Path, Headers, Data);
+
 connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
     %% Send only headers for streaming body mode (HTTP/1.1)
     NewData = Data#conn_data{
@@ -1061,6 +1074,13 @@ connected(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Re
 connected({call, From}, stream_body, #conn_data{protocol = http3, h3_streams = Streams} = Data) ->
     handle_h3_stream_body(From, Streams, Data);
 
+%% HTTP/2 streaming-body response reads (after start_response/1).
+connected({call, From}, stream_body, #conn_data{protocol = http2} = Data) ->
+    handle_h2_stream_body(From, Data);
+
+connected({call, From}, body, #conn_data{protocol = http2} = Data) ->
+    handle_h2_read_body(From, Data);
+
 connected(EventType, Event, Data) ->
     handle_common(EventType, Event, connected, Data).
 
@@ -1118,6 +1138,11 @@ sending(EventType, Event, Data) ->
 %% State: streaming_body - Streaming request body
 %%====================================================================
 
+streaming_body(enter, connected, #conn_data{protocol = http2}) ->
+    %% HTTP/2: the h2_connection process owns the socket and reads it in active
+    %% mode. hackney_conn must NOT flip it to passive or the h2 lib stops
+    %% receiving frames (the response would never arrive).
+    keep_state_and_data;
 streaming_body(enter, connected, #conn_data{transport = Transport, socket = Socket}) ->
     %% Set socket to passive mode for blocking send/recv operations
     %% (socket was in active mode while idle in connected state)
@@ -1169,6 +1194,24 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 - send a DATA frame without END_STREAM.
+    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
+    Result = case BodyData of
+        Fun when is_function(Fun, 0) ->
+            stream_body_fun_h2(H2Conn, StreamId, Fun);
+        {Fun, State} when is_function(Fun, 1) ->
+            stream_body_fun_h2(H2Conn, StreamId, {Fun, State});
+        _ ->
+            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false)
+    end,
+    case Result of
+        ok ->
+            {keep_state_and_data, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
     %% Send as chunked encoding (HTTP/1.1)
@@ -1197,6 +1240,16 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Da
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 - close the request stream with an empty END_STREAM DATA frame.
+    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
+    case h2_send_data(H2Conn, StreamId, <<>>, true) of
+        ok ->
+            {keep_state, Data, [{reply, From, ok}]};
+        {error, Reason} ->
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
 streaming_body({call, From}, finish_send_body, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
     %% Send final chunk marker (HTTP/1.1)
@@ -1205,6 +1258,27 @@ streaming_body({call, From}, finish_send_body, Data) ->
             {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+streaming_body({call, From}, start_response, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2 - move to connected and surface the response. If the response
+    %% raced ahead of this call (headers already buffered) reply now; otherwise
+    %% park the caller and let h2_on_response/4 reply when :status arrives.
+    %% CancelIdle keeps the #836 invariant: h2 conns stay in connected and must
+    %% not have the pool keepalive timer re-armed by connected(enter) here, or it
+    %% would tear down a slow streaming response mid-flight.
+    CancelIdle = {state_timeout, infinity, idle_timeout},
+    #conn_data{h2_stream_id = StreamId, h2_streams = Streams} = Data,
+    case maps:get(StreamId, Streams, undefined) of
+        {_, {stream, headers, Status, Hdrs, _Buf, _}} ->
+            {next_state, connected, Data, [CancelIdle, {reply, From, {ok, Status, Hdrs, self()}}]};
+        {_, {stream, done, Status, Hdrs, _Buf}} ->
+            {next_state, connected, Data, [CancelIdle, {reply, From, {ok, Status, Hdrs, self()}}]};
+        {_, {stream, sending}} ->
+            Streams2 = maps:put(StreamId, {From, {stream, waiting_headers, From}}, Streams),
+            {next_state, connected, Data#conn_data{h2_streams = Streams2}, [CancelIdle]};
+        _ ->
+            {next_state, connected, Data, [CancelIdle, {reply, From, {error, no_stream}}]}
     end;
 
 streaming_body({call, From}, start_response, #conn_data{protocol = http3} = Data) ->
@@ -1227,6 +1301,16 @@ streaming_body(info, {tcp_closed, Socket}, #conn_data{socket = Socket} = Data) -
 
 streaming_body(info, {ssl_closed, Socket}, #conn_data{socket = Socket} = Data) ->
     {next_state, closed, Data#conn_data{socket = undefined}};
+
+%% HTTP/2 message handling while still sending the request body. The server can
+%% respond early (e.g. an error); buffer it via handle_h2_event so start_response
+%% can surface it. Mirrors the connected-state h2 handlers.
+streaming_body(info, {h2, H2Conn, Event}, #conn_data{h2_conn = H2Conn} = Data) ->
+    handle_h2_event(Event, Data);
+streaming_body(info, {'EXIT', H2Conn, Reason}, #conn_data{h2_conn = H2Conn} = Data) ->
+    h2_on_closed(Reason, Data#conn_data{h2_conn = undefined, h2_mon = undefined});
+streaming_body(info, {'DOWN', Mon, process, _Pid, Reason}, #conn_data{h2_mon = Mon} = Data) ->
+    h2_on_closed(Reason, Data#conn_data{h2_conn = undefined, h2_mon = undefined});
 
 %% HTTP/3 message handling in streaming_body state
 streaming_body(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
@@ -2567,24 +2651,9 @@ do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo,
                {async, Ref, StreamTo, AsyncMode}, Data).
 
 do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
-    #conn_data{h2_conn = H2Conn, transport = Transport, host = Host, port = Port} = Data,
-    MethodBin = to_binary(Method),
-    PathBin = case Path of
-        <<>> -> <<"/">>;
-        _ -> to_binary(Path)
-    end,
-    Scheme = case Transport of
-        hackney_ssl -> <<"https">>;
-        _ -> <<"http">>
-    end,
-    Authority = build_authority(Host, Port, Transport),
-    PseudoHeaders = [
-        {<<":method">>, MethodBin},
-        {<<":scheme">>, Scheme},
-        {<<":authority">>, Authority},
-        {<<":path">>, PathBin}
-    ],
-    H2Headers = PseudoHeaders ++ normalize_headers(Headers),
+    #conn_data{h2_conn = H2Conn} = Data,
+    {MethodBin, PathBin, H2Headers} =
+        build_h2_request_headers(Method, Path, Headers, Data),
     BodyBin = case Body of
         B when is_binary(B) -> B;
         L -> iolist_to_binary(L)
@@ -2636,6 +2705,145 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
+
+%% @private Begin an HTTP/2 streaming-body request: send HEADERS without
+%% END_STREAM and transition to streaming_body so the caller can push body
+%% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
+do_h2_send_headers(From, Method, Path, Headers, Data) ->
+    #conn_data{h2_conn = H2Conn, h2_streams = Streams} = Data,
+    {MethodBin, PathBin, H2Headers} =
+        build_h2_request_headers(Method, Path, Headers, Data),
+    %% h2_connection can die between pool checkout and this call; normalise the
+    %% gen_statem:call exit into an error reply (issue #836).
+    SendRes = try
+        h2_connection:send_request_headers(H2Conn, H2Headers, false)
+    catch
+        exit:{ExitReason, _} -> {error, {closed, ExitReason}};
+        exit:ExitReason      -> {error, {closed, ExitReason}}
+    end,
+    case SendRes of
+        {ok, StreamId} ->
+            NewData = Data#conn_data{
+                h2_streams = maps:put(StreamId, {undefined, {stream, sending}}, Streams),
+                h2_stream_id = StreamId,
+                method = MethodBin,
+                path = PathBin,
+                request_from = undefined
+            },
+            {next_state, streaming_body, NewData, [{reply, From, ok}]};
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Non-blocking h2 send_data, matching the one-shot path. The
+%% h2_connection buffers beyond the peer's flow-control window and drains as
+%% WINDOW_UPDATEs arrive (returning {error, send_buffer_full} only past its
+%% per-stream cap). Normalises a dead h2_connection exit to an error.
+h2_send_data(H2Conn, StreamId, Bin, EndStream) ->
+    try
+        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
+    catch
+        exit:{ExitReason, _} -> {error, {closed, ExitReason}};
+        exit:ExitReason      -> {error, {closed, ExitReason}}
+    end.
+
+%% @private Drain a body-producer fun, sending each chunk as a non-final h2 DATA
+%% frame. Mirrors stream_body_fun/3 (HTTP/1.1) and stream_body_fun_h3/3.
+stream_body_fun_h2(H2Conn, StreamId, Fun) when is_function(Fun, 0) ->
+    case Fun() of
+        {ok, Data} ->
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, Fun);
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end;
+stream_body_fun_h2(H2Conn, StreamId, {Fun, State}) when is_function(Fun, 1) ->
+    case Fun(State) of
+        {ok, Data, NewState} ->
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, {Fun, NewState});
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private stream_body/1 over an HTTP/2 streaming response. Returns the next
+%% buffered chunk, parks the caller until data arrives, or signals done.
+%% Mirrors handle_h3_stream_body/3.
+handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Streams} = Data) ->
+    case maps:get(StreamId, Streams, undefined) of
+        {_, {stream, headers, Status, Hdrs, Buffer, undefined}} ->
+            case Buffer of
+                <<>> ->
+                    %% No data yet - park the caller; h2_on_data/4 replies.
+                    Streams2 = maps:put(StreamId,
+                                        {From, {stream, headers, Status, Hdrs, <<>>, From}},
+                                        Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2}};
+                _ ->
+                    Streams2 = maps:put(StreamId,
+                                        {undefined, {stream, headers, Status, Hdrs, <<>>, undefined}},
+                                        Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2},
+                     [{reply, From, {ok, Buffer}}]}
+            end;
+        {_, {stream, done, _Status, _Hdrs, <<>>}} ->
+            Streams2 = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, done}]};
+        {_, {stream, done, Status, Hdrs, Buffer}} ->
+            %% Hand back the last buffered chunk; next call returns done.
+            Streams2 = maps:put(StreamId, {undefined, {stream, done, Status, Hdrs, <<>>}}, Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, {ok, Buffer}}]};
+        _ ->
+            {keep_state_and_data, [{reply, From, {error, no_stream}}]}
+    end.
+
+%% @private body/1 over an HTTP/2 streaming response: accumulate the whole body
+%% then reply. Parks the caller until END_STREAM (h2_on_data/4 replies).
+handle_h2_read_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Streams} = Data) ->
+    case maps:get(StreamId, Streams, undefined) of
+        {_, {stream, headers, Status, Hdrs, Buffer, undefined}} ->
+            Streams2 = maps:put(StreamId,
+                                {From, {stream, body_full, Status, Hdrs, Buffer, From}},
+                                Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2}};
+        {_, {stream, done, _Status, _Hdrs, Buffer}} ->
+            Streams2 = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, {ok, Buffer}}]};
+        _ ->
+            {keep_state_and_data, [{reply, From, {error, no_stream}}]}
+    end.
+
+%% @private Build the method/path/header list for an HTTP/2 request.
+%% Shared by the one-shot path (do_h2_send/8) and the streaming-body path
+%% (the {send_headers,...} http2 clause) so both emit identical pseudo-headers.
+build_h2_request_headers(Method, Path, Headers, Data) ->
+    #conn_data{transport = Transport, host = Host, port = Port} = Data,
+    MethodBin = to_binary(Method),
+    PathBin = case Path of
+        <<>> -> <<"/">>;
+        _ -> to_binary(Path)
+    end,
+    Scheme = case Transport of
+        hackney_ssl -> <<"https">>;
+        _ -> <<"http">>
+    end,
+    Authority = build_authority(Host, Port, Transport),
+    PseudoHeaders = [
+        {<<":method">>, MethodBin},
+        {<<":scheme">>, Scheme},
+        {<<":authority">>, Authority},
+        {<<":path">>, PathBin}
+    ],
+    H2Headers = PseudoHeaders ++ normalize_headers(Headers),
+    {MethodBin, PathBin, H2Headers}.
 
 %% @private Build authority (host:port) for HTTP/2 :authority pseudo-header
 build_authority(Host, Port, Transport) ->
@@ -2705,6 +2913,24 @@ h2_on_response(StreamId, Status, Headers, Data) ->
             {keep_state, Data#conn_data{h2_streams = Streams2,
                                         status = Status,
                                         response_headers = Headers}};
+        {_, {stream, sending}} ->
+            %% Streaming body: response arrived before start_response/1; buffer
+            %% the headers so start_response can reply immediately.
+            Streams2 = maps:put(StreamId,
+                                {undefined, {stream, headers, Status, Headers, <<>>, undefined}},
+                                Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2,
+                                        status = Status,
+                                        response_headers = Headers}};
+        {_, {stream, waiting_headers, From}} ->
+            %% start_response/1 is parked - reply with status/headers now.
+            Streams2 = maps:put(StreamId,
+                                {undefined, {stream, headers, Status, Headers, <<>>, undefined}},
+                                Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2,
+                                        status = Status,
+                                        response_headers = Headers},
+             [{reply, From, {ok, Status, Headers, self()}}]};
         _ ->
             {keep_state, Data}
     end.
@@ -2747,6 +2973,48 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
                     Streams2 = maps:put(StreamId, {StreamTo, NewState}, Streams),
                     {keep_state, Data#conn_data{h2_streams = Streams2}}
             end;
+        {_, {stream, headers, Status, Headers, Buffer, Pending}} ->
+            %% Streaming-body response, pull reads via stream_body/1.
+            NewBuffer = <<Buffer/binary, Body/binary>>,
+            case Pending of
+                undefined ->
+                    NextState = case EndStream of
+                        true -> {stream, done, Status, Headers, NewBuffer};
+                        false -> {stream, headers, Status, Headers, NewBuffer, undefined}
+                    end,
+                    Streams2 = maps:put(StreamId, {undefined, NextState}, Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2}};
+                From when NewBuffer =/= <<>> ->
+                    NextState = case EndStream of
+                        true -> {stream, done, Status, Headers, <<>>};
+                        false -> {stream, headers, Status, Headers, <<>>, undefined}
+                    end,
+                    Streams2 = maps:put(StreamId, {undefined, NextState}, Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2},
+                     [{reply, From, {ok, NewBuffer}}]};
+                From when EndStream ->
+                    %% Parked caller, no buffered bytes, stream ended -> done.
+                    Streams2 = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2},
+                     [{reply, From, done}]};
+                _From ->
+                    %% Empty DATA frame without END_STREAM: keep the caller parked.
+                    {keep_state, Data}
+            end;
+        {From, {stream, body_full, Status, Headers, Acc, From}} ->
+            %% Full-body read via body/1 after start_response/1.
+            NewAcc = <<Acc/binary, Body/binary>>,
+            case EndStream of
+                true ->
+                    Streams2 = maps:remove(StreamId, Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2},
+                     [{reply, From, {ok, NewAcc}}]};
+                false ->
+                    Streams2 = maps:put(StreamId,
+                                        {From, {stream, body_full, Status, Headers, NewAcc, From}},
+                                        Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2}}
+            end;
         _ ->
             {keep_state, Data}
     end.
@@ -2767,9 +3035,26 @@ h2_on_stream_reset(StreamId, ErrorCode, Data) ->
             StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
             Streams2 = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h2_streams = Streams2}};
+        {_, Inner} when is_tuple(Inner), element(1, Inner) =:= stream ->
+            %% Streaming-body stream: reply to any parked caller and drop it so a
+            %% later stream_body/start_response sees {error, no_stream}.
+            Streams2 = maps:remove(StreamId, Streams),
+            Replies = case h2_stream_parked_from(Inner) of
+                undefined -> [];
+                From -> [{reply, From, {error, {stream_error, ErrorCode}}}]
+            end,
+            {keep_state, Data#conn_data{h2_streams = Streams2, request_from = undefined},
+             Replies};
         _ ->
             {keep_state, Data}
     end.
+
+%% @private Extract the gen_statem caller parked inside a streaming-body
+%% h2 stream state, or undefined when no caller is currently blocked.
+h2_stream_parked_from({stream, waiting_headers, From}) -> From;
+h2_stream_parked_from({stream, headers, _, _, _, From}) -> From;
+h2_stream_parked_from({stream, body_full, _, _, _, From}) -> From;
+h2_stream_parked_from(_) -> undefined.
 
 h2_on_goaway(ErrorCode, Data) ->
     {Replies, Data1} = collect_h2_aborts({goaway, ErrorCode}, Data),
@@ -2796,6 +3081,11 @@ collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->
         (_SId, {StreamTo, {async, _, StreamTo, Ref, _, _, _}}, Acc) ->
             StreamTo ! {hackney_response, Ref, {error, Err}},
             Acc;
+        (_SId, {_, Inner}, Acc) when is_tuple(Inner), element(1, Inner) =:= stream ->
+            case h2_stream_parked_from(Inner) of
+                undefined -> Acc;
+                From -> [{reply, From, {error, Err}} | Acc]
+            end;
         (_, _, Acc) -> Acc
     end, [], Streams),
     {Replies, Data#conn_data{h2_streams = #{}, request_from = undefined}}.
