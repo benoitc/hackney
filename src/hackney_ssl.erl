@@ -220,7 +220,7 @@ options_key(FinalSslOpts) ->
 
 %% @doc Hash the QUIC trust projection of an HTTP/3 connection into a pool
 %% key component. Includes exactly what decides server trust on the QUIC
-%% handshake, mirroring `hackney_conn:h3_tls_opts/2': the verify mode
+%% handshake, mirroring hackney_conn's h3_tls_opts/2: the verify mode
 %% derived from the `insecure' flag (read from ConnectOpts first, then
 %% SslOpts) and the CA source from SslOpts (the `cacerts' list, else the
 %% `cacertfile' path, else the default trust store). The cacertfile path is
