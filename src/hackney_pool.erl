@@ -946,11 +946,13 @@ checkout_ssl_fallback(SslKey, Requester, Opts, State) ->
                     start_ssl_checkout_conn(SslKey, Requester, Opts,
                                             State#state{available=Available2})
             end;
-        none when TotalInUse >= MaxConn ->
-            ?report_trace("pool: at max connections", [{pool, PoolName}, {in_use, TotalInUse}]),
-            {reply, {error, checkout_timeout}, State};
         none ->
-            ?report_trace("pool: starting new connection", [{pool, PoolName}]),
+            %% No pooled TCP connection. Per-host concurrency is already capped
+            %% by hackney_load_regulation, so start one even at max_connections:
+            %% it is an overflow connection, closed at checkin (see do_checkin)
+            %% rather than pooled. Mirrors the plain checkout path.
+            ?report_trace("pool: starting new connection",
+                          [{pool, PoolName}, {overflow, TotalInUse >= MaxConn}]),
             start_ssl_checkout_conn(SslKey, Requester, Opts, State)
     end.
 
