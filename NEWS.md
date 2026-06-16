@@ -1,5 +1,17 @@
 # NEWS
 
+4.4.1 - 2026-06-16
+------------------
+
+### Dependencies
+
+- webtransport 0.4.0 -> ~> 0.4.1, h2 ~> 0.10.0 -> ~> 0.10.1, quic 1.6.5 ->
+  ~> 1.6.5. The exact webtransport 0.4.0 pin required h2 0.9.0, conflicting
+  with hackney's own h2 ~> 0.10.0 and breaking installation on strict
+  resolvers. webtransport 0.4.1 relaxes that requirement; the ranges now
+  accept any 0.4.x / 0.10.x / 1.6.x patch release without a further bump.
+  (#879)
+
 4.4.0 - 2026-06-13
 ------------------
 
