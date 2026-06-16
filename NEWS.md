@@ -1,5 +1,17 @@
 # NEWS
 
+4.4.2 - 2026-06-16
+------------------
+
+### Fixed
+
+- Apply the pool overflow fix to the opt-in `ssl_pooling` checkout path. With
+  `ssl_pooling` enabled and `pool_size` below `max_per_host`, a second
+  concurrent HTTPS request could still fail with `checkout_timeout`; it now
+  opens an overflow connection like the plain checkout path, closed at checkin
+  rather than pooled. HTTP/2 and HTTP/3 are unaffected (they multiplex over
+  shared connections).
+
 4.4.1 - 2026-06-16
 ------------------
 
