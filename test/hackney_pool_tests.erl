@@ -63,6 +63,8 @@ hackney_pool_integration_test_() ->
        {timeout, 30, fun test_checkout_survives_dying_connection/0}},
       {"checkout_ssl without pooled conns returns needs_upgrade",
        fun test_checkout_ssl_needs_upgrade/0},
+      {"checkout_ssl overflows past pool_size instead of timing out",
+       fun test_checkout_ssl_overflow/0},
       {"checkin of an SSL-keyed conn that was never upgraded closes it",
        fun test_checkout_ssl_unupgraded_closes/0},
       {"checkin pools an upgraded HTTPS/1.1 conn under its SSL key",
@@ -523,6 +525,27 @@ test_checkout_ssl_needs_upgrade() ->
     ?assertEqual(1, proplists:get_value(in_use_count, Stats)),
     hackney_conn:stop(Pid),
     ok = hackney_pool:stop_pool(test_pool_ssl_co).
+
+test_checkout_ssl_overflow() ->
+    %% pool_size bounds the warm pool, not concurrency. With pool_size=1 a
+    %% second concurrent SSL checkout opens an overflow connection instead of
+    %% failing with checkout_timeout.
+    ok = hackney_pool:start_pool(test_pool_ssl_overflow,
+                                 [{pool_size, 1}, {prewarm_count, 0}]),
+    TlsKey = crypto:hash(sha256, <<"ssl-overflow">>),
+    Opts = [{pool, test_pool_ssl_overflow}, {tls_key, TlsKey}],
+    {ok, _, Pid1, needs_upgrade} =
+        hackney_pool:checkout_ssl("127.0.0.1", ?PORT, hackney_ssl, Opts),
+    {ok, _, Pid2, needs_upgrade} =
+        hackney_pool:checkout_ssl("127.0.0.1", ?PORT, hackney_ssl, Opts),
+    ?assert(is_process_alive(Pid1)),
+    ?assert(is_process_alive(Pid2)),
+    ?assertNotEqual(Pid1, Pid2),
+    Stats = hackney_pool:get_stats(test_pool_ssl_overflow),
+    ?assertEqual(2, proplists:get_value(in_use_count, Stats)),
+    hackney_conn:stop(Pid1),
+    hackney_conn:stop(Pid2),
+    ok = hackney_pool:stop_pool(test_pool_ssl_overflow).
 
 test_checkout_ssl_unupgraded_closes() ->
     %% Anomaly guard: an SSL-keyed conn checked in without being upgraded
