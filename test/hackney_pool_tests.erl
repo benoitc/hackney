@@ -708,40 +708,40 @@ test_prewarm() ->
 %%====================================================================
 
 test_queue_timeout() ->
-    %% Test that when pool is full, second checkout returns error immediately
-    %% (no more queuing - load regulation handles waiting)
+    %% pool_size bounds the warm (idle) pool, not concurrency. Per-host
+    %% concurrency is capped by max_per_host, so with pool_size=1 a second
+    %% concurrent request opens an overflow connection instead of failing.
     URL = <<"http://localhost:8123/pool">>,
     Headers = [],
     hackney_pool:start_pool(pool_test, [{pool_size, 1}]),
     Opts = [{pool, pool_test}, {connect_timeout, 100}, {checkout_timeout, 5000}],
-    case hackney:request(post, URL, Headers, stream, Opts) of
-        {ok, Ref} ->
-            %% Second request should fail immediately (pool full, no queue)
-            {error, checkout_timeout} = hackney:request(post, URL, Headers, stream, Opts),
+    {ok, Ref1} = hackney:request(post, URL, Headers, stream, Opts),
+    %% Second concurrent request succeeds via an overflow connection
+    {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),
 
-            %% Finish first request - body is returned directly with start_response
-            ok = hackney:finish_send_body(Ref),
-            {ok, _Status, _Headers, _Body} = hackney:start_response(Ref),
-            %% Close the connection to release it back to pool
-            hackney:close(Ref),
+    %% Complete both requests
+    ok = hackney:finish_send_body(Ref1),
+    {ok, _S1, _H1, _B1} = hackney:start_response(Ref1),
+    hackney:close(Ref1),
+    ok = hackney:finish_send_body(Ref2),
+    {ok, _S2, _H2, _B2} = hackney:start_response(Ref2),
+    hackney:close(Ref2),
 
-            %% Now pool is free, next request should succeed
-            {ok, Ref2} = hackney:request(post, URL, Headers, stream, Opts),
-            hackney:close(Ref2)
-    end,
     hackney_pool:stop_pool(pool_test).
 
 test_checkout_timeout() ->
+    %% checkout_timeout now comes from load regulation, the hard per-host
+    %% concurrency cap. Cap it at 1 so the second concurrent request waits for
+    %% a slot and times out.
     URL = <<"http://localhost:8123/pool">>,
     Headers = [],
     hackney_pool:start_pool(pool_test_timeout, [{pool_size, 1}]),
-    Opts = [{max_body, 2048}, {pool, pool_test_timeout}, {connect_timeout, 1000}, {checkout_timeout, 100}],
-    case hackney:request(post, URL, Headers, stream, Opts) of
-        {ok, Ref} ->
-            {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
-            hackney:close(Ref),
-            ?assertEqual(Error, checkout_timeout)
-    end,
+    Opts = [{max_body, 2048}, {pool, pool_test_timeout}, {max_per_host, 1},
+            {connect_timeout, 1000}, {checkout_timeout, 100}],
+    {ok, Ref} = hackney:request(post, URL, Headers, stream, Opts),
+    {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
+    hackney:close(Ref),
+    ?assertEqual(checkout_timeout, Error),
     hackney_pool:stop_pool(pool_test_timeout).
 
 %% Test for issue #544: Server closes idle connection, pool should detect it

@@ -556,14 +556,15 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
                             {reply, {error, Reason}, State#state{available=Available2}}
                     end
             end;
-        none when TotalInUse >= MaxConn ->
-            %% At max connections - return error immediately (no queue)
-            %% Note: In the new architecture, load_regulation handles waiting
-            ?report_trace("pool: at max connections", [{pool, PoolName}, {in_use, TotalInUse}]),
-            {reply, {error, checkout_timeout}, State};
         none ->
-            %% No available connection, start a new one
-            ?report_trace("pool: starting new connection", [{pool, PoolName}]),
+            %% No pooled connection available. Per-host concurrency is already
+            %% capped by hackney_load_regulation, so start a connection even
+            %% when in_use has reached max_connections: it is an overflow
+            %% connection, closed at checkin rather than pooled (see do_checkin).
+            %% max_connections bounds the warm/idle pool, not the number of
+            %% concurrent connections.
+            ?report_trace("pool: starting new connection",
+                          [{pool, PoolName}, {overflow, TotalInUse >= MaxConn}]),
             case start_connection(Key, Requester, Opts, State) of
                 {ok, Pid, State2} ->
                     InUse2 = maps:put(Pid, Key, State2#state.in_use),
@@ -1030,10 +1031,12 @@ do_checkin(Pid, State) ->
                 true ->
                     %% One call fetches every flag the decision needs
                     Info = try hackney_conn:checkin_info(Pid) catch _:_ -> #{} end,
-                    case checkin_poolable(Key, Info) of
+                    case checkin_poolable(Key, Info) andalso pool_has_idle_room(State) of
                         true ->
                             checkin_pool(Pid, Key, InUse2, State);
                         false ->
+                            %% Not poolable, or the warm pool is already full
+                            %% (overflow connection): close rather than pool.
                             stop_conn(Pid),
                             checkin_close(Pid, Key, InUse2, State)
                     end;
@@ -1127,7 +1130,16 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
                             gen_statem:cast(Pid, stop),
                             checkin_close(Pid, Key, InUse2, State);
                         _ ->
-                            checkin_pool(Pid, Key, InUse2, State)
+                            %% Pool only if the warm pool has room; otherwise
+                            %% close this overflow connection. Use cast - the
+                            %% connection is blocked waiting for our reply.
+                            case pool_has_idle_room(State) of
+                                true ->
+                                    checkin_pool(Pid, Key, InUse2, State);
+                                false ->
+                                    gen_statem:cast(Pid, stop),
+                                    checkin_close(Pid, Key, InUse2, State)
+                            end
                     end;
                 false ->
                     State#state{in_use=InUse2}
@@ -1135,6 +1147,17 @@ do_checkin_with_close_flag(Pid, ShouldClose, State) ->
         error ->
             State
     end.
+
+%% @private Is there room in the warm/idle pool for one more connection?
+%% `available' holds idle pooled connections; their count is capped at
+%% max_connections. Concurrency above that is served by overflow connections
+%% at checkout, which are closed here instead of pooled.
+pool_has_idle_room(#state{available=Available, max_connections=MaxConn}) ->
+    idle_count(Available) < MaxConn.
+
+%% @private Number of idle (pooled) connections across all host buckets.
+idle_count(Available) ->
+    maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available).
 
 %% @private Check that a pooled HTTP/2 conn is alive and in `connected` state.
 %% Short timeout so a stuck conn doesn't wedge the pool; any failure → unusable.

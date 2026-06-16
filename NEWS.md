@@ -3,6 +3,15 @@
 4.4.1 - 2026-06-16
 ------------------
 
+### Fixed
+
+- Pool checkout no longer fails with `checkout_timeout` when a connection from
+  a just-completed request has not yet been checked back in. `pool_size` /
+  `max_connections` now bounds the warm (idle) pool kept for reuse; per-host
+  concurrency is capped by `max_per_host`. A request beyond the warm pool size
+  opens an overflow connection that is closed at checkin instead of being
+  pooled. Set `max_per_host` to cap concurrent connections to a host.
+
 ### Dependencies
 
 - webtransport 0.4.0 -> ~> 0.4.1, h2 ~> 0.10.0 -> ~> 0.10.1, quic 1.6.5 ->
