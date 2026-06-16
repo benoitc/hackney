@@ -690,7 +690,7 @@ hackney_load_regulation:current(Host, Port).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `pool_size` / `max_connections` | 50 | Max connections in pool |
+| `pool_size` / `max_connections` | 50 | Warm (idle) connections kept for reuse. Concurrency is capped by `max_per_host`; requests above this open overflow connections that close at checkin |
 | `timeout` / `keepalive_timeout` | 2000 | Idle timeout (max 2000ms) |
 | `prewarm_count` | 4 | Connections to maintain per host |
 
