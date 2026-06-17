@@ -59,6 +59,8 @@ hackney_pool_integration_test_() ->
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}},
+      {"unsolicited idle data refuses reuse; clean conn stays reusable",
+       {timeout, 30, fun test_idle_data_refuses_reuse/0}},
       {"checkout survives a connection dying mid-liveness-check (PR #869)",
        {timeout, 30, fun test_checkout_survives_dying_connection/0}},
       {"checkout_ssl without pooled conns returns needs_upgrade",
@@ -825,3 +827,40 @@ test_server_close_detected() ->
     ?assertEqual(0, FreeCount2),
 
     ok = hackney_pool:stop_pool(test_pool_server_close).
+
+%% Bug 2: a pooled HTTP/1.1 connection that received unsolicited bytes while
+%% idle must not be reused. hackney does not pipeline, so bytes arriving while
+%% idle can never belong to the next response; reusing the socket would strand
+%% them (passive recv blocks on an empty buffer) or corrupt the next read. A
+%% clean idle connection is still reusable, so keep-alive is preserved.
+test_idle_data_refuses_reuse() ->
+    Self = self(),
+    {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, ServerPort} = inet:port(ListenSock),
+    ServerPid = spawn_link(fun() ->
+        {ok, ClientSock} = gen_tcp:accept(ListenSock, 5000),
+        Self ! {server, accepted},
+        receive {write, Bytes} -> gen_tcp:send(ClientSock, Bytes) end,
+        receive stop -> ok end,
+        gen_tcp:close(ClientSock),
+        gen_tcp:close(ListenSock)
+    end),
+
+    ok = hackney_pool:start_pool(test_pool_idle_data, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_idle_data}],
+    {ok, _PoolInfo, ConnPid} =
+        hackney_pool:checkout("127.0.0.1", ServerPort, hackney_tcp, Opts),
+    receive {server, accepted} -> ok after 5000 -> error(timeout_accept) end,
+
+    %% Clean connection: is_ready sets the socket passive and keeps it reusable.
+    ?assertEqual({ok, connected}, hackney_conn:is_ready(ConnPid)),
+
+    %% Server pushes unsolicited bytes into the now-passive socket buffer.
+    ServerPid ! {write, <<"unsolicited">>},
+    timer:sleep(50),
+
+    %% The connection must now be refused rather than reused with stale bytes.
+    ?assertEqual({ok, closed}, hackney_conn:is_ready(ConnPid)),
+
+    ServerPid ! stop,
+    ok = hackney_pool:stop_pool(test_pool_idle_data).
