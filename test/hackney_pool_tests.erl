@@ -59,8 +59,8 @@ hackney_pool_integration_test_() ->
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}},
-      {"unsolicited idle data refuses reuse; clean conn stays reusable",
-       {timeout, 30, fun test_idle_data_refuses_reuse/0}},
+      {"bytes stranded while idle are buffered, not dropped; conn stays reusable",
+       {timeout, 30, fun test_idle_data_consumed_not_dropped/0}},
       {"checkout survives a connection dying mid-liveness-check (PR #869)",
        {timeout, 30, fun test_checkout_survives_dying_connection/0}},
       {"checkout_ssl without pooled conns returns needs_upgrade",
@@ -828,19 +828,18 @@ test_server_close_detected() ->
 
     ok = hackney_pool:stop_pool(test_pool_server_close).
 
-%% Bug 2: a pooled HTTP/1.1 connection that received unsolicited bytes while
-%% idle must not be reused. hackney does not pipeline, so bytes arriving while
-%% idle can never belong to the next response; reusing the socket would strand
-%% them (passive recv blocks on an empty buffer) or corrupt the next read. A
-%% clean idle connection is still reusable, so keep-alive is preserved.
-test_idle_data_refuses_reuse() ->
+%% A pooled HTTP/1.1 connection that received bytes while idle in {active, once}
+%% (the start of the next response on a reused connection) must BUFFER them and
+%% stay reusable - not drop the connection and lose the bytes. A clean idle
+%% connection is still reusable (keep-alive preserved); a server close is still
+%% refused (#544, see test_server_close_detected).
+test_idle_data_consumed_not_dropped() ->
     Self = self(),
     {ok, ListenSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
     {ok, ServerPort} = inet:port(ListenSock),
     ServerPid = spawn_link(fun() ->
         {ok, ClientSock} = gen_tcp:accept(ListenSock, 5000),
         Self ! {server, accepted},
-        receive {write, Bytes} -> gen_tcp:send(ClientSock, Bytes) end,
         receive stop -> ok end,
         gen_tcp:close(ClientSock),
         gen_tcp:close(ListenSock)
@@ -852,15 +851,19 @@ test_idle_data_refuses_reuse() ->
         hackney_pool:checkout("127.0.0.1", ServerPort, hackney_tcp, Opts),
     receive {server, accepted} -> ok after 5000 -> error(timeout_accept) end,
 
-    %% Clean connection: is_ready sets the socket passive and keeps it reusable.
-    ?assertEqual({ok, connected}, hackney_conn:is_ready(ConnPid)),
+    {connected, ConnData} = sys:get_state(ConnPid),
+    Socket = element(8, ConnData),   %% #conn_data.socket
 
-    %% Server pushes unsolicited bytes into the now-passive socket buffer.
-    ServerPid ! {write, <<"unsolicited">>},
+    %% Deliver bytes as an active-once mailbox message (as #544 would on reuse).
+    ConnPid ! {tcp, Socket, <<"the-next-response">>},
     timer:sleep(50),
 
-    %% The connection must now be refused rather than reused with stale bytes.
-    ?assertEqual({ok, closed}, hackney_conn:is_ready(ConnPid)),
+    %% Connection is NOT dropped; the bytes are buffered for the next request,
+    %% and is_ready keeps it reusable.
+    ?assertMatch({connected, _}, sys:get_state(ConnPid)),
+    ?assertEqual({ok, connected}, hackney_conn:is_ready(ConnPid)),
+    {connected, ConnData2} = sys:get_state(ConnPid),
+    ?assertEqual(<<"the-next-response">>, element(9, ConnData2)),  %% #conn_data.buffer
 
     ServerPid ! stop,
     ok = hackney_pool:stop_pool(test_pool_idle_data).
