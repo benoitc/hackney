@@ -119,6 +119,11 @@
 %% late-arriving calls race the pool DOWN cleanup and still get a proper
 %% error reply instead of exit:{normal, _}. See issue #836.
 -define(CLOSED_GRACE_MS, 50).
+%% Cap on bytes buffered from an idle HTTP/1.1 connection via #544 {active,
+%% once}. A well-behaved peer sends nothing while idle; the next response's
+%% stranded prefix is small. Past this, treat the peer as misbehaving (flooding
+%% an idle connection) and drop it rather than buffer unboundedly.
+-define(MAX_IDLE_BUFFER, 65536).
 
 %% State data record
 -record(conn_data, {
@@ -1085,14 +1090,10 @@ connected(info, {ssl_error, Socket, _Reason}, #conn_data{socket = Socket} = Data
 %% Bytes delivered by #544 {active, once} while idle are the start of the next
 %% response on a reused connection. Buffer them (do NOT treat as a broken
 %% connection) and re-arm close detection, so the next request consumes them.
-connected(info, {tcp, Socket, Data}, #conn_data{socket = Socket, transport = Transport,
-                                                buffer = Buffer} = D) ->
-    _ = Transport:setopts(Socket, [{active, once}]),
-    {keep_state, D#conn_data{buffer = <<Buffer/binary, Data/binary>>}};
-connected(info, {ssl, Socket, Data}, #conn_data{socket = Socket, transport = Transport,
-                                                buffer = Buffer} = D) ->
-    _ = Transport:setopts(Socket, [{active, once}]),
-    {keep_state, D#conn_data{buffer = <<Buffer/binary, Data/binary>>}};
+connected(info, {tcp, Socket, Data}, #conn_data{socket = Socket} = D) ->
+    buffer_idle_data(Data, D);
+connected(info, {ssl, Socket, Data}, #conn_data{socket = Socket} = D) ->
+    buffer_idle_data(Data, D);
 
 %% HTTP/3 message handling
 connected(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
@@ -2444,6 +2445,21 @@ drain_socket_data(Socket, Acc) ->
         Acc
     end.
 
+%% @private Buffer bytes that #544 {active, once} delivered on an idle HTTP/1.1
+%% connection (the start of the next response on reuse) and re-arm close
+%% detection, so the next request consumes them. Bounded by ?MAX_IDLE_BUFFER: a
+%% peer flooding an idle connection is dropped rather than buffered unboundedly.
+buffer_idle_data(Data, #conn_data{socket = Socket, transport = Transport,
+                                  buffer = Buffer} = D) ->
+    NewBuffer = <<Buffer/binary, Data/binary>>,
+    case byte_size(NewBuffer) > ?MAX_IDLE_BUFFER of
+        true ->
+            {next_state, closed, D#conn_data{socket = undefined}};
+        false ->
+            _ = Transport:setopts(Socket, [{active, once}]),
+            {keep_state, D#conn_data{buffer = NewBuffer}}
+    end.
+
 %% @private Notify pool that connection is available for reuse (async)
 notify_pool_available(#conn_data{pool_pid = undefined}) ->
     %% Not from a pool, nothing to do
@@ -2762,12 +2778,18 @@ cancel_all_h2_timers(#conn_data{h2_timers = Timers} = Data) ->
 %% stream and a sync reader is parked, fail that reader and drop the stream.
 %% A stale timer (re-armed or already completed) is ignored.
 handle_h2_recv_timeout(StreamId, TRef,
-                       #conn_data{h2_streams = Streams, h2_timers = Timers} = Data) ->
+                       #conn_data{h2_streams = Streams, h2_timers = Timers,
+                                  h2_conn = H2Conn} = Data) ->
     case maps:get(StreamId, Timers, undefined) of
         TRef ->
             Timers2 = maps:remove(StreamId, Timers),
             case maps:get(StreamId, Streams, undefined) of
                 {From, Inner} when is_tuple(Inner), element(1, Inner) =:= sync ->
+                    %% RST_STREAM(CANCEL) the stalled stream so the peer stops
+                    %% sending for it and the h2 layer drops it; otherwise the
+                    %% pooled connection would be reused with an orphaned stream
+                    %% still open (h2_conn_usable only checks the conn state).
+                    _ = cancel_h2_stream(H2Conn, StreamId),
                     Streams2 = maps:remove(StreamId, Streams),
                     {keep_state,
                      Data#conn_data{h2_streams = Streams2, h2_timers = Timers2,
@@ -2779,6 +2801,11 @@ handle_h2_recv_timeout(StreamId, TRef,
         _ ->
             {keep_state, Data}
     end.
+
+%% @private RST_STREAM(CANCEL) a stalled HTTP/2 stream, tolerating a dead conn.
+cancel_h2_stream(undefined, _StreamId) -> ok;
+cancel_h2_stream(H2Conn, StreamId) ->
+    try h2_connection:cancel_stream(H2Conn, StreamId) catch _:_ -> ok end.
 
 %% @private Send an HTTP/2 request via the h2 library.
 do_h2_request(From, Method, Path, Headers, Body, Data) ->
