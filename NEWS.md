@@ -1,5 +1,24 @@
 # NEWS
 
+4.4.4 - 2026-06-17
+------------------
+
+### Fixed
+
+- HTTP/2: a connection is no longer reused after the peer sends `GOAWAY` while
+  keeping the socket open (as AWS ALB does to recycle connections). The
+  connection is retired so the pool dials a fresh one, instead of being handed
+  out again with new streams the peer ignores until `recv_timeout`.
+- HTTP/2: when the per-stream `recv_timeout` watchdog fires, the stalled stream
+  is cancelled (`RST_STREAM`) so the peer stops sending and the connection is not
+  reused with an orphaned stream.
+- HTTP/1.1: bytes that issue #544's idle `{active, once}` delivers to the
+  connection mailbox on a reused connection are now buffered and fed to the next
+  request instead of dropping the connection (refines the 4.4.3 behavior below),
+  so a reused request no longer blocks to `recv_timeout` while the response sits
+  stranded as an unread message. The idle buffer is bounded, and a server close
+  still refuses reuse (#544).
+
 4.4.3 - 2026-06-17
 ------------------
 
