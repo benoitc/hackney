@@ -1,5 +1,23 @@
 # NEWS
 
+4.4.3 - 2026-06-17
+------------------
+
+### Fixed
+
+- HTTP/2: a response that signals end of stream with a trailing HEADERS frame
+  (trailers, or an empty trailing HEADERS as proxies emit for responses without
+  a content-length) no longer hangs the body read until `recv_timeout`. The
+  trailer event is now treated as end of stream, so reads complete on fresh and
+  reused connections.
+- HTTP/2: sync reads run under a per-stream `recv_timeout` watchdog, so a lost
+  frame fails fast with `{error, timeout}` instead of blocking until the
+  connection dies.
+- HTTP/1.1: a pooled connection that received unsolicited data while idle is
+  dropped at checkout instead of having the bytes discarded, which could strand
+  or corrupt the next read. Healthy idle connections still reuse normally,
+  preserving keep-alive and the issue #544 stale-connection detection.
+
 4.4.2 - 2026-06-16
 ------------------
 
