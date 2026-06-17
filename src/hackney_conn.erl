@@ -3188,9 +3188,26 @@ h2_stream_parked_from({stream, headers, _, _, _, From}) -> From;
 h2_stream_parked_from({stream, body_full, _, _, _, From}) -> From;
 h2_stream_parked_from(_) -> undefined.
 
-h2_on_goaway(ErrorCode, Data) ->
+h2_on_goaway(ErrorCode, #conn_data{h2_conn = H2Conn, h2_mon = H2Mon} = Data) ->
+    %% A GOAWAY means the peer will not service new streams on this connection.
+    %% AWS ALBs recycle connections this way, sending GOAWAY but keeping the
+    %% socket open for a drain window. Leaving the conn `connected` and pooled
+    %% made checkout_h2/h2_conn_usable keep handing it out, so every reused
+    %% request opened a stream past last_stream_id that the peer ignored and hung
+    %% to recv_timeout. Tear the connection down and transition to `closed` (like
+    %% h2_on_closed/2): the pool then stops reusing it (h2_conn_usable requires
+    %% `connected`) and new requests dial a fresh connection. in-flight streams
+    %% are aborted with the goaway error as before.
     {Replies, Data1} = collect_h2_aborts({goaway, ErrorCode}, Data),
-    {keep_state, cancel_all_h2_timers(Data1), Replies}.
+    Data2 = cancel_all_h2_timers(Data1),
+    _ = case H2Mon of
+        undefined -> ok;
+        _ -> erlang:demonitor(H2Mon, [flush])
+    end,
+    close_h2(H2Conn),
+    Stripped = Data2#conn_data{h2_conn = undefined, h2_mon = undefined,
+                               socket = undefined, no_reuse = true},
+    {next_state, closed, Stripped, Replies}.
 
 h2_on_closed(Reason, Data) ->
     {Replies, Data1} = collect_h2_aborts({closed, Reason}, Data),
