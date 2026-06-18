@@ -41,7 +41,7 @@
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
 -export([get_negotiated_protocol/1]).
--export([negotiated_protocol/4, resolve_alpn/5, recall_alpn/2]).
+-export([negotiated_protocol/5, resolve_alpn/6, recall_alpn/2]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -514,35 +514,45 @@ get_negotiated_protocol(SslSocket) ->
 %% nothing, so we fall back to `Cached' (snapshotted before the handshake), but
 %% only when the session actually resumed - a full handshake that reports no ALPN
 %% is a genuine HTTP/1 conn. `Cached' is `recall_alpn(Host, AlpnProtos)' read at
-%% the resumption gate.
--spec negotiated_protocol(ssl:sslsocket(), string(), list(), http2 | http1 | none) ->
-  http2 | http1.
-negotiated_protocol(SslSocket, Host, AlpnProtos, Cached) ->
+%% the resumption gate. `Resumable' is whether this conn is tied to the resumable
+%% ticket source (hackney enabled session_tickets); only then is the memo written,
+%% so a custom-ssl_options handshake that does not seed the ticket store cannot
+%% poison the shared `{Host, AlpnProtos}' entry a later resumed session reads.
+-spec negotiated_protocol(ssl:sslsocket(), string(), list(),
+                          http2 | http1 | none, boolean()) -> http2 | http1.
+negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable) ->
   resolve_alpn(ssl:negotiated_protocol(SslSocket), resumed(SslSocket),
-               Cached, Host, AlpnProtos).
+               Cached, Host, AlpnProtos, Resumable).
 
-%% @doc Pure ALPN decision (exported for tests). See negotiated_protocol/4.
+%% @doc Pure ALPN decision (exported for tests). See negotiated_protocol/5.
 -spec resolve_alpn({ok, binary()} | {error, term()}, boolean(),
-                   http2 | http1 | none, string(), list()) -> http2 | http1.
-resolve_alpn({ok, <<"h2">>}, _Resumed, _Cached, Host, AlpnProtos) ->
-  remember_alpn(Host, AlpnProtos, http2),
+                   http2 | http1 | none, string(), list(), boolean()) ->
+  http2 | http1.
+resolve_alpn({ok, <<"h2">>}, _Resumed, _Cached, Host, AlpnProtos, Resumable) ->
+  maybe_remember(Resumable, Host, AlpnProtos, http2),
   http2;
-resolve_alpn({ok, <<"http/1.1">>}, _Resumed, _Cached, Host, AlpnProtos) ->
-  remember_alpn(Host, AlpnProtos, http1),
+resolve_alpn({ok, <<"http/1.1">>}, _Resumed, _Cached, Host, AlpnProtos, Resumable) ->
+  maybe_remember(Resumable, Host, AlpnProtos, http1),
   http1;
-resolve_alpn({error, protocol_not_negotiated}, true, Cached, _Host, _AlpnProtos)
+resolve_alpn({error, protocol_not_negotiated}, true, Cached, _Host, _AlpnProtos, _Resumable)
   when Cached =/= none ->
   %% Genuinely resumed: ALPN is not re-reported, use the gate-time snapshot.
   Cached;
-resolve_alpn({error, protocol_not_negotiated}, false, _Cached, Host, AlpnProtos) ->
-  %% Full handshake with no ALPN: a real HTTP/1 conn. Refresh the memo so a stale
-  %% cached http2 cannot be recalled on a later resumption.
-  remember_alpn(Host, AlpnProtos, http1),
+resolve_alpn({error, protocol_not_negotiated}, false, _Cached, Host, AlpnProtos, Resumable) ->
+  %% Full handshake with no ALPN: a real HTTP/1 conn. Refresh the memo (only for
+  %% the resumable source) so a stale cached http2 cannot be recalled later.
+  maybe_remember(Resumable, Host, AlpnProtos, http1),
   http1;
-resolve_alpn(_Other, _Resumed, _Cached, _Host, _AlpnProtos) ->
+resolve_alpn(_Other, _Resumed, _Cached, _Host, _AlpnProtos, _Resumable) ->
   %% Defensive: resumed without a snapshot (gate should prevent this) or an
   %% unexpected ssl:negotiated_protocol/1 result.
   http1.
+
+%% @private Write the ALPN memo only for handshakes tied to the resumable ticket
+%% source (hackney's default-config resumption). A non-resumable handshake
+%% (custom ssl_options) leaves the shared entry untouched.
+maybe_remember(true, Host, AlpnProtos, Proto) -> remember_alpn(Host, AlpnProtos, Proto);
+maybe_remember(false, _Host, _AlpnProtos, _Proto) -> ok.
 
 %% @doc Whether the TLS handshake resumed a session (PSK / abbreviated handshake).
 -spec resumed(ssl:sslsocket()) -> boolean().

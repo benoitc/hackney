@@ -900,13 +900,16 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
     end,
     %% Gate TLS resumption on the ALPN memo and snapshot the cached protocol, so a
     %% resumed session (where ssl reports no ALPN) resolves against this snapshot.
+    %% Resumable: only the resumption-eligible config (session_tickets enabled)
+    %% updates the memo, so a custom-ssl_options handshake cannot poison it.
     AlpnProtos = alpn_advertised(FinalSslOpts),
+    Resumable = resumption_enabled(FinalSslOpts),
     Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
     GatedSslOpts = gate_resumption(FinalSslOpts, Cached),
     case ssl:connect(Socket, GatedSslOpts) of
         {ok, SslSocket} ->
             %% Detect negotiated protocol, carrying ALPN across resumption
-            Protocol = hackney_ssl:negotiated_protocol(SslSocket, Host, AlpnProtos, Cached),
+            Protocol = hackney_ssl:negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable),
             %% Update connection to use SSL
             NewData = Data#conn_data{
                 transport = hackney_ssl,
@@ -2727,13 +2730,15 @@ do_tcp_connect(From, Data) ->
             %% Gate TLS resumption on the ALPN memo and snapshot the cached
             %% protocol now, so a resumed session (where ssl reports no ALPN) is
             %% resolved against this snapshot rather than re-read from the memo.
+            %% Resumable: only the resumption-eligible config updates the memo.
             AlpnProtos = alpn_advertised(FinalSslOpts0),
+            Resumable = resumption_enabled(FinalSslOpts0),
             Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
             FinalSslOpts = gate_resumption(FinalSslOpts0, Cached),
             Opts = TransportOpts ++ [{ssl_options, FinalSslOpts}],
             case Transport:connect(Host, Port, Opts, Timeout) of
                 {ok, Socket} ->
-                    case hackney_ssl:negotiated_protocol(Socket, Host, AlpnProtos, Cached) of
+                    case hackney_ssl:negotiated_protocol(Socket, Host, AlpnProtos, Cached, Resumable) of
                         http2 ->
                             init_h2_connection(Socket,
                                 Data#conn_data{socket = Socket, protocol = http2}, From);
@@ -2767,6 +2772,13 @@ alpn_advertised(SslOpts) ->
 %% repopulates the memo. Keeps a resumed session from losing the protocol.
 gate_resumption(SslOpts, none) -> proplists:delete(session_tickets, SslOpts);
 gate_resumption(SslOpts, _Cached) -> SslOpts.
+
+%% @private Whether hackney enabled TLS resumption for this conn. effective_opts/3
+%% adds `session_tickets' only for the resumable (default) config, which is the
+%% single ticket source per host; only such conns may update the ALPN memo, so a
+%% custom-ssl_options handshake cannot poison the entry a resumed session reads.
+resumption_enabled(SslOpts) ->
+    lists:keymember(session_tickets, 1, SslOpts).
 
 %% @private Initialize HTTP/2 connection via the h2 library.
 %% The h2_connection process takes ownership of the socket and delivers
