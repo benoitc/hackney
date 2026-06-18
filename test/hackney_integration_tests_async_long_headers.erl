@@ -84,7 +84,10 @@ dummy_server_loop(LSock, Port, StatusCode) ->
                               ]),
   send(Sock, Response),
   ok = gen_tcp:shutdown(Sock, read_write),
-  dummy_server_loop(LSock, RedirectUrl, StatusCode).
+  %% Recurse with Port (not RedirectUrl): the loop must keep accepting. Pool
+  %% prewarm reconnects to this host after a closed conn is checked in, so a
+  %% second accept happens; passing the binary URL here crashed integer_to_list.
+  dummy_server_loop(LSock, Port, StatusCode).
 
 send(Sock, << Data :128/binary, Rest/binary>>) ->
   ok = gen_tcp:send(Sock, Data),
