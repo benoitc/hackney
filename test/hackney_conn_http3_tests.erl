@@ -29,8 +29,20 @@ cleanup(_) ->
 %% HTTP/3 Connection Tests
 %%====================================================================
 
+%% Live external-server tests (cloudflare over HTTP/3) are opt-in: they depend on
+%% the network and intermittently crash the quic h3 library, which destabilizes
+%% CI. Set HACKNEY_LIVE_TESTS to run them; the HTTP/3 e2e CT suites
+%% (make http3-e2e-test) cover live testing otherwise. parse_headers_test_ below
+%% is a pure unit test and stays enabled.
+maybe_live(GenFun) ->
+    case os:getenv("HACKNEY_LIVE_TESTS") of
+        false -> [];
+        _ -> GenFun()
+    end.
+
 %% Test HTTP/3 connection via hackney_conn
-http3_conn_test_() ->
+http3_conn_test_() -> maybe_live(fun http3_conn_live/0).
+http3_conn_live() ->
     {
         "HTTP/3 connection tests via hackney_conn",
         {

@@ -31,7 +31,18 @@ cleanup(_) ->
 %% HTTP/3 Integration Tests
 %%====================================================================
 
-http3_integration_test_() ->
+%% Live external-server tests (cloudflare/httpbin over HTTP/3) are opt-in: they
+%% depend on the network and intermittently crash the quic h3 library, which
+%% destabilizes CI. Set HACKNEY_LIVE_TESTS to run them; the HTTP/3 e2e CT suites
+%% (make http3-e2e-test) cover live testing otherwise.
+maybe_live(GenFun) ->
+    case os:getenv("HACKNEY_LIVE_TESTS") of
+        false -> [];
+        _ -> GenFun()
+    end.
+
+http3_integration_test_() -> maybe_live(fun http3_integration_live/0).
+http3_integration_live() ->
     {
         "HTTP/3 hackney API integration tests",
         {
@@ -109,7 +120,8 @@ test_altsvc_enables_h3() ->
 %% Protocol Selection Tests
 %%====================================================================
 
-protocol_selection_test_() ->
+protocol_selection_test_() -> maybe_live(fun protocol_selection_live/0).
+protocol_selection_live() ->
     {
         "Protocol selection tests",
         {
@@ -158,7 +170,8 @@ test_blocked_fallback() ->
 %% hackney:get with HTTP/3 Tests
 %%====================================================================
 
-http3_get_test_() ->
+http3_get_test_() -> maybe_live(fun http3_get_live/0).
+http3_get_live() ->
     {
         "HTTP/3 hackney:get tests",
         {

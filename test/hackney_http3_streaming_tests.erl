@@ -31,7 +31,18 @@ cleanup(_) ->
 %% HTTP/3 Async Streaming Tests
 %%====================================================================
 
-h3_async_streaming_test_() ->
+%% Live external-server tests (cloudflare over HTTP/3) are opt-in: they depend on
+%% the network and intermittently crash the quic h3 library, which destabilizes
+%% CI. Set HACKNEY_LIVE_TESTS to run them; the HTTP/3 e2e CT suites
+%% (make http3-e2e-test) cover live testing otherwise.
+maybe_live(GenFun) ->
+    case os:getenv("HACKNEY_LIVE_TESTS") of
+        false -> [];
+        _ -> GenFun()
+    end.
+
+h3_async_streaming_test_() -> maybe_live(fun h3_async_streaming_live/0).
+h3_async_streaming_live() ->
     {
         "HTTP/3 async streaming tests",
         {
@@ -50,7 +61,8 @@ h3_async_streaming_test_() ->
 %% HTTP/3 Pull-based Streaming Tests (stream_body)
 %%====================================================================
 
-h3_stream_body_test_() ->
+h3_stream_body_test_() -> maybe_live(fun h3_stream_body_live/0).
+h3_stream_body_live() ->
     {
         "HTTP/3 stream_body tests",
         {
@@ -137,7 +149,8 @@ read_all_chunks(ConnPid, Acc) ->
 %% HTTP/3 Body Sending Tests (streaming uploads)
 %%====================================================================
 
-h3_send_body_test_() ->
+h3_send_body_test_() -> maybe_live(fun h3_send_body_live/0).
+h3_send_body_live() ->
     {
         "HTTP/3 send_body tests",
         {

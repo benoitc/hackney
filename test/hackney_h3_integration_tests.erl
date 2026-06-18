@@ -139,7 +139,18 @@ get_location(Headers) ->
 %% TLS Verification Tests
 %%====================================================================
 
-tls_test_() ->
+%% Live external-server tests (cloudflare/httpbin over HTTP/3) are opt-in: they
+%% depend on the network and intermittently crash the quic h3 library, which
+%% destabilizes CI. Set HACKNEY_LIVE_TESTS to run them; the HTTP/3 e2e CT suites
+%% (make http3-e2e-test) cover live testing otherwise.
+maybe_live(GenFun) ->
+    case os:getenv("HACKNEY_LIVE_TESTS") of
+        false -> [];
+        _ -> GenFun()
+    end.
+
+tls_test_() -> maybe_live(fun tls_live/0).
+tls_live() ->
     {
         "HTTP/3 TLS verification tests",
         {
@@ -186,7 +197,8 @@ test_connect_with_verify() ->
 %% Redirect Tests
 %%====================================================================
 
-redirect_test_() ->
+redirect_test_() -> maybe_live(fun redirect_live/0).
+redirect_live() ->
     {
         "HTTP/3 redirect handling tests",
         {
@@ -252,7 +264,8 @@ test_redirect_path() ->
 %% HTTP Methods Tests
 %%====================================================================
 
-methods_test_() ->
+methods_test_() -> maybe_live(fun methods_live/0).
+methods_live() ->
     {
         "HTTP/3 method tests",
         {
@@ -344,7 +357,8 @@ test_multiple_requests() ->
 %% High-level API Tests
 %%====================================================================
 
-high_level_api_test_() ->
+high_level_api_test_() -> maybe_live(fun high_level_api_live/0).
+high_level_api_live() ->
     {
         "HTTP/3 high-level API tests",
         {
@@ -391,7 +405,8 @@ test_h3_connect_api() ->
 %% Error Handling Tests
 %%====================================================================
 
-error_handling_test_() ->
+error_handling_test_() -> maybe_live(fun error_handling_live/0).
+error_handling_live() ->
     {
         "HTTP/3 error handling tests",
         {

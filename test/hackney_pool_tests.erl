@@ -773,10 +773,17 @@ test_checkout_timeout() ->
     URL = <<"http://localhost:8123/pool">>,
     Headers = [],
     hackney_pool:start_pool(pool_test_timeout, [{pool_size, 1}]),
-    Opts = [{max_body, 2048}, {pool, pool_test_timeout}, {max_per_host, 1},
-            {connect_timeout, 1000}, {checkout_timeout, 100}],
-    {ok, Ref} = hackney:request(post, URL, Headers, stream, Opts),
-    {error, Error} = hackney:request(post, URL, Headers, stream, Opts),
+    BaseOpts = [{max_body, 2048}, {pool, pool_test_timeout}, {max_per_host, 1},
+                {connect_timeout, 1000}],
+    %% The first request must acquire the single per-host slot; give it a
+    %% generous checkout_timeout so it is not itself raced by a slow connect or
+    %% transient load-regulation contention on the shared localhost:8123 host
+    %% (only the second request, which must wait for that slot, uses the tight
+    %% timeout we are actually asserting on).
+    {ok, Ref} = hackney:request(post, URL, Headers, stream,
+                                [{checkout_timeout, 5000} | BaseOpts]),
+    {error, Error} = hackney:request(post, URL, Headers, stream,
+                                     [{checkout_timeout, 100} | BaseOpts]),
     hackney:close(Ref),
     ?assertEqual(checkout_timeout, Error),
     hackney_pool:stop_pool(pool_test_timeout).
