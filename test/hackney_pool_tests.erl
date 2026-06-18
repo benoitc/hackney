@@ -58,6 +58,8 @@ hackney_pool_integration_test_() ->
       {"prewarm creates connections", fun test_prewarm/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
+      {"stop_pool releases in_use load_regulation slots",
+       {timeout, 30, fun test_stop_pool_releases_inuse_slots/0}},
       {"server close detected when idle (issue #544)", {timeout, 30, fun test_server_close_detected/0}},
       {"bytes stranded while idle are buffered, not dropped; conn stays reusable",
        {timeout, 30, fun test_idle_data_consumed_not_dropped/0}},
@@ -780,6 +782,26 @@ test_checkout_timeout() ->
     hackney:close(Ref),
     ?assertEqual(checkout_timeout, Error),
     hackney_pool:stop_pool(pool_test_timeout).
+
+%% Regression: stopping a pool while a request is still checked out must release
+%% the connection's per-host load_regulation slot. Before the terminate/2 fix the
+%% slot leaked, starving that host's concurrency cap node-wide (and flaking
+%% test_checkout_timeout, which shares the host with the prior test). Delta-based
+%% so it does not depend on the absolute global count.
+test_stop_pool_releases_inuse_slots() ->
+    Host = "127.0.0.1", Port = ?PORT,
+    URL = <<"http://127.0.0.1:8123/pool">>,
+    Before = hackney_load_regulation:current(Host, Port),
+    ok = hackney_pool:start_pool(test_pool_stop_leak, [{pool_size, 1}]),
+    Opts = [{pool, test_pool_stop_leak}, {connect_timeout, 1000},
+            {checkout_timeout, 5000}],
+    %% Streaming request: returns once the conn is checked out (in_use), holding
+    %% a load_regulation slot. Do not close it - stop the pool while in flight.
+    {ok, _Ref} = hackney:request(post, URL, [], stream, Opts),
+    ?assertEqual(Before + 1, hackney_load_regulation:current(Host, Port)),
+    hackney_pool:stop_pool(test_pool_stop_leak),
+    timer:sleep(200),
+    ?assertEqual(Before, hackney_load_regulation:current(Host, Port)).
 
 %% Test for issue #544: Server closes idle connection, pool should detect it
 %% This tests that when a server closes a connection while it's idle in the pool,
