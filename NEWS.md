@@ -1,5 +1,27 @@
 # NEWS
 
+4.4.5 - 2026-06-18
+------------------
+
+### Fixed
+
+- HTTPS: a connection reused over a resumed TLS 1.3 session is no longer
+  mislabeled as HTTP/1 when it negotiated HTTP/2. `ssl:negotiated_protocol/1`
+  reports nothing on a resumed session, so hackney now remembers the protocol
+  learned on the full handshake (per host and advertised ALPN) and offers
+  resumption only once that protocol is known, resolving a resumed session
+  against that snapshot. Reused h2 connections take the h2 path instead of
+  feeding h2 frames to the HTTP/1 parser.
+- HTTP/1.1: a response that cannot begin an HTTP/1 status line (for example an
+  HTTP/2 frame on a mislabeled connection) now fails fast with
+  `{error, {bad_response, not_http}}` instead of spinning the CPU in the
+  status-line parser.
+- Connection pooling: `Connection: close` responses are no longer returned to
+  the pool on the sync body path; checkin only pools connections proven
+  keep-alive and socket-ready (unknown defaults to close); and a closed pooled
+  entry is discarded at checkout instead of being redialed inside the pool
+  process (#888).
+
 4.4.4 - 2026-06-17
 ------------------
 
