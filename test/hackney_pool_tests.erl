@@ -76,7 +76,15 @@ hackney_pool_integration_test_() ->
       {"checkin closes an SSL-keyed non-http1 conn",
        fun test_checkin_ssl_wrong_protocol_stub/0},
       {"count/2 aggregates legacy 3-tuples and host_stats spans buckets",
-       fun test_count_mixed_buckets/0}
+       fun test_count_mixed_buckets/0},
+      {"keep-alive response pools the conn and reuses it",
+       {timeout, 30, fun test_keepalive_response_pools/0}},
+      {"Connection: close response is not pooled (sync body path)",
+       {timeout, 30, fun test_connection_close_not_pooled/0}},
+      {"many sequential Connection: close requests all return ok",
+       {timeout, 60, fun test_connection_close_sequential_ok/0}},
+      {"a closed pool entry is discarded at checkout, not reanimated",
+       {timeout, 30, fun test_closed_pool_entry_not_reanimated/0}}
      ]}.
 
 %% HTTPS/1.1 ssl_pooling integration tests - require a TLS server
@@ -471,7 +479,11 @@ swap_one(P, _Old, _New) -> P.
 %% also ignores casts (set_owner_async, stop) and cooperates with
 %% gen_statem:stop/1 (system terminate) so the pool's close path never
 %% blocks on it.
-stub_conn(Info) ->
+stub_conn(Info0) ->
+    %% checkin_info now also carries should_close/ready. Default them to the
+    %% poolable side so existing flag maps keep their meaning: the no_reuse and
+    %% non-http1 cases still close for their own reason, the poolable case passes.
+    Info = maps:merge(#{should_close => false, ready => true}, Info0),
     spawn(fun() -> stub_conn_loop(Info) end).
 
 stub_conn_loop(Info) ->
@@ -867,3 +879,86 @@ test_idle_data_consumed_not_dropped() ->
 
     ServerPid ! stop,
     ok = hackney_pool:stop_pool(test_pool_idle_data).
+
+%% A keep-alive response (HTTP/1.1, no Connection: close) leaves the connection
+%% poolable: after the body is read on the sync path the conn auto-releases and
+%% the next checkout reuses the same pid.
+test_keepalive_response_pools() ->
+    ok = hackney_pool:start_pool(test_pool_keepalive, [{pool_size, 5}, {prewarm_count, 0}]),
+    Opts = [{pool, test_pool_keepalive}],
+    {ok, _PoolInfo, Pid1} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    {ok, 200, _H} = hackney_conn:request(Pid1, <<"GET">>, <<"/get">>, [], <<>>),
+    {ok, _Body} = hackney_conn:body(Pid1),
+    %% Body fully read -> conn auto-releases to the pool (async cast).
+    timer:sleep(50),
+    Stats = hackney_pool:get_stats(test_pool_keepalive),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(1, proplists:get_value(free_count, Stats)),
+    %% Reused on next checkout.
+    {ok, _PoolInfo2, Pid2} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assertEqual(Pid1, Pid2),
+    hackney_conn:stop(Pid2),
+    ok = hackney_pool:stop_pool(test_pool_keepalive).
+
+%% A Connection: close response read on the sync body path must NOT be pooled.
+%% The next checkout gets a fresh, different, working connection.
+test_connection_close_not_pooled() ->
+    ok = hackney_pool:start_pool(test_pool_conn_close, [{pool_size, 5}, {prewarm_count, 0}]),
+    Opts = [{pool, test_pool_conn_close}],
+    {ok, _PoolInfo, Pid1} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    {ok, 200, _H} = hackney_conn:request(Pid1, <<"GET">>, <<"/connection-close">>, [], <<>>),
+    {ok, _Body} = hackney_conn:body(Pid1),
+    %% Body read -> conn auto-releases; the pool must close it, not pool it.
+    timer:sleep(50),
+    Stats = hackney_pool:get_stats(test_pool_conn_close),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    ?assertEqual(0, proplists:get_value(free_count, Stats)),
+    %% Next checkout dials a fresh conn (different pid) and works.
+    {ok, _PoolInfo2, Pid2} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assertNotEqual(Pid1, Pid2),
+    {ok, 200, _H2} = hackney_conn:request(Pid2, <<"GET">>, <<"/get">>, [], <<>>),
+    {ok, _Body2} = hackney_conn:body(Pid2),
+    hackney_conn:stop(Pid2),
+    ok = hackney_pool:stop_pool(test_pool_conn_close).
+
+%% Hammer the same Connection: close URI sequentially through a small pool: every
+%% request must succeed (a fresh conn each time; no hang from a wrongly-pooled
+%% close connection).
+test_connection_close_sequential_ok() ->
+    ok = hackney_pool:start_pool(test_pool_conn_close_seq, [{pool_size, 2}]),
+    Opts = [{pool, test_pool_conn_close_seq}],
+    lists:foreach(
+      fun(_) ->
+          {ok, _PoolInfo, Pid} =
+              hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+          ?assertMatch({ok, 200, _},
+                       hackney_conn:request(Pid, <<"GET">>, <<"/connection-close">>, [], <<>>)),
+          ?assertMatch({ok, _}, hackney_conn:body(Pid))
+      end, lists:seq(1, 20)),
+    ok = hackney_pool:stop_pool(test_pool_conn_close_seq).
+
+%% A pooled TCP conn whose socket is dead while the process is still alive (and
+%% the entry still in `available') must be discarded at checkout, never redialed
+%% into the same pid. Guards the find_available reanimation removal: closing the
+%% socket locally invalidates peername without delivering a tcp_closed, so the
+%% conn stays in `connected' and is_ready reports {ok, closed} via the health
+%% check - exactly the case the old Redial path reanimated.
+test_closed_pool_entry_not_reanimated() ->
+    ok = hackney_pool:start_pool(test_pool_no_reanimate, [{pool_size, 5}]),
+    Opts = [{pool, test_pool_no_reanimate}],
+    {ok, PoolInfo, Pid1} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ok = hackney_pool:checkin(PoolInfo, Pid1),
+    timer:sleep(20),
+    ?assertEqual(1, proplists:get_value(free_count,
+                                        hackney_pool:get_stats(test_pool_no_reanimate))),
+    {connected, ConnData} = sys:get_state(Pid1),
+    Socket = element(8, ConnData),   %% #conn_data.socket
+    ok = gen_tcp:close(Socket),
+    %% Next checkout must NOT hand back the reanimated Pid1; it dials fresh.
+    {ok, _PoolInfo2, Pid2} = hackney_pool:checkout("127.0.0.1", ?PORT, hackney_tcp, Opts),
+    ?assertNotEqual(Pid1, Pid2),
+    ?assert(is_process_alive(Pid2)),
+    {ok, 200, _H} = hackney_conn:request(Pid2, <<"GET">>, <<"/get">>, [], <<>>),
+    {ok, _B} = hackney_conn:body(Pid2),
+    hackney_conn:stop(Pid2),
+    ok = hackney_pool:stop_pool(test_pool_no_reanimate).

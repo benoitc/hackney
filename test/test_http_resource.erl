@@ -130,6 +130,17 @@ handle_request(<<"GET">>, <<"/connection-close">>, Req, State) ->
     }, <<"{\"connection\": \"close\"}">>, Req),
     {ok, Req2, State};
 
+%% GET /maybe-close - randomly close the connection (~50%), to stress the pool
+%% with a mix of keep-alive and Connection: close responses on the same URI.
+handle_request(<<"GET">>, <<"/maybe-close">>, Req, State) ->
+    Headers = case rand:uniform(2) of
+        1 -> #{<<"content-type">> => <<"application/json">>,
+               <<"connection">> => <<"close">>};
+        2 -> #{<<"content-type">> => <<"application/json">>}
+    end,
+    Req2 = cowboy_req:reply(200, Headers, <<"{\"maybe\": \"close\"}">>, Req),
+    {ok, Req2, State};
+
 %% GET /connection-close/:size - return large body with Connection: close
 %% For testing issue #439 - responses with connection close sometimes lost
 handle_request(<<"GET">>, <<"/connection-close/", SizeBin/binary>>, Req, State) ->

@@ -157,6 +157,10 @@
     request_from :: {pid(), reference()} | undefined,
     method :: binary() | undefined,
     path :: binary() | undefined,
+    %% Whether the current request carried Connection: close (the caller asked
+    %% the server to close). Folded into the keepalive decision at checkin so a
+    %% requested close is never reused. Reset on every request send.
+    request_close = false :: boolean(),
 
     %% Response state
     version :: {integer(), integer()} | undefined,
@@ -583,9 +587,12 @@ is_no_reuse(Pid) ->
 
 %% @doc Get the flags the pool needs for its checkin decision in one call:
 %% whether the connection was SSL upgraded, opted into SSL pooling, must not
-%% be reused (proxy tunnels), and the negotiated protocol.
+%% be reused (proxy tunnels), the negotiated protocol, whether the response
+%% requires the connection to close (keepalive), and whether the socket is
+%% proven ready to pool.
 -spec checkin_info(pid()) -> #{upgraded_ssl := boolean(), no_reuse := boolean(),
-                               pool_ssl := boolean(), protocol := atom()}.
+                               pool_ssl := boolean(), protocol := atom(),
+                               should_close := boolean(), ready := boolean()}.
 checkin_info(Pid) ->
     gen_statem:call(Pid, checkin_info).
 
@@ -921,7 +928,9 @@ connected({call, From}, is_no_reuse, #conn_data{no_reuse = NoReuse}) ->
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
 connected({call, From}, checkin_info, Data) ->
-    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
+    %% In connected state: prove the socket is ready before the pool may keep it.
+    Map = (checkin_info_map(Data))#{ready => socket_ready(Data)},
+    {keep_state_and_data, [{reply, From, Map}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
@@ -1232,10 +1241,15 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
     RequestLine = build_request_line(Method, Path),
     HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- HeadersList],
     HeadersData = [RequestLine, HeaderLines, <<"\r\n">>],
+    %% Record whether the caller asked the server to close (the request line is
+    %% built here, not via do_send_request/5), for the keepalive decision.
+    RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
     case Transport:send(Socket, HeadersData) of
         ok ->
             From = Data#conn_data.request_from,
-            {keep_state, Data#conn_data{request_from = undefined}, [{reply, From, ok}]};
+            {keep_state, Data#conn_data{request_from = undefined,
+                                        request_close = RequestClose},
+             [{reply, From, ok}]};
         {error, Reason} ->
             From = Data#conn_data.request_from,
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
@@ -1840,7 +1854,9 @@ handle_common({call, From}, is_no_reuse, _State, #conn_data{no_reuse = NoReuse})
     {keep_state_and_data, [{reply, From, NoReuse}]};
 
 handle_common({call, From}, checkin_info, _State, Data) ->
-    {keep_state_and_data, [{reply, From, checkin_info_map(Data)}]};
+    %% Any non-connected state (e.g. already closed) is not poolable.
+    Map = (checkin_info_map(Data))#{ready => false},
+    {keep_state_and_data, [{reply, From, Map}]};
 
 handle_common({call, From}, get_protocol, _State, #conn_data{protocol = Protocol}) ->
     {keep_state_and_data, [{reply, From, Protocol}]};
@@ -1894,14 +1910,18 @@ reset_async(Data) ->
         stream_to = undefined
     }.
 
-%% @private Check if connection should be closed based on response headers
-should_close_connection(#conn_data{response_headers = undefined}) ->
+%% @private Whether the connection must close (not be reused) for keepalive
+%% reasons. Distinguishes "no response observed yet" (a fresh or idle pooled
+%% conn, which stays poolable) from a parsed response, whose close decision
+%% follows RFC 7230 via hackney_keepalive:should_close/3.
+should_close_connection(#conn_data{response_headers = undefined, version = undefined}) ->
+    %% No request/response cycle has run on this connection: keep it poolable so
+    %% a plain checkout/checkin (no request) still returns the live conn to the
+    %% pool.
     false;
-should_close_connection(#conn_data{response_headers = Headers}) ->
-    case hackney_headers:get_value(<<"connection">>, Headers) of
-        undefined -> false;
-        Value -> hackney_bstr:to_lower(Value) =:= <<"close">>
-    end.
+should_close_connection(#conn_data{version = Version, response_headers = Headers,
+                                   request_close = RequestClose}) ->
+    hackney_keepalive:should_close(Version, Headers, RequestClose).
 
 %% @private Finish async streaming - close or return to connected based on Connection header
 finish_async_streaming(Data) ->
@@ -1960,6 +1980,10 @@ do_send_request(Method, Path, Headers, Body, Data) ->
     %% Build request headers
     FinalHeaders = build_headers(Method, Headers, Body, Netloc),
 
+    %% Record whether the caller asked the server to close, for the keepalive
+    %% decision at checkin. Reset per request.
+    Data1 = Data#conn_data{request_close = hackney_keepalive:request_closes(FinalHeaders)},
+
     %% Build request line and headers
     Path1 = case Path of
         <<>> -> <<"/">>;
@@ -1975,7 +1999,7 @@ do_send_request(Method, Path, Headers, Body, Data) ->
             %% Send body if present
             case send_body(Transport, Socket, Body) of
                 ok ->
-                    {ok, Data};
+                    {ok, Data1};
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -2428,6 +2452,16 @@ has_pending_close(Socket) ->
         false
     end.
 
+%% @private Whether the socket is proven ready to pool: present, no queued close,
+%% and still connected. Runs in the conn process (peername + receive-after-0,
+%% both fast); consuming a queued close here makes a server-closed idle conn
+%% report not-ready. Does not disable active-once, so no stranded-byte regression.
+socket_ready(#conn_data{socket = undefined}) ->
+    false;
+socket_ready(#conn_data{transport = Transport, socket = Socket}) ->
+    not has_pending_close(Socket) andalso
+        check_socket_health(Transport, Socket) =:= ok.
+
 %% @private Drain and return any {tcp/ssl, Socket, Data} bytes queued in the
 %% mailbox. #544 puts idle pooled sockets in {active, once}, which delivers the
 %% next inbound bytes (the start of the response on a reused connection) as a
@@ -2478,16 +2512,24 @@ notify_pool_available_sync(#conn_data{pool_pid = undefined}) ->
     ok;
 notify_pool_available_sync(#conn_data{pool_pid = PoolPid, upgraded_ssl = UpgradedSsl,
                                       no_reuse = NoReuse, pool_ssl = PoolSsl,
-                                      protocol = Protocol}) ->
+                                      protocol = Protocol} = Data) ->
+    %% do_checkin_with_close_flag/3 pools whenever this flag is false, with no
+    %% further check, so also close on a keepalive-close response and on an
+    %% unready socket - matching the async-cast checkin gate.
     ShouldClose = NoReuse orelse (UpgradedSsl andalso not PoolSsl)
-        orelse Protocol =/= http1,
+        orelse Protocol =/= http1
+        orelse should_close_connection(Data)
+        orelse not socket_ready(Data),
     gen_server:call(PoolPid, {checkin_sync, self(), ShouldClose}, 5000).
 
-%% @private Flags for the pool's checkin decision, see checkin_info/1.
+%% @private Flags for the pool's checkin decision, see checkin_info/1. The
+%% `ready' flag is added per-state by the checkin_info handlers, since it
+%% depends on the conn being in `connected' with a healthy socket.
 checkin_info_map(#conn_data{upgraded_ssl = UpgradedSsl, no_reuse = NoReuse,
-                            pool_ssl = PoolSsl, protocol = Protocol}) ->
+                            pool_ssl = PoolSsl, protocol = Protocol} = Data) ->
     #{upgraded_ssl => UpgradedSsl, no_reuse => NoReuse,
-      pool_ssl => PoolSsl, protocol => Protocol}.
+      pool_ssl => PoolSsl, protocol => Protocol,
+      should_close => should_close_connection(Data)}.
 
 %% @private Start an async request
 do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data) ->
