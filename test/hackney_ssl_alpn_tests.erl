@@ -29,6 +29,7 @@ alpn_test_() ->
       fun resumed_without_snapshot_defaults_http1/0,
       fun key_preserves_order_and_protocol_set/0,
       fun non_resumable_handshake_does_not_write_memo/0,
+      fun only_auto_tickets_are_memo_eligible/0,
       fun options_key_ignores_session_tickets/0
      ]}.
 
@@ -107,6 +108,15 @@ non_resumable_handshake_does_not_write_memo() ->
         hackney_ssl:resolve_alpn({error, protocol_not_negotiated}, false, none,
                                  "poison.example", h2(), false)),
     ?assertEqual(http2, hackney_ssl:recall_alpn("poison.example", h2())).
+
+%% Only hackney's automatic tickets make a conn memo-eligible; a caller-supplied
+%% disabled/manual session_tickets entry must not (it is not the resumable source).
+only_auto_tickets_are_memo_eligible() ->
+    ?assert(hackney_ssl:auto_tickets([{verify, verify_none}, {session_tickets, auto}])),
+    ?assertNot(hackney_ssl:auto_tickets([{session_tickets, disabled}])),
+    ?assertNot(hackney_ssl:auto_tickets([{session_tickets, manual}])),
+    ?assertNot(hackney_ssl:auto_tickets([{verify, verify_none}])),
+    ?assertNot(hackney_ssl:auto_tickets([])).
 
 %% The pool tls_key must not depend on session_tickets (the handshake varies it).
 options_key_ignores_session_tickets() ->

@@ -41,7 +41,7 @@
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
 -export([get_negotiated_protocol/1]).
--export([negotiated_protocol/5, resolve_alpn/6, recall_alpn/2]).
+-export([negotiated_protocol/5, resolve_alpn/6, recall_alpn/2, auto_tickets/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -553,6 +553,15 @@ resolve_alpn(_Other, _Resumed, _Cached, _Host, _AlpnProtos, _Resumable) ->
 %% (custom ssl_options) leaves the shared entry untouched.
 maybe_remember(true, Host, AlpnProtos, Proto) -> remember_alpn(Host, AlpnProtos, Proto);
 maybe_remember(false, _Host, _AlpnProtos, _Proto) -> ok.
+
+%% @doc Whether the effective opts carry hackney's automatic TLS resumption
+%% (`{session_tickets, auto}'), which `effective_opts/3' adds only for the
+%% resumable default config. Only such connections are tied to that ticket source
+%% and may update the ALPN memo; a caller-supplied `disabled' or `manual' tickets
+%% entry is not memo-eligible and must not overwrite the shared entry.
+-spec auto_tickets(list()) -> boolean().
+auto_tickets(SslOpts) ->
+  lists:member({session_tickets, auto}, SslOpts).
 
 %% @doc Whether the TLS handshake resumed a session (PSK / abbreviated handshake).
 -spec resumed(ssl:sslsocket()) -> boolean().
