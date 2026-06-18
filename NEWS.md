@@ -21,6 +21,11 @@
   keep-alive and socket-ready (unknown defaults to close); and a closed pooled
   entry is discarded at checkout instead of being redialed inside the pool
   process (#888).
+- Connection pooling: stopping a pool while requests are in flight no longer
+  leaks the per-host concurrency (`load_regulation`) slots of the checked-out
+  connections. The pool now traps exits so its shutdown releases those slots and
+  stops the in-use connections, instead of orphaning them and starving the host's
+  concurrency cap node-wide (#892).
 
 4.4.4 - 2026-06-17
 ------------------
