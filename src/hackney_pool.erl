@@ -453,6 +453,11 @@ start_link(Name, Options0) ->
 %%====================================================================
 
 init([Name, Options]) ->
+    %% Trap exits so a supervisor shutdown (stop_pool -> terminate_child) runs
+    %% terminate/2 instead of killing the pool outright. terminate/2 releases the
+    %% load_regulation slots of in_use connections; without trapping exits it
+    %% would be skipped and those per-host slots would leak.
+    process_flag(trap_exit, true),
     MaxConn = case proplists:get_value(pool_size, Options) of
                   undefined ->
                       proplists:get_value(max_connections, Options, ?DEFAULT_MAX_CONNECTIONS);
@@ -801,7 +806,7 @@ handle_info(_Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-terminate(_Reason, #state{available=Available,
+terminate(_Reason, #state{available=Available, in_use=InUse,
                          h2_connections=H2Conns, h3_connections=H3Conns,
                          pid_monitors=PidMonitors}) ->
     %% Stop all available connections
@@ -812,6 +817,20 @@ terminate(_Reason, #state{available=Available,
             end, Pids)
         end,
         Available
+    ),
+
+    %% Release the load_regulation slot of every checked-out connection and stop
+    %% it. Without this, stopping a pool while requests are in flight orphans the
+    %% in_use conns: the pool's DOWN handler (which would release) is gone, so the
+    %% global per-host slots leak and that host's concurrency cap is starved
+    %% node-wide. Each Key carries the conn's host/port.
+    maps:foreach(
+        fun(Pid, Key) ->
+            {Host, Port} = key_host_port(Key),
+            hackney_load_regulation:release(Host, Port),
+            stop_conn(Pid)
+        end,
+        InUse
     ),
 
     %% Stop all HTTP/2 connections
