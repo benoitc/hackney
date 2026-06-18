@@ -337,9 +337,10 @@ effective_opts_resumption_requires_tlsv13_test() ->
         application:unset_env(ssl, protocol_version)
     end.
 
-options_key_differs_on_resumption_test() ->
-    %% Resumption-enabled and resumption-disabled connections are
-    %% handshaken differently and must not share pool buckets.
+options_key_ignores_resumption_test() ->
+    %% session_tickets is identity-neutral and excluded from the pool key: the
+    %% ALPN resumption gate varies it per connection, so resumption-on and
+    %% resumption-off connections must share the same pool bucket (not churn it).
     On = hackney_ssl:options_key(hackney_ssl:effective_opts("example.com", [], [])),
     application:set_env(hackney, tls_session_resumption, false),
     Off = try
@@ -347,7 +348,7 @@ options_key_differs_on_resumption_test() ->
     after
         application:unset_env(hackney, tls_session_resumption)
     end,
-    ?assertNotEqual(On, Off).
+    ?assertEqual(On, Off).
 
 %%====================================================================
 %% effective_opts_and_key memoization Tests (Unit tests)
@@ -391,16 +392,17 @@ tls_key_cache_distinct_inputs() ->
     ?assertEqual(3, ets:info(hackney_tls_keys, size)).
 
 tls_key_cache_env_fingerprint() ->
-    %% A runtime env flip changes the effective options, so the memo must
-    %% not serve the key cached under the previous env.
+    %% A runtime env flip that changes the key must not be served stale from the
+    %% memo. default_protocols drives the advertised ALPN, which is part of the
+    %% key (unlike session_tickets, which is now excluded), so flip it here.
     true = ets:delete_all_objects(hackney_tls_keys),
     {_, On} = hackney_ssl:effective_opts_and_key("example.com", [], []),
-    application:set_env(hackney, tls_session_resumption, false),
+    application:set_env(hackney, default_protocols, [http1]),
     Off = try
         {_, K} = hackney_ssl:effective_opts_and_key("example.com", [], []),
         K
     after
-        application:unset_env(hackney, tls_session_resumption)
+        application:unset_env(hackney, default_protocols)
     end,
     ?assertNotEqual(On, Off).
 

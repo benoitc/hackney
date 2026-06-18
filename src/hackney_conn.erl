@@ -898,10 +898,18 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
             end,
             hackney_util:merge_opts(MergedSslOpts, AlpnOpts)
     end,
-    case ssl:connect(Socket, FinalSslOpts) of
+    %% Gate TLS resumption on the ALPN memo and snapshot the cached protocol, so a
+    %% resumed session (where ssl reports no ALPN) resolves against this snapshot.
+    %% Resumable: only the resumption-eligible config (session_tickets enabled)
+    %% updates the memo, so a custom-ssl_options handshake cannot poison it.
+    AlpnProtos = alpn_advertised(FinalSslOpts),
+    Resumable = hackney_ssl:auto_tickets(FinalSslOpts),
+    Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
+    GatedSslOpts = gate_resumption(FinalSslOpts, Cached),
+    case ssl:connect(Socket, GatedSslOpts) of
         {ok, SslSocket} ->
-            %% Detect negotiated protocol
-            Protocol = hackney_ssl:get_negotiated_protocol(SslSocket),
+            %% Detect negotiated protocol, carrying ALPN across resumption
+            Protocol = hackney_ssl:negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable),
             %% Update connection to use SSL
             NewData = Data#conn_data{
                 transport = hackney_ssl,
@@ -2183,21 +2191,22 @@ recv_status_and_headers_loop(Data) ->
 recv_status(#conn_data{parser = Parser, buffer = Buffer} = Data) ->
     case hackney_http:execute(Parser, Buffer) of
         {more, NewParser} ->
-            %% Check if parser has data in its internal buffer (e.g., after skipping 1XX response)
-            %% If so, continue parsing; otherwise read from socket
-            ParserBuffer = hackney_http:get(NewParser, buffer),
-            case ParserBuffer of
-                <<>> ->
-                    %% Parser buffer empty - need to read from socket
+            %% The parser needs more bytes to complete the status line. It already
+            %% consumed what it could, so re-feeding its own buffer makes no
+            %% progress (that was an infinite spin); always read from the socket.
+            %% But a valid HTTP/1 status line starts with "HTTP/": if what we have
+            %% can never be that (e.g. an HTTP/2 frame on a mislabeled connection),
+            %% fail fast instead of reading until recv_timeout.
+            case maybe_http_status_start(hackney_http:get(NewParser, buffer)) of
+                false ->
+                    {error, {bad_response, not_http}};
+                true ->
                     case recv_data(Data) of
                         {ok, RecvData} ->
                             recv_status(Data#conn_data{parser = NewParser, buffer = RecvData});
                         {error, Reason} ->
                             {error, Reason}
-                    end;
-                _ ->
-                    %% Parser has data in buffer - continue parsing without reading
-                    recv_status(Data#conn_data{parser = NewParser, buffer = <<>>})
+                    end
             end;
         {response, Version, Status, Reason, NewParser} ->
             recv_headers(Data#conn_data{
@@ -2210,6 +2219,26 @@ recv_status(#conn_data{parser = Parser, buffer = Buffer} = Data) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+%% @private Whether the buffered bytes can still be the start of an HTTP/1 status
+%% line. Leading blank lines are tolerated (RFC 7230 3.5). True while the buffer is
+%% empty or shares a common prefix with "HTTP/" up to the shorter length, so both a
+%% still-accumulating version ("HTT") and a longer partial line ("HTTP/1.1 2") pass;
+%% false once it diverges (e.g. an HTTP/2 frame), so a protocol mismatch fails fast.
+maybe_http_status_start(Buffer) ->
+    case strip_leading_eol(Buffer) of
+        <<>> ->
+            true;
+        Bin ->
+            Prefix = <<"HTTP/">>,
+            N = min(byte_size(Bin), byte_size(Prefix)),
+            binary:part(Bin, 0, N) =:= binary:part(Prefix, 0, N)
+    end.
+
+%% @private Drop leading CR/LF bytes (lenient about blank lines before the status line).
+strip_leading_eol(<<"\r", Rest/binary>>) -> strip_leading_eol(Rest);
+strip_leading_eol(<<"\n", Rest/binary>>) -> strip_leading_eol(Rest);
+strip_leading_eol(Bin) -> Bin.
 
 recv_headers(#conn_data{parser = Parser} = Data, Headers) ->
     case hackney_http:execute(Parser) of
@@ -2687,7 +2716,7 @@ do_tcp_connect(From, Data) ->
     } = Data,
     %% Filter out hackney-specific options that are not valid for transport
     TransportOpts = proplists:delete(protocols, ConnectOpts),
-    Opts = case Transport of
+    case Transport of
         hackney_ssl ->
             %% effective_opts is the single builder of ssl:connect options for
             %% both default and custom ssl_options. It resolves SNI and ALPN
@@ -2697,26 +2726,52 @@ do_tcp_connect(From, Data) ->
                 undefined -> SslOpts0;
                 Protocols -> [{protocols, Protocols} | SslOpts0]
             end,
-            FinalSslOpts = hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts),
-            TransportOpts ++ [{ssl_options, FinalSslOpts}];
-        _ -> TransportOpts
-    end,
-    case Transport:connect(Host, Port, Opts, Timeout) of
-        {ok, Socket} ->
-            Protocol = case Transport of
-                hackney_ssl -> hackney_ssl:get_negotiated_protocol(Socket);
-                _ -> http1
-            end,
-            case Protocol of
-                http2 ->
-                    init_h2_connection(Socket, Data#conn_data{socket = Socket, protocol = http2}, From);
-                http1 ->
-                    NewData = Data#conn_data{socket = Socket, protocol = http1},
-                    {next_state, connected, NewData, [{reply, From, ok}]}
+            FinalSslOpts0 = hackney_ssl:effective_opts(Host, SslOpts1, ConnectOpts),
+            %% Gate TLS resumption on the ALPN memo and snapshot the cached
+            %% protocol now, so a resumed session (where ssl reports no ALPN) is
+            %% resolved against this snapshot rather than re-read from the memo.
+            %% Resumable: only the resumption-eligible config updates the memo.
+            AlpnProtos = alpn_advertised(FinalSslOpts0),
+            Resumable = hackney_ssl:auto_tickets(FinalSslOpts0),
+            Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
+            FinalSslOpts = gate_resumption(FinalSslOpts0, Cached),
+            Opts = TransportOpts ++ [{ssl_options, FinalSslOpts}],
+            case Transport:connect(Host, Port, Opts, Timeout) of
+                {ok, Socket} ->
+                    case hackney_ssl:negotiated_protocol(Socket, Host, AlpnProtos, Cached, Resumable) of
+                        http2 ->
+                            init_h2_connection(Socket,
+                                Data#conn_data{socket = Socket, protocol = http2}, From);
+                        http1 ->
+                            {next_state, connected,
+                             Data#conn_data{socket = Socket, protocol = http1},
+                             [{reply, From, ok}]}
+                    end;
+                {error, Reason} ->
+                    {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
             end;
-        {error, Reason} ->
-            {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
+        _ ->
+            case Transport:connect(Host, Port, TransportOpts, Timeout) of
+                {ok, Socket} ->
+                    {next_state, connected,
+                     Data#conn_data{socket = Socket, protocol = http1},
+                     [{reply, From, ok}]};
+                {error, Reason} ->
+                    {stop_and_reply, normal, [{reply, From, {error, Reason}}]}
+            end
     end.
+
+%% @private The advertised ALPN protocol list (in offered order) from ssl opts,
+%% or [] when none is offered. Used as part of the ALPN memo key.
+alpn_advertised(SslOpts) ->
+    proplists:get_value(alpn_advertised_protocols, SslOpts, []).
+
+%% @private Gate TLS resumption on the ALPN memo: keep `session_tickets' (offer
+%% resumption) only once a full handshake has cached this host+ALPN's protocol.
+%% A cold memo (`none') strips it so the handshake is full and reports ALPN, which
+%% repopulates the memo. Keeps a resumed session from losing the protocol.
+gate_resumption(SslOpts, none) -> proplists:delete(session_tickets, SslOpts);
+gate_resumption(SslOpts, _Cached) -> SslOpts.
 
 %% @private Initialize HTTP/2 connection via the h2 library.
 %% The h2_connection process takes ownership of the socket and delivers

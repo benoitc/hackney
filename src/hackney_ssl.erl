@@ -32,9 +32,16 @@
 -define(TLS_KEY_CACHE, hackney_tls_keys).
 -define(TLS_KEY_CACHE_MAX, 512).
 
+%% Per {Host, advertised-ALPN} memo of the protocol learned on a full handshake,
+%% so a resumed TLS session (where ssl:negotiated_protocol/1 reports nothing) is
+%% labeled correctly. See resolve_alpn/5 and the resumption gate in hackney_conn.
+-define(ALPN_CACHE, hackney_alpn_protocols).
+-define(ALPN_CACHE_MAX, 4096).
+
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
 -export([get_negotiated_protocol/1]).
+-export([negotiated_protocol/5, resolve_alpn/6, recall_alpn/2, auto_tickets/1]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -152,15 +159,19 @@ tlsv13_allowed() ->
     {ok, _} -> false
   end.
 
-%% @doc Create the TLS key memo table used by `effective_opts_and_key/3'.
-%% Idempotent; called from hackney_sup:init/1.
+%% @doc Create the TLS key memo table used by `effective_opts_and_key/3' and the
+%% per-host ALPN memo used by `resolve_alpn/5'. Idempotent; called from
+%% hackney_sup:init/1.
 -spec init_key_cache() -> ok.
 init_key_cache() ->
-  case ets:info(?TLS_KEY_CACHE) of
+  ok = ensure_table(?TLS_KEY_CACHE),
+  ok = ensure_table(?ALPN_CACHE),
+  ok.
+
+ensure_table(Name) ->
+  case ets:info(Name) of
     undefined ->
-      ?TLS_KEY_CACHE = ets:new(?TLS_KEY_CACHE,
-                               [set, public, named_table,
-                                {read_concurrency, true}]),
+      Name = ets:new(Name, [set, public, named_table, {read_concurrency, true}]),
       ok;
     _ ->
       ok
@@ -211,8 +222,13 @@ env_fingerprint() ->
 %% lookup semantics) so option order does not change the key, while
 %% conflicting duplicates such as `[{verify,A},{verify,B}]' and its
 %% reverse still hash differently.
+%%
+%% `session_tickets' is excluded (like the HTTP/3 key excludes `session_ticket'):
+%% it is identity-neutral (does not affect trust) and the handshake now varies it
+%% per the ALPN resumption gate, so it must not change the pool bucket.
 -spec options_key(list()) -> binary().
-options_key(FinalSslOpts) ->
+options_key(FinalSslOpts0) ->
+  FinalSslOpts = proplists:delete(session_tickets, FinalSslOpts0),
   {Tuples, Rest} = lists:partition(
     fun(T) -> is_tuple(T) andalso tuple_size(T) =:= 2 end,
     FinalSslOpts),
@@ -491,6 +507,98 @@ get_negotiated_protocol(SslSocket) ->
     {ok, <<"http/1.1">>} -> http1;
     {error, protocol_not_negotiated} -> http1;
     _ -> http1
+  end.
+
+%% @doc Resolve the negotiated protocol after a handshake, carrying the ALPN memo
+%% across TLS resumption. On a resumed session ssl:negotiated_protocol/1 reports
+%% nothing, so we fall back to `Cached' (snapshotted before the handshake), but
+%% only when the session actually resumed - a full handshake that reports no ALPN
+%% is a genuine HTTP/1 conn. `Cached' is `recall_alpn(Host, AlpnProtos)' read at
+%% the resumption gate. `Resumable' is whether this conn is tied to the resumable
+%% ticket source (hackney enabled session_tickets); only then is the memo written,
+%% so a custom-ssl_options handshake that does not seed the ticket store cannot
+%% poison the shared `{Host, AlpnProtos}' entry a later resumed session reads.
+-spec negotiated_protocol(ssl:sslsocket(), string(), list(),
+                          http2 | http1 | none, boolean()) -> http2 | http1.
+negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable) ->
+  resolve_alpn(ssl:negotiated_protocol(SslSocket), resumed(SslSocket),
+               Cached, Host, AlpnProtos, Resumable).
+
+%% @doc Pure ALPN decision (exported for tests). See negotiated_protocol/5.
+-spec resolve_alpn({ok, binary()} | {error, term()}, boolean(),
+                   http2 | http1 | none, string(), list(), boolean()) ->
+  http2 | http1.
+resolve_alpn({ok, <<"h2">>}, _Resumed, _Cached, Host, AlpnProtos, Resumable) ->
+  maybe_remember(Resumable, Host, AlpnProtos, http2),
+  http2;
+resolve_alpn({ok, <<"http/1.1">>}, _Resumed, _Cached, Host, AlpnProtos, Resumable) ->
+  maybe_remember(Resumable, Host, AlpnProtos, http1),
+  http1;
+resolve_alpn({error, protocol_not_negotiated}, true, Cached, _Host, _AlpnProtos, _Resumable)
+  when Cached =/= none ->
+  %% Genuinely resumed: ALPN is not re-reported, use the gate-time snapshot.
+  Cached;
+resolve_alpn({error, protocol_not_negotiated}, false, _Cached, Host, AlpnProtos, Resumable) ->
+  %% Full handshake with no ALPN: a real HTTP/1 conn. Refresh the memo (only for
+  %% the resumable source) so a stale cached http2 cannot be recalled later.
+  maybe_remember(Resumable, Host, AlpnProtos, http1),
+  http1;
+resolve_alpn(_Other, _Resumed, _Cached, _Host, _AlpnProtos, _Resumable) ->
+  %% Defensive: resumed without a snapshot (gate should prevent this) or an
+  %% unexpected ssl:negotiated_protocol/1 result.
+  http1.
+
+%% @private Write the ALPN memo only for handshakes tied to the resumable ticket
+%% source (hackney's default-config resumption). A non-resumable handshake
+%% (custom ssl_options) leaves the shared entry untouched.
+maybe_remember(true, Host, AlpnProtos, Proto) -> remember_alpn(Host, AlpnProtos, Proto);
+maybe_remember(false, _Host, _AlpnProtos, _Proto) -> ok.
+
+%% @doc Whether the effective opts carry hackney's automatic TLS resumption
+%% (`{session_tickets, auto}'), which `effective_opts/3' adds only for the
+%% resumable default config. Only such connections are tied to that ticket source
+%% and may update the ALPN memo; a caller-supplied `disabled' or `manual' tickets
+%% entry is not memo-eligible and must not overwrite the shared entry.
+-spec auto_tickets(list()) -> boolean().
+auto_tickets(SslOpts) ->
+  lists:member({session_tickets, auto}, SslOpts).
+
+%% @doc Whether the TLS handshake resumed a session (PSK / abbreviated handshake).
+-spec resumed(ssl:sslsocket()) -> boolean().
+resumed(SslSocket) ->
+  case ssl:connection_information(SslSocket, [session_resumption]) of
+    {ok, [{session_resumption, R}]} -> R =:= true;
+    _ -> false
+  end.
+
+%% @doc Recall the protocol learned for `{Host, AlpnProtos}' on a full handshake,
+%% or `none' if not cached. `AlpnProtos' is the advertised ALPN list in offered
+%% order (order is the client's preference and can change negotiation).
+-spec recall_alpn(string(), list()) -> http2 | http1 | none.
+recall_alpn(Host, AlpnProtos) ->
+  try ets:lookup(?ALPN_CACHE, {Host, AlpnProtos}) of
+    [{_, Proto}] -> Proto;
+    [] -> none
+  catch
+    %% Table absent: hackney used as a library without the app started.
+    error:badarg -> none
+  end.
+
+%% @private Cache the protocol for `{Host, AlpnProtos}'. Soft-capped: a generous
+%% bound cleared wholesale on overflow. Eviction is not correctness-critical - a
+%% cold memo just means the next handshake is full (the gate offers no resumption)
+%% and re-learns the protocol.
+-spec remember_alpn(string(), list(), http2 | http1) -> ok.
+remember_alpn(Host, AlpnProtos, Proto) ->
+  try
+    case ets:info(?ALPN_CACHE, size) >= ?ALPN_CACHE_MAX of
+      true -> _ = ets:delete_all_objects(?ALPN_CACHE);
+      false -> ok
+    end,
+    _ = ets:insert(?ALPN_CACHE, {{Host, AlpnProtos}, Proto}),
+    ok
+  catch
+    error:badarg -> ok
   end.
 
 %% @private Convert protocol atom to ALPN protocol identifier
