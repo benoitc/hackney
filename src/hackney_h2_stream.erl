@@ -249,18 +249,18 @@ connected({call, From}, {send, SData, Fin},
           #h2s_data{h2_conn = H2Conn, stream_id = Sid}) ->
     EndStream = (Fin =:= fin),
     Reply = h2_call(fun() ->
-        h2_connection:send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream)
+        eh2_connection:send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream)
     end),
     {keep_state_and_data, [{reply, From, Reply}]};
 
 connected({call, From}, {send_trailers, Trailers},
           #h2s_data{h2_conn = H2Conn, stream_id = Sid}) ->
-    Reply = h2_call(fun() -> h2_connection:send_trailers(H2Conn, Sid, Trailers) end),
+    Reply = h2_call(fun() -> eh2_connection:send_trailers(H2Conn, Sid, Trailers) end),
     {keep_state_and_data, [{reply, From, Reply}]};
 
 connected({call, From}, {consume, NBytes},
           #h2s_data{h2_conn = H2Conn, stream_id = Sid}) ->
-    Reply = h2_call(fun() -> h2_connection:consume(H2Conn, Sid, NBytes) end),
+    Reply = h2_call(fun() -> eh2_connection:consume(H2Conn, Sid, NBytes) end),
     {keep_state_and_data, [{reply, From, Reply}]};
 
 %% --- recv ------------------------------------------------------------
@@ -571,7 +571,7 @@ down_reason(shutdown) -> closed;
 down_reason({shutdown, _}) -> closed;
 down_reason(Reason) -> {closed, Reason}.
 
-%% @private Run an h2_connection call, normalising a dead-connection exit.
+%% @private Run an eh2_connection call, normalising a dead-connection exit.
 h2_call(Fun) ->
     try Fun()
     catch
@@ -582,7 +582,7 @@ h2_call(Fun) ->
 cancel_stream_safe(#h2s_data{h2_conn = undefined}) ->
     ok;
 cancel_stream_safe(#h2s_data{h2_conn = H2Conn, stream_id = Sid}) ->
-    _ = try h2_connection:cancel_stream(H2Conn, Sid) catch _:_ -> ok end,
+    _ = try eh2_connection:cancel_stream(H2Conn, Sid) catch _:_ -> ok end,
     ok.
 
 stop_conn(undefined) ->

@@ -195,7 +195,7 @@
     protocol = http1 :: http1 | http2 | http3,
     %% HTTP/2 connection pid (from h2 library)
     h2_conn :: pid() | undefined,
-    %% Monitor ref for the h2_connection process so hackney_conn fails fast
+    %% Monitor ref for the eh2_connection process so hackney_conn fails fast
     %% if the h2 lib crashes.
     h2_mon :: reference() | undefined,
     %% Map of active HTTP/2 streams: StreamId => {From, StreamState}
@@ -378,7 +378,7 @@ start_response(Pid) ->
     safe_call(Pid, start_response, infinity).
 
 %% @doc Open an HTTP/2 stream whose events are routed to HandlerPid (the gRPC
-%% bidi model), returning the underlying h2_connection pid and stream id so the
+%% bidi model), returning the underlying eh2_connection pid and stream id so the
 %% handler can drive send_data/send_trailers/consume directly. Used by
 %% hackney_h2_stream; the stream is not tracked in this gen_statem.
 -spec open_h2_stream(pid(), binary(), binary(), list(), pid(), map()) ->
@@ -1041,12 +1041,12 @@ connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts
           #conn_data{protocol = http2, h2_conn = H2Conn} = Data) ->
     %% Open a stream routed to HandlerPid (gRPC bidi). The handler owns the
     %% stream end to end; we do not track it in h2_streams. Returns the
-    %% h2_connection pid + stream id so the handler drives it directly.
+    %% eh2_connection pid + stream id so the handler drives it directly.
     {_, _, H2Headers} = build_h2_request_headers(Method, Path, Headers, Data),
     FlowControl = maps:get(flow_control, Opts, auto),
     StreamOpts = #{handler => HandlerPid, flow_control => FlowControl},
     Reply = try
-        case h2_connection:send_request_headers(H2Conn, H2Headers, false, StreamOpts) of
+        case eh2_connection:send_request_headers(H2Conn, H2Headers, false, StreamOpts) of
             {ok, StreamId} -> {ok, H2Conn, StreamId};
             {error, _} = E -> E
         end
@@ -1082,7 +1082,7 @@ connected(info, {h2, H2Conn, Event}, #conn_data{h2_conn = H2Conn} = Data) ->
 %% HTTP/2 per-stream recv_timeout watchdog (see arm_h2_timer/2).
 connected(info, {timeout, TRef, {h2_recv_timeout, StreamId}}, Data) ->
     handle_h2_recv_timeout(StreamId, TRef, Data);
-%% h2_connection is linked via start_link; trap_exit surfaces its termination
+%% eh2_connection is linked via start_link; trap_exit surfaces its termination
 %% as an 'EXIT' signal. Convert to the same cleanup path as the monitor DOWN.
 connected(info, {'EXIT', H2Conn, Reason}, #conn_data{h2_conn = H2Conn} = Data) ->
     h2_on_closed(Reason, Data#conn_data{h2_conn = undefined, h2_mon = undefined});
@@ -1103,7 +1103,7 @@ connected(info, {ssl_error, Socket, _Reason}, #conn_data{socket = Socket} = Data
     {next_state, closed, Data#conn_data{socket = undefined}};
 
 %% Unexpected data received while idle - HTTP/1.1 only (H/2 socket is owned
-%% by h2_connection; H/3 uses QUIC messages).
+%% by eh2_connection; H/3 uses QUIC messages).
 %% Bytes delivered by #544 {active, once} while idle are the start of the next
 %% response on a reused connection. Buffer them (do NOT treat as a broken
 %% connection) and re-arm close detection, so the next request consumes them.
@@ -1218,7 +1218,7 @@ sending(EventType, Event, Data) ->
 %%====================================================================
 
 streaming_body(enter, connected, #conn_data{protocol = http2}) ->
-    %% HTTP/2: the h2_connection process owns the socket and reads it in active
+    %% HTTP/2: the eh2_connection process owns the socket and reads it in active
     %% mode. hackney_conn must NOT flip it to passive or the h2 lib stops
     %% receiving frames (the response would never arrive).
     keep_state_and_data;
@@ -2774,7 +2774,7 @@ gate_resumption(SslOpts, none) -> proplists:delete(session_tickets, SslOpts);
 gate_resumption(SslOpts, _Cached) -> SslOpts.
 
 %% @private Initialize HTTP/2 connection via the h2 library.
-%% The h2_connection process takes ownership of the socket and delivers
+%% The eh2_connection process takes ownership of the socket and delivers
 %% owner messages ({h2, Conn, Event}) to this gen_statem's mailbox.
 init_h2_connection(Socket, Data, From) ->
     start_h2_connection(Socket, Data, From, first_connect).
@@ -2785,13 +2785,13 @@ init_h2_after_upgrade(SslSocket, Data, From) ->
 
 start_h2_connection(Socket, Data, From, Origin) ->
     #conn_data{transport = Transport} = Data,
-    case h2_connection:start_link(client, Socket, self(), #{}) of
+    case eh2_connection:start_link(client, Socket, self(), #{}) of
         {ok, H2Conn} ->
             %% Transfer socket ownership then activate handshake.
             _ = Transport:controlling_process(Socket, H2Conn),
-            case h2_connection:activate(H2Conn) of
+            case eh2_connection:activate(H2Conn) of
                 ok ->
-                    case h2_connection:wait_connected(H2Conn,
+                    case eh2_connection:wait_connected(H2Conn,
                                                      Data#conn_data.connect_timeout) of
                         ok ->
                             Mon = erlang:monitor(process, H2Conn),
@@ -2832,7 +2832,7 @@ h2_start_failure(after_upgrade, From, Reason) ->
 
 %% @private Close an HTTP/2 connection, tolerating an already-closed one.
 close_h2(H2Conn) ->
-    try h2_connection:close(H2Conn) catch _:_ -> ok end.
+    try eh2_connection:close(H2Conn) catch _:_ -> ok end.
 
 %% @private Arm a per-stream recv_timeout watchdog for a sync HTTP/2 read so a
 %% lost frame fails fast with {error, timeout} instead of blocking until the
@@ -2902,7 +2902,7 @@ handle_h2_recv_timeout(StreamId, TRef,
 %% @private RST_STREAM(CANCEL) a stalled HTTP/2 stream, tolerating a dead conn.
 cancel_h2_stream(undefined, _StreamId) -> ok;
 cancel_h2_stream(H2Conn, StreamId) ->
-    try h2_connection:cancel_stream(H2Conn, StreamId) catch _:_ -> ok end.
+    try eh2_connection:cancel_stream(H2Conn, StreamId) catch _:_ -> ok end.
 
 %% @private Send an HTTP/2 request via the h2 library.
 do_h2_request(From, Method, Path, Headers, Body, Data) ->
@@ -2925,17 +2925,17 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
         B when is_binary(B) -> B;
         L -> iolist_to_binary(L)
     end,
-    %% h2_connection can die between pool checkout and this call; gen_statem:call
+    %% eh2_connection can die between pool checkout and this call; gen_statem:call
     %% on a dead pid raises exit:noproc. Catch that and normalise to an error
     %% so the caller sees {error, {closed, _}} instead of a gen_statem:call
     %% blowing up (issue #836).
     SendRes = try
         case BodyBin of
-            <<>> -> h2_connection:send_request_headers(H2Conn, H2Headers, true);
+            <<>> -> eh2_connection:send_request_headers(H2Conn, H2Headers, true);
             _ ->
-                case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
+                case eh2_connection:send_request_headers(H2Conn, H2Headers, false) of
                     {ok, SId} ->
-                        case h2_connection:send_data(H2Conn, SId, BodyBin, true) of
+                        case eh2_connection:send_data(H2Conn, SId, BodyBin, true) of
                             ok -> {ok, SId};
                             {error, _} = E1 -> E1
                         end;
@@ -2982,10 +2982,10 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
     #conn_data{h2_conn = H2Conn, h2_streams = Streams} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
-    %% h2_connection can die between pool checkout and this call; normalise the
+    %% eh2_connection can die between pool checkout and this call; normalise the
     %% gen_statem:call exit into an error reply (issue #836).
     SendRes = try
-        h2_connection:send_request_headers(H2Conn, H2Headers, false)
+        eh2_connection:send_request_headers(H2Conn, H2Headers, false)
     catch
         exit:{ExitReason, _} -> {error, {closed, ExitReason}};
         exit:ExitReason      -> {error, {closed, ExitReason}}
@@ -3005,12 +3005,12 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
     end.
 
 %% @private Non-blocking h2 send_data, matching the one-shot path. The
-%% h2_connection buffers beyond the peer's flow-control window and drains as
+%% eh2_connection buffers beyond the peer's flow-control window and drains as
 %% WINDOW_UPDATEs arrive (returning {error, send_buffer_full} only past its
-%% per-stream cap). Normalises a dead h2_connection exit to an error.
+%% per-stream cap). Normalises a dead eh2_connection exit to an error.
 h2_send_data(H2Conn, StreamId, Bin, EndStream) ->
     try
-        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
+        eh2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
     catch
         exit:{ExitReason, _} -> {error, {closed, ExitReason}};
         exit:ExitReason      -> {error, {closed, ExitReason}}
