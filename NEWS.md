@@ -1,5 +1,17 @@
 # NEWS
 
+4.5.1 - 2026-07-04
+------------------
+
+### Changed
+
+- Bump `h2` to 0.10.3. It fixes an HTTP/2 upload hang: a sender blocked on
+  flow control is now released with `{error, stream_reset}` or
+  `{error, stream_closed}` when the peer cancels the stream, instead of
+  hanging for the connection's lifetime. This affects hackney's streamed
+  request bodies over HTTP/2 when the server resets the stream
+  mid-backpressure.
+
 4.5.0 - 2026-07-04
 ------------------
 
