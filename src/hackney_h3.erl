@@ -609,6 +609,7 @@ method_to_binary(delete) -> <<"DELETE">>;
 method_to_binary(head) -> <<"HEAD">>;
 method_to_binary(options) -> <<"OPTIONS">>;
 method_to_binary(patch) -> <<"PATCH">>;
+method_to_binary(query) -> <<"QUERY">>;
 method_to_binary(Method) when is_atom(Method) ->
     string:uppercase(atom_to_binary(Method));
 method_to_binary(Method) when is_binary(Method) ->

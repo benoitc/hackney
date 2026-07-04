@@ -4,6 +4,7 @@
 %% Supported routes:
 %%   GET  /get              - return request info as JSON
 %%   POST /post             - echo request info with body as JSON
+%%   QUERY /query           - echo request info with body as JSON
 %%   HEAD /*                - return headers only
 %%   GET  /status/:code     - return specific status code
 %%   GET  /redirect-to      - redirect to ?url= (optional ?status_code=)
@@ -28,6 +29,13 @@ handle_request(<<"GET">>, <<"/get">>, Req, State) ->
 
 %% POST /post - echo request info with body
 handle_request(<<"POST">>, <<"/post">>, Req0, State) ->
+    {ok, Body, Req} = cowboy_req:read_body(Req0),
+    Info = request_info(Req),
+    Info2 = Info#{<<"data">> => Body},
+    reply_json(200, Info2, Req, State);
+
+%% QUERY /query - echo request info with body (RFC 10008: safe method with body)
+handle_request(<<"QUERY">>, <<"/query">>, Req0, State) ->
     {ok, Body, Req} = cowboy_req:read_body(Req0),
     Info = request_info(Req),
     Info2 = Info#{<<"data">> => Body},

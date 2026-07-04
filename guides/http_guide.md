@@ -112,6 +112,31 @@ ok = hackney:finish_send_body(Ref),
 {ok, Status, RespHeaders, Ref} = hackney:start_response(Ref).
 ```
 
+## QUERY Requests
+
+QUERY (RFC 10008) is a safe, idempotent method for read-only operations that
+need a request body, for example a structured query too large or too
+sensitive for the URL. Use it like a POST: the body travels the same way
+over HTTP/1.1, HTTP/2, and HTTP/3.
+
+```erlang
+hackney:query(
+    URL,
+    [{<<"content-type">>, <<"application/json">>}],
+    Json,
+    Options
+).
+```
+
+The generic form works too:
+
+```erlang
+hackney:request(query, URL, Headers, Body, Options).
+```
+
+Every request body format above (binary, form, multipart, streaming) works
+with QUERY.
+
 ## Response Handling
 
 ### Read Full Body
