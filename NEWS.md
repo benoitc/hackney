@@ -1,5 +1,16 @@
 # NEWS
 
+4.5.0 - 2026-07-04
+------------------
+
+### Added
+
+- HTTP QUERY method (RFC 10008) as a first-class method: `hackney:query/1..4`
+  helpers and `hackney:request(query, ...)`. QUERY is safe and idempotent and
+  carries a request body like POST. It works over HTTP/1.1, HTTP/2, and
+  HTTP/3 with every request body mode (binary, streamed, async, connection
+  API).
+
 4.4.5 - 2026-06-18
 ------------------
 

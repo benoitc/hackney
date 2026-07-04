@@ -35,4 +35,7 @@
 ?METHOD_TPL(patch).
 ?METHOD_TPL(purge).
 
+%% RFC-10008
+?METHOD_TPL(query).
+
 -undef(METHOD_TPL).

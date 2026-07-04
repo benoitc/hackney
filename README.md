@@ -78,6 +78,19 @@ hackney:delete(URL).
 hackney:head(URL).
 hackney:options(URL).
 hackney:patch(URL, Headers, Body).
+hackney:query(URL, Headers, Body).
+```
+
+`QUERY` (RFC 10008) is a safe, idempotent method for read-only operations
+that need a request body:
+
+```erlang
+hackney:query(
+    URL,
+    [{<<"content-type">>, <<"application/json">>}],
+    Json,
+    Options
+).
 ```
 
 ### Connection Pooling

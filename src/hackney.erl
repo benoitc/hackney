@@ -560,7 +560,9 @@ request(Method, URL, Headers, Body) ->
 %% @doc Make a request.
 %%
 %% Args:
-%% - Method: HTTP method (get, post, put, delete, etc.)
+%% - Method: HTTP method (get, post, put, delete, query, etc.).
+%%   `query' is the RFC 10008 QUERY method: safe and idempotent, with a
+%%   request body allowed like post.
 %% - URL: Full URL or parsed hackney_url record
 %% - Headers: List of headers
 %% - Body: Request body (binary, iolist, {form, KVs}, {file, Path}, etc.)
