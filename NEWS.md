@@ -1,6 +1,6 @@
 # NEWS
 
-4.5.2 - 2026-07-05
+4.5.2 - 2026-07-06
 ------------------
 
 ### Changed
@@ -10,6 +10,13 @@
   the stream closed on its END_STREAM chunk. A waiting sender is now settled
   as `ok` once the send buffer has drained, and only gets the close-reason
   error when data is still outstanding.
+- Bump `quic` to 1.7.0. Relevant to hackney's HTTP/3 client: the connection
+  flow-control window now slides forward with received bytes instead of
+  stalling after 8 MiB, so large HTTP/3 downloads keep flowing; the idle
+  timer restarts on received activity per RFC 9000 §10.1; an invalid peer
+  SETTINGS frame now closes the connection cleanly instead of crashing; and
+  a client recognizes a server stateless reset (RFC 9000 §10.3) and closes
+  promptly instead of waiting for the idle timeout.
 
 4.5.1 - 2026-07-04
 ------------------
