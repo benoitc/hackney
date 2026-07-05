@@ -17,6 +17,9 @@
   SETTINGS frame now closes the connection cleanly instead of crashing; and
   a client recognizes a server stateless reset (RFC 9000 §10.3) and closes
   promptly instead of waiting for the idle timeout.
+- Bump `webtransport` to 0.4.3, which aligns its transitive `h2` (0.10.4) and
+  `quic` (1.7.0) dependencies with hackney's own, so the `wt_*` API runs on
+  the same HTTP/2 and HTTP/3 stack versions.
 
 4.5.1 - 2026-07-04
 ------------------
