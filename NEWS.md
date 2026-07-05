@@ -1,5 +1,16 @@
 # NEWS
 
+4.5.2 - 2026-07-05
+------------------
+
+### Changed
+
+- Bump `h2` to 0.10.4. It fixes a regression from 0.10.3 where a blocking
+  send whose data had fully drained received `{error, stream_closed}` when
+  the stream closed on its END_STREAM chunk. A waiting sender is now settled
+  as `ok` once the send buffer has drained, and only gets the close-reason
+  error when data is still outstanding.
+
 4.5.1 - 2026-07-04
 ------------------
 
