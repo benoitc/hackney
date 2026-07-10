@@ -62,6 +62,7 @@ hackney_conn_integration_test_() ->
       %% Mid-stream ownership reassignment
       {"set_owner while receiving body", {timeout, 30, fun test_set_owner_while_receiving/0}},
       {"set_owner while streaming async", {timeout, 30, fun test_set_owner_while_streaming/0}},
+      {"set_owner API unchanged in other states", {timeout, 30, fun test_set_owner_api_unchanged/0}},
       %% 1XX response handling
       {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
      ]}.
@@ -745,6 +746,34 @@ test_set_owner_while_streaming() ->
     end,
     ?assert(lists:member(done, Msgs)),
     ?assertEqual(Size, iolist_size([B || B <- Msgs, is_binary(B)])),
+    hackney_conn:stop(Pid).
+
+test_set_owner_api_unchanged() ->
+    %% Regression: adding receiving/streaming handlers must not change the API
+    %% elsewhere. set_owner still succeeds in connected and is still rejected
+    %% with invalid_state in an untouched state (streaming_once / async once).
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    %% connected: reassignment still works, then hand ownership back to us.
+    Target = spawn(fun() -> receive stop -> ok end end),
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, Target)),
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, self())),
+    Target ! stop,
+
+    %% streaming_once (async once, awaiting stream_next): still rejected.
+    {ok, Ref} = hackney_conn:request_async(Pid, <<"GET">>, <<"/get">>, [], <<>>, once),
+    receive {hackney_response, Ref, {status, _, _}} -> ok after 5000 -> error(status_timeout) end,
+    receive {hackney_response, Ref, {headers, _}} -> ok after 5000 -> error(headers_timeout) end,
+    ?assertEqual({error, invalid_state}, hackney_conn:set_owner(Pid, self())),
+
     hackney_conn:stop(Pid).
 
 %%====================================================================
