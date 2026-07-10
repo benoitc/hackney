@@ -1518,8 +1518,9 @@ receiving({call, From}, body, Data) ->
             %% Transition to closed state instead of connected
             {next_state, closed, NewData, [{reply, From, {ok, Body}}]};
         {ok, Body, NewData} ->
-            %% Socket still valid - return to connected state
-            {next_state, connected, NewData, [{reply, From, {ok, Body}}]};
+            %% Socket still valid - reuse it, or stop the process if the
+            %% connection must not be reused (see finish_sync_request/3).
+            finish_sync_request(From, {ok, Body}, NewData);
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1533,7 +1534,7 @@ receiving({call, From}, stream_body, Data) ->
             %% Socket was closed during body read - transition to closed state
             {next_state, closed, NewData, [{reply, From, done}]};
         {done, NewData} ->
-            {next_state, connected, NewData, [{reply, From, done}]};
+            finish_sync_request(From, done, NewData);
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1930,6 +1931,29 @@ should_close_connection(#conn_data{response_headers = undefined, version = undef
 should_close_connection(#conn_data{version = Version, response_headers = Headers,
                                    request_close = RequestClose}) ->
     hackney_keepalive:should_close(Version, Headers, RequestClose).
+
+%% @private Finish a completed synchronous request. The blocking `body` /
+%% `stream_body` path historically returned unconditionally to `connected`,
+%% never consulting `no_reuse` or `should_close_connection/1`. A connection that
+%% must not be reused — flagged `no_reuse` (proxy tunnels, SSL upgrades, pool
+%% disabled) or carrying `Connection: close` per RFC 7230 — therefore parked in
+%% `connected` forever, pinned alive by its owner link, leaking one hackney_conn
+%% process per request. This mirrors finish_async_streaming/1 for the sync path:
+%% close the socket and stop the process for non-reusable connections, otherwise
+%% return to `connected` for keep-alive reuse.
+finish_sync_request(From, Reply, #conn_data{transport = Transport, socket = Socket,
+                                            no_reuse = NoReuse} = Data) ->
+    case NoReuse orelse should_close_connection(Data) of
+        true ->
+            case Socket of
+                undefined -> ok;
+                _ -> Transport:close(Socket)
+            end,
+            {stop_and_reply, normal, [{reply, From, Reply}],
+             Data#conn_data{socket = undefined}};
+        false ->
+            {next_state, connected, Data, [{reply, From, Reply}]}
+    end.
 
 %% @private Finish async streaming - close or return to connected based on Connection header
 finish_async_streaming(Data) ->
