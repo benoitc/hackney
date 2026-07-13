@@ -994,6 +994,7 @@ start_connection(Key, Owner, Opts, State) ->
 start_connection(Host, Port, Transport, Owner, Opts, State) ->
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
     RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
+    H2SendTimeout = proplists:get_value(h2_send_timeout, Opts, 5000),
     IdleTimeout = State#state.keepalive_timeout,
     SslOpts = proplists:get_value(ssl_options, Opts, []),
     ConnectOpts = proplists:get_value(connect_options, Opts, []),
@@ -1004,6 +1005,7 @@ start_connection(Host, Port, Transport, Owner, Opts, State) ->
         transport => Transport,
         connect_timeout => ConnectTimeout,
         recv_timeout => RecvTimeout,
+        h2_send_timeout => H2SendTimeout,
         idle_timeout => IdleTimeout,
         ssl_options => SslOpts,
         connect_options => ConnectOpts,

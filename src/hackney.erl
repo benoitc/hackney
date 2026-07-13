@@ -137,6 +137,7 @@ connect_direct(Transport, Host, Port, Options) ->
     transport => Transport,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    h2_send_timeout => proplists:get_value(h2_send_timeout, Options, 5000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
@@ -496,6 +497,7 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     socket => Socket,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    h2_send_timeout => proplists:get_value(h2_send_timeout, Options, 5000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, []),
     no_reuse => NoReuse
@@ -1043,7 +1045,8 @@ shutdown_wt(WtPid) ->
 %% one stream on it. Returns a pid driven with h2_send/h2_recv etc. The method
 %% defaults to POST.
 %%
-%% Options: connect_timeout, recv_timeout, connect_options, ssl_options,
+%% Options: connect_timeout, recv_timeout, h2_send_timeout (default 5000 ms),
+%% connect_options, ssl_options,
 %% {flow_control, auto | manual}, {active, true | false | once},
 %% {max_recv_buffer, bytes | infinity}.
 -spec h2_open(binary() | string(), list()) -> {ok, pid()} | {error, term()}.
@@ -1080,6 +1083,7 @@ h2_open(Method, URL, Headers, Opts) ->
         headers => Headers,
         connect_timeout => proplists:get_value(connect_timeout, Opts, 8000),
         recv_timeout => proplists:get_value(recv_timeout, Opts, infinity),
+        h2_send_timeout => proplists:get_value(h2_send_timeout, Opts, 5000),
         connect_options => proplists:get_value(connect_options, Opts, []),
         ssl_options => proplists:get_value(ssl_options, Opts, []),
         flow_control => proplists:get_value(flow_control, Opts, auto),

@@ -144,6 +144,9 @@
     %% Options
     connect_timeout = ?CONNECT_TIMEOUT :: timeout(),
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
+    %% Maximum time to wait for HTTP/2 peer flow-control credit while sending.
+    %% `infinity' is accepted for callers that explicitly want unbounded wait.
+    h2_send_timeout = 5000 :: timeout(),
     idle_timeout = ?IDLE_TIMEOUT :: timeout(),
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
@@ -635,6 +638,7 @@ init([DefaultOwner, Opts]) ->
         socket = Socket,
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
+        h2_send_timeout = maps:get(h2_send_timeout, Opts, 5000),
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
@@ -944,7 +948,8 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_d
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
     %% Allow recv_timeout to be overridden per-request (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
-    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    H2SendTimeout = proplists:get_value(h2_send_timeout, ReqOpts, Data#conn_data.h2_send_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout, h2_send_timeout = H2SendTimeout},
     do_h2_request(From, Method, Path, Headers, Body, NewData);
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http3} = Data) ->
@@ -1013,7 +1018,8 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request with ReqOpts (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
-    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    H2SendTimeout = proplists:get_value(h2_send_timeout, ReqOpts, Data#conn_data.h2_send_timeout),
+    NewData = Data#conn_data{recv_timeout = RecvTimeout, h2_send_timeout = H2SendTimeout},
     do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, _FollowRedirect, ReqOpts}, #conn_data{protocol = http3} = Data) ->
@@ -1281,16 +1287,17 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
-streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http2} = Data) ->
+streaming_body({call, From}, {send_body_chunk, BodyData},
+               #conn_data{protocol = http2, h2_send_timeout = SendTimeout} = Data) ->
     %% HTTP/2 - send a DATA frame without END_STREAM.
     #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
     Result = case BodyData of
         Fun when is_function(Fun, 0) ->
-            stream_body_fun_h2(H2Conn, StreamId, Fun);
+            stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout);
         {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun_h2(H2Conn, StreamId, {Fun, State});
+            stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout);
         _ ->
-            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false)
+            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false, SendTimeout)
     end,
     case Result of
         ok ->
@@ -1327,10 +1334,11 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Da
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
-streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Data) ->
+streaming_body({call, From}, finish_send_body,
+               #conn_data{protocol = http2, h2_send_timeout = SendTimeout} = Data) ->
     %% HTTP/2 - close the request stream with an empty END_STREAM DATA frame.
     #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
-    case h2_send_data(H2Conn, StreamId, <<>>, true) of
+    case h2_send_data(H2Conn, StreamId, <<>>, true, SendTimeout) of
         ok ->
             {keep_state, Data, [{reply, From, ok}]};
         {error, Reason} ->
@@ -2918,7 +2926,7 @@ do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo,
                {async, Ref, StreamTo, AsyncMode}, Data).
 
 do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
-    #conn_data{h2_conn = H2Conn} = Data,
+    #conn_data{h2_conn = H2Conn, h2_send_timeout = SendTimeout} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
     BodyBin = case Body of
@@ -2935,8 +2943,16 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
             _ ->
                 case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
                     {ok, SId} ->
-                        case h2_connection:send_data(H2Conn, SId, BodyBin, true) of
+                        case h2_connection:send_data(H2Conn, SId, BodyBin, true,
+                                                     #{block => SendTimeout}) of
                             ok -> {ok, SId};
+                            {error, timeout} = E1 ->
+                                %% h2 may retain the timed-out payload in its
+                                %% send buffer. The request is failing, so
+                                %% reset the stream rather than let it be sent
+                                %% after the caller has received an error.
+                                _ = cancel_h2_stream(H2Conn, SId),
+                                E1;
                             {error, _} = E1 -> E1
                         end;
                     Err -> Err
@@ -3004,13 +3020,12 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
-%% @private Non-blocking h2 send_data, matching the one-shot path. The
-%% h2_connection buffers beyond the peer's flow-control window and drains as
-%% WINDOW_UPDATEs arrive (returning {error, send_buffer_full} only past its
-%% per-stream cap). Normalises a dead h2_connection exit to an error.
-h2_send_data(H2Conn, StreamId, Bin, EndStream) ->
+%% @private Blocking h2 send_data. Waiting for peer flow-control credit keeps
+%% Hackney from overflowing h2's bounded per-stream send buffer.
+h2_send_data(H2Conn, StreamId, Bin, EndStream, SendTimeout) ->
     try
-        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
+        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream,
+                                #{block => SendTimeout})
     catch
         exit:{ExitReason, _} -> {error, {closed, ExitReason}};
         exit:ExitReason      -> {error, {closed, ExitReason}}
@@ -3018,11 +3033,11 @@ h2_send_data(H2Conn, StreamId, Bin, EndStream) ->
 
 %% @private Drain a body-producer fun, sending each chunk as a non-final h2 DATA
 %% frame. Mirrors stream_body_fun/3 (HTTP/1.1) and stream_body_fun_h3/3.
-stream_body_fun_h2(H2Conn, StreamId, Fun) when is_function(Fun, 0) ->
+stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout) when is_function(Fun, 0) ->
     case Fun() of
         {ok, Data} ->
-            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h2(H2Conn, StreamId, Fun);
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false, SendTimeout) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout);
                 Error -> Error
             end;
         eof ->
@@ -3030,11 +3045,11 @@ stream_body_fun_h2(H2Conn, StreamId, Fun) when is_function(Fun, 0) ->
         {error, _} = Error ->
             Error
     end;
-stream_body_fun_h2(H2Conn, StreamId, {Fun, State}) when is_function(Fun, 1) ->
+stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout) when is_function(Fun, 1) ->
     case Fun(State) of
         {ok, Data, NewState} ->
-            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h2(H2Conn, StreamId, {Fun, NewState});
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false, SendTimeout) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, {Fun, NewState}, SendTimeout);
                 Error -> Error
             end;
         eof ->

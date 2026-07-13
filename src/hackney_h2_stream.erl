@@ -91,6 +91,7 @@
     ssl_options = [] :: list(),
     connect_timeout = ?CONNECT_TIMEOUT :: timeout(),
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
+    h2_send_timeout = 5000 :: timeout(),
     flow_control = auto :: auto | manual,
     active = false :: false | true | once,
 
@@ -196,6 +197,7 @@ init([Owner, Opts]) ->
         ssl_options = maps:get(ssl_options, Opts, []),
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
+        h2_send_timeout = maps:get(h2_send_timeout, Opts, 5000),
         flow_control = maps:get(flow_control, Opts, auto),
         active = maps:get(active, Opts, false),
         max_recv_buffer = maps:get(max_recv_buffer, Opts, ?DEFAULT_MAX_RECV_BUFFER)
@@ -246,11 +248,21 @@ connected(enter, _OldState, _Data) ->
 
 %% --- send ------------------------------------------------------------
 connected({call, From}, {send, SData, Fin},
-          #h2s_data{h2_conn = H2Conn, stream_id = Sid}) ->
+          #h2s_data{h2_conn = H2Conn, stream_id = Sid, h2_send_timeout = SendTimeout}) ->
     EndStream = (Fin =:= fin),
-    Reply = h2_call(fun() ->
-        h2_connection:send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream)
+    Reply0 = h2_call(fun() ->
+        h2_connection:send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream,
+                                #{block => SendTimeout})
     end),
+    %% h2 can retain data after its blocking-send deadline expires. Reset the
+    %% stream so a caller that receives timeout never has that payload sent
+    %% later in the background.
+    Reply = case Reply0 of
+        {error, timeout} = Error ->
+            _ = h2_call(fun() -> h2_connection:cancel_stream(H2Conn, Sid) end),
+            Error;
+        _ -> Reply0
+    end,
     {keep_state_and_data, [{reply, From, Reply}]};
 
 connected({call, From}, {send_trailers, Trailers},
