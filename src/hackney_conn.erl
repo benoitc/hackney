@@ -1556,6 +1556,18 @@ receiving(info, {ssl_error, Socket, _Reason}, #conn_data{socket = Socket} = Data
 receiving(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
 
+receiving({call, From}, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    %% Reparent mid-stream: swap the monitored owner so the process reading the
+    %% body can exit without stopping the connection. Socket/async state untouched.
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon},
+     [{reply, From, ok}]};
+receiving(cast, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}};
+
 receiving(EventType, Event, Data) ->
     handle_common(EventType, Event, receiving, Data).
 
@@ -1617,6 +1629,18 @@ streaming(info, {ssl_error, Socket, Reason}, #conn_data{socket = Socket, async_r
 
 streaming(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
+
+streaming({call, From}, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    %% Reparent the lifecycle monitor mid-stream. stream_to is left as-is, so the
+    %% async message target does not change; only owner death handling moves.
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon},
+     [{reply, From, ok}]};
+streaming(cast, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}};
 
 streaming(EventType, Event, Data) ->
     handle_common(EventType, Event, streaming, Data).

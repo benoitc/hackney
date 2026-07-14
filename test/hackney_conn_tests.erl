@@ -59,6 +59,10 @@ hackney_conn_integration_test_() ->
       %% Async tests
       {"async request continuous", {timeout, 30, fun test_async_continuous/0}},
       {"async request once mode", {timeout, 30, fun test_async_once/0}},
+      %% Mid-stream ownership reassignment
+      {"set_owner while receiving body", {timeout, 30, fun test_set_owner_while_receiving/0}},
+      {"set_owner while streaming async", {timeout, 30, fun test_set_owner_while_streaming/0}},
+      {"set_owner API unchanged in other states", {timeout, 30, fun test_set_owner_api_unchanged/0}},
       %% 1XX response handling
       {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
      ]}.
@@ -629,6 +633,146 @@ test_async_once() ->
     %% Collect remaining messages
     Messages = receive_all_async_with_next(Ref, Pid, []),
     ?assert(lists:member(done, Messages)),
+
+    hackney_conn:stop(Pid).
+
+test_set_owner_while_receiving() ->
+    %% HTTP/1.1: a short-lived worker starts the response and reads one chunk,
+    %% then a third process reassigns ownership to a long-lived reader. The
+    %% original owner exits and the reader drains the body to done, proving the
+    %% connection is no longer torn down by the original owner's DOWN.
+    Size = 200000,
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    Parent = self(),
+    Path = <<"/chunked/", (integer_to_binary(Size))/binary>>,
+
+    {Worker, WMon} = spawn_monitor(fun() ->
+        receive go -> ok end,
+        {ok, 200, _} = hackney_conn:request(Pid, <<"GET">>, Path, [], <<>>),
+        {ok, C1} = hackney_conn:stream_body(Pid),
+        Parent ! {chunk1, self(), C1},
+        receive stop -> ok end
+    end),
+
+    %% Tie the connection lifecycle to the worker (connected state).
+    ok = hackney_conn:set_owner(Pid, Worker),
+    Worker ! go,
+
+    FirstChunk = receive
+        {chunk1, Worker, C} -> C
+    after 5000 -> error(chunk1_timeout)
+    end,
+    ?assert(byte_size(FirstChunk) > 0),
+
+    %% Reassign ownership mid-stream (receiving state) to a long-lived reader
+    %% that stays alive as owner until we have verified.
+    Reader = spawn(fun() ->
+        Rest = stream_all(Pid, <<>>),
+        Parent ! {rest, self(), Rest},
+        receive stop -> ok end
+    end),
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, Reader)),
+
+    %% Original owner exits; the connection must survive.
+    Worker ! stop,
+    receive {'DOWN', WMon, process, Worker, _} -> ok after 5000 -> error(worker_down_timeout) end,
+    ?assert(is_process_alive(Pid)),
+
+    Rest = receive
+        {rest, Reader, R} -> R
+    after 10000 -> error(rest_timeout)
+    end,
+
+    ?assertEqual(Size, byte_size(FirstChunk) + byte_size(Rest)),
+    Reader ! stop,
+    hackney_conn:stop(Pid).
+
+test_set_owner_while_streaming() ->
+    %% Async continuous: the request runs with the worker as lifecycle owner and
+    %% a separate collector as stream_to. Mid-stream (streaming state) a third
+    %% process reassigns ownership away from the worker, which then exits without
+    %% stopping the connection. stream_to is unchanged, so the collector still
+    %% receives every message through done.
+    Size = 2000000,
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    Parent = self(),
+    Path = <<"/chunked/", (integer_to_binary(Size))/binary>>,
+
+    {Owner, OMon} = spawn_monitor(fun() -> receive stop -> ok end end),
+    %% Owner becomes the lifecycle owner (connected state).
+    ok = hackney_conn:set_owner(Pid, Owner),
+
+    %% Collector issues the async request as its own caller, so stream_to is the
+    %% collector while owner stays Owner (do_request_async leaves owner unchanged
+    %% when StreamTo == caller).
+    Collector = spawn(fun() ->
+        {ok, Ref} = hackney_conn:request_async(Pid, <<"GET">>, Path, [], <<>>, true),
+        Parent ! {started, self()},
+        Msgs = receive_all_async(Ref, []),
+        Parent ! {collected, self(), Msgs}
+    end),
+
+    %% Wait until the request is issued (streaming has begun), then reassign
+    %% ownership to the long-lived parent while the body is still draining.
+    receive {started, Collector} -> ok after 5000 -> error(started_timeout) end,
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, self())),
+
+    %% Original owner exits; the connection must survive.
+    Owner ! stop,
+    receive {'DOWN', OMon, process, Owner, _} -> ok after 5000 -> error(owner_down_timeout) end,
+    ?assert(is_process_alive(Pid)),
+
+    Msgs = receive
+        {collected, Collector, M} -> M
+    after 15000 -> error(collect_timeout)
+    end,
+    ?assert(lists:member(done, Msgs)),
+    ?assertEqual(Size, iolist_size([B || B <- Msgs, is_binary(B)])),
+    hackney_conn:stop(Pid).
+
+test_set_owner_api_unchanged() ->
+    %% Regression: adding receiving/streaming handlers must not change the API
+    %% elsewhere. set_owner still succeeds in connected and is still rejected
+    %% with invalid_state in an untouched state (streaming_once / async once).
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+
+    %% connected: reassignment still works, then hand ownership back to us.
+    Target = spawn(fun() -> receive stop -> ok end end),
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, Target)),
+    ?assertEqual(ok, hackney_conn:set_owner(Pid, self())),
+    Target ! stop,
+
+    %% streaming_once (async once, awaiting stream_next): still rejected.
+    {ok, Ref} = hackney_conn:request_async(Pid, <<"GET">>, <<"/get">>, [], <<>>, once),
+    receive {hackney_response, Ref, {status, _, _}} -> ok after 5000 -> error(status_timeout) end,
+    receive {hackney_response, Ref, {headers, _}} -> ok after 5000 -> error(headers_timeout) end,
+    ?assertEqual({error, invalid_state}, hackney_conn:set_owner(Pid, self())),
 
     hackney_conn:stop(Pid).
 
