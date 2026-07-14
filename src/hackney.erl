@@ -109,11 +109,10 @@ connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
 connect(Transport, Host, Port) ->
   connect(Transport, Host, Port, []).
 
--spec connect(module(), binary(), inet:port_number(), list()) -> {ok, conn()} | {error, term()}.
+-spec connect(module(), string() | binary(), inet:port_number(), list()) ->
+        {ok, conn()} | {error, term()}.
 connect(Transport, Host, Port, Options) when is_binary(Host) ->
-  connect(Transport, binary_to_list(Host), Port, Options).
-
--spec connect(module(), string(), inet:port_number(), list()) -> {ok, conn()} | {error, term()}.
+  connect(Transport, binary_to_list(Host), Port, Options);
 connect(Transport, Host, Port, Options) ->
   %% Check if using a pool
   UsePool = use_pool(Options),
