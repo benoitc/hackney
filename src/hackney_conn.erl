@@ -144,9 +144,9 @@
     %% Options
     connect_timeout = ?CONNECT_TIMEOUT :: timeout(),
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
-    %% Maximum time to wait for HTTP/2 peer flow-control credit while sending.
-    %% `infinity' is accepted for callers that explicitly want unbounded wait.
-    h2_send_timeout = 5000 :: timeout(),
+    %% Optional maximum time to wait for HTTP/2 peer flow-control credit while
+    %% sending. When unset, preserve h2's non-blocking send behavior.
+    h2_send_timeout = undefined :: timeout() | undefined,
     idle_timeout = ?IDLE_TIMEOUT :: timeout(),
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
@@ -638,7 +638,7 @@ init([DefaultOwner, Opts]) ->
         socket = Socket,
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
-        h2_send_timeout = maps:get(h2_send_timeout, Opts, 5000),
+        h2_send_timeout = maps:get(h2_send_timeout, Opts, undefined),
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
@@ -2943,8 +2943,7 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
             _ ->
                 case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
                     {ok, SId} ->
-                        case h2_connection:send_data(H2Conn, SId, BodyBin, true,
-                                                     #{block => SendTimeout}) of
+                        case h2_send_data(H2Conn, SId, BodyBin, true, SendTimeout) of
                             ok -> {ok, SId};
                             {error, timeout} = E1 ->
                                 %% h2 may retain the timed-out payload in its
@@ -3020,8 +3019,15 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
-%% @private Blocking h2 send_data. Waiting for peer flow-control credit keeps
-%% Hackney from overflowing h2's bounded per-stream send buffer.
+%% @private Preserve non-blocking h2 sends unless the caller explicitly opts
+%% into a blocking deadline with h2_send_timeout.
+h2_send_data(H2Conn, StreamId, Bin, EndStream, undefined) ->
+    try
+        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
+    catch
+        exit:{ExitReason, _} -> {error, {closed, ExitReason}};
+        exit:ExitReason      -> {error, {closed, ExitReason}}
+    end;
 h2_send_data(H2Conn, StreamId, Bin, EndStream, SendTimeout) ->
     try
         h2_connection:send_data(H2Conn, StreamId, Bin, EndStream,

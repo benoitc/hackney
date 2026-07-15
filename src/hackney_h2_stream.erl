@@ -91,7 +91,7 @@
     ssl_options = [] :: list(),
     connect_timeout = ?CONNECT_TIMEOUT :: timeout(),
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
-    h2_send_timeout = 5000 :: timeout(),
+    h2_send_timeout = undefined :: timeout() | undefined,
     flow_control = auto :: auto | manual,
     active = false :: false | true | once,
 
@@ -197,7 +197,7 @@ init([Owner, Opts]) ->
         ssl_options = maps:get(ssl_options, Opts, []),
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
-        h2_send_timeout = maps:get(h2_send_timeout, Opts, 5000),
+        h2_send_timeout = maps:get(h2_send_timeout, Opts, undefined),
         flow_control = maps:get(flow_control, Opts, auto),
         active = maps:get(active, Opts, false),
         max_recv_buffer = maps:get(max_recv_buffer, Opts, ?DEFAULT_MAX_RECV_BUFFER)
@@ -251,8 +251,7 @@ connected({call, From}, {send, SData, Fin},
           #h2s_data{h2_conn = H2Conn, stream_id = Sid, h2_send_timeout = SendTimeout}) ->
     EndStream = (Fin =:= fin),
     Reply0 = h2_call(fun() ->
-        h2_connection:send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream,
-                                #{block => SendTimeout})
+        h2_send_data(H2Conn, Sid, iolist_to_binary(SData), EndStream, SendTimeout)
     end),
     %% h2 can retain data after its blocking-send deadline expires. Reset the
     %% stream so a caller that receives timeout never has that payload sent
@@ -590,6 +589,14 @@ h2_call(Fun) ->
         exit:{ExitReason, _} -> {error, {closed, ExitReason}};
         exit:ExitReason      -> {error, {closed, ExitReason}}
     end.
+
+%% @private Use h2's existing non-blocking behavior unless the caller opted
+%% into waiting for peer flow-control credit.
+h2_send_data(H2Conn, Sid, Data, EndStream, undefined) ->
+    h2_connection:send_data(H2Conn, Sid, Data, EndStream);
+h2_send_data(H2Conn, Sid, Data, EndStream, SendTimeout) ->
+    h2_connection:send_data(H2Conn, Sid, Data, EndStream,
+                            #{block => SendTimeout}).
 
 cancel_stream_safe(#h2s_data{h2_conn = undefined}) ->
     ok;
