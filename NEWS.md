@@ -1,5 +1,28 @@
 # NEWS
 
+4.6.0 - 2026-07-15
+------------------
+
+### Added
+
+- `set_owner/2` now works while a response body is streaming, in both the
+  synchronous and the async path. It used to return `{error, invalid_state}`
+  once the body had started. This lets a short lived worker run a request and
+  hand the still streaming response to a longer lived process before it exits,
+  without stopping the connection.
+- `connect/4` accepts a binary host, restoring the 1.x behavior. A binary is
+  converted to a string, so callers passing a binary host no longer fail.
+
+### Fixed
+
+- A non-reusable connection (flagged `no_reuse` for proxy tunnels, SSL
+  upgrades or a disabled pool, or answered with `Connection: close`) is now
+  closed and its process stopped when a synchronous request completes, instead
+  of parking in `connected` forever. With a long lived owner nothing stopped
+  it, so one `hackney_conn` process leaked per request until the node ran out
+  of memory (#902). The sync and async reuse decision now share the same
+  check, which also stops a `no_reuse` pooled connection on the async path.
+
 4.5.2 - 2026-07-06
 ------------------
 
