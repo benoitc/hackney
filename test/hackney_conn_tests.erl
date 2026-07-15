@@ -63,6 +63,11 @@ hackney_conn_integration_test_() ->
       {"set_owner while receiving body", {timeout, 30, fun test_set_owner_while_receiving/0}},
       {"set_owner while streaming async", {timeout, 30, fun test_set_owner_while_streaming/0}},
       {"set_owner API unchanged in other states", {timeout, 30, fun test_set_owner_api_unchanged/0}},
+      %% Non-reusable connections stop at request completion (#902)
+      {"sync body on a non-reusable conn stops it", {timeout, 30, fun test_sync_body_no_reuse_stops/0}},
+      {"sync stream_body on a non-reusable conn stops it", {timeout, 30, fun test_sync_stream_body_no_reuse_stops/0}},
+      {"async on a non-reusable pooled conn stops it", {timeout, 30, fun test_async_no_reuse_pooled_stops/0}},
+      {"sync body on a reusable conn keeps it connected", {timeout, 30, fun test_sync_body_reusable_stays_connected/0}},
       %% 1XX response handling
       {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
      ]}.
@@ -775,6 +780,98 @@ test_set_owner_api_unchanged() ->
     ?assertEqual({error, invalid_state}, hackney_conn:set_owner(Pid, self())),
 
     hackney_conn:stop(Pid).
+
+%% A connection flagged no_reuse must be closed and its process stopped once the
+%% synchronous body read completes, instead of parking in `connected' forever
+%% (#902). Uses a keep-alive endpoint so the socket stays valid at completion;
+%% the no_reuse flag alone must drive termination.
+test_sync_body_no_reuse_stops() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000,
+        no_reuse => true
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    {ok, _Status, _Headers} = hackney_conn:request(Pid, <<"GET">>, <<"/get">>, [], <<>>),
+    MRef = erlang:monitor(process, Pid),
+    {ok, Body} = hackney_conn:body(Pid),
+    ?assert(is_binary(Body)),
+    ?assert(wait_down(Pid, MRef)),
+    ?assertNot(is_process_alive(Pid)).
+
+%% Same, but draining the body through stream_body/1 to `done'.
+test_sync_stream_body_no_reuse_stops() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000,
+        no_reuse => true
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    {ok, _Status, _Headers} = hackney_conn:request(Pid, <<"GET">>, <<"/get">>, [], <<>>),
+    MRef = erlang:monitor(process, Pid),
+    _Body = stream_all(Pid, <<>>),
+    ?assert(wait_down(Pid, MRef)),
+    ?assertNot(is_process_alive(Pid)).
+
+%% Async path parity: a no_reuse pooled connection used to return to `connected'
+%% after streaming (the sync path's sibling gap). It must now stop too.
+test_async_no_reuse_pooled_stops() ->
+    Pool = spawn(fun() -> receive stop -> ok end end),
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000,
+        no_reuse => true,
+        pool_pid => Pool
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    MRef = erlang:monitor(process, Pid),
+    {ok, Ref} = hackney_conn:request_async(Pid, <<"GET">>, <<"/get">>, [], <<>>, true),
+    Messages = receive_all_async(Ref, []),
+    ?assert(lists:member(done, Messages)),
+    ?assert(wait_down(Pid, MRef)),
+    ?assertNot(is_process_alive(Pid)),
+    Pool ! stop.
+
+%% Non-regression: a reusable connection (no no_reuse, no Connection: close) must
+%% still return to `connected' and be usable for a second request.
+test_sync_body_reusable_stays_connected() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    {ok, _S1, _H1} = hackney_conn:request(Pid, <<"GET">>, <<"/get">>, [], <<>>),
+    {ok, _B1} = hackney_conn:body(Pid),
+    ?assertEqual({ok, connected}, hackney_conn:get_state(Pid)),
+    ?assert(is_process_alive(Pid)),
+    %% Reuse the same connection for a second request.
+    {ok, _S2, _H2} = hackney_conn:request(Pid, <<"GET">>, <<"/get">>, [], <<>>),
+    {ok, _B2} = hackney_conn:body(Pid),
+    ?assert(is_process_alive(Pid)),
+    hackney_conn:stop(Pid).
+
+%% Wait for a connection process to terminate normally after completion.
+wait_down(Pid, MRef) ->
+    receive
+        {'DOWN', MRef, process, Pid, _Reason} -> true
+    after 2000 -> false
+    end.
 
 %%====================================================================
 %% 1XX Response Tests
