@@ -1,5 +1,14 @@
 # NEWS
 
+4.6.1 - 2026-07-15
+------------------
+
+### Changed
+
+- Bump `h2` to 0.11.0. It adds `h2:peername/1`, which returns the peer's
+  `{IpAddress, Port}` for a live connection. Additive only; no behavior
+  change for hackney.
+
 4.6.0 - 2026-07-15
 ------------------
 
