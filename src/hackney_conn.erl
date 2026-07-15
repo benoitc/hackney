@@ -1518,8 +1518,8 @@ receiving({call, From}, body, Data) ->
             %% Transition to closed state instead of connected
             {next_state, closed, NewData, [{reply, From, {ok, Body}}]};
         {ok, Body, NewData} ->
-            %% Socket still valid - return to connected state
-            {next_state, connected, NewData, [{reply, From, {ok, Body}}]};
+            %% Socket still valid - reuse it, or stop if not reusable.
+            finish_sync_request(From, {ok, Body}, NewData);
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1533,7 +1533,7 @@ receiving({call, From}, stream_body, Data) ->
             %% Socket was closed during body read - transition to closed state
             {next_state, closed, NewData, [{reply, From, done}]};
         {done, NewData} ->
-            {next_state, connected, NewData, [{reply, From, done}]};
+            finish_sync_request(From, done, NewData);
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1955,27 +1955,47 @@ should_close_connection(#conn_data{version = Version, response_headers = Headers
                                    request_close = RequestClose}) ->
     hackney_keepalive:should_close(Version, Headers, RequestClose).
 
-%% @private Finish async streaming - close or return to connected based on Connection header
-finish_async_streaming(Data) ->
-    #conn_data{transport = Transport, socket = Socket, pool_pid = PoolPid} = Data,
-    case should_close_connection(Data) of
+%% @private Whether a connection whose request/response cycle just finished may
+%% be reused. Shared by the sync and async completion paths so the reuse test
+%% lives in one place: a connection flagged no_reuse (proxy tunnel, SSL upgrade,
+%% pool disabled) or whose response asked to close (RFC 7230) is not reusable.
+connection_reusable(#conn_data{no_reuse = true}) ->
+    false;
+connection_reusable(Data) ->
+    not should_close_connection(Data).
+
+%% @private Close the socket if we still hold one. Returns ok.
+close_socket(_Transport, undefined) -> ok;
+close_socket(Transport, Socket) -> Transport:close(Socket), ok.
+
+%% @private Finish a completed synchronous request (blocking body / stream_body).
+%% A reusable connection returns to `connected': a pooled one is handed back to
+%% the pool from connected(enter, receiving), a direct one stays alive for the
+%% owner to reuse. A non-reusable one is closed and the process stopped, so a
+%% no_reuse / Connection: close conn no longer parks in `connected' forever
+%% (#902). Mirrors finish_async_streaming/1 for the sync path.
+finish_sync_request(From, Reply, #conn_data{transport = Transport, socket = Socket} = Data) ->
+    case connection_reusable(Data) of
         true ->
-            %% Connection: close - close socket and stop process
-            case Socket of
-                undefined -> ok;
-                _ -> Transport:close(Socket)
-            end,
-            {stop, normal, reset_async(Data#conn_data{socket = undefined})};
-        false when PoolPid =:= undefined ->
-            %% No pool and no Connection: close - still stop since no reuse
-            case Socket of
-                undefined -> ok;
-                _ -> Transport:close(Socket)
-            end,
-            {stop, normal, reset_async(Data#conn_data{socket = undefined})};
+            {next_state, connected, Data, [{reply, From, Reply}]};
         false ->
-            %% Has pool or keep-alive - return to connected for reuse
-            {next_state, connected, reset_async(Data)}
+            ok = close_socket(Transport, Socket),
+            {stop_and_reply, normal, [{reply, From, Reply}],
+             Data#conn_data{socket = undefined}}
+    end.
+
+%% @private Finish async streaming. Reuse only a reusable, pooled connection
+%% (direct async conns are not re-driven, so they stop rather than park);
+%% otherwise close and stop. Now also honours no_reuse via connection_reusable/1,
+%% closing the gap where a no_reuse pooled async conn returned to `connected'.
+finish_async_streaming(#conn_data{transport = Transport, socket = Socket,
+                                  pool_pid = PoolPid} = Data) ->
+    case connection_reusable(Data) andalso PoolPid =/= undefined of
+        true ->
+            {next_state, connected, reset_async(Data)};
+        false ->
+            ok = close_socket(Transport, Socket),
+            {stop, normal, reset_async(Data#conn_data{socket = undefined})}
     end.
 
 %% @private Handle receiving response status and headers
