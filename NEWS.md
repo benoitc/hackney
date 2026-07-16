@@ -1,5 +1,17 @@
 # NEWS
 
+unreleased
+----------
+
+### Fixed
+
+- Chunked decoding no longer fails with `{error, invalid_chunk_size}` when
+  the CRLF terminating a chunk-size line is split across two socket reads
+  (buffer ending on a lone `\r`). The parser now waits for the `\n` (#901).
+- A malformed chunk-size line or chunk terminator now fails cleanly with
+  `{error, invalid_chunk_size}` or `{error, poorly_formatted_chunked_size}`
+  instead of crashing the parser with a `case_clause` error.
+
 4.7.0 - 2026-07-17
 ------------------
 

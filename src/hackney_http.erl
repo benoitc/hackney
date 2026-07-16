@@ -493,9 +493,12 @@ content_decode(ContentDecode, Data, St) ->
 
 %% @doc Decode a stream of chunks.
 -spec te_chunked(binary(), any())
-    -> more | {ok, binary(), {non_neg_integer(), non_neg_integer()}}
-  | {ok, binary(), binary(),  {non_neg_integer(), non_neg_integer()}}
-  | {done, non_neg_integer(), binary()} | {error, badarg}.
+    -> done
+  | {chunk_done, binary()}
+  | {chunk_ok, binary(), binary()}
+  | more
+  | {more, {non_neg_integer(), non_neg_integer()}}
+  | {error, invalid_chunk_size | poorly_formatted_chunked_size}.
 te_chunked(<<>>, _) ->
   done;
 te_chunked(Data, _) ->
@@ -507,10 +510,14 @@ te_chunked(Data, _) ->
         {ok, Chunk, Rest1} ->
           {chunk_ok, Chunk, Rest1};
         eof ->
-          {more, {byte_size(Rest), Size}}
+          {more, {byte_size(Rest), Size}};
+        {error, _} = Error ->
+          Error
       end;
     eof ->
-      more
+      more;
+    {error, _} = Error ->
+      Error
   end.
 
 %% @doc Decode an identity stream.
@@ -534,6 +541,11 @@ read_size(Data) ->
   read_size(Data, 0, 0).
 
 read_size(<<>>, _, _) ->
+  eof;
+%% The size line's CRLF terminator is split across two reads and the buffer
+%% ends on the lone \r: wait for the \n instead of treating the line as
+%% malformed (issue #901).
+read_size(<<"\r">>, _, _) ->
   eof;
 
 read_size(<<"\r\n", Rest/binary>>, Size, Len) when Len > 0 ->
