@@ -44,7 +44,9 @@ raw_server_test_() ->
      {"streamed request send_timeout applies on a reused pooled conn",
       {timeout, 60, fun t_streamed_send_timeout_reused_conn/0}},
      {"direct hackney_conn async API uses the connection default send_timeout",
-      {timeout, 60, fun t_async_direct_conn_api/0}}].
+      {timeout, 60, fun t_async_direct_conn_api/0}},
+     {"manual hackney:connect honors {send_timeout, T}",
+      {timeout, 60, fun t_manual_connect_send_timeout/0}}].
 
 echo_server_test_() ->
     {setup,
@@ -336,6 +338,34 @@ drain_async(Ref) ->
         {hackney_response, Ref, _} -> drain_async(Ref)
     after 15000 ->
         {error, no_async_done}
+    end.
+
+%% hackney:connect/4 + hackney:send_request/2 has no per-request options
+%% channel: the connection-level send_timeout from the connect options must
+%% apply (single-owner connection, unlike pooled ones).
+t_manual_connect_send_timeout() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, 1024}],
+        window_update => none,
+        body_size => 128
+    }),
+    Body = binary:copy(<<"m">>, 200 * 1024),
+    %% pool false: hackney:connect defaults to the default pool, but the
+    %% conn-level send_timeout seeding is for single-owner direct conns.
+    {ok, ConnPid} = hackney:connect(hackney_ssl, "localhost",
+                                    repro_h2_raw_server:port(Srv),
+                                    [{send_timeout, 25}, {pool, false}, {protocols, [http2]},
+                                     {ssl_options, [{insecure, true}, {verify, verify_none}]}]),
+    try
+        T0 = erlang:monotonic_time(millisecond),
+        Res = hackney:send_request(ConnPid, {post, <<"/">>, [], Body}),
+        Elapsed = erlang:monotonic_time(millisecond) - T0,
+        ?assertEqual({error, timeout}, Res),
+        ?assert(Elapsed < 1500)
+    after
+        catch hackney:close(ConnPid),
+        repro_h2_raw_server:stop(element(1, Srv))
     end.
 
 %%====================================================================

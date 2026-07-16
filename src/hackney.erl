@@ -140,6 +140,11 @@ connect_direct(Transport, Host, Port, Options) ->
     transport => Transport,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    %% Single-owner connection: seed the conn-level send_timeout so
+    %% hackney:send_request/2 (which has no options channel) honors it.
+    %% Pooled connections deliberately skip this (shared conns keep the
+    %% constant default; per-request ReqOpts override there).
+    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
@@ -499,6 +504,8 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     socket => Socket,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    %% Single-owner tunneled connection: same seeding as connect_direct.
+    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, []),
     no_reuse => NoReuse

@@ -18,6 +18,16 @@ unreleased
   entry stored the internal call reference where the delivery code expected
   the `stream_to` pid, so every async HTTP/2 response was silently dropped
   and the caller never received `{hackney_response, Ref, ...}` messages.
+- HTTP/2 `{async, once}` now honors `stream_next/1` with the same contract
+  as HTTP/1.1: status and headers are delivered eagerly, then each
+  `stream_next/1` delivers exactly one message (a body chunk or `done`).
+  Previously every frame was pushed eagerly, identical to `{async, true}`.
+  once-mode streams run h2 manual flow control, so a slow consumer keeps the
+  peer's window closed and in-flight data stays bounded to one window.
+- Connections created with `hackney:connect/4` and `{pool, false}` honor a
+  `{send_timeout, T}` connect option again (`hackney:send_request/2` has no
+  per-request options channel). Pooled connections keep the constant default
+  and take the per-request option instead.
 
 4.6.1 - 2026-07-15
 ------------------

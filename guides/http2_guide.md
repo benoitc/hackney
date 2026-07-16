@@ -130,6 +130,23 @@ receive
 end.
 ```
 
+With `{async, once}` you pull instead: status and headers arrive eagerly,
+then each `hackney:stream_next/1` delivers exactly one message (a body chunk
+or `done`). On HTTP/2 the stream uses manual flow control, so data you have
+not pulled keeps the server's send window closed and in-flight data stays
+bounded to one window.
+
+```erlang
+{ok, Ref} = hackney:get(URL, [], <<>>, [{async, once}]),
+%% ... receive status and headers as above, then:
+ok = hackney:stream_next(Ref),
+receive
+    {hackney_response, Ref, done} -> ok;
+    {hackney_response, Ref, Chunk} ->
+        process(Chunk)  %% call stream_next/1 again for the next chunk
+end.
+```
+
 ## Connection Multiplexing
 
 HTTP/2 allows multiple concurrent requests on a single connection. Unlike HTTP/1.1 where each request needs its own connection, HTTP/2 multiplexes requests as independent "streams" on a shared connection.

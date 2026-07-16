@@ -15,7 +15,9 @@
 %%%                   | ping | window_update
 %%%   quirk_when     :: after_each | after_first | mid_first | mid_each
 %%%   notify         :: pid()  send {h2_raw_server, rst_stream, StreamId, Code}
-%%%                   to this pid when an RST_STREAM frame is received
+%%%                   when an RST_STREAM frame is received, and
+%%%                   {h2_raw_server, window_update, StreamId, Increment}
+%%%                   when a WINDOW_UPDATE frame is received
 %%%   window_update  :: none | {auto, Increment, DelayMs}
 %%%                   none (default): never open the request-body window; the
 %%%                   client's upload stalls once the initial window is spent.
@@ -118,7 +120,11 @@ handle_frame(Sock, {ping, Data}, St, _Knobs) ->
     {continue, St};
 handle_frame(_Sock, {ping_ack, _}, St, _Knobs) ->
     {continue, St};
-handle_frame(_Sock, {window_update, _, _}, St, _Knobs) ->
+handle_frame(_Sock, {window_update, StreamId, Increment}, St, Knobs) ->
+    case maps:get(notify, Knobs, undefined) of
+        undefined -> ok;
+        Pid -> Pid ! {h2_raw_server, window_update, StreamId, Increment}
+    end,
     {continue, St};
 handle_frame(Sock, {data, StreamId, _Body, _EndStream, PayloadLen}, St, Knobs) ->
     %% Request-body DATA: never decoded, only flow-control accounted per the
@@ -141,6 +147,16 @@ handle_frame(_Sock, {rst_stream, StreamId, ErrorCode}, St, Knobs) ->
 %% streams past last_stream_id). The client's read then hangs to recv_timeout.
 handle_frame(_Sock, {headers, _StreamId, _B, _E, _H}, #{goaway := true} = St, _Knobs) ->
     {continue, St};
+%% rst_after_headers knob: answer with response HEADERS only (no END_STREAM),
+%% then reset the stream with the given error code.
+handle_frame(Sock, {headers, StreamId, _Block, _EndStream, _EndHeaders},
+             #{enc := EncCtx} = St, #{rst_after_headers := Code}) ->
+    {HBlock, EncCtx2} = h2_hpack:encode(
+        [{<<":status">>, <<"200">>},
+         {<<"content-type">>, <<"application/json">>}], EncCtx),
+    send(Sock, h2_frame:headers(StreamId, HBlock, false)),
+    send(Sock, h2_frame:rst_stream(StreamId, Code)),
+    {continue, St#{enc := EncCtx2}};
 handle_frame(Sock, {headers, StreamId, _Block, _EndStream, _EndHeaders}, St, Knobs) ->
     #{enc := EncCtx, count := Count} = St,
     Count2 = Count + 1,
