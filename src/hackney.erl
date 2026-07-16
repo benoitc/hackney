@@ -140,6 +140,11 @@ connect_direct(Transport, Host, Port, Options) ->
     transport => Transport,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    %% Single-owner connection: seed the conn-level send_timeout so
+    %% hackney:send_request/2 (which has no options channel) honors it.
+    %% Pooled connections deliberately skip this (shared conns keep the
+    %% constant default; per-request ReqOpts override there).
+    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
@@ -499,6 +504,8 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     socket => Socket,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
+    %% Single-owner tunneled connection: same seeding as connect_direct.
+    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, []),
     no_reuse => NoReuse
@@ -1336,8 +1343,14 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
   %% Check if this is a streaming body request
   case FinalBody of
     stream ->
-      %% For streaming body, just send headers and return immediately
-      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList) of
+      %% For streaming body, send headers and return immediately. Forward
+      %% send_timeout so the body chunks use the caller's deadline even on a
+      %% reused pooled connection.
+      ReqOpts = case proplists:get_value(send_timeout, Options) of
+        undefined -> [];
+        SendTimeout -> [{send_timeout, SendTimeout}]
+      end,
+      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList, ReqOpts) of
         ok -> {ok, ConnPid};
         {error, Reason} -> {error, Reason}
       end;
@@ -1358,9 +1371,15 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     false -> ReqOpts0
   end,
   %% Pass recv_timeout through to the connection so it's applied per-request
-  ReqOpts = case proplists:get_value(recv_timeout, Options) of
+  ReqOpts2 = case proplists:get_value(recv_timeout, Options) of
     undefined -> ReqOpts1;
     RecvTimeout -> [{recv_timeout, RecvTimeout} | ReqOpts1]
+  end,
+  %% Pass send_timeout through so HTTP/2 body sends blocked on flow control
+  %% use the caller's deadline
+  ReqOpts = case proplists:get_value(send_timeout, Options) of
+    undefined -> ReqOpts2;
+    SendTimeout -> [{send_timeout, SendTimeout} | ReqOpts2]
   end,
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
     %% HTTP/2 returns body directly - handle 4-tuple first
@@ -1568,9 +1587,13 @@ async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
   {FinalHeaders, FinalBody} = encode_body(Headers, Body, []),
   HeadersList = hackney_headers:to_list(FinalHeaders),
   %% Build ReqOpts for recv_timeout (fix for issue #832)
-  ReqOpts = case proplists:get_value(recv_timeout, Options) of
+  ReqOpts0 = case proplists:get_value(recv_timeout, Options) of
     undefined -> [];
     RecvTimeout -> [{recv_timeout, RecvTimeout}]
+  end,
+  ReqOpts = case proplists:get_value(send_timeout, Options) of
+    undefined -> ReqOpts0;
+    SendTimeout -> [{send_timeout, SendTimeout} | ReqOpts0]
   end,
   %% Note: Issue #646 - ownership transfer to StreamTo (when different from caller)
   %% is handled atomically inside hackney_conn:do_request_async

@@ -39,6 +39,7 @@
     stream_body/1,
     %% Streaming body (request body)
     send_request_headers/4,
+    send_request_headers/5,
     send_body_chunk/2,
     finish_send_body/1,
     start_response/1,
@@ -115,6 +116,11 @@
 
 -define(CONNECT_TIMEOUT, 8000).
 -define(IDLE_TIMEOUT, infinity).
+%% How long an HTTP/2 request-body send may wait on flow control
+%% (WINDOW_UPDATE) before failing with {error, timeout}. The atom nonblock
+%% opts out of blocking: sends then fail fast with {error, send_buffer_full}
+%% once the h2 per-stream buffer cap is hit.
+-define(SEND_TIMEOUT, 30000).
 %% Grace window for pooled hackney_conn in `closed` state, during which
 %% late-arriving calls race the pool DOWN cleanup and still get a proper
 %% error reply instead of exit:{normal, _}. See issue #836.
@@ -144,6 +150,12 @@
     %% Options
     connect_timeout = ?CONNECT_TIMEOUT :: timeout(),
     recv_timeout = ?RECV_TIMEOUT :: timeout(),
+    send_timeout = ?SEND_TIMEOUT :: timeout() | nonblock,
+    %% Effective send_timeout for the streaming-body request in flight, set at
+    %% every stream start (send_headers) so a per-request override never leaks
+    %% into later requests. The connection-level default above is never
+    %% mutated per-request.
+    req_send_timeout :: timeout() | nonblock | undefined,
     idle_timeout = ?IDLE_TIMEOUT :: timeout(),
     connect_options = [] :: list(),
     ssl_options = [] :: list(),
@@ -357,8 +369,14 @@ request_streaming(Pid, Method, Path, Headers, Body) ->
 %% then start_response/1 to receive the response.
 -spec send_request_headers(pid(), binary(), binary(), list()) -> ok | {error, term()}.
 send_request_headers(Pid, Method, Path, Headers) ->
+    send_request_headers(Pid, Method, Path, Headers, []).
+
+%% @doc Like send_request_headers/4 with per-request options. Currently only
+%% send_timeout is used (HTTP/2 flow-control deadline for the body chunks).
+-spec send_request_headers(pid(), binary(), binary(), list(), list()) -> ok | {error, term()}.
+send_request_headers(Pid, Method, Path, Headers, ReqOpts) ->
     case valid_request_target(Path) of
-        ok -> safe_call(Pid, {send_headers, Method, Path, Headers}, infinity);
+        ok -> safe_call(Pid, {send_headers, Method, Path, Headers, ReqOpts}, infinity);
         Err -> Err
     end.
 
@@ -441,10 +459,11 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedir
         Err -> Err
     end.
 
-%% @doc Request the next message in {async, once} mode.
+%% @doc Request the next message in {async, once} mode. The caller pid rides
+%% along so a shared HTTP/2 connection can route the pull to the right stream.
 -spec stream_next(pid()) -> ok | {error, term()}.
 stream_next(Pid) ->
-    gen_statem:cast(Pid, stream_next).
+    gen_statem:cast(Pid, {stream_next, self()}).
 
 %% @doc Stop async mode and return to sync mode.
 -spec stop_async(pid()) -> ok | {error, term()}.
@@ -635,6 +654,7 @@ init([DefaultOwner, Opts]) ->
         socket = Socket,
         connect_timeout = maps:get(connect_timeout, Opts, ?CONNECT_TIMEOUT),
         recv_timeout = maps:get(recv_timeout, Opts, ?RECV_TIMEOUT),
+        send_timeout = maps:get(send_timeout, Opts, ?SEND_TIMEOUT),
         idle_timeout = maps:get(idle_timeout, Opts, ?IDLE_TIMEOUT),
         connect_options = maps:get(connect_options, Opts, []),
         ssl_options = maps:get(ssl_options, Opts, []),
@@ -944,8 +964,11 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_d
     %% HTTP/2 request - use h2_machine (1xx not applicable for HTTP/2)
     %% Allow recv_timeout to be overridden per-request (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    %% send_timeout is passed along, never stored: a per-request override must
+    %% not leak into later requests on a pooled connection.
+    SendTimeout = proplists:get_value(send_timeout, ReqOpts, Data#conn_data.send_timeout),
     NewData = Data#conn_data{recv_timeout = RecvTimeout},
-    do_h2_request(From, Method, Path, Headers, Body, NewData);
+    do_h2_request(From, Method, Path, Headers, Body, SendTimeout, NewData);
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 request - use hackney_h3 (1xx not applicable for HTTP/3)
@@ -956,11 +979,13 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_d
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request
-    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false, Data);
+    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false,
+                        Data#conn_data.send_timeout, Data);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request with redirect option
-    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data);
+    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect,
+                        Data#conn_data.send_timeout, Data);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 async request
@@ -1013,8 +1038,10 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request with ReqOpts (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
+    %% send_timeout passed along, never stored (no leak across pooled requests)
+    SendTimeout = proplists:get_value(send_timeout, ReqOpts, Data#conn_data.send_timeout),
     NewData = Data#conn_data{recv_timeout = RecvTimeout},
-    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
+    do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, SendTimeout, NewData);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, _FollowRedirect, ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 async request with ReqOpts (fix for issue #832, redirect not yet implemented for H3)
@@ -1028,14 +1055,14 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
     NewData = Data#conn_data{recv_timeout = RecvTimeout},
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
 
-connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protocol = http3} = Data) ->
+connected({call, From}, {send_headers, Method, Path, Headers, _ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 streaming body - send headers only via QUIC
     do_h3_send_headers(From, Method, Path, Headers, Data);
 
-connected({call, From}, {send_headers, Method, Path, Headers}, #conn_data{protocol = http2} = Data) ->
+connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 streaming body - send headers without END_STREAM, then accept body
     %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
-    do_h2_send_headers(From, Method, Path, Headers, Data);
+    do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data);
 
 connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts},
           #conn_data{protocol = http2, h2_conn = H2Conn} = Data) ->
@@ -1056,7 +1083,7 @@ connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts
     end,
     {keep_state_and_data, [{reply, From, Reply}]};
 
-connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
+connected({call, From}, {send_headers, Method, Path, Headers, _ReqOpts}, Data) ->
     %% Send only headers for streaming body mode (HTTP/1.1)
     NewData = Data#conn_data{
         request_from = From,
@@ -1075,6 +1102,14 @@ connected({call, From}, {send_headers, Method, Path, Headers}, Data) ->
     },
     %% Transition to streaming_body state
     {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
+
+%% {async, once} pull for an HTTP/2 stream. The h1 pulls are handled in the
+%% streaming_once state; on a connected h2 conn the pull routes to the
+%% caller's once-mode stream. The bare atom is the pre-upgrade message form.
+connected(cast, {stream_next, Caller}, Data) ->
+    handle_h2_stream_next(Caller, Data);
+connected(cast, stream_next, Data) ->
+    handle_h2_stream_next(undefined, Data);
 
 %% HTTP/2 owner messages from h2 library
 connected(info, {h2, H2Conn, Event}, #conn_data{h2_conn = H2Conn} = Data) ->
@@ -1283,14 +1318,16 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 - send a DATA frame without END_STREAM.
-    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
+    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId,
+               req_send_timeout = SendTimeout} = Data,
     Result = case BodyData of
         Fun when is_function(Fun, 0) ->
-            stream_body_fun_h2(H2Conn, StreamId, Fun);
+            stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout);
         {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun_h2(H2Conn, StreamId, {Fun, State});
+            stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout);
         _ ->
-            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false)
+            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false,
+                         SendTimeout)
     end,
     case Result of
         ok ->
@@ -1329,8 +1366,9 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Da
 
 streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 - close the request stream with an empty END_STREAM DATA frame.
-    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data,
-    case h2_send_data(H2Conn, StreamId, <<>>, true) of
+    #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId,
+               req_send_timeout = SendTimeout} = Data,
+    case h2_send_data(H2Conn, StreamId, <<>>, true, SendTimeout) of
         ok ->
             {keep_state, Data, [{reply, From, ok}]};
         {error, Reason} ->
@@ -1653,8 +1691,10 @@ streaming_once(enter, _OldState, _Data) ->
     %% Wait for stream_next
     keep_state_and_data;
 
+streaming_once(cast, {stream_next, _Caller}, Data) ->
+    streaming_once(cast, stream_next, Data);
 streaming_once(cast, stream_next, Data) ->
-    %% Stream one chunk
+    %% Stream one chunk (bare-atom form kept for pre-upgrade callers)
     #conn_data{async_ref = Ref, stream_to = StreamTo} = Data,
     case stream_body_chunk(Data) of
         {ok, Chunk, NewData} ->
@@ -2949,19 +2989,19 @@ cancel_h2_stream(H2Conn, StreamId) ->
     try h2_connection:cancel_stream(H2Conn, StreamId) catch _:_ -> ok end.
 
 %% @private Send an HTTP/2 request via the h2 library.
-do_h2_request(From, Method, Path, Headers, Body, Data) ->
+do_h2_request(From, Method, Path, Headers, Body, SendTimeout, Data) ->
     do_h2_send(From, Method, Path, Headers, Body,
-               {sync, waiting_headers}, sync, Data).
+               {sync, waiting_headers}, sync, SendTimeout, Data).
 
 %% @private Send an HTTP/2 async request.
 do_h2_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo,
-                    _FollowRedirect, Data) ->
+                    _FollowRedirect, SendTimeout, Data) ->
     Ref = self(),
     StreamState = {async, AsyncMode, StreamTo, Ref, waiting_headers},
     do_h2_send(From, Method, Path, Headers, Body, StreamState,
-               {async, Ref, StreamTo, AsyncMode}, Data).
+               {async, Ref, StreamTo, AsyncMode}, SendTimeout, Data).
 
-do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
+do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Data) ->
     #conn_data{h2_conn = H2Conn} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
@@ -2969,17 +3009,27 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
         B when is_binary(B) -> B;
         L -> iolist_to_binary(L)
     end,
+    %% once-mode async pulls response chunks via stream_next/1: open the
+    %% stream with manual flow control so the peer stalls at one window until
+    %% the consumer pulls (consume/3 releases bytes as chunks are delivered).
+    StreamOpts = case Mode of
+        {async, _, _, once} -> #{flow_control => manual};
+        _ -> #{}
+    end,
     %% h2_connection can die between pool checkout and this call; gen_statem:call
     %% on a dead pid raises exit:noproc. Catch that and normalise to an error
     %% so the caller sees {error, {closed, _}} instead of a gen_statem:call
     %% blowing up (issue #836).
     SendRes = try
         case BodyBin of
-            <<>> -> h2_connection:send_request_headers(H2Conn, H2Headers, true);
+            <<>> -> h2_connection:send_request_headers(H2Conn, H2Headers, true, StreamOpts);
             _ ->
-                case h2_connection:send_request_headers(H2Conn, H2Headers, false) of
+                case h2_connection:send_request_headers(H2Conn, H2Headers, false, StreamOpts) of
                     {ok, SId} ->
-                        case h2_connection:send_data(H2Conn, SId, BodyBin, true) of
+                        %% Block on flow control so bodies larger than the
+                        %% peer's window wait for WINDOW_UPDATE instead of
+                        %% failing with send_buffer_full.
+                        case h2_send_data(H2Conn, SId, BodyBin, true, SendTimeout) of
                             ok -> {ok, SId};
                             {error, _} = E1 -> E1
                         end;
@@ -2992,7 +3042,16 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
     end,
     case SendRes of
         {ok, StreamId} ->
-            Streams = maps:put(StreamId, {From, StreamState},
+            %% The entry's first element is the stream owner: the parked sync
+            %% caller, or the async StreamTo pid. The async delivery clauses
+            %% (h2_on_response/h2_on_data) match it against the StreamTo held
+            %% in the stream state, so storing the gen_statem From tuple there
+            %% would silently drop every async response.
+            Owner = case Mode of
+                sync -> From;
+                {async, _Ref0, StreamTo0, _AsyncMode0} -> StreamTo0
+            end,
+            Streams = maps:put(StreamId, {Owner, StreamState},
                                Data#conn_data.h2_streams),
             NewData0 = Data#conn_data{
                 h2_streams = Streams,
@@ -3022,10 +3081,14 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, Data) ->
 %% @private Begin an HTTP/2 streaming-body request: send HEADERS without
 %% END_STREAM and transition to streaming_body so the caller can push body
 %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
-do_h2_send_headers(From, Method, Path, Headers, Data) ->
+do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data) ->
     #conn_data{h2_conn = H2Conn, h2_streams = Streams} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
+    %% Effective send_timeout for this stream's body chunks. Stored in the
+    %% per-request field, set at every stream start, so an override never
+    %% leaks into later requests; the connection default stays untouched.
+    SendTimeout = proplists:get_value(send_timeout, ReqOpts, Data#conn_data.send_timeout),
     %% h2_connection can die between pool checkout and this call; normalise the
     %% gen_statem:call exit into an error reply (issue #836).
     SendRes = try
@@ -3039,6 +3102,7 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
             NewData = Data#conn_data{
                 h2_streams = maps:put(StreamId, {undefined, {stream, sending}}, Streams),
                 h2_stream_id = StreamId,
+                req_send_timeout = SendTimeout,
                 method = MethodBin,
                 path = PathBin,
                 request_from = undefined
@@ -3048,25 +3112,45 @@ do_h2_send_headers(From, Method, Path, Headers, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
 
-%% @private Non-blocking h2 send_data, matching the one-shot path. The
-%% h2_connection buffers beyond the peer's flow-control window and drains as
-%% WINDOW_UPDATEs arrive (returning {error, send_buffer_full} only past its
-%% per-stream cap). Normalises a dead h2_connection exit to an error.
-h2_send_data(H2Conn, StreamId, Bin, EndStream) ->
-    try
-        h2_connection:send_data(H2Conn, StreamId, Bin, EndStream)
+%% @private h2 send_data with flow-control blocking. With a timeout (or
+%% infinity) the caller parks in h2_connection until the peer's WINDOW_UPDATEs
+%% drain the send buffer, so bodies larger than the flow-control window
+%% complete instead of failing; {error, timeout} if the window never opens.
+%% With nonblock, keeps the historical non-blocking behavior: h2_connection
+%% buffers beyond the window and returns {error, send_buffer_full} past its
+%% per-stream cap. Normalises a dead h2_connection exit to an error.
+%%
+%% Every caller abandons the request on a failed body send, so the half-sent
+%% stream is RST_STREAM(CANCEL)ed here: its buffered body must not linger on
+%% a shared connection, accumulating memory and stream capacity.
+h2_send_data(H2Conn, StreamId, Bin, EndStream, SendTimeout) ->
+    Res = try
+        do_h2_send_data(H2Conn, StreamId, Bin, EndStream, SendTimeout)
     catch
         exit:{ExitReason, _} -> {error, {closed, ExitReason}};
         exit:ExitReason      -> {error, {closed, ExitReason}}
-    end.
+    end,
+    h2_send_result(Res, H2Conn, StreamId).
+
+h2_send_result(ok, _H2Conn, _StreamId) ->
+    ok;
+h2_send_result({error, _} = Error, H2Conn, StreamId) ->
+    _ = cancel_h2_stream(H2Conn, StreamId),
+    Error.
+
+do_h2_send_data(H2Conn, StreamId, Bin, EndStream, nonblock) ->
+    h2_connection:send_data(H2Conn, StreamId, Bin, EndStream);
+do_h2_send_data(H2Conn, StreamId, Bin, EndStream, Timeout) ->
+    h2_connection:send_data(H2Conn, StreamId, Bin, EndStream, #{block => Timeout}).
 
 %% @private Drain a body-producer fun, sending each chunk as a non-final h2 DATA
 %% frame. Mirrors stream_body_fun/3 (HTTP/1.1) and stream_body_fun_h3/3.
-stream_body_fun_h2(H2Conn, StreamId, Fun) when is_function(Fun, 0) ->
+stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout) when is_function(Fun, 0) ->
     case Fun() of
         {ok, Data} ->
-            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h2(H2Conn, StreamId, Fun);
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false,
+                              SendTimeout) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout);
                 Error -> Error
             end;
         eof ->
@@ -3074,11 +3158,12 @@ stream_body_fun_h2(H2Conn, StreamId, Fun) when is_function(Fun, 0) ->
         {error, _} = Error ->
             Error
     end;
-stream_body_fun_h2(H2Conn, StreamId, {Fun, State}) when is_function(Fun, 1) ->
+stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout) when is_function(Fun, 1) ->
     case Fun(State) of
         {ok, Data, NewState} ->
-            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h2(H2Conn, StreamId, {Fun, NewState});
+            case h2_send_data(H2Conn, StreamId, iolist_to_binary(Data), false,
+                              SendTimeout) of
+                ok -> stream_body_fun_h2(H2Conn, StreamId, {Fun, NewState}, SendTimeout);
                 Error -> Error
             end;
         eof ->
@@ -3222,6 +3307,19 @@ h2_on_response(StreamId, Status, Headers, Data) ->
                                                   status = Status,
                                                   response_headers = Headers}),
             {keep_state, Data2};
+        {StreamTo, {async, once, StreamTo, Ref, waiting_headers}} ->
+            %% once mode, same contract as HTTP/1.1: status and headers are
+            %% delivered eagerly, then each stream_next/1 pulls exactly one
+            %% message (a body chunk or done). Queue holds undelivered items;
+            %% Credit is 1 when a stream_next arrived before any data.
+            StreamTo ! {hackney_response, Ref, {status, Status, <<>>}},
+            StreamTo ! {hackney_response, Ref, {headers, Headers}},
+            Streams2 = maps:put(StreamId,
+                                {StreamTo, {async_once, StreamTo, Ref, [], 0}},
+                                Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2,
+                                        status = Status,
+                                        response_headers = Headers}};
         {StreamTo, {async, AsyncMode, StreamTo, Ref, waiting_headers}} ->
             StreamTo ! {hackney_response, Ref, {status, Status, <<>>}},
             StreamTo ! {hackney_response, Ref, {headers, Headers}},
@@ -3254,6 +3352,47 @@ h2_on_response(StreamId, Status, Headers, Data) ->
             {keep_state, Data}
     end.
 
+%% @private Deliver exactly one queued item of a once-mode h2 async stream:
+%% a body chunk (consume/3 reopens exactly those bytes of the peer's window)
+%% or done (stream finished, cleanup). An empty queue parks the pull as a
+%% credit; the next DATA frame delivers immediately.
+deliver_once_item(StreamId, StreamTo, Ref, [{data, Body} | Rest], Data) ->
+    StreamTo ! {hackney_response, Ref, Body},
+    _ = try h2_connection:consume(Data#conn_data.h2_conn, StreamId, byte_size(Body))
+        catch _:_ -> ok end,
+    Streams2 = maps:put(StreamId,
+                        {StreamTo, {async_once, StreamTo, Ref, Rest, 0}},
+                        Data#conn_data.h2_streams),
+    {keep_state, Data#conn_data{h2_streams = Streams2}};
+deliver_once_item(StreamId, StreamTo, Ref, [done], Data) ->
+    StreamTo ! {hackney_response, Ref, done},
+    Streams2 = maps:remove(StreamId, Data#conn_data.h2_streams),
+    {keep_state, Data#conn_data{h2_streams = Streams2,
+                                async = false,
+                                async_ref = undefined,
+                                stream_to = undefined}};
+deliver_once_item(StreamId, StreamTo, Ref, [], Data) ->
+    Streams2 = maps:put(StreamId,
+                        {StreamTo, {async_once, StreamTo, Ref, [], 1}},
+                        Data#conn_data.h2_streams),
+    {keep_state, Data#conn_data{h2_streams = Streams2}}.
+
+%% @private Route a stream_next pull to the caller's once-mode h2 stream.
+%% With several once-mode streams for the same caller on a shared connection,
+%% the oldest stream id wins (the pull API cannot address a specific stream).
+handle_h2_stream_next(Caller, #conn_data{h2_streams = Streams} = Data) ->
+    OnceIds = [SId || {SId, {StreamTo, {async_once, StreamTo, _, _, _}}}
+                          <- maps:to_list(Streams),
+                      StreamTo =:= Caller orelse Caller =:= undefined],
+    case lists:sort(OnceIds) of
+        [] ->
+            keep_state_and_data;
+        [StreamId | _] ->
+            {StreamTo, {async_once, StreamTo, Ref, Queue, _Credit}} =
+                maps:get(StreamId, Streams),
+            deliver_once_item(StreamId, StreamTo, Ref, Queue, Data)
+    end.
+
 h2_on_data(StreamId, Body, EndStream, Data) ->
     #conn_data{h2_streams = Streams} = Data,
     case maps:get(StreamId, Streams, undefined) of
@@ -3274,6 +3413,21 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
                     Data2 = rearm_h2_timer(StreamId,
                                            Data#conn_data{h2_streams = Streams2}),
                     {keep_state, Data2}
+            end;
+        {StreamTo, {async_once, StreamTo, Ref, Queue, Credit}} ->
+            %% Queue the frame; deliver only when the consumer has pulled.
+            %% The stream runs manual flow control, so undelivered bytes keep
+            %% the peer's window closed (bounded in-flight data).
+            Queue1 = Queue ++ [{data, Body} || Body =/= <<>>]
+                           ++ [done || EndStream],
+            case Credit of
+                1 ->
+                    deliver_once_item(StreamId, StreamTo, Ref, Queue1, Data);
+                0 ->
+                    Streams2 = maps:put(StreamId,
+                                        {StreamTo, {async_once, StreamTo, Ref, Queue1, 0}},
+                                        Streams),
+                    {keep_state, Data#conn_data{h2_streams = Streams2}}
             end;
         {StreamTo, {async, AsyncMode, StreamTo, Ref, streaming, Status, Headers}} ->
             _ = case byte_size(Body) of
@@ -3359,6 +3513,10 @@ h2_on_stream_reset(StreamId, ErrorCode, Data) ->
             StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
             Streams2 = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h2_streams = Streams2}};
+        {StreamTo, {async_once, StreamTo, Ref, _, _}} ->
+            StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
+            Streams2 = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h2_streams = Streams2}};
         {_, Inner} when is_tuple(Inner), element(1, Inner) =:= stream ->
             %% Streaming-body stream: reply to any parked caller and drop it so a
             %% later stream_body/start_response sees {error, no_stream}.
@@ -3421,6 +3579,9 @@ collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->
             StreamTo ! {hackney_response, Ref, {error, Err}},
             Acc;
         (_SId, {StreamTo, {async, _, StreamTo, Ref, _, _, _}}, Acc) ->
+            StreamTo ! {hackney_response, Ref, {error, Err}},
+            Acc;
+        (_SId, {StreamTo, {async_once, StreamTo, Ref, _, _}}, Acc) ->
             StreamTo ! {hackney_response, Ref, {error, Err}},
             Acc;
         (_SId, {_, Inner}, Acc) when is_tuple(Inner), element(1, Inner) =:= stream ->

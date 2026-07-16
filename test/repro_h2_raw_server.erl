@@ -14,9 +14,21 @@
 %%%   quirk          :: none | settings | {settings, [{atom(),int()}]}
 %%%                   | ping | window_update
 %%%   quirk_when     :: after_each | after_first | mid_first | mid_each
+%%%   notify         :: pid()  send {h2_raw_server, rst_stream, StreamId, Code}
+%%%                   when an RST_STREAM frame is received, and
+%%%                   {h2_raw_server, window_update, StreamId, Increment}
+%%%                   when a WINDOW_UPDATE frame is received
+%%%   window_update  :: none | {auto, Increment, DelayMs}
+%%%                   none (default): never open the request-body window; the
+%%%                   client's upload stalls once the initial window is spent.
+%%%                   {auto, Inc, Delay}: on each request DATA frame, release
+%%%                   the consumed bytes back in Inc-sized WINDOW_UPDATE pairs
+%%%                   (connection + stream), sleeping Delay ms before each, so
+%%%                   a large upload drains across several delayed updates.
 -module(repro_h2_raw_server).
 
 -export([start/1, stop/1, port/1]).
+-export([start_collector/0, collector_messages/1, stop_collector/1]).
 
 -define(PREFACE, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n">>).
 
@@ -38,6 +50,35 @@ stop(Pid) ->
     ok.
 
 port({_Pid, Port}) -> Port.
+
+%% Use a collector as the notify target instead of the test process: eunit
+%% runs sibling tests (and later suites) in the same process, so notifications
+%% arriving after a test ends would otherwise pollute their mailbox. The
+%% collector dies with stop_collector/1 and any late message goes nowhere.
+start_collector() ->
+    spawn(fun() -> collector_loop([]) end).
+
+collector_messages(Collector) ->
+    Ref = make_ref(),
+    Collector ! {get, self(), Ref},
+    receive
+        {Ref, Msgs} -> Msgs
+    after 5000 ->
+        erlang:error(collector_timeout)
+    end.
+
+stop_collector(Collector) ->
+    exit(Collector, kill),
+    ok.
+
+collector_loop(Acc) ->
+    receive
+        {get, From, Ref} ->
+            From ! {Ref, lists:reverse(Acc)},
+            collector_loop(Acc);
+        Msg ->
+            collector_loop([Msg | Acc])
+    end.
 
 accept_loop(LSock, Knobs) ->
     case ssl:transport_accept(LSock, 5000) of
@@ -109,16 +150,43 @@ handle_frame(Sock, {ping, Data}, St, _Knobs) ->
     {continue, St};
 handle_frame(_Sock, {ping_ack, _}, St, _Knobs) ->
     {continue, St};
-handle_frame(_Sock, {window_update, _, _}, St, _Knobs) ->
+handle_frame(_Sock, {window_update, StreamId, Increment}, St, Knobs) ->
+    case maps:get(notify, Knobs, undefined) of
+        undefined -> ok;
+        Pid -> Pid ! {h2_raw_server, window_update, StreamId, Increment}
+    end,
+    {continue, St};
+handle_frame(Sock, {data, StreamId, _Body, _EndStream, PayloadLen}, St, Knobs) ->
+    %% Request-body DATA: never decoded, only flow-control accounted per the
+    %% window_update knob.
+    case maps:get(window_update, Knobs, none) of
+        none -> ok;
+        {auto, Inc, DelayMs} ->
+            release_window(Sock, StreamId, PayloadLen, Inc, DelayMs)
+    end,
     {continue, St};
 handle_frame(_Sock, {goaway, _, _, _}, _St, _Knobs) ->
     stop;
-handle_frame(_Sock, {rst_stream, _, _}, St, _Knobs) ->
+handle_frame(_Sock, {rst_stream, StreamId, ErrorCode}, St, Knobs) ->
+    case maps:get(notify, Knobs, undefined) of
+        undefined -> ok;
+        Pid -> Pid ! {h2_raw_server, rst_stream, StreamId, ErrorCode}
+    end,
     {continue, St};
 %% After we have sent GOAWAY, ignore new streams (the ALB stops answering
 %% streams past last_stream_id). The client's read then hangs to recv_timeout.
 handle_frame(_Sock, {headers, _StreamId, _B, _E, _H}, #{goaway := true} = St, _Knobs) ->
     {continue, St};
+%% rst_after_headers knob: answer with response HEADERS only (no END_STREAM),
+%% then reset the stream with the given error code.
+handle_frame(Sock, {headers, StreamId, _Block, _EndStream, _EndHeaders},
+             #{enc := EncCtx} = St, #{rst_after_headers := Code}) ->
+    {HBlock, EncCtx2} = h2_hpack:encode(
+        [{<<":status">>, <<"200">>},
+         {<<"content-type">>, <<"application/json">>}], EncCtx),
+    send(Sock, h2_frame:headers(StreamId, HBlock, false)),
+    send(Sock, h2_frame:rst_stream(StreamId, Code)),
+    {continue, St#{enc := EncCtx2}};
 handle_frame(Sock, {headers, StreamId, _Block, _EndStream, _EndHeaders}, St, Knobs) ->
     #{enc := EncCtx, count := Count} = St,
     Count2 = Count + 1,
@@ -190,6 +258,18 @@ emit_quirk(Sock, settings) -> send(Sock, h2_frame:settings([]));
 emit_quirk(Sock, {settings, L}) -> send(Sock, h2_frame:settings(L));
 emit_quirk(Sock, ping) -> send(Sock, h2_frame:ping(<<0,0,0,0,0,0,0,7>>));
 emit_quirk(Sock, window_update) -> send(Sock, h2_frame:window_update(0, 1000)).
+
+%% Release consumed request-body bytes back to the client in Inc-sized
+%% WINDOW_UPDATE pairs (connection stream 0 + request stream), with a delay
+%% before each, forcing the client through several park/flush cycles.
+release_window(_Sock, _StreamId, 0, _Inc, _DelayMs) ->
+    ok;
+release_window(Sock, StreamId, Remaining, Inc, DelayMs) ->
+    Chunk = min(Inc, Remaining),
+    case DelayMs of 0 -> ok; _ -> timer:sleep(DelayMs) end,
+    send(Sock, h2_frame:window_update(0, Chunk)),
+    send(Sock, h2_frame:window_update(StreamId, Chunk)),
+    release_window(Sock, StreamId, Remaining - Chunk, Inc, DelayMs).
 
 send(Sock, FrameData) ->
     ssl:send(Sock, h2_frame:encode(FrameData)).

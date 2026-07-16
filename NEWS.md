@@ -1,5 +1,34 @@
 # NEWS
 
+unreleased
+----------
+
+### Fixed
+
+- HTTP/2 request bodies larger than the peer's flow control window no longer
+  fail with `{error, send_buffer_full}`. Body sends now block until the
+  server opens the window with WINDOW_UPDATE frames, bounded by the new
+  `send_timeout` request option (default 30000 ms, `infinity` allowed). If
+  the window never opens the request fails with `{error, timeout}` instead
+  of hanging, and the abandoned stream is reset (RST_STREAM) so its buffered
+  body does not linger on a shared connection. Pass `{send_timeout, nonblock}`
+  to restore the previous non-blocking behavior. Applies to whole-body and
+  streamed HTTP/2 request bodies; HTTP/1.1 and HTTP/3 are unchanged.
+- HTTP/2 async requests now deliver their response messages. The stream
+  entry stored the internal call reference where the delivery code expected
+  the `stream_to` pid, so every async HTTP/2 response was silently dropped
+  and the caller never received `{hackney_response, Ref, ...}` messages.
+- HTTP/2 `{async, once}` now honors `stream_next/1` with the same contract
+  as HTTP/1.1: status and headers are delivered eagerly, then each
+  `stream_next/1` delivers exactly one message (a body chunk or `done`).
+  Previously every frame was pushed eagerly, identical to `{async, true}`.
+  once-mode streams run h2 manual flow control, so a slow consumer keeps the
+  peer's window closed and in-flight data stays bounded to one window.
+- Connections created with `hackney:connect/4` and `{pool, false}` honor a
+  `{send_timeout, T}` connect option again (`hackney:send_request/2` has no
+  per-request options channel). Pooled connections keep the constant default
+  and take the per-request option instead.
+
 4.6.1 - 2026-07-15
 ------------------
 

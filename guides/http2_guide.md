@@ -130,6 +130,23 @@ receive
 end.
 ```
 
+With `{async, once}` you pull instead: status and headers arrive eagerly,
+then each `hackney:stream_next/1` delivers exactly one message (a body chunk
+or `done`). On HTTP/2 the stream uses manual flow control, so data you have
+not pulled keeps the server's send window closed and in-flight data stays
+bounded to one window.
+
+```erlang
+{ok, Ref} = hackney:get(URL, [], <<>>, [{async, once}]),
+%% ... receive status and headers as above, then:
+ok = hackney:stream_next(Ref),
+receive
+    {hackney_response, Ref, done} -> ok;
+    {hackney_response, Ref, Chunk} ->
+        process(Chunk)  %% call stream_next/1 again for the next chunk
+end.
+```
+
 ## Connection Multiplexing
 
 HTTP/2 allows multiple concurrent requests on a single connection. Unlike HTTP/1.1 where each request needs its own connection, HTTP/2 multiplexes requests as independent "streams" on a shared connection.
@@ -328,6 +345,24 @@ HTTP/2 has built-in flow control to prevent fast senders from overwhelming slow 
 - Respects server's flow control windows when sending
 
 No configuration is needed for most use cases.
+
+### Sending Large Bodies
+
+A request body larger than the server's flow control window cannot be sent in one shot: the send waits for the server to open the window with WINDOW_UPDATE frames. Hackney blocks the request until the body is fully handed to the connection, up to `send_timeout` (default 30000 ms). If the server never opens the window, the request fails with `{error, timeout}` instead of hanging.
+
+```erlang
+%% Give a slow server more time to drain a large upload
+hackney:post(URL, Headers, LargeBody, [{send_timeout, 120000}]).
+
+%% Wait forever
+hackney:post(URL, Headers, LargeBody, [{send_timeout, infinity}]).
+
+%% Opt out of blocking: fail fast with {error, send_buffer_full} when the
+%% body exceeds the window plus the connection's send buffer
+hackney:post(URL, Headers, Body, [{send_timeout, nonblock}]).
+```
+
+The option applies to whole-body requests and to streamed bodies sent with `hackney:send_body/2`. HTTP/1.1 and HTTP/3 requests ignore it.
 
 ## Error Handling
 
