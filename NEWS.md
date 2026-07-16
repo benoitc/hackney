@@ -1,5 +1,19 @@
 # NEWS
 
+unreleased
+----------
+
+### Fixed
+
+- HTTP/2 request bodies larger than the peer's flow control window no longer
+  fail with `{error, send_buffer_full}`. Body sends now block until the
+  server opens the window with WINDOW_UPDATE frames, bounded by the new
+  `send_timeout` request option (default 30000 ms, `infinity` allowed). If
+  the window never opens the request fails with `{error, timeout}` instead
+  of hanging. Pass `{send_timeout, nonblock}` to restore the previous
+  non-blocking behavior. Applies to whole-body and streamed HTTP/2 request
+  bodies; HTTP/1.1 and HTTP/3 are unchanged.
+
 4.6.1 - 2026-07-15
 ------------------
 

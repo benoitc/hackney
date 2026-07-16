@@ -258,7 +258,8 @@ hackney:get(URL, [], <<>>, [{follow_redirect, true}, {max_redirect, 5}]).
 ```erlang
 hackney:get(URL, [], <<>>, [
     {connect_timeout, 5000},  %% Connection timeout
-    {recv_timeout, 30000}     %% Response timeout
+    {recv_timeout, 30000},    %% Response timeout
+    {send_timeout, 30000}     %% HTTP/2 body send timeout (flow control)
 ]).
 ```
 

@@ -329,6 +329,24 @@ HTTP/2 has built-in flow control to prevent fast senders from overwhelming slow 
 
 No configuration is needed for most use cases.
 
+### Sending Large Bodies
+
+A request body larger than the server's flow control window cannot be sent in one shot: the send waits for the server to open the window with WINDOW_UPDATE frames. Hackney blocks the request until the body is fully handed to the connection, up to `send_timeout` (default 30000 ms). If the server never opens the window, the request fails with `{error, timeout}` instead of hanging.
+
+```erlang
+%% Give a slow server more time to drain a large upload
+hackney:post(URL, Headers, LargeBody, [{send_timeout, 120000}]).
+
+%% Wait forever
+hackney:post(URL, Headers, LargeBody, [{send_timeout, infinity}]).
+
+%% Opt out of blocking: fail fast with {error, send_buffer_full} when the
+%% body exceeds the window plus the connection's send buffer
+hackney:post(URL, Headers, Body, [{send_timeout, nonblock}]).
+```
+
+The option applies to whole-body requests and to streamed bodies sent with `hackney:send_body/2`. HTTP/1.1 and HTTP/3 requests ignore it.
+
 ## Error Handling
 
 HTTP/2 specific errors:

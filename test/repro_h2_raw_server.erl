@@ -14,6 +14,13 @@
 %%%   quirk          :: none | settings | {settings, [{atom(),int()}]}
 %%%                   | ping | window_update
 %%%   quirk_when     :: after_each | after_first | mid_first | mid_each
+%%%   window_update  :: none | {auto, Increment, DelayMs}
+%%%                   none (default): never open the request-body window; the
+%%%                   client's upload stalls once the initial window is spent.
+%%%                   {auto, Inc, Delay}: on each request DATA frame, release
+%%%                   the consumed bytes back in Inc-sized WINDOW_UPDATE pairs
+%%%                   (connection + stream), sleeping Delay ms before each, so
+%%%                   a large upload drains across several delayed updates.
 -module(repro_h2_raw_server).
 
 -export([start/1, stop/1, port/1]).
@@ -111,6 +118,15 @@ handle_frame(_Sock, {ping_ack, _}, St, _Knobs) ->
     {continue, St};
 handle_frame(_Sock, {window_update, _, _}, St, _Knobs) ->
     {continue, St};
+handle_frame(Sock, {data, StreamId, _Body, _EndStream, PayloadLen}, St, Knobs) ->
+    %% Request-body DATA: never decoded, only flow-control accounted per the
+    %% window_update knob.
+    case maps:get(window_update, Knobs, none) of
+        none -> ok;
+        {auto, Inc, DelayMs} ->
+            release_window(Sock, StreamId, PayloadLen, Inc, DelayMs)
+    end,
+    {continue, St};
 handle_frame(_Sock, {goaway, _, _, _}, _St, _Knobs) ->
     stop;
 handle_frame(_Sock, {rst_stream, _, _}, St, _Knobs) ->
@@ -190,6 +206,18 @@ emit_quirk(Sock, settings) -> send(Sock, h2_frame:settings([]));
 emit_quirk(Sock, {settings, L}) -> send(Sock, h2_frame:settings(L));
 emit_quirk(Sock, ping) -> send(Sock, h2_frame:ping(<<0,0,0,0,0,0,0,7>>));
 emit_quirk(Sock, window_update) -> send(Sock, h2_frame:window_update(0, 1000)).
+
+%% Release consumed request-body bytes back to the client in Inc-sized
+%% WINDOW_UPDATE pairs (connection stream 0 + request stream), with a delay
+%% before each, forcing the client through several park/flush cycles.
+release_window(_Sock, _StreamId, 0, _Inc, _DelayMs) ->
+    ok;
+release_window(Sock, StreamId, Remaining, Inc, DelayMs) ->
+    Chunk = min(Inc, Remaining),
+    case DelayMs of 0 -> ok; _ -> timer:sleep(DelayMs) end,
+    send(Sock, h2_frame:window_update(0, Chunk)),
+    send(Sock, h2_frame:window_update(StreamId, Chunk)),
+    release_window(Sock, StreamId, Remaining - Chunk, Inc, DelayMs).
 
 send(Sock, FrameData) ->
     ssl:send(Sock, h2_frame:encode(FrameData)).
