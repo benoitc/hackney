@@ -217,24 +217,35 @@ t_nonblock_opt_out() ->
 %% RST_STREAM it. The raw server reports received RST_STREAM frames.
 t_timeout_cancels_stream() ->
     start_apps(),
+    %% Notifications go to a collector, never to the shared eunit process
+    %% (late messages would leak into later tests' mailboxes).
+    Collector = repro_h2_raw_server:start_collector(),
     Srv = repro_h2_raw_server:start(#{
         server_settings => [{initial_window_size, 1024}],
         window_update => none,
-        notify => self(),
+        notify => Collector,
         body_size => 128
     }),
     Body = binary:copy(<<"c">>, 200 * 1024),
     try
         {error, timeout} = hackney:request(post, url(Srv, <<"/">>), [], Body,
                                            opts([{send_timeout, 300}])),
-        receive
-            {h2_raw_server, rst_stream, StreamId, _Code} ->
-                ?assert(StreamId > 0)
-        after 2000 ->
-            erlang:error(no_rst_stream_after_send_timeout)
-        end
+        Rsts = await_rst_streams(Collector, 20),
+        ?assertMatch([{StreamId, _Code} | _] when StreamId > 0, Rsts)
     after
-        repro_h2_raw_server:stop(element(1, Srv))
+        repro_h2_raw_server:stop(element(1, Srv)),
+        repro_h2_raw_server:stop_collector(Collector)
+    end.
+
+await_rst_streams(Collector, Retries) ->
+    Rsts = [{Sid, Code} || {h2_raw_server, rst_stream, Sid, Code}
+                               <- repro_h2_raw_server:collector_messages(Collector)],
+    case Rsts of
+        [] when Retries > 0 ->
+            timer:sleep(100),
+            await_rst_streams(Collector, Retries - 1);
+        _ ->
+            Rsts
     end.
 
 %% A {send_timeout, 25} request must not change the timeout of the next

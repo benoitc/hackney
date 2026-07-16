@@ -28,6 +28,7 @@
 -module(repro_h2_raw_server).
 
 -export([start/1, stop/1, port/1]).
+-export([start_collector/0, collector_messages/1, stop_collector/1]).
 
 -define(PREFACE, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n">>).
 
@@ -49,6 +50,35 @@ stop(Pid) ->
     ok.
 
 port({_Pid, Port}) -> Port.
+
+%% Use a collector as the notify target instead of the test process: eunit
+%% runs sibling tests (and later suites) in the same process, so notifications
+%% arriving after a test ends would otherwise pollute their mailbox. The
+%% collector dies with stop_collector/1 and any late message goes nowhere.
+start_collector() ->
+    spawn(fun() -> collector_loop([]) end).
+
+collector_messages(Collector) ->
+    Ref = make_ref(),
+    Collector ! {get, self(), Ref},
+    receive
+        {Ref, Msgs} -> Msgs
+    after 5000 ->
+        erlang:error(collector_timeout)
+    end.
+
+stop_collector(Collector) ->
+    exit(Collector, kill),
+    ok.
+
+collector_loop(Acc) ->
+    receive
+        {get, From, Ref} ->
+            From ! {Ref, lists:reverse(Acc)},
+            collector_loop(Acc);
+        Msg ->
+            collector_loop([Msg | Acc])
+    end.
 
 accept_loop(LSock, Knobs) ->
     case ssl:transport_accept(LSock, 5000) of

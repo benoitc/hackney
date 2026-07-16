@@ -50,20 +50,28 @@ t_once_pull_pacing() ->
 
 %% Manual flow control on the wire: the client must not open the stream
 %% window before the consumer pulls, and must open it (consume/3) after.
+%% Notifications go to a collector process, never to the shared eunit
+%% process, so nothing leaks into later tests' mailboxes.
 t_once_backpressure_wire() ->
-    {Srv, Ref} = start_and_request(once),
+    Collector = repro_h2_raw_server:start_collector(),
+    {Srv, Ref} = start_and_request(once, #{
+        body_size => ?BODY_SIZE,
+        frame_count => ?FRAME_COUNT,
+        notify => Collector
+    }),
     try
         ok = recv_status_headers(Ref),
         no_message_within(Ref, 300),
-        ?assertEqual([], drain_stream_window_updates(0)),
+        ?assertEqual([], stream_window_updates(Collector)),
         _Chunks = pull_all(Ref, []),
-        %% consume/3 acknowledged the delivered bytes: at least one
-        %% stream-level WINDOW_UPDATE reaches the server.
-        WUs = drain_stream_window_updates(2000),
+        %% consume/3 acknowledged the delivered bytes: stream-level
+        %% WINDOW_UPDATEs totalling the body size reach the server.
+        WUs = await_stream_window_updates(Collector, ?WIRE_SIZE, 20),
         ?assert(length(WUs) >= 1),
         ?assertEqual(?WIRE_SIZE, lists:sum([Inc || {_Sid, Inc} <- WUs]))
     after
-        repro_h2_raw_server:stop(element(1, Srv))
+        repro_h2_raw_server:stop(element(1, Srv)),
+        repro_h2_raw_server:stop_collector(Collector)
     end.
 
 %% {async, true} keeps the eager contract: all frames and done arrive with
@@ -84,8 +92,7 @@ t_once_pull_before_data() ->
     {Srv, Ref} = start_and_request(once, #{
         body_size => ?BODY_SIZE,
         frame_count => 2,
-        inter_frame_ms => 400,
-        notify => self()
+        inter_frame_ms => 400
     }),
     try
         ok = recv_status_headers(Ref),
@@ -143,8 +150,7 @@ t_once_conn_teardown() ->
 t_legacy_bare_stream_next() ->
     {Srv, Ref} = start_and_request(once, #{
         body_size => ?BODY_SIZE,
-        frame_count => ?FRAME_COUNT,
-        notify => self()
+        frame_count => ?FRAME_COUNT
     }),
     try
         ok = recv_status_headers(Ref),
@@ -167,16 +173,12 @@ t_legacy_bare_stream_next() ->
 start_and_request(AsyncMode) ->
     start_and_request(AsyncMode, #{
         body_size => ?BODY_SIZE,
-        frame_count => ?FRAME_COUNT,
-        notify => self()
+        frame_count => ?FRAME_COUNT
     }).
 
 start_and_request(AsyncMode, Knobs) ->
     _ = application:ensure_all_started(hackney),
     _ = application:ensure_all_started(h2),
-    %% eunit runs sibling tests in the same process: drop notify leftovers
-    %% from a previous test's server.
-    flush_server_notifications(),
     Srv = repro_h2_raw_server:start(Knobs),
     Port = repro_h2_raw_server:port(Srv),
     Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
@@ -185,13 +187,6 @@ start_and_request(AsyncMode, Knobs) ->
             {ssl_options, [{insecure, true}, {verify, verify_none}]}],
     {ok, Ref} = hackney:request(get, Url, [], <<>>, Opts),
     {Srv, Ref}.
-
-flush_server_notifications() ->
-    receive
-        {h2_raw_server, _, _, _} -> flush_server_notifications()
-    after 0 ->
-        ok
-    end.
 
 recv_status_headers(Ref) ->
     receive
@@ -257,15 +252,21 @@ recv_eager(Ref, Acc) ->
         erlang:error(eager_delivery_stalled)
     end.
 
-%% Collect {h2_raw_server, window_update, ...} for non-zero (stream-level)
-%% stream ids. Connection-level (stream 0) updates stay in auto mode and are
-%% ignored.
-drain_stream_window_updates(TimeoutMs) ->
-    receive
-        {h2_raw_server, window_update, 0, _} ->
-            drain_stream_window_updates(TimeoutMs);
-        {h2_raw_server, window_update, StreamId, Inc} ->
-            [{StreamId, Inc} | drain_stream_window_updates(TimeoutMs)]
-    after TimeoutMs ->
-        []
+%% Stream-level (non-zero stream id) WINDOW_UPDATEs seen by the server so
+%% far. Connection-level (stream 0) updates stay in auto mode and are ignored.
+stream_window_updates(Collector) ->
+    [{Sid, Inc} || {h2_raw_server, window_update, Sid, Inc}
+                       <- repro_h2_raw_server:collector_messages(Collector),
+                   Sid =/= 0].
+
+%% Poll until the collected stream WINDOW_UPDATEs cover ExpectedSum.
+await_stream_window_updates(Collector, ExpectedSum, Retries) ->
+    WUs = stream_window_updates(Collector),
+    case lists:sum([Inc || {_, Inc} <- WUs]) >= ExpectedSum of
+        true -> WUs;
+        false when Retries > 0 ->
+            timer:sleep(100),
+            await_stream_window_updates(Collector, ExpectedSum, Retries - 1);
+        false ->
+            WUs
     end.
