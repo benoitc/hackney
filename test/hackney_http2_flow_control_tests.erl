@@ -36,7 +36,15 @@ raw_server_test_() ->
      {"async request send hits send_timeout when the window never opens",
       {timeout, 60, fun t_async_send_times_out/0}},
      {"send_timeout nonblock keeps the old fail-fast behavior",
-      {timeout, 60, fun t_nonblock_opt_out/0}}].
+      {timeout, 60, fun t_nonblock_opt_out/0}},
+     {"timed-out send RST_STREAMs the abandoned stream",
+      {timeout, 60, fun t_timeout_cancels_stream/0}},
+     {"per-request send_timeout does not leak into later pooled requests",
+      {timeout, 60, fun t_send_timeout_not_sticky/0}},
+     {"streamed request send_timeout applies on a reused pooled conn",
+      {timeout, 60, fun t_streamed_send_timeout_reused_conn/0}},
+     {"direct hackney_conn async API uses the connection default send_timeout",
+      {timeout, 60, fun t_async_direct_conn_api/0}}].
 
 echo_server_test_() ->
     {setup,
@@ -202,6 +210,134 @@ t_nonblock_opt_out() ->
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
+%% A send that times out must not leave the half-sent stream (and its
+%% buffered body) behind on the shared connection: the client has to
+%% RST_STREAM it. The raw server reports received RST_STREAM frames.
+t_timeout_cancels_stream() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, 1024}],
+        window_update => none,
+        notify => self(),
+        body_size => 128
+    }),
+    Body = binary:copy(<<"c">>, 200 * 1024),
+    try
+        {error, timeout} = hackney:request(post, url(Srv, <<"/">>), [], Body,
+                                           opts([{send_timeout, 300}])),
+        receive
+            {h2_raw_server, rst_stream, StreamId, _Code} ->
+                ?assert(StreamId > 0)
+        after 2000 ->
+            erlang:error(no_rst_stream_after_send_timeout)
+        end
+    after
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+%% A {send_timeout, 25} request must not change the timeout of the next
+%% request on the same pooled connection: the follow-up uses the default and
+%% completes even though the window drains slower than 25 ms.
+t_send_timeout_not_sticky() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, ?SMALL_WINDOW}],
+        window_update => {auto, ?SMALL_WINDOW, 30},
+        body_size => 128
+    }),
+    Pool = h2_fc_sticky_pool,
+    catch hackney_pool:stop_pool(Pool),
+    ok = hackney_pool:start_pool(Pool, [{max_connections, 5}]),
+    Body = binary:copy(<<"s">>, 150 * 1024),
+    try
+        {error, timeout} = hackney:request(post, url(Srv, <<"/">>), [], Body,
+                                           pool_opts(Pool, [{send_timeout, 25}])),
+        Res = hackney:request(post, url(Srv, <<"/">>), [], Body, pool_opts(Pool, [])),
+        ?assertMatch({ok, 200, _, _}, Res)
+    after
+        catch hackney_pool:stop_pool(Pool),
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+%% A streamed request must apply its own send_timeout even when it reuses a
+%% pooled connection opened by an earlier request without one.
+t_streamed_send_timeout_reused_conn() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, 1024}],
+        window_update => none,
+        body_size => 128
+    }),
+    Pool = h2_fc_stream_reuse_pool,
+    catch hackney_pool:stop_pool(Pool),
+    ok = hackney_pool:start_pool(Pool, [{max_connections, 5}]),
+    Chunk = binary:copy(<<"r">>, 200 * 1024),
+    try
+        %% Bodyless request establishes the pooled conn with the default
+        %% send_timeout.
+        {ok, 200, _, _} = hackney:request(get, url(Srv, <<"/">>), [], <<>>,
+                                          pool_opts(Pool, [])),
+        {ok, ConnPid} = hackney:request(post, url(Srv, <<"/">>), [], stream,
+                                        pool_opts(Pool, [{send_timeout, 25}])),
+        T0 = erlang:monotonic_time(millisecond),
+        Res = hackney:send_body(ConnPid, Chunk),
+        Elapsed = erlang:monotonic_time(millisecond) - T0,
+        ?assertEqual({error, timeout}, Res),
+        ?assert(Elapsed < 1500)
+    after
+        catch hackney_pool:stop_pool(Pool),
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+%% The hackney_conn request_async arities without ReqOpts (and the legacy
+%% message form without FollowRedirect) fall back to the connection default:
+%% a body larger than the window still completes.
+t_async_direct_conn_api() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, ?SMALL_WINDOW}],
+        window_update => {auto, ?SMALL_WINDOW, 5},
+        body_size => 128
+    }),
+    Body = binary:copy(<<"d">>, 150 * 1024),
+    {ok, ConnPid} = hackney_conn_sup:start_conn(#{
+        host => "localhost",
+        port => repro_h2_raw_server:port(Srv),
+        transport => hackney_ssl,
+        connect_options => [{protocols, [http2]}],
+        ssl_options => [{insecure, true}, {verify, verify_none}]
+    }),
+    try
+        ok = hackney_conn:connect(ConnPid),
+        {ok, Ref1} = hackney_conn:request_async(ConnPid, <<"POST">>, <<"/">>, [],
+                                                Body, true),
+        ok = await_async_status(Ref1, 200),
+        %% Legacy message form without the FollowRedirect element.
+        {ok, Ref2} = gen_statem:call(ConnPid, {request_async, <<"POST">>, <<"/">>,
+                                               [], Body, true, self()}),
+        ok = await_async_status(Ref2, 200)
+    after
+        catch hackney_conn:stop(ConnPid),
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+await_async_status(Ref, Status) ->
+    receive
+        {hackney_response, Ref, {status, Status, _}} -> drain_async(Ref);
+        {hackney_response, Ref, {error, Reason}} -> {error, Reason}
+    after 15000 ->
+        {error, no_async_status}
+    end.
+
+drain_async(Ref) ->
+    receive
+        {hackney_response, Ref, done} -> ok;
+        {hackney_response, Ref, {error, Reason}} -> {error, Reason};
+        {hackney_response, Ref, _} -> drain_async(Ref)
+    after 15000 ->
+        {error, no_async_done}
+    end.
+
 %%====================================================================
 %% Echo-server test (well-behaved peer, body over the old cap)
 %%====================================================================
@@ -269,6 +405,13 @@ start_apps() ->
 opts(Extra) ->
     Extra ++
     [{pool, false},
+     {protocols, [http2]},
+     {recv_timeout, 15000},
+     {ssl_options, [{insecure, true}, {verify, verify_none}]}].
+
+pool_opts(Pool, Extra) ->
+    Extra ++
+    [{pool, Pool},
      {protocols, [http2]},
      {recv_timeout, 15000},
      {ssl_options, [{insecure, true}, {verify, verify_none}]}].

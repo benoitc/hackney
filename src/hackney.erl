@@ -140,7 +140,6 @@ connect_direct(Transport, Host, Port, Options) ->
     transport => Transport,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, [])
   },
@@ -289,7 +288,6 @@ try_new_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
     transport => Transport,
     connect_timeout => ConnectTimeout,
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => SslOpts,
     pool_name => PoolName,
@@ -501,7 +499,6 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
     socket => Socket,
     connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
-    send_timeout => proplists:get_value(send_timeout, Options, 30000),
     connect_options => ConnectOpts,
     ssl_options => proplists:get_value(ssl_options, Options, []),
     no_reuse => NoReuse
@@ -1339,8 +1336,14 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
   %% Check if this is a streaming body request
   case FinalBody of
     stream ->
-      %% For streaming body, just send headers and return immediately
-      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList) of
+      %% For streaming body, send headers and return immediately. Forward
+      %% send_timeout so the body chunks use the caller's deadline even on a
+      %% reused pooled connection.
+      ReqOpts = case proplists:get_value(send_timeout, Options) of
+        undefined -> [];
+        SendTimeout -> [{send_timeout, SendTimeout}]
+      end,
+      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList, ReqOpts) of
         ok -> {ok, ConnPid};
         {error, Reason} -> {error, Reason}
       end;

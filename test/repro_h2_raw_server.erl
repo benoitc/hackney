@@ -14,6 +14,8 @@
 %%%   quirk          :: none | settings | {settings, [{atom(),int()}]}
 %%%                   | ping | window_update
 %%%   quirk_when     :: after_each | after_first | mid_first | mid_each
+%%%   notify         :: pid()  send {h2_raw_server, rst_stream, StreamId, Code}
+%%%                   to this pid when an RST_STREAM frame is received
 %%%   window_update  :: none | {auto, Increment, DelayMs}
 %%%                   none (default): never open the request-body window; the
 %%%                   client's upload stalls once the initial window is spent.
@@ -129,7 +131,11 @@ handle_frame(Sock, {data, StreamId, _Body, _EndStream, PayloadLen}, St, Knobs) -
     {continue, St};
 handle_frame(_Sock, {goaway, _, _, _}, _St, _Knobs) ->
     stop;
-handle_frame(_Sock, {rst_stream, _, _}, St, _Knobs) ->
+handle_frame(_Sock, {rst_stream, StreamId, ErrorCode}, St, Knobs) ->
+    case maps:get(notify, Knobs, undefined) of
+        undefined -> ok;
+        Pid -> Pid ! {h2_raw_server, rst_stream, StreamId, ErrorCode}
+    end,
     {continue, St};
 %% After we have sent GOAWAY, ignore new streams (the ALB stops answering
 %% streams past last_stream_id). The client's read then hangs to recv_timeout.

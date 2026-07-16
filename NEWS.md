@@ -10,9 +10,14 @@ unreleased
   server opens the window with WINDOW_UPDATE frames, bounded by the new
   `send_timeout` request option (default 30000 ms, `infinity` allowed). If
   the window never opens the request fails with `{error, timeout}` instead
-  of hanging. Pass `{send_timeout, nonblock}` to restore the previous
-  non-blocking behavior. Applies to whole-body and streamed HTTP/2 request
-  bodies; HTTP/1.1 and HTTP/3 are unchanged.
+  of hanging, and the abandoned stream is reset (RST_STREAM) so its buffered
+  body does not linger on a shared connection. Pass `{send_timeout, nonblock}`
+  to restore the previous non-blocking behavior. Applies to whole-body and
+  streamed HTTP/2 request bodies; HTTP/1.1 and HTTP/3 are unchanged.
+- HTTP/2 async requests now deliver their response messages. The stream
+  entry stored the internal call reference where the delivery code expected
+  the `stream_to` pid, so every async HTTP/2 response was silently dropped
+  and the caller never received `{hackney_response, Ref, ...}` messages.
 
 4.6.1 - 2026-07-15
 ------------------
