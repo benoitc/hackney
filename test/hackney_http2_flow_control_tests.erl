@@ -27,8 +27,14 @@ raw_server_test_() ->
       {timeout, 120, fun t_large_body_completes/0}},
      {"streamed chunks complete across delayed split WINDOW_UPDATEs",
       {timeout, 120, fun t_streaming_large_small_window/0}},
+     {"body-producer funs complete across delayed split WINDOW_UPDATEs",
+      {timeout, 120, fun t_streaming_fun_bodies/0}},
+     {"streamed send hits send_timeout when the window never opens",
+      {timeout, 60, fun t_streaming_send_times_out/0}},
      {"window never opens: bounded {error, timeout}, no hang",
       {timeout, 60, fun t_window_never_opens_times_out/0}},
+     {"async request send hits send_timeout when the window never opens",
+      {timeout, 60, fun t_async_send_times_out/0}},
      {"send_timeout nonblock keeps the old fail-fast behavior",
       {timeout, 60, fun t_nonblock_opt_out/0}}].
 
@@ -84,6 +90,61 @@ t_streaming_large_small_window() ->
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
+%% Same constrained window, driven through the body-producer fun forms of
+%% send_body/2: an arity-0 fun and a {fun/1, State} pair, each emitting more
+%% than the window in total.
+t_streaming_fun_bodies() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, ?SMALL_WINDOW}],
+        window_update => {auto, ?SMALL_WINDOW, 2},
+        body_size => 128
+    }),
+    Chunk = binary:copy(<<"f">>, 32768),
+    C = counters:new(1, []),
+    Fun0 = fun() ->
+        case counters:get(C, 1) of
+            N when N < 4 -> counters:add(C, 1, 1), {ok, Chunk};
+            _ -> eof
+        end
+    end,
+    Fun1 = {fun(N) when N < 4 -> {ok, Chunk, N + 1};
+               (_) -> eof
+            end, 0},
+    try
+        {ok, ConnPid} = hackney:request(post, url(Srv, <<"/">>), [], stream, opts([])),
+        ok = hackney:send_body(ConnPid, Fun0),
+        ok = hackney:send_body(ConnPid, Fun1),
+        ok = hackney:finish_send_body(ConnPid),
+        {ok, 200, _RespHeaders, ConnPid} = hackney:start_response(ConnPid),
+        {ok, _RespBody} = hackney:body(ConnPid)
+    after
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+%% Streaming picks send_timeout up from the request options at connect time
+%% (there is no per-chunk option): a chunk larger than a never-opening window
+%% must fail with {error, timeout}, closing the connection.
+t_streaming_send_times_out() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, 1024}],
+        window_update => none,
+        body_size => 128
+    }),
+    Chunk = binary:copy(<<"t">>, 200 * 1024),
+    try
+        {ok, ConnPid} = hackney:request(post, url(Srv, <<"/">>), [], stream,
+                                        opts([{send_timeout, 500}])),
+        T0 = erlang:monotonic_time(millisecond),
+        Res = hackney:send_body(ConnPid, Chunk),
+        Elapsed = erlang:monotonic_time(millisecond) - T0,
+        ?assertEqual({error, timeout}, Res),
+        ?assert(Elapsed < 5000)
+    after
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
 %% A server that never sends WINDOW_UPDATE must yield {error, timeout} after
 %% send_timeout, not a hang and not send_buffer_full.
 t_window_never_opens_times_out() ->
@@ -101,6 +162,24 @@ t_window_never_opens_times_out() ->
         Elapsed = erlang:monotonic_time(millisecond) - T0,
         ?assertEqual({error, timeout}, Res),
         ?assert(Elapsed < 5000)
+    after
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+%% The async request path sends the body before returning the ref, so a
+%% never-opening window surfaces {error, timeout} from the request call.
+t_async_send_times_out() ->
+    start_apps(),
+    Srv = repro_h2_raw_server:start(#{
+        server_settings => [{initial_window_size, 1024}],
+        window_update => none,
+        body_size => 128
+    }),
+    Body = binary:copy(<<"a">>, 200 * 1024),
+    try
+        Res = hackney:request(post, url(Srv, <<"/">>), [], Body,
+                              opts([async, {send_timeout, 500}])),
+        ?assertEqual({error, timeout}, Res)
     after
         repro_h2_raw_server:stop(element(1, Srv))
     end.
