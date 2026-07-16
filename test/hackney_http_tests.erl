@@ -67,6 +67,69 @@ parse_chunked_response_trailers_test() ->
 	{more, P4} = hackney_http:execute(P3, <<"0\r\nFoo: ">>),
 	?assertEqual({done, <<>>}, hackney_http:execute(P4, <<"Bar\r\n\r\n">>)).
 
+%% Issue #901: the CRLF terminating a chunk-size line is split across two
+%% reads, leaving the buffer on a lone \r. The parser must wait for the \n
+%% instead of failing with invalid_chunk_size.
+parse_chunked_size_crlf_split_test() ->
+	?assertEqual({done, <<"HELLO">>},
+	             run_chunked([<<"5\r">>, <<"\nHELLO\r\n0\r\n\r\n">>])).
+
+parse_chunked_last_chunk_crlf_split_test() ->
+	?assertEqual({done, <<"HELLO">>},
+	             run_chunked([<<"5\r\nHELLO\r\n0\r">>, <<"\n\r\n">>])).
+
+%% Exhaustive read-boundary sweep: a two-chunk body with a trailer, split at
+%% every possible byte position, must always decode to the same body.
+parse_chunked_split_sweep_test() ->
+	Body = <<"5\r\nHELLO\r\n6\r\n WORLD\r\n0\r\nX-Trail: 1\r\n\r\n">>,
+	[?assertEqual({done, <<"HELLO WORLD">>},
+	              run_chunked([binary:part(Body, 0, I),
+	                           binary:part(Body, I, byte_size(Body) - I)]))
+	 || I <- lists:seq(0, byte_size(Body))].
+
+%% A genuinely malformed size line must fail cleanly, not crash te_chunked.
+parse_chunked_invalid_size_test() ->
+	?assertEqual({error, invalid_chunk_size},
+	             run_chunked([<<"5\rX\nHELLO\r\n0\r\n\r\n">>])).
+
+%% A malformed chunk terminator must fail cleanly as well
+%% (read_chunk's error was unhandled in te_chunked).
+parse_chunked_bad_chunk_terminator_test() ->
+	?assertEqual({error, poorly_formatted_chunked_size},
+	             run_chunked([<<"5\r\nHELLOXX0\r\n\r\n">>])).
+
+%% Drive a chunked response body through the parser, feeding Segments as
+%% separate socket reads. Contract: after {ok, Chunk, P}, drain buffered data
+%% with execute/1 until the parser asks for more, only then feed the next
+%% segment. Returns {done, Body} when the response completed with no
+%% leftover bytes.
+run_chunked(Segments) ->
+	P0 = hackney_http:parser([response]),
+	{_, _, _, _, P1} = hackney_http:execute(P0, <<"HTTP/1.1 200 OK\r\n">>),
+	{_, _, P2} = hackney_http:execute(P1, <<"Transfer-Encoding: chunked\r\n">>),
+	{headers_complete, P3} = hackney_http:execute(P2, <<"\r\n">>),
+	feed_chunked(P3, Segments, <<>>).
+
+feed_chunked(_Parser, [], Acc) ->
+	{incomplete, Acc};
+feed_chunked(Parser, [Seg | Rest], Acc) ->
+	chunked_step(hackney_http:execute(Parser, Seg), Rest, Acc).
+
+chunked_step({ok, Chunk, Parser}, Segments, Acc) ->
+	chunked_step(hackney_http:execute(Parser), Segments, <<Acc/binary, Chunk/binary>>);
+chunked_step({more, Parser}, Segments, Acc) ->
+	feed_chunked(Parser, Segments, Acc);
+chunked_step({more, Parser, _Buffer}, Segments, Acc) ->
+	feed_chunked(Parser, Segments, Acc);
+chunked_step({done, <<>>}, _Segments, Acc) ->
+	{done, Acc};
+chunked_step({done, Leftover}, _Segments, Acc) ->
+	{done_with_leftover, Acc, Leftover};
+chunked_step(done, _Segments, Acc) ->
+	{done, Acc};
+chunked_step({error, Reason}, _Segments, _Acc) ->
+	{error, Reason}.
+
 %% Issue #697: Handle non-standard decimal status codes (e.g., 401.1 from IIS)
 parse_response_decimal_status_code_test() ->
 	Response = <<"HTTP/1.1 401.1 Access Denied">>,
