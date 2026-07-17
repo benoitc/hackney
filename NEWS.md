@@ -1,5 +1,16 @@
 # NEWS
 
+unreleased
+----------
+
+### Changed
+
+- Bump `quic` to 1.7.1. A clean QUIC connection close (idle pooled HTTP/3
+  connections, orderly shutdown) no longer emits ERROR and CRASH reports from
+  `quic_h3_connection` nor propagates an abnormal exit to the connection
+  owner. This also removes the intermittent eunit group cancellation in the
+  h3/wt test suites.
+
 4.7.1 - 2026-07-17
 ------------------
 
