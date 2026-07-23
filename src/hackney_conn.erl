@@ -2123,8 +2123,12 @@ build_headers(_Method, Headers0, Body, Netloc) ->
 
     %% Add Content-Length for bodies
     case Body of
-        <<>> -> Headers3;
-        [] -> Headers3;
+        B when B =:= <<>> orelse B =:= [] ->
+            case hackney_headers:is_key(<<"content-length">>, Headers3) of
+                true -> Headers3;
+                false ->
+                    hackney_headers:store(<<"Content-Length">>, 0, Headers3)
+            end;
         _ when is_binary(Body) ->
             Len = byte_size(Body),
             case hackney_headers:is_key(<<"content-length">>, Headers3) of
