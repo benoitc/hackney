@@ -196,8 +196,15 @@ connect_pool(Transport, Host, Port, Options) ->
           case PoolHandler:checkout_h2(Host, Port, Transport, Options2) of
             {ok, H2Pid} ->
               %% Verify connection is actually in connected state
-              %% (OTP 28 on FreeBSD may have timing issues with SSL connections)
-              case hackney_conn:get_state(H2Pid) of
+              %% (OTP 28 on FreeBSD may have timing issues with SSL connections).
+              %% The probe is a gen_statem:call, which exits if the pooled
+              %% connection is terminating (idle teardown, GOAWAY, keepalive
+              %% close) at checkout time; treat that as unusable and fall
+              %% through to a fresh connection instead of crashing the caller.
+              %% Mirrors maybe_register_h2/maybe_upgrade_ssl.
+              GetState = try hackney_conn:get_state(H2Pid)
+                         catch exit:_ -> {error, terminated} end,
+              case GetState of
                 {ok, connected} ->
                           {ok, H2Pid};
                 _ ->
@@ -247,8 +254,13 @@ try_h3_connection(Host, Port, Transport, Options, PoolHandler) ->
       %% Check if we have an existing HTTP/3 connection
       case PoolHandler:checkout_h3(Host, Port, Transport, Options2) of
         {ok, H3Pid} ->
-          %% Verify connection is actually in connected state
-          case hackney_conn:get_state(H3Pid) of
+          %% Verify connection is actually in connected state. The probe is a
+          %% gen_statem:call, which exits if the pooled connection is
+          %% terminating at checkout time; treat that as unusable and fall
+          %% through to a fresh connection instead of crashing the caller.
+          GetState = try hackney_conn:get_state(H3Pid)
+                     catch exit:_ -> {error, terminated} end,
+          case GetState of
             {ok, connected} ->
               {ok, H3Pid};
             _ ->
