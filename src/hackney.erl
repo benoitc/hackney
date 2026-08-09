@@ -1477,7 +1477,14 @@ follow_redirect(ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeader
       end,
       NewBody = case NewMethod of
         <<"GET">> -> <<>>;
-        _ -> Body
+        _ ->
+          %% A 307/308 keeps the method and body. Do not forward the body to a
+          %% different host unless the caller set location_trusted, mirroring
+          %% the auth/cookie stripping in maybe_strip_auth_on_redirect/3.
+          case redirect_crosses_host(CurrentURL, NewURL, Options) of
+            true -> <<>>;
+            false -> Body
+          end
       end,
       %% Make new request to the redirect URL
       %% Remove old redirect_count and add incremented one
@@ -1570,6 +1577,12 @@ find_last_slash(Bin, Pos) ->
 %% @private Strip sensitive auth options when redirecting to a different host.
 %% This prevents credential leakage per CVE-2018-1000007.
 %% Use location_trusted option to allow forwarding auth to different hosts (like curl's --location-trusted).
+%% @private True when a redirect leaves the original host and the caller has not
+%% opted into location_trusted, i.e. the request body must not be forwarded.
+redirect_crosses_host(CurrentURL, NewURL, Options) ->
+  proplists:get_value(location_trusted, Options, false) =:= false
+    andalso CurrentURL#hackney_url.host =/= NewURL#hackney_url.host.
+
 maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
   LocationTrusted = proplists:get_value(location_trusted, Options, false),
   case LocationTrusted of

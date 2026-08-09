@@ -189,10 +189,16 @@ handle_redirect(Status, RespHeaders, _RespBody, Method, Url, Headers, Body, Opts
             NewUrl = resolve_redirect_url(Location, Url),
             %% Determine new method based on status code
             NewMethod = redirect_method(Status, Method),
-            %% Clear body for POST->GET redirects
+            %% Clear body for POST->GET redirects, and for a 307/308 that
+            %% crosses origin unless the caller set location_trusted (mirrors
+            %% the credential-header strip below).
             NewBody = case NewMethod of
                 get when Method =/= get -> <<>>;
-                _ -> Body
+                _ ->
+                    case redirect_keeps_body(Url, NewUrl, Opts) of
+                        true -> Body;
+                        false -> <<>>
+                    end
             end,
             %% GHSA-h73q: do not forward credential headers to a different
             %% origin unless the caller opted into location_trusted.
@@ -216,6 +222,12 @@ get_redirect_location(Headers) ->
                 false -> {error, no_location}
             end
     end.
+
+%% @private Keep the request body on a 307/308 only for a same-origin redirect,
+%% unless the caller trusts the location. Mirrors the credential-header strip.
+redirect_keeps_body(OldUrl, NewUrl, Opts) ->
+    maps:get(location_trusted, Opts, false) =:= true
+        orelse same_origin(OldUrl, NewUrl).
 
 %% @private GHSA-h73q: strip Authorization / Cookie / Proxy-Authorization
 %% before following a redirect to a different origin (scheme, host or port).

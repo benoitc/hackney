@@ -63,8 +63,9 @@ handle_request(<<"GET">>, <<"/status/", CodeBin/binary>>, Req, State) ->
             reply_json(Code, #{<<"status">> => Code}, Req, State)
     end;
 
-%% GET /redirect-to?url=X&status_code=Y - redirect to URL
-handle_request(<<"GET">>, <<"/redirect-to">>, Req, State) ->
+%% <method> /redirect-to?url=X&status_code=Y - redirect to URL (any method, so
+%% 307/308 body-forwarding can be exercised for POST/PUT/PATCH too)
+handle_request(_Method, <<"/redirect-to">>, Req, State) ->
     QS = cowboy_req:parse_qs(Req),
     Url = proplists:get_value(<<"url">>, QS, <<"/">>),
     StatusCode = case proplists:get_value(<<"status_code">>, QS) of
