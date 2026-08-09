@@ -607,6 +607,27 @@ normalize_rejects_pct_encoded_ip_host_test_() ->
                      hackney_url:normalize(Url))
      end} || Url <- Cases].
 
+%% normalize/2 must also refuse hosts that reach an IP literal only after IDNA
+%% conversion: the Unicode full-stop variants split into ASCII-dot labels, so a
+%% host like 127<U+3002>0<U+3002>0<U+3002>1 normalizes to 127.0.0.1 and would
+%% otherwise bypass the IP gate. Codepoints are built explicitly so the case
+%% does not depend on this source file's compile-time encoding.
+normalize_rejects_idna_dot_ip_host_test_() ->
+    Ip = fun(Dot) ->
+        <<"http://127", Dot/binary, "0", Dot/binary, "0", Dot/binary, "1/x">>
+    end,
+    Cases = [
+        Ip(<<16#3002/utf8>>),   %% IDEOGRAPHIC FULL STOP
+        Ip(<<16#FF0E/utf8>>),   %% FULLWIDTH FULL STOP
+        Ip(<<16#FF61/utf8>>),   %% HALFWIDTH IDEOGRAPHIC FULL STOP
+        %% pct-encoded U+3002 form
+        <<"http://127%E3%80%820%E3%80%820%E3%80%821/">>
+    ],
+    [{binary_to_list(Url), fun() ->
+        ?assertError({invalid_url_host, _},
+                     hackney_url:normalize(Url))
+     end} || Url <- Cases].
+
 %% GHSA-9653: parse_url must not mint a fresh atom for every attacker-supplied
 %% scheme. binary_to_existing_atom keeps the atom table bounded; unknown
 %% schemes are returned as the lowercased binary instead.
