@@ -173,18 +173,19 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                      {ok, {_, _, _, _, _, _, _, _}} ->
                        {Host0, Netloc0};
                      _ ->
-                       Host1 = binary_to_list(
-                                 urldecode(unicode:characters_to_binary(Host0))
-                                ),
+                       DecodedBin = urldecode(unicode:characters_to_binary(Host0)),
+                       Host1 = binary_to_list(DecodedBin),
 
-                       %% GHSA-pj7v: a non-IP host that decodes to an IP
-                       %% literal (e.g. `%31%32%37%2E%30%2E%30%2E%31` ->
-                       %% `127.0.0.1`) bypasses any caller-side SSRF
-                       %% allowlist that ran inet:parse_address on the
-                       %% pre-normalised host. Pct-encoding an IP literal
-                       %% has no legitimate use; reject the differential.
+                       %% A non-IP host that decodes to an IP literal (e.g.
+                       %% `%31%32%37%2E%30%2E%30%2E%31` -> `127.0.0.1`) bypasses
+                       %% any caller-side SSRF allowlist that ran
+                       %% inet:parse_address on the pre-normalised host. IDNA
+                       %% also folds the Unicode full-stop variants
+                       %% (U+3002/U+FF0E/U+FF61) onto ASCII dots, so a host
+                       %% written with them normalises to the same literal.
+                       %% Reject the differential on the dot-canonicalised host.
                        %% IDN / pct-encoded UTF-8 hosts still flow through.
-                       case inet_parse:address(Host1) of
+                       case inet_parse:address(dot_canonical(DecodedBin)) of
                          {ok, _} -> error({invalid_url_host, Host0});
                          _ -> ok
                        end,
@@ -225,6 +226,21 @@ idnconvert_hostname(Host) ->
     false ->
       idna:utf8_to_ascii(Host)
   end.
+
+%% @private Fold the Unicode full-stop variants that IDNA treats as label
+%% separators onto ASCII '.', so an IP literal written with them is caught by
+%% the inet_parse gate. Falls back to the raw bytes if the host is not valid
+%% UTF-8 (which cannot be an IP literal anyway).
+dot_canonical(Bin) when is_binary(Bin) ->
+  case unicode:characters_to_list(Bin) of
+    Cps when is_list(Cps) -> [fold_dot(C) || C <- Cps];
+    _ -> binary_to_list(Bin)
+  end.
+
+fold_dot(16#3002) -> $.;
+fold_dot(16#FF0E) -> $.;
+fold_dot(16#FF61) -> $.;
+fold_dot(C) -> C.
 
 %% @doc True when Host is an IPv4/IPv6 literal. RFC 6066 forbids sending SNI
 %% for IP literals. Hosts reach the TLS layer bracket-stripped, but strip a
