@@ -898,7 +898,7 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
 connected({call, From}, {upgrade_to_ssl, _SslOpts, _UpgradeOpts}, #conn_data{transport = hackney_ssl} = _Data) ->
     %% Already SSL - no upgrade needed
     {keep_state_and_data, [{reply, From, ok}]};
-connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts} = Data) ->
+connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socket = Socket, host = Host, connect_options = ConnectOpts, connect_timeout = HandshakeTimeout} = Data) ->
     %% Upgrade TCP socket to SSL (e.g., after CONNECT proxy tunnel)
     FinalSslOpts = case maps:get(final, UpgradeOpts, false) of
         true ->
@@ -926,7 +926,11 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
     Resumable = hackney_ssl:auto_tickets(FinalSslOpts),
     Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
     GatedSslOpts = gate_resumption(FinalSslOpts, Cached),
-    case ssl:connect(Socket, GatedSslOpts) of
+    %% Bound the pooled TLS upgrade handshake with the connection's
+    %% connect_timeout. ssl:connect/2 has no handshake deadline, so a server
+    %% that stalls after TCP accept would pin this process and its pool slot
+    %% indefinitely, past connect_timeout/recv_timeout.
+    case ssl:connect(Socket, GatedSslOpts, HandshakeTimeout) of
         {ok, SslSocket} ->
             %% Detect negotiated protocol, carrying ALPN across resumption
             Protocol = hackney_ssl:negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable),
