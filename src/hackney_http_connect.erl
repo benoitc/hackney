@@ -195,6 +195,23 @@ sockname({Transport, Socket}) ->
 
 %% private functions
 do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
+  %% The target host is concatenated straight into the CONNECT request line
+  %% and the Host header. A percent-decoded host can carry raw CR/LF/NUL, which
+  %% would split the request sent to the proxy. Reject it before building any
+  %% payload, mirroring the WebSocket/WebTransport authority guards.
+  case host_has_ctl_bytes(Host) of
+    true ->
+      {error, invalid_connect_host};
+    false ->
+      do_handshake_1(Socket, ProxyTransport, Host, Port, Options)
+  end.
+
+host_has_ctl_bytes(Host) when is_list(Host) ->
+  lists:any(fun(C) -> C =:= $\r orelse C =:= $\n orelse C =:= 0 end, Host);
+host_has_ctl_bytes(Host) when is_binary(Host) ->
+  binary:match(Host, [<<"\r">>, <<"\n">>, <<0>>]) =/= nomatch.
+
+do_handshake_1(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyUser = proplists:get_value(connect_user, Options),
   ProxyPass = proplists:get_value(connect_pass, Options, <<>>),
   ProxyPort = proplists:get_value(connect_port, Options),
