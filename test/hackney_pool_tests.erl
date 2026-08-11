@@ -60,6 +60,8 @@ hackney_pool_integration_test_() ->
       {"prewarm creates connections", fun test_prewarm/0},
       {"connect timeout does not crash the pool",
        fun test_connect_timeout_does_not_crash_pool/0},
+      {"connect crash does not crash the pool",
+       fun test_connect_crash_does_not_crash_pool/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"stop_pool releases in_use load_regulation slots",
@@ -134,9 +136,13 @@ teardown_integration(_) ->
     error_logger:tty(true),
     ok.
 
-connect(_Host, _Port, _Opts, _Timeout) ->
+%% Stub transport: "slow.example" outlives the connect timeout, "crash.example"
+%% takes the connection process down while dialing.
+connect("slow.example", _Port, _Opts, _Timeout) ->
     timer:sleep(100),
-    {error, simulated_timeout}.
+    {error, simulated_timeout};
+connect("crash.example", _Port, _Opts, _Timeout) ->
+    erlang:error(simulated_crash).
 
 setup_ssl() ->
     error_logger:tty(false),
@@ -756,6 +762,15 @@ test_connect_timeout_does_not_crash_pool() ->
     Opts = [{pool, PoolName}, {connect_timeout, 10}, {checkout_timeout, 1000}],
     ?assertEqual({error, connect_timeout},
                  hackney_pool:checkout("slow.example", 443, ?MODULE, Opts)),
+    ?assert(is_process_alive(hackney_pool:find_pool(PoolName))),
+    ok = hackney_pool:stop_pool(PoolName).
+
+test_connect_crash_does_not_crash_pool() ->
+    PoolName = test_pool_connect_crash,
+    ok = hackney_pool:start_pool(PoolName, [{pool_size, 1}, {prewarm_count, 0}]),
+    Opts = [{pool, PoolName}, {connect_timeout, 1000}, {checkout_timeout, 2000}],
+    ?assertMatch({error, {simulated_crash, _}},
+                 hackney_pool:checkout("crash.example", 443, ?MODULE, Opts)),
     ?assert(is_process_alive(hackney_pool:find_pool(PoolName))),
     ok = hackney_pool:stop_pool(PoolName).
 

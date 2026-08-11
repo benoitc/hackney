@@ -1028,16 +1028,21 @@ start_connection(Host, Port, Transport, Owner, Opts, State) ->
             {error, Reason}
     end.
 
-%% @private Convert a connection call timeout into a checkout error. The pool
-%% must not terminate just because a DNS/TCP/TLS attempt outlives its timeout.
+%% @private Convert a failed connection call into a checkout error. The pool
+%% must not terminate because a DNS/TCP/TLS attempt outlives its timeout, nor
+%% because the connection process dies while dialing (a transport raising, or
+%% the conn being killed). The caller stops the conn on any error return.
 connect_connection(Pid, Timeout) ->
     try hackney_conn:connect(Pid, Timeout) of
         Result ->
             Result
     catch
         exit:{timeout, _} ->
-            stop_conn(Pid),
-            {error, connect_timeout}
+            {error, connect_timeout};
+        exit:{Reason, {gen_statem, call, _}} ->
+            {error, Reason};
+        exit:Reason ->
+            {error, Reason}
     end.
 
 %% @private Process a checkin - return connection to pool.
