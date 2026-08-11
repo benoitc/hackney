@@ -1014,7 +1014,7 @@ start_connection(Host, Port, Transport, Owner, Opts, State) ->
     case hackney_conn_sup:start_conn(ConnOpts) of
         {ok, Pid} ->
             %% Connect the connection
-            case hackney_conn:connect(Pid) of
+            case connect_connection(Pid, ConnectTimeout) of
                 ok ->
                     %% Monitor the process
                     MonRef = erlang:monitor(process, Pid),
@@ -1026,6 +1026,18 @@ start_connection(Host, Port, Transport, Owner, Opts, State) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+%% @private Convert a connection call timeout into a checkout error. The pool
+%% must not terminate just because a DNS/TCP/TLS attempt outlives its timeout.
+connect_connection(Pid, Timeout) ->
+    try hackney_conn:connect(Pid, Timeout) of
+        Result ->
+            Result
+    catch
+        exit:{timeout, _} ->
+            stop_conn(Pid),
+            {error, connect_timeout}
     end.
 
 %% @private Process a checkin - return connection to pool.
