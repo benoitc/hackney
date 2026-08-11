@@ -2115,7 +2115,7 @@ compute_netloc(Host, Port, Transport) ->
     end.
 
 %% @private Build request headers
-build_headers(_Method, Headers0, Body, Netloc) ->
+build_headers(Method, Headers0, Body, Netloc) ->
     %% Start with user headers
     Headers1 = hackney_headers:new(Headers0),
 
@@ -2127,8 +2127,16 @@ build_headers(_Method, Headers0, Body, Netloc) ->
 
     %% Add Content-Length for bodies
     case Body of
-        <<>> -> Headers3;
-        [] -> Headers3;
+        B when B =:= <<>>; B =:= [] ->
+            %% Empty body: like curl, send Content-Length: 0 for methods that
+            %% carry a body (POST/PUT/PATCH) so a server that requires the
+            %% header (e.g. AWS) still gets it; leave bodyless methods
+            %% (GET/HEAD/DELETE/...) without one.
+            case body_method(Method) andalso
+                 not hackney_headers:is_key(<<"content-length">>, Headers3) of
+                true -> hackney_headers:store(<<"Content-Length">>, <<"0">>, Headers3);
+                false -> Headers3
+            end;
         _ when is_binary(Body) ->
             Len = byte_size(Body),
             case hackney_headers:is_key(<<"content-length">>, Headers3) of
@@ -2146,6 +2154,16 @@ build_headers(_Method, Headers0, Body, Netloc) ->
         _ ->
             %% Streaming body - expect user to have set Content-Length or Transfer-Encoding
             Headers3
+    end.
+
+%% @private Methods that carry a request body, so an empty body still gets an
+%% explicit Content-Length: 0 (curl does the same for POST/PUT/PATCH).
+body_method(Method) ->
+    case hackney_bstr:to_upper(hackney_bstr:to_binary(Method)) of
+        <<"POST">> -> true;
+        <<"PUT">> -> true;
+        <<"PATCH">> -> true;
+        _ -> false
     end.
 
 %% @private Convert headers to binary
