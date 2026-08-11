@@ -1,10 +1,26 @@
 # NEWS
 
-unreleased
-----------
+4.7.3 - 2026-08-11
+------------------
 
 ### Fixed
 
+- Reusing a pooled HTTP/2 or HTTP/3 connection no longer crashes the caller of
+  `hackney:connect/4` when the pooled connection terminates during the checkout
+  liveness probe. The `get_state` probe is guarded so a terminating connection
+  falls through to a fresh one (#914).
+- `hackney_url:normalize/2` now rejects a host that reaches an IP literal only
+  after IDNA folds the Unicode full-stop variants (U+3002/U+FF0E/U+FF61) to
+  ASCII dots (for example `127。0。0。1` becoming `127.0.0.1`), closing a bypass
+  of the percent-encoded-IP check.
+- The CONNECT proxy handshake rejects CR/LF/NUL in the target host instead of
+  concatenating it into the request line and `Host` header.
+- The pooled HTTPS upgrade bounds the TLS handshake with `connect_timeout`
+  (`ssl:connect/3`), so a server that stalls the handshake no longer pins the
+  connection process and its pool slot (#916).
+- The streaming request path sanitizes header values (CR/LF) like the buffered
+  path, and the request method is validated (CR/LF/NUL) at every entry point,
+  not just the request target.
 - A response body cut short by the peer closing mid-transfer no longer leaks
   the connection process. `read_full_body/2` hands back `socket = undefined`,
   so the connection went straight to `closed` and never reached the reuse
@@ -18,6 +34,13 @@ unreleased
 - `hackney_conn:get_location/1` and `set_location/2` no longer exit with
   `noproc` when the connection has already stopped, which would otherwise
   propagate out of `hackney:request/5` on the redirect path.
+
+### Changed
+
+- Like curl, an empty body on a body-bearing method (POST/PUT/PATCH) now sends
+  `Content-Length: 0`; bodyless methods (GET/HEAD/DELETE) are unchanged (#917).
+- Update dependencies to their latest releases: `quic` 1.8.0, `webtransport`
+  0.4.4, `mimerl` 1.5.0, and `cowboy` 2.18.0 for the test suite.
 
 4.7.2 - 2026-07-17
 ------------------

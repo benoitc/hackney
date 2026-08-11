@@ -19,9 +19,9 @@ jobs:
     strategy:
       matrix:
         otp: ["27.2", "28.0", "29.0"]
-        rebar3: ['3.25.0']
+        rebar3: ['3.27.0']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: erlef/setup-beam@v1
@@ -50,9 +50,9 @@ jobs:
     strategy:
       matrix:
         otp: ["27.2"]
-        rebar3: ['3.25.0']
+        rebar3: ['3.27.0']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: erlef/setup-beam@v1
@@ -73,7 +73,7 @@ jobs:
     strategy:
       matrix:
         otp: ["27"]
-        rebar3: ['3.25.0']
+        rebar3: ['3.27.0']
     steps:
       - name: Install Erlang and Go
         env:
@@ -86,7 +86,7 @@ jobs:
         run: |
           wget https://github.com/erlang/rebar3/releases/download/${{ matrix.rebar3 }}/rebar3 && chmod +x rebar3
           sudo mv rebar3 /usr/local/bin/ && sudo chmod +x /usr/local/bin/rebar3
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - run: make test
@@ -96,7 +96,7 @@ jobs:
     name: FreeBSD 14.2 OTP-28
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Test on FreeBSD
