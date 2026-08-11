@@ -30,6 +30,7 @@
     connect/1,
     connect/2,
     get_state/1,
+    get_state/2,
     %% Request/Response (sync)
     request/5,
     request/6,
@@ -73,6 +74,7 @@
     release_to_pool/1,
     verify_socket/1,
     is_ready/1,
+    is_ready/2,
     %% SSL upgrade
     upgrade_to_ssl/2,
     upgrade_to_ssl/3,
@@ -80,8 +82,10 @@
     %% Reuse control
     is_no_reuse/1,
     checkin_info/1,
+    checkin_info/2,
     %% Owner management
     set_owner/2,
+    set_owner/3,
     set_owner_async/2,
     %% Protocol info
     get_protocol/1
@@ -308,7 +312,15 @@ connect(Pid, Timeout) ->
 %% @doc Get current state name for debugging.
 -spec get_state(pid()) -> {ok, atom()} | {error, term()}.
 get_state(Pid) ->
-    gen_statem:call(Pid, get_state).
+    get_state(Pid, 5000).
+
+%% @doc Get current state name, waiting at most `Timeout'. Callers that probe
+%% a connection they do not own (the pool, deciding whether to hand it out)
+%% pass a short timeout: a connection that cannot answer promptly is unusable
+%% to them, and waiting on it blocks everything behind them.
+-spec get_state(pid(), timeout()) -> {ok, atom()} | {error, term()}.
+get_state(Pid, Timeout) ->
+    gen_statem:call(Pid, get_state, Timeout).
 
 %% @doc Send an HTTP request and wait for the response status and headers.
 %% Returns {ok, Status, Headers} for HTTP/1.1 or {ok, Status, Headers, Body} for HTTP/2.
@@ -588,7 +600,12 @@ release_to_pool(Pid) ->
 %% a connection to a new requester.
 -spec set_owner(pid(), pid()) -> ok | {error, invalid_state}.
 set_owner(Pid, NewOwner) ->
-    gen_statem:call(Pid, {set_owner, NewOwner}, 5000).
+    set_owner(Pid, NewOwner, 5000).
+
+%% @doc Set a new owner, waiting at most `Timeout'. @see get_state/2
+-spec set_owner(pid(), pid(), timeout()) -> ok | {error, invalid_state}.
+set_owner(Pid, NewOwner, Timeout) ->
+    gen_statem:call(Pid, {set_owner, NewOwner}, Timeout).
 
 %% @doc Set a new owner for this connection (async).
 %% Same as set_owner/2 but non-blocking. Used when the caller cannot
@@ -608,7 +625,12 @@ verify_socket(Pid) ->
 %% This combines state check and socket verification in one call.
 -spec is_ready(pid()) -> {ok, connected} | {ok, closed} | {error, term()}.
 is_ready(Pid) ->
-    gen_statem:call(Pid, is_ready).
+    is_ready(Pid, 5000).
+
+%% @doc Check socket health, waiting at most `Timeout'. @see get_state/2
+-spec is_ready(pid(), timeout()) -> {ok, connected} | {ok, closed} | {error, term()}.
+is_ready(Pid, Timeout) ->
+    gen_statem:call(Pid, is_ready, Timeout).
 
 %% @doc Upgrade a TCP connection to SSL.
 %% This performs an SSL handshake on the existing TCP socket.
@@ -649,7 +671,12 @@ is_no_reuse(Pid) ->
                                pool_ssl := boolean(), protocol := atom(),
                                should_close := boolean(), ready := boolean()}.
 checkin_info(Pid) ->
-    gen_statem:call(Pid, checkin_info).
+    checkin_info(Pid, 5000).
+
+%% @doc Checkin flags, waiting at most `Timeout'. @see get_state/2
+-spec checkin_info(pid(), timeout()) -> map().
+checkin_info(Pid, Timeout) ->
+    gen_statem:call(Pid, checkin_info, Timeout).
 
 %% @doc Get the negotiated protocol for this connection.
 %% Returns http1, http2, or http3 based on ALPN negotiation (SSL connections),

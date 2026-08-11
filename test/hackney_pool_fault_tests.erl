@@ -33,10 +33,13 @@
 %%====================================================================
 
 pool_fault_test_() ->
-    {foreach,
-     fun setup/0,
-     fun teardown/1,
-     [
+    {setup,
+     fun start_server/0,
+     fun stop_server/1,
+     {foreach,
+      fun setup/0,
+      fun teardown/1,
+      [
       scenario("a connect that outlives its timeout is a checkout error (#927)",
                fun t_connect_outlives_timeout/1),
       scenario("a connect that never answers is a checkout error",
@@ -55,7 +58,7 @@ pool_fault_test_() ->
                fun t_kill_checked_out_connection/1),
       scenario("a fault storm never takes the pool down", 60,
                fun t_fault_storm/1)
-     ]}.
+      ]}}.
 
 %% Each scenario runs against the connection count it started with: other
 %% suites in the same VM leave connections running, so "no connection leaked"
@@ -68,13 +71,25 @@ scenario(Description, Timeout, Test) ->
             {Description, {timeout, Timeout, fun() -> Test(Baseline) end}}
     end.
 
-setup() ->
+%% The listener lives for the whole module: rebinding the same port between
+%% scenarios races with the previous listener shutting down.
+start_server() ->
     error_logger:tty(false),
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(hackney),
     Dispatch = cowboy_router:compile([{'_', [{"/[...]", test_http_resource, []}]}]),
     {ok, _} = cowboy:start_clear(fault_test_server, [{port, ?PORT}],
                                  #{env => #{dispatch => Dispatch}}),
+    ok.
+
+stop_server(_) ->
+    _ = (try cowboy:stop_listener(fault_test_server) catch _:_ -> ok end),
+    application:stop(cowboy),
+    application:stop(hackney),
+    error_logger:tty(true),
+    ok.
+
+setup() ->
     ok = hackney_fault_transport:clear(),
     ok = hackney_crash_sentinel:start(),
     ok = hackney_pool:start_pool(?POOL, [{pool_size, 4}, {prewarm_count, 0}]),
@@ -84,10 +99,6 @@ teardown(_) ->
     ok = hackney_fault_transport:clear(),
     _ = hackney_crash_sentinel:stop(),
     _ = (try hackney_pool:stop_pool(?POOL) catch _:_ -> ok end),
-    _ = (try cowboy:stop_listener(fault_test_server) catch _:_ -> ok end),
-    application:stop(cowboy),
-    application:stop(hackney),
-    error_logger:tty(true),
     ok.
 
 %%====================================================================

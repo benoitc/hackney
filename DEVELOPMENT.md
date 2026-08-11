@@ -99,12 +99,19 @@ Available faults: `{sleep, Ms}`, `{slow_error, Ms}`, `{hang, Ms}`, `{error, Reas
 `crash`. Any callback can be armed: `connect`, `send`, `recv`, `setopts`,
 `close`, `controlling_process`.
 
-Run the fault matrix and the randomized chaos run:
+Run the fault matrix, the multiplexed (HTTP/2, HTTP/3) checkout faults, and the
+randomized chaos run:
 
 ```bash
 rebar3 eunit --module=hackney_pool_fault_tests
+rebar3 eunit --module=hackney_pool_h2h3_fault_tests
 rebar3 eunit --module=hackney_pool_chaos_tests
 ```
+
+The HTTP/2 and HTTP/3 connections are shared rather than checked out, so one
+bad connection is felt by every caller for that host. Those scenarios wedge a
+registered connection with `sys:suspend/1` and require the pool to answer
+`none` within the probe budget instead of waiting on it.
 
 Soak the chaos run harder, for example before a release:
 

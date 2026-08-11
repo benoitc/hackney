@@ -94,6 +94,11 @@
 -define(DEFAULT_PREWARM_COUNT, 4).         % Connections to maintain per host
 -define(STOP_CONN_TIMEOUT, 100).           % Max wait for a conn to stop
 -define(PREWARM_CONNECT_TIMEOUT, 5000).    % Dial budget for a prewarm conn
+%% Every question the pool asks a conn about its own health is answered from
+%% the conn's state, so a healthy conn answers at once. A conn that does not
+%% is wedged, and waiting on it from inside the pool gen_server blocks every
+%% caller of the pool, not just the one that asked: treat slow as unusable.
+-define(PROBE_TIMEOUT, 250).
 
 start() ->
     %% Create ETS table to store pool pid by name
@@ -918,7 +923,7 @@ find_available(Key, Available) ->
                     %% The connection can die between is_process_alive/1 above
                     %% and this gen_statem call (flaky network); the resulting
                     %% noproc exit must not crash the pool, so skip and move on.
-                    try hackney_conn:is_ready(Pid) of
+                    try hackney_conn:is_ready(Pid, ?PROBE_TIMEOUT) of
                         {ok, connected} ->
                             {ok, Pid, Available2};
                         _ ->
@@ -1117,7 +1122,7 @@ checkin_poolable(_TcpKey, Info) ->
 %% failure means the conn is unusable; every caller already dials a fresh one
 %% on `{error, _}'.
 set_owner(Pid, Owner) ->
-    try hackney_conn:set_owner(Pid, Owner)
+    try hackney_conn:set_owner(Pid, Owner, ?PROBE_TIMEOUT)
     catch _:_ -> {error, set_owner_failed}
     end.
 
@@ -1125,7 +1130,7 @@ set_owner(Pid, Owner) ->
 %% conn died between is_process_alive/1 and here). Caller treats `error' as
 %% not poolable.
 checkin_info(Pid) ->
-    try {ok, hackney_conn:checkin_info(Pid)}
+    try {ok, hackney_conn:checkin_info(Pid, ?PROBE_TIMEOUT)}
     catch _:_ -> error
     end.
 
@@ -1238,7 +1243,7 @@ h2_conn_usable(Pid) ->
     case erlang:is_process_alive(Pid) of
         false -> false;
         true ->
-            try hackney_conn:get_state(Pid) of
+            try hackney_conn:get_state(Pid, ?PROBE_TIMEOUT) of
                 {ok, connected} -> true;
                 _ -> false
             catch
