@@ -41,9 +41,11 @@ start_conn(Opts) ->
     supervisor:start_child(?SERVER, [Opts]).
 
 %% @doc Stop a connection process gracefully.
+%% Tolerates a connection that is already gone or that dies while stopping:
+%% callers are only asking for it to be off.
 -spec stop_conn(pid()) -> ok.
 stop_conn(Pid) ->
-    hackney_conn:stop(Pid).
+    try hackney_conn:stop(Pid) catch _:_ -> ok end.
 
 %% @doc Stop all connection processes gracefully.
 %% Useful for test cleanup.

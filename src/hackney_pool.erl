@@ -92,6 +92,8 @@
 -define(DEFAULT_MAX_CONNECTIONS, 50).
 -define(DEFAULT_KEEPALIVE_TIMEOUT, 2000).  % 2 seconds max idle
 -define(DEFAULT_PREWARM_COUNT, 4).         % Connections to maintain per host
+-define(STOP_CONN_TIMEOUT, 100).           % Max wait for a conn to stop
+-define(PREWARM_CONNECT_TIMEOUT, 5000).    % Dial budget for a prewarm conn
 
 start() ->
     %% Create ETS table to store pool pid by name
@@ -544,7 +546,7 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
         {ok, Pid, Available2} ->
             %% Found an available connection - update owner to new requester
             ?report_debug("pool: reusing connection", [{pool, PoolName}, {pid, Pid}]),
-            case hackney_conn:set_owner(Pid, Requester) of
+            case set_owner(Pid, Requester) of
                 ok ->
                     InUse2 = maps:put(Pid, Key, InUse),
                     {reply, {ok, Pid}, State#state{available=Available2, in_use=InUse2}};
@@ -589,7 +591,7 @@ handle_call({checkout_ssl, SslKey, Requester, Opts}, _From, State) ->
         {ok, Pid, Available2} ->
             %% Found a pooled SSL connection with the same TLS options hash
             ?report_debug("pool: reusing ssl connection", [{pool, PoolName}, {pid, Pid}]),
-            case hackney_conn:set_owner(Pid, Requester) of
+            case set_owner(Pid, Requester) of
                 ok ->
                     InUse2 = maps:put(Pid, SslKey, InUse),
                     {reply, {ok, Pid, ready},
@@ -889,9 +891,13 @@ h3_connection_key(Host0, Port, Transport, Options) ->
     Host = string:lowercase(Host0),
     {Host, Port, Transport, proplists:get_value(h3_tls_key, Options, default)}.
 
-%% @private Stop a connection, tolerating an already-dead process.
+%% @private Stop a connection, tolerating an already-dead process. Bounded on
+%% purpose: this runs inside the pool gen_server, and a conn wedged in a
+%% transport call (the dial that just outlived its timeout, typically) would
+%% otherwise hold every caller of the pool for as long as the transport takes
+%% to return. Past the deadline the conn is killed.
 stop_conn(Pid) ->
-    try hackney_conn:stop(Pid) catch _:_ -> ok end.
+    try hackney_conn:stop(Pid, ?STOP_CONN_TIMEOUT) catch _:_ -> ok end.
 
 %% @private Find a reusable idle connection for `Key', discarding any that are
 %% no longer keepalive-ready. Only a conn that is_ready reports `{ok, connected}'
@@ -952,7 +958,7 @@ checkout_ssl_fallback(SslKey, Requester, Opts, State) ->
 
     case find_available(TcpKey, Available) of
         {ok, Pid, Available2} ->
-            case hackney_conn:set_owner(Pid, Requester) of
+            case set_owner(Pid, Requester) of
                 ok ->
                     InUse2 = maps:put(Pid, SslKey, InUse),
                     {reply, {ok, Pid, needs_upgrade},
@@ -1104,6 +1110,16 @@ checkin_poolable(_TcpKey, Info) ->
     maps:get(no_reuse, Info, false) =:= false andalso
         maps:get(upgraded_ssl, Info, false) =:= false andalso
         keepalive_ready(Info).
+
+%% @private Hand a pooled conn to its new owner. Called from inside the pool
+%% gen_server, so it must not raise: the conn answered `is_ready' a moment ago
+%% but can be gone or wedged by now, and either would take the pool down. Any
+%% failure means the conn is unusable; every caller already dials a fresh one
+%% on `{error, _}'.
+set_owner(Pid, Owner) ->
+    try hackney_conn:set_owner(Pid, Owner)
+    catch _:_ -> {error, set_owner_failed}
+    end.
 
 %% @private Fetch the conn's checkin flags, or `error' if the call fails (the
 %% conn died between is_process_alive/1 and here). Caller treats `error' as
@@ -1350,7 +1366,7 @@ prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
     },
     case hackney_conn_sup:start_conn(ConnOpts) of
         {ok, Pid} ->
-            case hackney_conn:connect(Pid) of
+            case connect_connection(Pid, ?PREWARM_CONNECT_TIMEOUT) of
                 ok ->
                     %% Checkin the new connection to the pool
                     gen_server:cast(PoolPid, {prewarm_checkin, Pid,

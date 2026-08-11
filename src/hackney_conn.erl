@@ -26,6 +26,7 @@
 -export([
     start_link/1,
     stop/1,
+    stop/2,
     connect/1,
     connect/2,
     get_state/1,
@@ -270,14 +271,30 @@ start_link(Opts) when is_map(Opts) ->
 %% Returns ok even if the process has already terminated.
 -spec stop(pid()) -> ok.
 stop(Pid) ->
+    stop(Pid, infinity).
+
+%% @doc Stop the connection process, waiting at most `Timeout' for it.
+%% A connection wedged inside a transport call (a dial that outlived its
+%% timeout, a socket that never answers) cannot handle a stop request; it is
+%% killed rather than left holding the caller, which for pool checkouts is the
+%% pool gen_server itself.
+%% Returns ok even if the process has already terminated.
+-spec stop(pid(), timeout()) -> ok.
+stop(Pid, Timeout) ->
     try
-        gen_statem:stop(Pid)
+        gen_statem:stop(Pid, normal, Timeout)
     catch
         exit:noproc -> ok;
         exit:{noproc, _} -> ok;
         exit:normal -> ok;
-        exit:{normal, _} -> ok
+        exit:{normal, _} -> ok;
+        exit:timeout -> kill(Pid);
+        exit:{timeout, _} -> kill(Pid)
     end.
+
+kill(Pid) ->
+    exit(Pid, kill),
+    ok.
 
 %% @doc Connect to the target host. Blocks until connected or timeout.
 -spec connect(pid()) -> ok | {error, term()}.
