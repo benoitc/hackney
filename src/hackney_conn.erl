@@ -312,7 +312,7 @@ request(Pid, Method, Path, Headers, Body, Timeout) ->
 -spec request(pid(), binary(), binary(), list(), binary() | iolist(), timeout(), list()) ->
     {ok, integer(), list()} | {ok, integer(), list(), binary()} | {error, term()}.
 request(Pid, Method, Path, Headers, Body, Timeout, ReqOpts) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {request, Method, Path, Headers, Body, ReqOpts}, Timeout);
         Err -> Err
     end.
@@ -353,13 +353,29 @@ valid_request_target(Path) when is_list(Path) ->
 valid_request_target(_) ->
     ok.
 
+%% @private Validate both the method and the request target before they are
+%% serialized into the request line. The method sits on the same line as the
+%% path, so a caller-influenced method carrying CR/LF/NUL could inject headers
+%% or split the request just as a bad path could.
+valid_request_line(Method, Path) ->
+    case valid_method(Method) of
+        ok -> valid_request_target(Path);
+        Error -> Error
+    end.
+
+valid_method(Method) ->
+    case binary:match(hackney_bstr:to_binary(Method), [<<"\r">>, <<"\n">>, <<0>>]) of
+        nomatch -> ok;
+        _ -> {error, {invalid_method, Method}}
+    end.
+
 %% @doc Send an HTTP/3 request and return headers immediately.
 %% Returns {ok, Status, Headers} and allows subsequent stream_body/1 calls.
 %% This is for pull-based body streaming over HTTP/3.
 -spec request_streaming(pid(), binary(), binary(), list(), binary() | iolist()) ->
     {ok, integer(), list()} | {error, term()}.
 request_streaming(Pid, Method, Path, Headers, Body) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity);
         Err -> Err
     end.
@@ -375,7 +391,7 @@ send_request_headers(Pid, Method, Path, Headers) ->
 %% send_timeout is used (HTTP/2 flow-control deadline for the body chunks).
 -spec send_request_headers(pid(), binary(), binary(), list(), list()) -> ok | {error, term()}.
 send_request_headers(Pid, Method, Path, Headers, ReqOpts) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {send_headers, Method, Path, Headers, ReqOpts}, infinity);
         Err -> Err
     end.
@@ -402,7 +418,7 @@ start_response(Pid) ->
 -spec open_h2_stream(pid(), binary(), binary(), list(), pid(), map()) ->
     {ok, pid(), pos_integer()} | {error, term()}.
 open_h2_stream(Pid, Method, Path, Headers, HandlerPid, Opts) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts}, infinity);
         Err -> Err
     end.
@@ -446,7 +462,7 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo) ->
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean()) ->
     {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect});
         Err -> Err
     end.
@@ -454,7 +470,7 @@ request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedir
 -spec request_async(pid(), binary(), binary(), list(), binary() | iolist(), true | once, pid(), boolean(), list()) ->
     {ok, pid()} | {error, term()}.
 request_async(Pid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts) ->
-    case valid_request_target(Path) of
+    case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts});
         Err -> Err
     end.
@@ -1287,10 +1303,13 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
         undefined -> hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
         _ -> HeadersObj
     end,
-    HeadersList = hackney_headers:to_list(HeadersWithTE),
     RequestLine = build_request_line(Method, Path),
-    HeaderLines = [[Name, <<": ">>, Value, <<"\r\n">>] || {Name, Value} <- HeadersList],
-    HeadersData = [RequestLine, HeaderLines, <<"\r\n">>],
+    %% Serialize through to_iolist/1 so header values are CR/LF sanitized like
+    %% the buffered path; the raw to_list/1 concatenation used before let a
+    %% header value carry its own CRLF and inject extra lines. to_iolist/1
+    %% already appends the terminating blank line.
+    HeaderBlock = hackney_headers:to_iolist(HeadersWithTE),
+    HeadersData = [RequestLine, HeaderBlock],
     %% Record whether the caller asked the server to close (the request line is
     %% built here, not via do_send_request/5), for the keepalive decision.
     RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
