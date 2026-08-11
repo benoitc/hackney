@@ -1,5 +1,24 @@
 # NEWS
 
+unreleased
+----------
+
+### Fixed
+
+- A response body cut short by the peer closing mid-transfer no longer leaks
+  the connection process. `read_full_body/2` hands back `socket = undefined`,
+  so the connection went straight to `closed` and never reached the reuse
+  check added for #902. An unpooled connection arms no grace timer there and,
+  when started under `hackney_conn_sup`, has the supervisor as its `owner`, so
+  the owner-DOWN clause never fired either: the process parked forever holding
+  every refc binary it had read. Callers could not clean up, since a
+  synchronous request returns the body directly and the truncated read still
+  reports `{ok, Body}` (#918). The same applies to a failed body read and to
+  bodyless (204/304) responses.
+- `hackney_conn:get_location/1` and `set_location/2` no longer exit with
+  `noproc` when the connection has already stopped, which would otherwise
+  propagate out of `hackney:request/5` on the redirect path.
+
 4.7.2 - 2026-07-17
 ------------------
 

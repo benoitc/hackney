@@ -68,6 +68,11 @@ hackney_conn_integration_test_() ->
       {"sync stream_body on a non-reusable conn stops it", {timeout, 30, fun test_sync_stream_body_no_reuse_stops/0}},
       {"async on a non-reusable pooled conn stops it", {timeout, 30, fun test_async_no_reuse_pooled_stops/0}},
       {"sync body on a reusable conn keeps it connected", {timeout, 30, fun test_sync_body_reusable_stays_connected/0}},
+      %% Truncated body: bypasses finish_sync_request/3 and lands in `closed' (#918)
+      {"truncated body on an unpooled conn stops it", {timeout, 30, fun test_truncated_body_unpooled_stops/0}},
+      {"truncated stream_body on an unpooled conn stops it", {timeout, 30, fun test_truncated_stream_body_unpooled_stops/0}},
+      {"truncated body on a pooled conn keeps the grace window", {timeout, 30, fun test_truncated_body_pooled_keeps_grace/0}},
+      {"location accessors are noproc-safe", {timeout, 30, fun test_location_accessors_noproc_safe/0}},
       %% 1XX response handling
       {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
      ]}.
@@ -955,3 +960,109 @@ stream_all(Pid, Acc) ->
         done ->
             Acc
     end.
+
+%% A response whose body is cut short (peer closes mid-body) leaves
+%% read_full_body/2 with `socket = undefined', so `receiving' goes straight to
+%% `closed' and never reaches finish_sync_request/3 -- the #902 fix. For an
+%% unpooled connection `closed(enter)' arms no timer and the owner is
+%% hackney_conn_sup, so the process parked forever holding the partial body.
+test_truncated_body_unpooled_stops() ->
+    {LSock, Port} = start_truncating_server(1024 * 64),
+    try
+        Pid = truncating_conn(Port),
+        MRef = erlang:monitor(process, Pid),
+        %% The short read still reports success, so the caller has no reason
+        %% (and under hackney 4 no handle) to close anything.
+        {ok, Body} = hackney_conn:body(Pid),
+        ?assertEqual(1024 * 64, byte_size(Body)),
+        ?assertEqual(normal, wait_down_reason(Pid, MRef))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+%% Same, draining through stream_body/1 rather than body/1.
+test_truncated_stream_body_unpooled_stops() ->
+    {LSock, Port} = start_truncating_server(1024 * 64),
+    try
+        Pid = truncating_conn(Port),
+        MRef = erlang:monitor(process, Pid),
+        _ = stream_all(Pid, <<>>),
+        ?assertEqual(normal, wait_down_reason(Pid, MRef))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+%% A pooled connection must still park in `closed' so the #836 grace window
+%% answers late calls; the pool's own timer stops it shortly after.
+test_truncated_body_pooled_keeps_grace() ->
+    {LSock, Port} = start_truncating_server(1024 * 64),
+    Pool = spawn(fun() -> receive stop -> ok end end),
+    try
+        Pid = truncating_conn(Port, #{pool_pid => Pool}),
+        {ok, _Body} = hackney_conn:body(Pid),
+        ?assertEqual({ok, closed}, hackney_conn:get_state(Pid)),
+        ?assert(is_process_alive(Pid))
+    after
+        Pool ! stop,
+        catch gen_tcp:close(LSock)
+    end.
+
+truncating_conn(Port) ->
+    truncating_conn(Port, #{}).
+
+truncating_conn(Port, Extra) ->
+    Opts = maps:merge(#{
+        host => "127.0.0.1",
+        port => Port,
+        transport => hackney_tcp,
+        connect_timeout => 5000,
+        recv_timeout => 5000
+    }, Extra),
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:connect(Pid),
+    {ok, _Status, _Headers} = hackney_conn:request(Pid, <<"GET">>, <<"/truncated">>, [], <<>>),
+    Pid.
+
+%% Announces a Content-Length far larger than what it sends, then closes.
+start_truncating_server(SendBytes) ->
+    {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    spawn(fun() ->
+        case gen_tcp:accept(LSock, 5000) of
+            {ok, Sock} ->
+                _ = gen_tcp:recv(Sock, 0, 5000),
+                Headers = ["HTTP/1.1 200 OK\r\n",
+                           "Content-Type: application/octet-stream\r\n",
+                           "Content-Length: 100000000\r\n\r\n"],
+                _ = gen_tcp:send(Sock, Headers),
+                _ = gen_tcp:send(Sock, binary:copy(<<"x">>, SendBytes)),
+                gen_tcp:close(Sock);
+            _ ->
+                ok
+        end
+    end),
+    {LSock, Port}.
+
+wait_down_reason(Pid, MRef) ->
+    receive
+        {'DOWN', MRef, process, Pid, Reason} -> Reason
+    after 5000 ->
+        timeout
+    end.
+
+%% hackney:request/5 calls set_location/2 on the original connection after a
+%% redirect chain returns. Now that a dead-end connection stops rather than
+%% parks, that pid can already be gone, so the accessors must not exit with
+%% noproc and propagate out of the caller.
+test_location_accessors_noproc_safe() ->
+    Opts = #{
+        host => "127.0.0.1",
+        port => ?PORT,
+        transport => hackney_tcp,
+        connect_timeout => 5000
+    },
+    {ok, Pid} = hackney_conn:start_link(Opts),
+    ok = hackney_conn:stop(Pid),
+    ?assertNot(is_process_alive(Pid)),
+    ?assertEqual(undefined, hackney_conn:get_location(Pid)),
+    ?assertEqual({error, closed}, hackney_conn:set_location(Pid, <<"http://127.0.0.1/final">>)).

@@ -510,12 +510,15 @@ response_headers(Pid) ->
 %% @doc Get the stored location (final URL after redirects).
 -spec get_location(pid()) -> binary() | undefined.
 get_location(Pid) ->
-    gen_statem:call(Pid, get_location).
+    case safe_call(Pid, get_location) of
+        {error, closed} -> undefined;
+        Location -> Location
+    end.
 
 %% @doc Set the location (used after following redirects).
--spec set_location(pid(), binary()) -> ok.
+-spec set_location(pid(), binary()) -> ok | {error, closed}.
 set_location(Pid, Location) ->
-    gen_statem:call(Pid, {set_location, Location}).
+    safe_call(Pid, {set_location, Location}).
 
 %% @doc Send data through the connection process.
 %% This is a low-level function used by hackney_request.
@@ -1557,13 +1560,12 @@ receiving({call, From}, body, Data) ->
     case read_full_body(Data, <<>>) of
         {ok, Body, #conn_data{socket = undefined} = NewData} ->
             %% Socket was closed during body read (e.g., no Content-Length)
-            %% Transition to closed state instead of connected
-            {next_state, closed, NewData, [{reply, From, {ok, Body}}]};
+            finish_dead_request(From, {ok, Body}, NewData);
         {ok, Body, NewData} ->
             %% Socket still valid - reuse it, or stop if not reusable.
             finish_sync_request(From, {ok, Body}, NewData);
         {error, Reason} ->
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            finish_dead_request(From, {error, Reason}, Data)
     end;
 
 receiving({call, From}, stream_body, Data) ->
@@ -1572,12 +1574,12 @@ receiving({call, From}, stream_body, Data) ->
         {ok, Chunk, NewData} ->
             {keep_state, NewData, [{reply, From, {ok, Chunk}}]};
         {done, #conn_data{socket = undefined} = NewData} ->
-            %% Socket was closed during body read - transition to closed state
-            {next_state, closed, NewData, [{reply, From, done}]};
+            %% Socket was closed during body read
+            finish_dead_request(From, done, NewData);
         {done, NewData} ->
             finish_sync_request(From, done, NewData);
         {error, Reason} ->
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            finish_dead_request(From, {error, Reason}, Data)
     end;
 
 receiving({call, From}, get_state, _Data) ->
@@ -2026,6 +2028,27 @@ finish_sync_request(From, Reply, #conn_data{transport = Transport, socket = Sock
             ok = close_socket(Transport, Socket),
             {stop_and_reply, normal, [{reply, From, Reply}],
              Data#conn_data{socket = undefined}}
+    end.
+
+%% @private The request is over and the connection cannot carry another one:
+%% the body was cut short (the peer closed mid-transfer, so read_full_body/2
+%% hands back `socket = undefined'), the response had no body to read, or the
+%% read failed outright. None of these reach finish_sync_request/3 (#902).
+%%
+%% A pooled conn parks in `closed', keeping the grace window added for #836 so
+%% late calls still get a proper reply before it stops. An unpooled conn has no
+%% such timer, and when it was started under hackney_conn_sup its `owner' is the
+%% supervisor, so the owner-DOWN clause never fires either: parking there leaks
+%% the process along with every refc binary it read (#918). Stop instead.
+finish_dead_request(From, Reply, #conn_data{transport = Transport, socket = Socket,
+                                            pool_pid = PoolPid} = Data) ->
+    case PoolPid of
+        undefined ->
+            ok = close_socket(Transport, Socket),
+            {stop_and_reply, normal, [{reply, From, Reply}],
+             Data#conn_data{socket = undefined}};
+        _ ->
+            {next_state, closed, Data, [{reply, From, Reply}]}
     end.
 
 %% @private Finish async streaming. Reuse only a reusable, pooled connection

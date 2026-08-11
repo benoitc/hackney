@@ -1489,12 +1489,13 @@ follow_redirect(ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeader
                    [{follow_redirect, true}, {max_redirect, MaxRedirect},
                     {redirect_count, RedirectCount + 1}, {with_body, WithBody} | Options2]) of
         {ok, Status2, Headers2, Body2} ->
-          %% Store the final location in the connection
-          hackney_conn:set_location(ConnPid, FinalLocation),
+          %% Store the final location in the connection (the conn may already
+          %% be gone, so set_location can return {error, closed}).
+          _ = hackney_conn:set_location(ConnPid, FinalLocation),
           {ok, Status2, Headers2, Body2};
         {ok, Status2, Headers2} ->
           %% Store the final location in the connection
-          hackney_conn:set_location(ConnPid, FinalLocation),
+          _ = hackney_conn:set_location(ConnPid, FinalLocation),
           {ok, Status2, Headers2};
         Error ->
           Error
