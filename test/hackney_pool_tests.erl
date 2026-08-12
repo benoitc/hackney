@@ -9,6 +9,8 @@
 
 -module(hackney_pool_tests).
 
+-export([connect/4]).
+
 -include_lib("eunit/include/eunit.hrl").
 -include("hackney.hrl").
 
@@ -56,6 +58,10 @@ hackney_pool_integration_test_() ->
       {"owner crash kills connection", fun test_owner_crash/0},
       {"checkin resets owner to pool", fun test_checkin_resets_owner/0},
       {"prewarm creates connections", fun test_prewarm/0},
+      {"connect timeout does not crash the pool",
+       fun test_connect_timeout_does_not_crash_pool/0},
+      {"connect crash does not crash the pool",
+       fun test_connect_crash_does_not_crash_pool/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"stop_pool releases in_use load_regulation slots",
@@ -129,6 +135,14 @@ teardown_integration(_) ->
     application:stop(hackney),
     error_logger:tty(true),
     ok.
+
+%% Stub transport: "slow.example" outlives the connect timeout, "crash.example"
+%% takes the connection process down while dialing.
+connect("slow.example", _Port, _Opts, _Timeout) ->
+    timer:sleep(100),
+    {error, simulated_timeout};
+connect("crash.example", _Port, _Opts, _Timeout) ->
+    erlang:error(simulated_crash).
 
 setup_ssl() ->
     error_logger:tty(false),
@@ -741,6 +755,24 @@ test_prewarm() ->
     ?assertEqual(5, proplists:get_value(free_count, Stats3)),
 
     ok = hackney_pool:stop_pool(test_pool_prewarm).
+
+test_connect_timeout_does_not_crash_pool() ->
+    PoolName = test_pool_connect_timeout,
+    ok = hackney_pool:start_pool(PoolName, [{pool_size, 1}, {prewarm_count, 0}]),
+    Opts = [{pool, PoolName}, {connect_timeout, 10}, {checkout_timeout, 1000}],
+    ?assertEqual({error, connect_timeout},
+                 hackney_pool:checkout("slow.example", 443, ?MODULE, Opts)),
+    ?assert(is_process_alive(hackney_pool:find_pool(PoolName))),
+    ok = hackney_pool:stop_pool(PoolName).
+
+test_connect_crash_does_not_crash_pool() ->
+    PoolName = test_pool_connect_crash,
+    ok = hackney_pool:start_pool(PoolName, [{pool_size, 1}, {prewarm_count, 0}]),
+    Opts = [{pool, PoolName}, {connect_timeout, 1000}, {checkout_timeout, 2000}],
+    ?assertMatch({error, {simulated_crash, _}},
+                 hackney_pool:checkout("crash.example", 443, ?MODULE, Opts)),
+    ?assert(is_process_alive(hackney_pool:find_pool(PoolName))),
+    ok = hackney_pool:stop_pool(PoolName).
 
 %%====================================================================
 %% Timeout Tests
