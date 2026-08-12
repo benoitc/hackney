@@ -1,5 +1,40 @@
 # NEWS
 
+4.7.4 - 2026-08-12
+------------------
+
+### Fixed
+
+- A connection attempt that outlives its timeout no longer terminates the pool,
+  and with it every caller of that pool. The dial is made with the request's
+  `connect_timeout`, and a call that times out, like a connection process that
+  dies while dialing, comes back as a checkout error (#927, #928, thanks
+  @aboroska).
+- Handing a pooled connection to a new owner, and the prewarm dial, are guarded
+  like the other calls the pool makes into a connection process. A connection
+  that is gone or wedged is dropped instead of taking the pool down (#929).
+- Stopping a connection from inside the pool is bounded to 100ms, after which
+  the connection is killed. A connection wedged in a transport call, which a
+  failed dial makes likely, used to hold every caller of the pool for as long
+  as the transport took to return (#929).
+- The health probes the pool runs on a connection (`is_ready`, `checkin_info`,
+  `set_owner`, `get_state`) take an explicit timeout, and the pool passes
+  250ms. `h2_conn_usable/1` used the 5s default, so one wedged HTTP/2
+  connection stalled the pool for 5 seconds on every checkout for that host
+  (#929).
+
+### Added
+
+- Fault injection test harness for the pool: a transport which can be told to
+  misbehave, a sentinel which makes a dead pool visible, fault and chaos
+  suites, and a structural test which fails if the pool calls a connection
+  process outside a `try`. `DEVELOPMENT.md` explains how to use it (#929).
+
+### Changed
+
+- Update dependencies to their latest releases: `h2` 0.12.0 and `webtransport`
+  0.4.5 (#930).
+
 4.7.3 - 2026-08-11
 ------------------
 
