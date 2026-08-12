@@ -38,17 +38,30 @@ start() ->
     _ = stop(),
     Self = self(),
     Pid = spawn(fun() -> Self ! {?NAME, started}, collect([]) end),
+    %% Safe because stop/0 above waited for any previous collector to be gone.
     true = register(?NAME, Pid),
     receive {?NAME, started} -> ok after ?CALL_TIMEOUT -> ok end,
     ok = logger:add_handler(?NAME, ?MODULE, #{level => error}),
     ok.
 
 %% @doc Stop collecting and drop everything collected. Safe to call twice.
+%% Waits for the collector to be gone: `start/0' registers the same name, and
+%% an asynchronous stop leaves it taken for a moment.
 stop() ->
     _ = logger:remove_handler(?NAME),
     case whereis(?NAME) of
-        undefined -> ok;
-        Pid -> Pid ! stop, ok
+        undefined ->
+            ok;
+        Pid ->
+            Ref = erlang:monitor(process, Pid),
+            Pid ! stop,
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            after ?CALL_TIMEOUT ->
+                erlang:demonitor(Ref, [flush]),
+                exit(Pid, kill),
+                ok
+            end
     end.
 
 %% @doc Drop everything collected so far, keep collecting.
