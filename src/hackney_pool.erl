@@ -1127,10 +1127,10 @@ set_owner(Pid, Owner) ->
     end.
 
 %% @private Fetch the conn's checkin flags, or `error' if the call fails (the
-%% conn died between is_process_alive/1 and here). Caller treats `error' as
-%% not poolable.
+%% conn died between is_process_alive/1 and here) or in closed state (grace window). 
+%% Caller treats `error' as not poolable.
 checkin_info(Pid) ->
-    try {ok, hackney_conn:checkin_info(Pid, ?PROBE_TIMEOUT)}
+    try {ok, #{} = hackney_conn:checkin_info(Pid, ?PROBE_TIMEOUT)}
     catch _:_ -> error
     end.
 

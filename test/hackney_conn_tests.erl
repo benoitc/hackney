@@ -256,7 +256,7 @@ test_owner_death() ->
 
 %% #850: when a checkout races a server-side close, the pool calls set_owner on
 %% a connection that has just transitioned to `closed`. It must get
-%% {error, invalid_state} back (so the pool can fall through to a fresh
+%% {error, closed} back (so the pool can fall through to a fresh
 %% connection) rather than crash. A non-pooled connection has no grace timer,
 %% so it stays in `closed` to answer.
 test_set_owner_closed_returns_error() ->
@@ -264,7 +264,7 @@ test_set_owner_closed_returns_error() ->
     ?assertEqual({ok, connected}, hackney_conn:get_state(Pid)),
     ok = hackney_conn:close(Pid),
     ?assertEqual({ok, closed}, hackney_conn:get_state(Pid)),
-    ?assertEqual({error, invalid_state}, hackney_conn:set_owner(Pid, self())),
+    ?assertEqual({error, closed}, hackney_conn:set_owner(Pid, self())),
     hackney_conn:stop(Pid),
     gen_tcp:close(ListenSock).
 
