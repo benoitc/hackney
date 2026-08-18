@@ -1824,8 +1824,8 @@ closed(enter, _OldState, #conn_data{socket = Socket, transport = Transport, pool
     %% late-arriving {call, From, {request, _}} messages from workers that
     %% raced the pool checkout race a terminating gen_statem — which
     %% surfaces as `exit:{normal, _}` in the caller (issue #836). Stay
-    %% alive briefly so those late calls get a proper `{error, {closed, _}}`
-    %% reply via handle_common's invalid_state fallback, then stop.
+    %% alive briefly so those late calls get a proper `{error, closed}`
+    %% reply via the dedicated closed/3 catch-all clause below, then stop.
     case PoolPid of
         undefined ->
             {keep_state, Data#conn_data{socket = undefined}};
@@ -1878,6 +1878,14 @@ closed(cast, {set_owner, _NewOwner}, #conn_data{pool_pid = PoolPid} = Data)
     %% now so the pool's monitor removes us from `available` promptly, instead
     %% of lingering through the grace window and being handed out again.
     {stop, normal, Data};
+
+closed({call, From}, _Msg, _Data) ->
+    %% Any other synchronous call arriving during the grace window (request,
+    %% request_async, send_headers, body, stream_body, etc.) gets a proper
+    %% `{error, closed}` instead of the generic `{error, invalid_state}` from
+    %% handle_common. This lets callers distinguish a peer-closed connection
+    %% from a misuse of the API.
+    {keep_state_and_data, [{reply, From, {error, closed}}]};
 
 closed(EventType, Event, Data) ->
     handle_common(EventType, Event, closed, Data).
