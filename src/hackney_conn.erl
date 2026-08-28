@@ -950,9 +950,15 @@ connected({call, From}, is_ready, #conn_data{transport = Transport, socket = Soc
                     %% are the start of the response; keep them in the read buffer
                     %% so the next request consumes them instead of stranding them.
                     Drained = drain_socket_data(Socket),
+                    %% This conn is on its way to a requester, so it is not idle
+                    %% any more: disarm the keepalive timer armed by
+                    %% connected(enter). It has been running since before this
+                    %% probe and would otherwise still fire, closing the conn under
+                    %% the request about to arrive. Re-armed on release.
                     {keep_state,
                      Data#conn_data{buffer = <<Buffer/binary, Drained/binary>>},
-                     [{reply, From, {ok, connected}}]};
+                     [{state_timeout, infinity, idle_timeout},
+                      {reply, From, {ok, connected}}]};
                 {error, _} ->
                     {keep_state_and_data, [{reply, From, {ok, closed}}]}
             end
