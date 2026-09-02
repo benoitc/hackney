@@ -94,10 +94,9 @@
 -define(DEFAULT_PREWARM_COUNT, 4).         % Connections to maintain per host
 -define(STOP_CONN_TIMEOUT, 100).           % Max wait for a conn to stop
 -define(PREWARM_CONNECT_TIMEOUT, 5000).    % Dial budget for a prewarm conn
-%% Every question the pool asks a conn about its own health is answered from
-%% the conn's state, so a healthy conn answers at once. A conn that does not
-%% is wedged, and waiting on it from inside the pool gen_server blocks every
-%% caller of the pool, not just the one that asked: treat slow as unusable.
+%% Bound calls from the pool to a connection so one slow process does not block
+%% every pool caller. HTTP/2 state probe timeouts are treated as busy so active
+%% streams can drain
 -define(PROBE_TIMEOUT, 250).
 
 start() ->
@@ -210,13 +209,27 @@ checkout_h2(Host, Port, Transport, Options) ->
 %% @doc Register an HTTP/2 connection in the pool for sharing.
 %% Called after ALPN negotiation confirms HTTP/2.
 -spec register_h2(Host :: string(), Port :: non_neg_integer(),
-                  Transport :: module(), Pid :: pid(), Options :: list()) -> ok.
+                  Transport :: module(), Pid :: pid(), Options :: list()) ->
+    ok | {ok, pid()} | {error, term()}.
 register_h2(Host, Port, Transport, Pid, Options) ->
     PoolName = proplists:get_value(pool, Options, default),
+    ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
+    RegisterTimeout = proplists:get_value(checkout_timeout, Options,
+                                          ConnectTimeout),
     Pool = find_pool(PoolName, Options),
     Key = h2_connection_key(Host, Port, Transport, Options),
-    gen_server:cast(Pool, {register_h2, Key, Pid}),
-    ok.
+    Deadline = registration_deadline(RegisterTimeout),
+    CallTimeout = registration_call_timeout(RegisterTimeout),
+    try
+        gen_server:call(Pool, {register_h2, Key, Pid, Deadline}, CallTimeout)
+    catch
+        exit:{timeout, _} ->
+            stop_conn(Pid),
+            {error, checkout_timeout};
+        _:_ ->
+            stop_conn(Pid),
+            {error, checkout_failure}
+    end.
 
 %% @doc Remove an HTTP/2 connection from the pool (e.g., on GOAWAY).
 -spec unregister_h2(Pid :: pid(), Options :: list()) -> ok.
@@ -633,13 +646,26 @@ handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State)
         undefined ->
             {reply, none, State};
         Pid ->
-            case h2_conn_usable(Pid) of
-                true ->
+            case h2_conn_status(Pid) of
+                ready ->
                     {reply, {ok, Pid}, State};
-                false ->
+                busy ->
+                    {reply, none, State};
+                unusable ->
+                    stop_conn(Pid),
                     H2Conns2 = maps:remove(Key, H2Conns),
                     {reply, none, State#state{h2_connections = H2Conns2}}
             end
+    end;
+
+handle_call({register_h2, Key, Pid, Deadline}, _From,
+            #state{h2_connections = H2Conns} = State) ->
+    case registration_expired(Deadline) of
+        true ->
+            stop_conn(Pid),
+            {reply, {error, checkout_timeout}, State};
+        false ->
+            do_register_h2(Key, Pid, Deadline, H2Conns, State)
     end;
 
 handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State) ->
@@ -700,20 +726,6 @@ handle_cast({prewarm_checkin, Pid, Key}, State) ->
     %% Add to available
     Available2 = maps:update_with(Key, fun(Pids) -> [Pid | Pids] end, [Pid], Available),
     {noreply, State#state{available=Available2, pid_monitors=PidMonitors2}};
-
-handle_cast({register_h2, Key, Pid}, State) ->
-    %% Register an HTTP/2 connection for sharing
-    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
-    %% Monitor the connection if not already monitored
-    PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
-        true -> PidMonitors;
-        false ->
-            MonRef = erlang:monitor(process, Pid),
-            maps:put(Pid, MonRef, PidMonitors)
-    end,
-    %% Store HTTP/2 connection
-    H2Conns2 = maps:put(Key, Pid, H2Conns),
-    {noreply, State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}};
 
 handle_cast({unregister_h2, Pid}, State) ->
     %% Remove an HTTP/2 connection from the pool
@@ -1237,19 +1249,98 @@ pool_has_idle_room(#state{available=Available, max_connections=MaxConn}) ->
 idle_count(Available) ->
     maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available).
 
-%% @private Check that a pooled HTTP/2 conn is alive and in `connected` state.
-%% Short timeout so a stuck conn doesn't wedge the pool; any failure → unusable.
-h2_conn_usable(Pid) ->
+%% @private Check whether a pooled HTTP/2 conn can accept a new request
+h2_conn_status(Pid) ->
     case erlang:is_process_alive(Pid) of
-        false -> false;
+        false -> unusable;
         true ->
             try hackney_conn:get_state(Pid, ?PROBE_TIMEOUT) of
-                {ok, connected} -> true;
-                _ -> false
+                {ok, connected} -> ready;
+                {ok, streaming_body} -> busy;
+                _ -> unusable
             catch
-                _:_ -> false
+                exit:{timeout, _} -> busy;
+                _:_ -> unusable
             end
     end.
+
+do_register_h2(Key, Pid, Deadline, H2Conns, State) ->
+    case maps:get(Key, H2Conns, undefined) of
+        undefined ->
+            register_h2_connection(Key, Pid, Deadline, State);
+        Pid ->
+            {reply, {ok, Pid}, State};
+        Existing ->
+            Status = h2_conn_status(Existing),
+            case registration_expired(Deadline) of
+                true ->
+                    stop_conn(Pid),
+                    {reply, {error, checkout_timeout}, State};
+                false ->
+                    do_register_h2(Status, Key, Pid, Existing, Deadline, State)
+            end
+    end.
+
+do_register_h2(ready, _Key, Pid, Existing, _Deadline, State) ->
+    stop_conn(Pid),
+    {reply, {ok, Existing}, State};
+do_register_h2(busy, Key, Pid, Existing, Deadline, State) ->
+    case register_h2_connection(Key, Pid, Deadline, State) of
+        {reply, ok, _} = Result ->
+            hackney_conn:retire_h2(Existing),
+            Result;
+        Error ->
+            Error
+    end;
+do_register_h2(unusable, Key, Pid, Existing, Deadline, State) ->
+    stop_conn(Existing),
+    register_h2_connection(Key, Pid, Deadline, State).
+
+register_h2_connection(Key, Pid, Deadline, State) ->
+    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    case registration_expired(Deadline) of
+        true ->
+            stop_conn(Pid),
+            {reply, {error, checkout_timeout}, State};
+        false ->
+            register_h2_connection(Key, Pid, Deadline, State,
+                                   set_owner(Pid, self()),
+                                   H2Conns, PidMonitors)
+    end.
+
+register_h2_connection(Key, Pid, Deadline, State, ok,
+                       H2Conns, PidMonitors) ->
+    case registration_expired(Deadline) of
+        false ->
+            PidMonitors2 = case maps:is_key(Pid, PidMonitors) of
+                true -> PidMonitors;
+                false ->
+                    MonRef = erlang:monitor(process, Pid),
+                    maps:put(Pid, MonRef, PidMonitors)
+            end,
+            H2Conns2 = maps:put(Key, Pid, H2Conns),
+            {reply, ok, State#state{h2_connections = H2Conns2,
+                                    pid_monitors = PidMonitors2}};
+        true ->
+            stop_conn(Pid),
+            {reply, {error, checkout_timeout}, State}
+    end;
+register_h2_connection(_Key, Pid, _Deadline, State, {error, _} = Error,
+                       _H2Conns, _PidMonitors) ->
+    stop_conn(Pid),
+    {reply, Error, State}.
+
+registration_deadline(infinity) -> infinity;
+registration_deadline(Timeout) ->
+    erlang:monotonic_time(millisecond) + Timeout.
+
+registration_call_timeout(infinity) -> infinity;
+registration_call_timeout(Timeout) ->
+    Timeout + 2 * ?PROBE_TIMEOUT + ?STOP_CONN_TIMEOUT.
+
+registration_expired(infinity) -> false;
+registration_expired(Deadline) ->
+    erlang:monotonic_time(millisecond) >= Deadline.
 
 %% @private Remove an HTTP/2 connection from the pool
 do_unregister_h2(Pid, State) ->

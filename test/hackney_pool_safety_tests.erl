@@ -23,7 +23,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% Calls that cannot raise: casts are fire and forget.
--define(SAFE_BY_NATURE, [set_owner_async]).
+-define(SAFE_BY_NATURE, [set_owner_async, retire_h2]).
 
 conn_calls_are_guarded_test() ->
     Unguarded = [Call || Call <- conn_calls(hackney_pool), unguarded(Call)],

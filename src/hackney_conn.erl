@@ -87,6 +87,7 @@
     set_owner/2,
     set_owner/3,
     set_owner_async/2,
+    retire_h2/1,
     %% Protocol info
     get_protocol/1
 ]).
@@ -228,6 +229,10 @@
     %%   {stream, body_full, Status, Headers, Acc, From}
     %%   {stream, done, Status, Headers, Buffer}
     h2_streams = #{} :: #{pos_integer() => {term(), tuple()}},
+    %% Per-stream caller monitors: StreamId => monitor reference
+    h2_stream_monitors = #{} :: #{pos_integer() => reference()},
+    %% Stop after the last tracked stream is consumed
+    h2_retiring = false :: boolean(),
     %% Current HTTP/2 stream ID for streaming body mode (body = stream)
     h2_stream_id :: pos_integer() | undefined,
     %% Per-stream recv_timeout watchdog timers (sync one-shot reads):
@@ -613,6 +618,10 @@ set_owner(Pid, NewOwner, Timeout) ->
 -spec set_owner_async(pid(), pid()) -> ok.
 set_owner_async(Pid, NewOwner) ->
     gen_statem:cast(Pid, {set_owner, NewOwner}).
+
+-spec retire_h2(pid()) -> ok.
+retire_h2(Pid) ->
+    gen_statem:cast(Pid, retire_h2).
 
 %% @doc Check if the connection's socket is still healthy.
 %% Returns ok if socket is open, {error, closed} otherwise.
@@ -1895,6 +1904,12 @@ handle_common(cast, stop, _State, Data) ->
     %% Async stop - used by pool to avoid deadlock during sync checkin
     {stop, normal, Data};
 
+handle_common(cast, retire_h2, _State, Data) ->
+    h2_stream_result(Data#conn_data{h2_retiring = true}, []);
+
+handle_common(info, {'DOWN', Ref, process, _Pid, _Reason}, State, Data) ->
+    handle_h2_stream_owner_down(Ref, State, Data);
+
 handle_common(cast, _Msg, _State, _Data) ->
     keep_state_and_data;
 
@@ -2998,7 +3013,8 @@ start_h2_connection(Socket, Data, From, Origin) ->
                             NewData = Data#conn_data{
                                 h2_conn = H2Conn,
                                 h2_mon = Mon,
-                                h2_streams = #{}
+                                h2_streams = #{},
+                                h2_stream_monitors = #{}
                             },
                             %% Cancel any pending idle_timeout armed by the
                             %% TCP-first connected(enter): HTTP/2 connections
@@ -3033,6 +3049,72 @@ h2_start_failure(after_upgrade, From, Reason) ->
 %% @private Close an HTTP/2 connection, tolerating an already-closed one.
 close_h2(H2Conn) ->
     try h2_connection:close(H2Conn) catch _:_ -> ok end.
+
+%% Unpooled connections retain connection-owner cleanup and set_owner handoff.
+track_h2_stream(StreamId, Owner, StreamState,
+                #conn_data{pool_pid = undefined, h2_streams = Streams} = Data) ->
+    Data#conn_data{h2_streams = maps:put(StreamId, {Owner, StreamState}, Streams)};
+track_h2_stream(StreamId, Owner, StreamState,
+                #conn_data{h2_streams = Streams,
+                           h2_stream_monitors = Monitors} = Data) ->
+    OwnerPid = h2_stream_owner_pid(Owner),
+    Monitor = erlang:monitor(process, OwnerPid),
+    Data#conn_data{
+        h2_streams = maps:put(StreamId, {Owner, StreamState}, Streams),
+        h2_stream_monitors = maps:put(StreamId, Monitor, Monitors)
+    }.
+
+h2_stream_owner_pid({Pid, _Tag}) when is_pid(Pid) -> Pid;
+h2_stream_owner_pid(Pid) when is_pid(Pid) -> Pid.
+
+drop_h2_stream(StreamId,
+               #conn_data{h2_streams = Streams,
+                          h2_stream_monitors = Monitors} = Data) ->
+    Data1 = cancel_h2_timer(StreamId, Data),
+    Monitors2 = case maps:take(StreamId, Monitors) of
+        {Monitor, Rest} ->
+            _ = erlang:demonitor(Monitor, [flush]),
+            Rest;
+        error ->
+            Monitors
+    end,
+    Data1#conn_data{
+        h2_streams = maps:remove(StreamId, Streams),
+        h2_stream_monitors = Monitors2
+    }.
+
+clear_h2_stream_monitors(#conn_data{h2_stream_monitors = Monitors} = Data) ->
+    _ = maps:fold(fun(_StreamId, Monitor, ok) ->
+        _ = erlang:demonitor(Monitor, [flush]),
+        ok
+    end, ok, Monitors),
+    Data#conn_data{h2_stream_monitors = #{}}.
+
+handle_h2_stream_owner_down(Ref, State,
+                            #conn_data{h2_stream_monitors = Monitors} = Data) ->
+    case [StreamId || {StreamId, Monitor} <- maps:to_list(Monitors),
+                      Monitor =:= Ref] of
+        [StreamId] ->
+            _ = cancel_h2_stream(Data#conn_data.h2_conn, StreamId),
+            Data1 = drop_h2_stream(StreamId, Data),
+            h2_stream_owner_down_result(State, StreamId, Data1);
+        [] ->
+            keep_state_and_data
+    end.
+
+h2_stream_owner_down_result(streaming_body, StreamId,
+                            #conn_data{h2_stream_id = StreamId} = Data) ->
+    Data1 = Data#conn_data{h2_stream_id = undefined,
+                           request_from = undefined},
+    case h2_stream_result(Data1, []) of
+        {keep_state, Data2, []} ->
+            {next_state, connected, Data2,
+             [{state_timeout, infinity, idle_timeout}]};
+        Stop ->
+            Stop
+    end;
+h2_stream_owner_down_result(_State, _StreamId, Data) ->
+    h2_stream_result(Data, []).
 
 %% @private Arm a per-stream recv_timeout watchdog for a sync HTTP/2 read so a
 %% lost frame fails fast with {error, timeout} instead of blocking until the
@@ -3079,21 +3161,22 @@ handle_h2_recv_timeout(StreamId, TRef,
                                   h2_conn = H2Conn} = Data) ->
     case maps:get(StreamId, Timers, undefined) of
         TRef ->
-            Timers2 = maps:remove(StreamId, Timers),
             case maps:get(StreamId, Streams, undefined) of
                 {From, Inner} when is_tuple(Inner), element(1, Inner) =:= sync ->
                     %% RST_STREAM(CANCEL) the stalled stream so the peer stops
                     %% sending for it and the h2 layer drops it; otherwise the
                     %% pooled connection would be reused with an orphaned stream
-                    %% still open (h2_conn_usable only checks the conn state).
+                    %% still open (pool readiness only checks the conn state).
                     _ = cancel_h2_stream(H2Conn, StreamId),
-                    Streams2 = maps:remove(StreamId, Streams),
-                    {keep_state,
-                     Data#conn_data{h2_streams = Streams2, h2_timers = Timers2,
-                                    request_from = undefined},
-                     [{reply, From, {error, timeout}}]};
+                    Data2 = drop_h2_stream(
+                              StreamId,
+                              Data#conn_data{request_from = undefined}),
+                    h2_stream_result(
+                      Data2,
+                      [{reply, From, {error, timeout}}]);
                 _ ->
-                    {keep_state, Data#conn_data{h2_timers = Timers2}}
+                    {keep_state,
+                     Data#conn_data{h2_timers = maps:remove(StreamId, Timers)}}
             end;
         _ ->
             {keep_state, Data}
@@ -3167,10 +3250,8 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
                 sync -> From;
                 {async, _Ref0, StreamTo0, _AsyncMode0} -> StreamTo0
             end,
-            Streams = maps:put(StreamId, {Owner, StreamState},
-                               Data#conn_data.h2_streams),
-            NewData0 = Data#conn_data{
-                h2_streams = Streams,
+            NewData0 = track_h2_stream(StreamId, Owner, StreamState, Data),
+            NewData1 = NewData0#conn_data{
                 method = MethodBin,
                 path = PathBin
             },
@@ -3178,9 +3259,9 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
                 sync ->
                     %% Watchdog the response so a lost frame fails fast rather
                     %% than blocking on the infinity gen_statem:call.
-                    arm_h2_timer(StreamId, NewData0#conn_data{request_from = From});
+                    arm_h2_timer(StreamId, NewData1#conn_data{request_from = From});
                 {async, Ref, StreamTo, AsyncMode} ->
-                    NewData0#conn_data{
+                    NewData1#conn_data{
                         async = AsyncMode,
                         async_ref = Ref,
                         stream_to = StreamTo
@@ -3198,7 +3279,7 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
 %% END_STREAM and transition to streaming_body so the caller can push body
 %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
 do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data) ->
-    #conn_data{h2_conn = H2Conn, h2_streams = Streams} = Data,
+    #conn_data{h2_conn = H2Conn} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
     %% Effective send_timeout for this stream's body chunks. Stored in the
@@ -3215,8 +3296,9 @@ do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data) ->
     end,
     case SendRes of
         {ok, StreamId} ->
-            NewData = Data#conn_data{
-                h2_streams = maps:put(StreamId, {undefined, {stream, sending}}, Streams),
+            Owner = element(1, From),
+            NewData0 = track_h2_stream(StreamId, Owner, {stream, sending}, Data),
+            NewData = NewData0#conn_data{
                 h2_stream_id = StreamId,
                 req_send_timeout = SendTimeout,
                 method = MethodBin,
@@ -3309,8 +3391,8 @@ handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Str
                      [{reply, From, {ok, Buffer}}]}
             end;
         {_, {stream, done, _Status, _Hdrs, <<>>}} ->
-            Streams2 = maps:remove(StreamId, Streams),
-            {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, done}]};
+            h2_stream_result(drop_h2_stream(StreamId, Data),
+                             [{reply, From, done}]);
         {_, {stream, done, Status, Hdrs, Buffer}} ->
             %% Hand back the last buffered chunk; next call returns done.
             Streams2 = maps:put(StreamId, {undefined, {stream, done, Status, Hdrs, <<>>}}, Streams),
@@ -3329,8 +3411,8 @@ handle_h2_read_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Strea
                                 Streams),
             {keep_state, Data#conn_data{h2_streams = Streams2}};
         {_, {stream, done, _Status, _Hdrs, Buffer}} ->
-            Streams2 = maps:remove(StreamId, Streams),
-            {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, {ok, Buffer}}]};
+            h2_stream_result(drop_h2_stream(StreamId, Data),
+                             [{reply, From, {ok, Buffer}}]);
         _ ->
             {keep_state_and_data, [{reply, From, {error, no_stream}}]}
     end.
@@ -3482,11 +3564,10 @@ deliver_once_item(StreamId, StreamTo, Ref, [{data, Body} | Rest], Data) ->
     {keep_state, Data#conn_data{h2_streams = Streams2}};
 deliver_once_item(StreamId, StreamTo, Ref, [done], Data) ->
     StreamTo ! {hackney_response, Ref, done},
-    Streams2 = maps:remove(StreamId, Data#conn_data.h2_streams),
-    {keep_state, Data#conn_data{h2_streams = Streams2,
-                                async = false,
-                                async_ref = undefined,
-                                stream_to = undefined}};
+    Data1 = drop_h2_stream(StreamId, Data),
+    h2_stream_result(Data1#conn_data{async = false,
+                                     async_ref = undefined,
+                                     stream_to = undefined}, []);
 deliver_once_item(StreamId, StreamTo, Ref, [], Data) ->
     Streams2 = maps:put(StreamId,
                         {StreamTo, {async_once, StreamTo, Ref, [], 1}},
@@ -3516,12 +3597,11 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
             NewAcc = <<Acc/binary, Body/binary>>,
             case EndStream of
                 true ->
-                    Streams2 = maps:remove(StreamId, Streams),
-                    Data2 = cancel_h2_timer(StreamId,
-                                            Data#conn_data{h2_streams = Streams2,
-                                                           request_from = undefined}),
-                    {keep_state, Data2,
-                     [{reply, From, {ok, Status, Headers, NewAcc}}]};
+                    Data2 = drop_h2_stream(
+                              StreamId,
+                              Data#conn_data{request_from = undefined}),
+                    h2_stream_result(Data2,
+                                     [{reply, From, {ok, Status, Headers, NewAcc}}]);
                 false ->
                     Streams2 = maps:put(StreamId,
                                         {From, {sync, body, Status, Headers, NewAcc}},
@@ -3553,12 +3633,11 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
             case EndStream of
                 true ->
                     StreamTo ! {hackney_response, Ref, done},
-                    Streams2 = maps:remove(StreamId, Streams),
-                    {keep_state,
-                     Data#conn_data{h2_streams = Streams2,
-                                    async = false,
-                                    async_ref = undefined,
-                                    stream_to = undefined}};
+                    Data2 = drop_h2_stream(StreamId, Data),
+                    h2_stream_result(
+                      Data2#conn_data{async = false,
+                                      async_ref = undefined,
+                                      stream_to = undefined}, []);
                 false ->
                     NewState = {async, AsyncMode, StreamTo, Ref, streaming,
                                 Status, Headers},
@@ -3586,9 +3665,8 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
                      [{reply, From, {ok, NewBuffer}}]};
                 From when EndStream ->
                     %% Parked caller, no buffered bytes, stream ended -> done.
-                    Streams2 = maps:remove(StreamId, Streams),
-                    {keep_state, Data#conn_data{h2_streams = Streams2},
-                     [{reply, From, done}]};
+                    h2_stream_result(drop_h2_stream(StreamId, Data),
+                                     [{reply, From, done}]);
                 _From ->
                     %% Empty DATA frame without END_STREAM: keep the caller parked.
                     {keep_state, Data}
@@ -3598,9 +3676,8 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
             NewAcc = <<Acc/binary, Body/binary>>,
             case EndStream of
                 true ->
-                    Streams2 = maps:remove(StreamId, Streams),
-                    {keep_state, Data#conn_data{h2_streams = Streams2},
-                     [{reply, From, {ok, NewAcc}}]};
+                    h2_stream_result(drop_h2_stream(StreamId, Data),
+                                     [{reply, From, {ok, NewAcc}}]);
                 false ->
                     Streams2 = maps:put(StreamId,
                                         {From, {stream, body_full, Status, Headers, NewAcc, From}},
@@ -3615,34 +3692,32 @@ h2_on_stream_reset(StreamId, ErrorCode, Data) ->
     #conn_data{h2_streams = Streams} = Data,
     case maps:get(StreamId, Streams, undefined) of
         {From, Inner} when is_tuple(Inner), element(1, Inner) =:= sync ->
-            Streams2 = maps:remove(StreamId, Streams),
-            Data2 = cancel_h2_timer(StreamId,
-                                    Data#conn_data{h2_streams = Streams2,
-                                                   request_from = undefined}),
-            {keep_state, Data2,
-             [{reply, From, {error, {stream_error, ErrorCode}}}]};
+            Data2 = drop_h2_stream(
+                      StreamId,
+                      Data#conn_data{request_from = undefined}),
+            h2_stream_result(Data2,
+                             [{reply, From, {error, {stream_error, ErrorCode}}}]);
         {StreamTo, {async, _, StreamTo, Ref, _, _, _}} ->
             StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
-            Streams2 = maps:remove(StreamId, Streams),
-            {keep_state, Data#conn_data{h2_streams = Streams2}};
+            h2_stream_result(drop_h2_stream(StreamId, Data), []);
         {StreamTo, {async, _, StreamTo, Ref, _}} ->
             StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
-            Streams2 = maps:remove(StreamId, Streams),
-            {keep_state, Data#conn_data{h2_streams = Streams2}};
+            h2_stream_result(drop_h2_stream(StreamId, Data), []);
         {StreamTo, {async_once, StreamTo, Ref, _, _}} ->
             StreamTo ! {hackney_response, Ref, {error, {stream_error, ErrorCode}}},
-            Streams2 = maps:remove(StreamId, Streams),
-            {keep_state, Data#conn_data{h2_streams = Streams2}};
+            h2_stream_result(drop_h2_stream(StreamId, Data), []);
         {_, Inner} when is_tuple(Inner), element(1, Inner) =:= stream ->
             %% Streaming-body stream: reply to any parked caller and drop it so a
             %% later stream_body/start_response sees {error, no_stream}.
-            Streams2 = maps:remove(StreamId, Streams),
             Replies = case h2_stream_parked_from(Inner) of
                 undefined -> [];
                 From -> [{reply, From, {error, {stream_error, ErrorCode}}}]
             end,
-            {keep_state, Data#conn_data{h2_streams = Streams2, request_from = undefined},
-             Replies};
+            h2_stream_result(
+              drop_h2_stream(
+                StreamId,
+                Data#conn_data{request_from = undefined}),
+              Replies);
         _ ->
             {keep_state, Data}
     end.
@@ -3654,15 +3729,21 @@ h2_stream_parked_from({stream, headers, _, _, _, From}) -> From;
 h2_stream_parked_from({stream, body_full, _, _, _, From}) -> From;
 h2_stream_parked_from(_) -> undefined.
 
+h2_stream_result(#conn_data{h2_retiring = true, h2_streams = Streams} = Data,
+                 Replies) when map_size(Streams) =:= 0 ->
+    {stop_and_reply, normal, Replies, Data};
+h2_stream_result(Data, Replies) ->
+    {keep_state, Data, Replies}.
+
 h2_on_goaway(ErrorCode, #conn_data{h2_conn = H2Conn, h2_mon = H2Mon} = Data) ->
     %% A GOAWAY means the peer will not service new streams on this connection.
     %% AWS ALBs recycle connections this way, sending GOAWAY but keeping the
     %% socket open for a drain window. Leaving the conn `connected` and pooled
-    %% made checkout_h2/h2_conn_usable keep handing it out, so every reused
+    %% made checkout_h2 keep handing it out, so every reused
     %% request opened a stream past last_stream_id that the peer ignored and hung
     %% to recv_timeout. Tear the connection down and transition to `closed` (like
-    %% h2_on_closed/2): the pool then stops reusing it (h2_conn_usable requires
-    %% `connected`) and new requests dial a fresh connection. in-flight streams
+    %% h2_on_closed/2): the pool then stops reusing it, and new requests dial a
+    %% fresh connection. In-flight streams
     %% are aborted with the goaway error as before.
     {Replies, Data1} = collect_h2_aborts({goaway, ErrorCode}, Data),
     Data2 = cancel_all_h2_timers(Data1),
@@ -3707,7 +3788,9 @@ collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->
             end;
         (_, _, Acc) -> Acc
     end, [], Streams),
-    {Replies, Data#conn_data{h2_streams = #{}, request_from = undefined}}.
+    Data1 = clear_h2_stream_monitors(
+              Data#conn_data{h2_streams = #{}, request_from = undefined}),
+    {Replies, Data1}.
 
 
 %%====================================================================

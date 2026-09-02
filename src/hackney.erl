@@ -73,6 +73,7 @@
 
 -define(METHOD_TPL(Method),
   -export([Method/1, Method/2, Method/3, Method/4])).
+-define(H2_PROBE_TIMEOUT, 250).
 -include("hackney_methods.hrl").
 
 -include("hackney.hrl").
@@ -195,21 +196,13 @@ connect_pool(Transport, Host, Port, Options) ->
           %% Try HTTP/2 multiplexing
           case PoolHandler:checkout_h2(Host, Port, Transport, Options2) of
             {ok, H2Pid} ->
-              %% Verify connection is actually in connected state
-              %% (OTP 28 on FreeBSD may have timing issues with SSL connections).
-              %% The probe is a gen_statem:call, which exits if the pooled
-              %% connection is terminating (idle teardown, GOAWAY, keepalive
-              %% close) at checkout time; treat that as unusable and fall
-              %% through to a fresh connection instead of crashing the caller.
-              %% Mirrors maybe_register_h2/maybe_upgrade_ssl.
-              GetState = try hackney_conn:get_state(H2Pid)
-                         catch exit:_ -> {error, terminated} end,
-              case GetState of
-                {ok, connected} ->
-                          {ok, H2Pid};
-                _ ->
-                  %% Connection not ready, unregister and create new
-                  PoolHandler:unregister_h2(H2Pid, Options2),
+              case h2_checkout_status(H2Pid) of
+                ready ->
+                  {ok, H2Pid};
+                busy ->
+                  connect_pool_new(Transport, Host, Port, Options2, FinalSslOpts, PoolHandler);
+                unusable ->
+                  stop_conn(H2Pid),
                   connect_pool_new(Transport, Host, Port, Options2, FinalSslOpts, PoolHandler)
               end;
             none ->
@@ -369,9 +362,10 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
   CheckoutTimeout = proplists:get_value(checkout_timeout, Options,
                       proplists:get_value(connect_timeout, Options, 8000)),
 
-  %% 1. Acquire per-host slot (blocks with backoff until available)
-  case hackney_load_regulation:acquire(Host, Port, MaxPerHost, CheckoutTimeout) of
-    ok ->
+  %% 1. Acquire per-host slot, or reuse an H2 connection that becomes ready
+  case acquire_pool_slot(Transport, Host, Port, Options, PoolHandler,
+                         MaxPerHost, CheckoutTimeout) of
+    slot ->
       %% Slot acquired - now get connection from pool
       SslPooling = proplists:get_value(ssl_pooling, Options,
                      hackney_app:get_app_env(ssl_pooling, false)),
@@ -389,8 +383,7 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
               case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
                 ok ->
                   %% Check if HTTP/2 was negotiated, register for multiplexing
-                  maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
-                  {ok, ConnPid};
+                  maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler);
                 {error, Reason} ->
                   %% Upgrade failed - release slot and close connection
                   hackney_load_regulation:release(Host, Port),
@@ -403,9 +396,92 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
               {error, Reason}
           end
       end;
-    {error, timeout} ->
+    {h2, H2Pid} ->
+      {ok, H2Pid};
+    timeout ->
       {error, checkout_timeout}
   end.
+
+acquire_pool_slot(hackney_ssl, Host, Port, Options, PoolHandler,
+                  MaxPerHost, Timeout) ->
+  case lists:member(http2, proplists:get_value(protocols, Options,
+                                               hackney_util:default_protocols())) of
+    true ->
+      Deadline = checkout_deadline(Timeout),
+      acquire_pool_slot_h2(Host, Port, Options, PoolHandler,
+                           MaxPerHost, Deadline);
+    false ->
+      acquire_pool_slot_only(Host, Port, MaxPerHost, Timeout)
+  end;
+acquire_pool_slot(_Transport, Host, Port, _Options, _PoolHandler,
+                  MaxPerHost, Timeout) ->
+  acquire_pool_slot_only(Host, Port, MaxPerHost, Timeout).
+
+acquire_pool_slot_only(Host, Port, MaxPerHost, Timeout) ->
+  case hackney_load_regulation:acquire(Host, Port, MaxPerHost, Timeout) of
+    ok -> slot;
+    {error, timeout} -> timeout
+  end.
+
+acquire_pool_slot_h2(Host, Port, Options, PoolHandler, MaxPerHost, Deadline) ->
+  Wait = min(?H2_PROBE_TIMEOUT, checkout_time_left(Deadline)),
+  case hackney_load_regulation:acquire(Host, Port, MaxPerHost, Wait) of
+    ok ->
+      slot;
+    {error, timeout} ->
+      case checkout_h2_ready(Host, Port, Options, PoolHandler, Deadline) of
+        {ok, Pid} ->
+          {h2, Pid};
+        timeout ->
+          timeout;
+        none when Wait =:= 0 ->
+          timeout;
+        none ->
+          acquire_pool_slot_h2(Host, Port, Options, PoolHandler,
+                               MaxPerHost, Deadline)
+      end
+  end.
+
+checkout_h2_ready(Host, Port, Options, PoolHandler, Deadline) ->
+  case checkout_time_left(Deadline) of
+    0 ->
+      timeout;
+    Remaining ->
+      ProbeTimeout = min(?H2_PROBE_TIMEOUT, Remaining),
+      ProbeOptions = lists:keystore(connect_timeout, 1, Options,
+                                    {connect_timeout, ProbeTimeout}),
+      case PoolHandler:checkout_h2(Host, Port, hackney_ssl, ProbeOptions) of
+        {ok, Pid} ->
+          checkout_h2_candidate(Pid, Deadline);
+        none ->
+          none
+      end
+  end.
+
+checkout_h2_candidate(Pid, Deadline) ->
+  case checkout_time_left(Deadline) of
+    0 ->
+      timeout;
+    Remaining ->
+      ProbeTimeout = min(?H2_PROBE_TIMEOUT, Remaining),
+      case h2_checkout_status(Pid, ProbeTimeout) of
+        ready -> {ok, Pid};
+        busy -> none;
+        unusable ->
+          stop_conn(Pid, min(ProbeTimeout, checkout_time_left(Deadline))),
+          none
+      end
+  end.
+
+checkout_deadline(infinity) ->
+  infinity;
+checkout_deadline(Timeout) ->
+  erlang:monotonic_time(millisecond) + Timeout.
+
+checkout_time_left(infinity) ->
+  ?H2_PROBE_TIMEOUT;
+checkout_time_left(Deadline) ->
+  max(0, Deadline - erlang:monotonic_time(millisecond)).
 
 %% @private SSL-pooling checkout. A `ready' conn is an already-upgraded
 %% HTTPS/1.1 connection reused on an exact tls_key match; it was registered
@@ -420,8 +496,7 @@ connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
       case hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts,
                                        #{final => true, pool_ssl => true}) of
         ok ->
-          maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
-          {ok, ConnPid};
+          maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler);
         {error, Reason} ->
           hackney_load_regulation:release(Host, Port),
           stop_conn(ConnPid),
@@ -438,15 +513,36 @@ maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
   try hackney_conn:get_protocol(ConnPid) of
     http2 ->
       %% HTTP/2 negotiated - register for connection sharing
-      PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options);
+      case PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options) of
+        ok ->
+          {ok, ConnPid};
+        {ok, RegisteredPid} ->
+          {ok, RegisteredPid};
+        {error, _} = Error ->
+          stop_conn(ConnPid, ?H2_PROBE_TIMEOUT),
+          Error
+      end;
     http1 ->
-      ok;
+      {ok, ConnPid};
     http3 ->
-      ok
+      {ok, ConnPid}
   catch
-    _:_ ->
-      %% Connection terminated before we could check - ignore
-      ok
+    _:Reason ->
+      stop_conn(ConnPid, ?H2_PROBE_TIMEOUT),
+      {error, Reason}
+  end.
+
+h2_checkout_status(Pid) ->
+  h2_checkout_status(Pid, ?H2_PROBE_TIMEOUT).
+
+h2_checkout_status(Pid, Timeout) ->
+  try hackney_conn:get_state(Pid, Timeout) of
+    {ok, connected} -> ready;
+    {ok, streaming_body} -> busy;
+    _ -> unusable
+  catch
+    exit:{timeout, _} -> busy;
+    _:_ -> unusable
   end.
 
 %% @private Upgrade TCP connection to SSL if needed.
@@ -473,6 +569,9 @@ maybe_upgrade_ssl(_, _ConnPid, _FinalSslOpts) ->
 %% @private Stop a connection, tolerating an already-dead process.
 stop_conn(ConnPid) ->
   try hackney_conn:stop(ConnPid) catch _:_ -> ok end.
+
+stop_conn(ConnPid, Timeout) ->
+  try hackney_conn:stop(ConnPid, Timeout) catch _:_ -> ok end.
 
 %% @private Signal the websocket process to shut down, ignoring errors.
 shutdown_ws(WsPid) ->
