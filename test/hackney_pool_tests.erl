@@ -31,7 +31,9 @@ hackney_pool_unit_test_() ->
       {"start custom pool", fun test_custom_pool/0},
       {"pool stats", fun test_pool_stats/0},
       {"max connections setting", fun test_max_connections/0},
-      {"timeout setting", fun test_timeout_setting/0}
+      {"timeout setting", fun test_timeout_setting/0},
+      {"failed h2 ownership transfer is reported and stops connection",
+       fun test_h2_owner_transfer_timeout/0}
      ]}.
 
 %% HTTP/2 tls_key bucket tests - no server required
@@ -62,6 +64,8 @@ hackney_pool_integration_test_() ->
        fun test_connect_timeout_does_not_crash_pool/0},
       {"connect crash does not crash the pool",
        fun test_connect_crash_does_not_crash_pool/0},
+      {"h2 registration timeout stops the candidate and releases its slot",
+       fun test_h2_registration_timeout_releases_slot/0},
       {"queue timeout", {timeout, 120, fun test_queue_timeout/0}},
       {"checkout timeout", {timeout, 120, fun test_checkout_timeout/0}},
       {"stop_pool releases in_use load_regulation slots",
@@ -217,12 +221,50 @@ test_timeout_setting() ->
     ?assertEqual(2000, hackney_pool:timeout(test_pool_5)),  % Capped at 2s
     ok = hackney_pool:stop_pool(test_pool_5).
 
+test_h2_owner_transfer_timeout() ->
+    Pool = test_pool_h2_owner_timeout,
+    ok = hackney_pool:start_pool(Pool, []),
+    Parent = self(),
+    {Conn, ConnMon} = spawn_monitor(fun() ->
+        receive
+            {'$gen_call', From, {set_owner, _Owner}} ->
+                Parent ! {set_owner_started, self()},
+                receive
+                    {'$gen_cast', stop} -> gen_statem:reply(From, ok)
+                end
+        end
+    end),
+    Opts = [{pool, Pool}],
+    try
+        Registration = hackney_pool:register_h2("h2-owner.example.com", 443,
+                                                hackney_ssl, Conn, Opts),
+        StartResult = receive
+            {set_owner_started, Conn} -> started
+        after 1000 -> not_started
+        end,
+        ?assertEqual(started, StartResult),
+        StopResult = receive
+            {'DOWN', ConnMon, process, Conn, _Reason} -> stopped
+        after 1000 -> alive
+        end,
+        ?assertEqual(stopped, StopResult),
+        ?assertMatch({error, _}, Registration),
+        ?assertEqual(none, hackney_pool:checkout_h2("h2-owner.example.com", 443,
+                                                    hackney_ssl, Opts))
+    after
+        case is_process_alive(Conn) of
+            true -> exit(Conn, kill);
+            false -> ok
+        end,
+        catch hackney_pool:stop_pool(Pool)
+    end.
+
 %%====================================================================
 %% HTTP/2 tls_key Bucket Tests
 %%====================================================================
 
-%% Dummy connection that answers hackney_conn:get_state/1 (used by the
-%% pool's h2_conn_usable liveness check) with {ok, connected}.
+%% Dummy connection that implements the state and ownership calls used by
+%% HTTP/2 registration and checkout.
 dummy_h2_conn() ->
     spawn(fun dummy_h2_loop/0).
 
@@ -230,6 +272,9 @@ dummy_h2_loop() ->
     receive
         {'$gen_call', From, get_state} ->
             gen_statem:reply(From, {ok, connected}),
+            dummy_h2_loop();
+        {'$gen_call', From, {set_owner, _Owner}} ->
+            gen_statem:reply(From, ok),
             dummy_h2_loop();
         stop ->
             ok
@@ -773,6 +818,80 @@ test_connect_crash_does_not_crash_pool() ->
                  hackney_pool:checkout("crash.example", 443, ?MODULE, Opts)),
     ?assert(is_process_alive(hackney_pool:find_pool(PoolName))),
     ok = hackney_pool:stop_pool(PoolName).
+
+test_h2_registration_timeout_releases_slot() ->
+    PoolName = test_pool_h2_registration_timeout,
+    Host = "localhost",
+    Port = ?PORT,
+    ok = hackney_load_regulation:reset(Host, Port),
+    ok = hackney_pool:start_pool(PoolName, [{pool_size, 1},
+                                            {prewarm_count, 0}]),
+    Pool = hackney_pool:find_pool(PoolName),
+    Opts = [{pool, PoolName}, {connect_timeout, 1000},
+            {checkout_timeout, 25}],
+    try
+        ok = hackney_load_regulation:acquire(Host, Port, 1, 0),
+        {ok, _PoolInfo, Conn} = hackney_pool:checkout(Host, Port,
+                                                     hackney_tcp, Opts),
+        ConnRef = monitor(process, Conn),
+        ok = sys:suspend(Pool),
+        Parent = self(),
+        spawn(fun() ->
+            Parent ! {registration_result,
+                      hackney_pool:register_h2(Host, Port, hackney_tcp,
+                                               Conn, Opts)}
+        end),
+        ok = wait_for_registration_call(Pool, 100),
+        timer:sleep(25),
+        ok = sys:resume(Pool),
+        receive
+            {registration_result, Result} ->
+                ?assertEqual({error, checkout_timeout}, Result)
+        after 1000 ->
+            ?assert(false)
+        end,
+        receive
+            {'DOWN', ConnRef, process, Conn, _Reason} -> ok
+        after 1000 ->
+            ?assert(false)
+        end,
+        ok = wait_for_load_count(Host, Port, 0, 100),
+        ?assertEqual(none,
+                     hackney_pool:checkout_h2(Host, Port, hackney_tcp, Opts))
+    after
+        case is_process_alive(Pool) of
+            true -> catch sys:resume(Pool);
+            false -> ok
+        end,
+        catch hackney_pool:stop_pool(PoolName),
+        hackney_load_regulation:reset(Host, Port)
+    end.
+
+wait_for_registration_call(_Pool, 0) ->
+    error(registration_call_not_queued);
+wait_for_registration_call(Pool, Attempts) ->
+    {messages, Messages} = process_info(Pool, messages),
+    Queued = lists:any(
+        fun({'$gen_call', _, {register_h2, _, _}}) -> true;
+           ({'$gen_call', _, {register_h2, _, _, _}}) -> true;
+           (_) -> false
+        end, Messages),
+    case Queued of
+        true -> ok;
+        false ->
+            timer:sleep(5),
+            wait_for_registration_call(Pool, Attempts - 1)
+    end.
+
+wait_for_load_count(Host, Port, Expected, 0) ->
+    ?assertEqual(Expected, hackney_load_regulation:current(Host, Port));
+wait_for_load_count(Host, Port, Expected, Attempts) ->
+    case hackney_load_regulation:current(Host, Port) of
+        Expected -> ok;
+        _ ->
+            timer:sleep(5),
+            wait_for_load_count(Host, Port, Expected, Attempts - 1)
+    end.
 
 %%====================================================================
 %% Timeout Tests

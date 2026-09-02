@@ -37,6 +37,10 @@ h2h3_fault_test_() ->
       fun teardown/1,
       [
       {"a healthy h2 connection is handed out", fun t_h2_healthy/0},
+      {"duplicate h2 registration keeps the first connection",
+       fun t_h2_duplicate_registration/0},
+      {"a slow h2 connection drains before retirement",
+       fun t_h2_slow_registration/0},
       {"a wedged h2 connection is dropped without stalling the pool",
        fun t_h2_wedged/0},
       {"an h2 connection that dies when probed does not crash the pool",
@@ -84,6 +88,51 @@ t_h2_healthy() ->
     ?assertEqual({ok, Pid}, checkout_h2()),
     assert_pool_healthy().
 
+t_h2_duplicate_registration() ->
+    First = live_conn(),
+    Second = live_conn(),
+    SecondRef = monitor(process, Second),
+    _ = hackney_pool:register_h2(?HOST, ?PORT, hackney_tcp, First, opts()),
+    ?assertEqual({ok, First}, checkout_h2()),
+    ok = sys:suspend(Second),
+    try
+        Registration = hackney_pool:register_h2(?HOST, ?PORT, hackney_tcp,
+                                                Second, opts()),
+        StopResult = receive
+            {'DOWN', SecondRef, process, Second, _Reason} -> stopped
+        after 1000 -> alive
+        end,
+        ?assertEqual({ok, First}, Registration),
+        ?assertEqual(stopped, StopResult),
+        ?assertEqual({ok, First}, checkout_h2()),
+        assert_pool_healthy()
+    after
+        case is_process_alive(Second) of
+            true ->
+                catch sys:resume(Second),
+                catch hackney_conn:stop(Second, 100);
+            false ->
+                ok
+        end
+    end.
+
+t_h2_slow_registration() ->
+    First = live_conn(),
+    FirstRef = monitor(process, First),
+    Second = live_conn(),
+    ok = hackney_pool:register_h2(?HOST, ?PORT, hackney_tcp, First, opts()),
+    ok = sys:suspend(First),
+    ok = hackney_pool:register_h2(?HOST, ?PORT, hackney_tcp, Second, opts()),
+    ?assert(is_process_alive(First)),
+    ok = sys:resume(First),
+    receive
+        {'DOWN', FirstRef, process, First, normal} -> ok
+    after 1000 ->
+        ?assert(false)
+    end,
+    ?assertEqual({ok, Second}, checkout_h2()),
+    assert_pool_healthy().
+
 %% The connection is alive but answers nothing. Before `get_state' took a
 %% timeout the pool sat on the default 5s call for every caller of that host.
 t_h2_wedged() ->
@@ -98,7 +147,7 @@ t_h2_wedged() ->
 
 %% Alive when registered, gone by the time the pool asks it anything.
 t_h2_dies_when_probed() ->
-    Pid = spawn(fun() -> receive _ -> exit(probed) end end),
+    Pid = spawn(fun dies_when_probed/0),
     ok = hackney_pool:register_h2(?HOST, ?PORT, hackney_tcp, Pid, opts()),
     ?assertEqual(none, checkout_h2()),
     assert_pool_healthy().
@@ -144,6 +193,15 @@ checkout_h2() ->
 
 checkout_h3() ->
     hackney_pool:checkout_h3(?HOST, ?PORT, hackney_tcp, opts()).
+
+dies_when_probed() ->
+    receive
+        {'$gen_call', From, {set_owner, _Owner}} ->
+            gen_statem:reply(From, ok),
+            receive
+                {'$gen_call', _StateFrom, get_state} -> exit(probed)
+            end
+    end.
 
 %% A real connection process against the test server, outside the pool's
 %% checkout bookkeeping: these tests are about the shared-connection map.

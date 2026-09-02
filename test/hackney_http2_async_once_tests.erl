@@ -30,6 +30,8 @@ async_once_test_() ->
       {timeout, 60, fun t_once_stream_reset/0}},
      {"once: connection teardown surfaces as an error message",
       {timeout, 60, fun t_once_conn_teardown/0}},
+     {"once: dead consumer does not block connection retirement",
+      {timeout, 60, fun t_once_dead_consumer/0}},
      {"legacy bare stream_next atom still routes",
       {timeout, 60, fun t_legacy_bare_stream_next/0}}].
 
@@ -142,6 +144,41 @@ t_once_conn_teardown() ->
             erlang:error(no_teardown_error)
         end
     after
+        repro_h2_raw_server:stop(element(1, Srv))
+    end.
+
+t_once_dead_consumer() ->
+    _ = application:ensure_all_started(hackney),
+    _ = application:ensure_all_started(h2),
+    Srv = repro_h2_raw_server:start(#{
+        body_size => ?BODY_SIZE,
+        frame_count => ?FRAME_COUNT
+    }),
+    Port = repro_h2_raw_server:port(Srv),
+    Pool = hackney_h2_once_dead_consumer_pool,
+    _ = hackney_pool:start_pool(Pool, [{max_connections, 1}]),
+    try
+        Url = iolist_to_binary([<<"https://localhost:">>,
+                                integer_to_list(Port), <<"/">>]),
+        Opts = [{async, once}, {pool, Pool}, {protocols, [http2]},
+                {recv_timeout, 15000},
+                {ssl_options, [{insecure, true}, {verify, verify_none}]}],
+        Parent = self(),
+        {Worker, WorkerRef} = spawn_monitor(fun() ->
+            {ok, Ref} = hackney:request(get, Url, [], <<>>, Opts),
+            Parent ! {once_connection, Ref}
+        end),
+        Conn = receive {once_connection, Ref} -> Ref end,
+        receive {'DOWN', WorkerRef, process, Worker, normal} -> ok end,
+        ConnRef = monitor(process, Conn),
+        ok = hackney_conn:retire_h2(Conn),
+        receive
+            {'DOWN', ConnRef, process, Conn, normal} -> ok
+        after 1000 ->
+            ?assert(false)
+        end
+    after
+        catch hackney_pool:stop_pool(Pool),
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
