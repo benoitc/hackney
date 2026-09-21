@@ -5,6 +5,15 @@ unreleased
 
 ### Fixed
 
+- A pooled HTTP/2 connection no longer closes when the caller that opened it
+  exits. It stayed owned by that caller, so its exit failed every other
+  caller's request on the connection with `{error, closed}`. A shared
+  connection now has no owner: each stream is tied to its own caller and is
+  reset if that caller dies, and the connection closes itself once it has had
+  no open stream for the pool `timeout` (#937, thanks @smartinio).
+- Unregistering a pooled HTTP/2 connection no longer leaks its per-host slot.
+  The pool dropped its monitor on the connection, so the slot was never
+  released when the connection stopped.
 - A request that races a peer-initiated close now returns `{error, closed}`
   instead of `{error, invalid_state}`. A connection that sees the peer close
   stays alive briefly so late calls get an answer, and during that window every

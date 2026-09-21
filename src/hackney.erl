@@ -437,7 +437,9 @@ connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
 maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler) ->
   try hackney_conn:get_protocol(ConnPid) of
     http2 ->
-      %% HTTP/2 negotiated - register for connection sharing
+      %% HTTP/2 negotiated - register for connection sharing. Share it first
+      %% so it no longer dies with this caller while other callers use it.
+      _ = hackney_conn:share_h2(ConnPid),
       PoolHandler:register_h2(Host, Port, Transport, ConnPid, Options);
     http1 ->
       ok;
