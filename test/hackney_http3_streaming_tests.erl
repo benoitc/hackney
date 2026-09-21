@@ -5,7 +5,8 @@
 %%%
 %%% Copyright (c) 2024-2026 Benoit Chesneau
 %%%
-%%% @doc Tests for HTTP/3 async streaming support.
+%%% @doc Tests for HTTP/3 async streaming support, against a local
+%%% HTTP/3 server (hackney_h3_test_server).
 
 -module(hackney_http3_streaming_tests).
 
@@ -16,271 +17,144 @@
 %%====================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(hackney),
+    Server = hackney_h3_test_server:start(),
     hackney_altsvc:clear_all(),
-    ok.
+    Server.
 
-cleanup(_) ->
+cleanup(Server) ->
     hackney_conn_sup:stop_all(),
     hackney_altsvc:clear_all(),
-    %% Allow time for late UDP packets to be processed
-    timer:sleep(100),
-    ok.
+    hackney_h3_test_server:stop(Server).
+
+with_server(Tests) ->
+    {setup, fun setup/0, fun cleanup/1,
+     fun(Server) ->
+         [{Title, {timeout, 30, fun() -> Test(Server) end}} || {Title, Test} <- Tests]
+     end}.
 
 %%====================================================================
 %% HTTP/3 Async Streaming Tests
 %%====================================================================
 
 h3_async_streaming_test_() ->
-    {
-        "HTTP/3 async streaming tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"async=true streams continuously", fun test_h3_async_true/0},
-                {"async=once streams on demand", fun test_h3_async_once/0},
-                {"async streaming receives status", fun test_h3_async_status/0},
-                {"async streaming receives headers", fun test_h3_async_headers/0}
-            ]
-        }
-    }.
+    with_server([
+        {"async=true streams continuously", fun test_h3_async_true/1},
+        {"async=once streams on demand", fun test_h3_async_once/1},
+        {"async streaming receives status", fun test_h3_async_status/1},
+        {"async streaming receives headers", fun test_h3_async_headers/1}
+    ]).
 
 %%====================================================================
 %% HTTP/3 Pull-based Streaming Tests (stream_body)
 %%====================================================================
 
 h3_stream_body_test_() ->
-    {
-        "HTTP/3 stream_body tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"stream_body returns chunks", fun test_h3_stream_body/0},
-                {"stream_body returns done", fun test_h3_stream_body_done/0}
-            ]
-        }
-    }.
+    with_server([
+        {"stream_body returns chunks", fun test_h3_stream_body/1},
+        {"stream_body returns done", fun test_h3_stream_body_done/1}
+    ]).
 
-test_h3_stream_body() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Connect with HTTP/3
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
-            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
-                {ok, ConnPid} ->
-                    %% Use request_streaming to get headers first
-                    case hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/cdn-cgi/trace">>, [], <<>>) of
-                        {ok, Status, Headers} ->
-                            ?debugFmt("stream_body: Status=~p, Headers=~p", [Status, Headers]),
-                            ?assert(Status >= 200 andalso Status < 400),
-                            ?assert(is_list(Headers)),
-                            %% Now read body with stream_body
-                            Body = read_all_chunks(ConnPid),
-                            ?debugFmt("stream_body: Body=~s", [Body]),
-                            ?assert(byte_size(Body) > 0),
-                            hackney:close(ConnPid);
-                        {error, Reason} ->
-                            hackney:close(ConnPid),
-                            ?debugFmt("request_streaming failed: ~p", [Reason])
-                    end;
-                {error, Reason} ->
-                    ?debugFmt("H3 connect failed: ~p", [Reason])
-            end
-    end.
+test_h3_stream_body(Server) ->
+    {ok, ConnPid} = connect(Server),
+    {ok, Status, Headers} =
+        hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/large">>, [], <<>>),
+    ?assertEqual(200, Status),
+    ?assert(is_list(Headers)),
+    Body = read_all_chunks(ConnPid),
+    ?assertEqual(binary:copy(<<"x">>, 65536), Body),
+    hackney:close(ConnPid).
 
-test_h3_stream_body_done() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
-            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
-                {ok, ConnPid} ->
-                    case hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/cdn-cgi/trace">>, [], <<>>) of
-                        {ok, _Status, _Headers} ->
-                            %% Read all chunks until done
-                            Body = read_all_chunks(ConnPid),
-                            ?assert(byte_size(Body) > 0),
-                            %% Calling stream_body again should return error (no stream)
-                            Result = hackney_conn:stream_body(ConnPid),
-                            ?debugFmt("After done, stream_body returns: ~p", [Result]),
-                            %% After stream is done, stream_body returns {error, no_stream}
-                            ?assertEqual({error, no_stream}, Result),
-                            hackney:close(ConnPid);
-                        {error, Reason} ->
-                            hackney:close(ConnPid),
-                            ?debugFmt("request_streaming failed: ~p", [Reason])
-                    end;
-                {error, Reason} ->
-                    ?debugFmt("H3 connect failed: ~p", [Reason])
-            end
-    end.
+test_h3_stream_body_done(Server) ->
+    {ok, ConnPid} = connect(Server),
+    {ok, 200, _Headers} =
+        hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/cdn-cgi/trace">>, [], <<>>),
+    ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, read_all_chunks(ConnPid)),
+    %% Once the stream is done, stream_body has no stream to read.
+    ?assertEqual({error, no_stream}, hackney_conn:stream_body(ConnPid)),
+    hackney:close(ConnPid).
 
 read_all_chunks(ConnPid) ->
     read_all_chunks(ConnPid, <<>>).
 
 read_all_chunks(ConnPid, Acc) ->
     case hackney_conn:stream_body(ConnPid) of
-        {ok, Chunk} ->
-            read_all_chunks(ConnPid, <<Acc/binary, Chunk/binary>>);
-        done ->
-            Acc;
-        {error, _Reason} ->
-            Acc
+        {ok, Chunk} -> read_all_chunks(ConnPid, <<Acc/binary, Chunk/binary>>);
+        done -> Acc
     end.
 
 %%====================================================================
-%% HTTP/3 Body Sending Tests (streaming uploads)
+%% HTTP/3 send_body Tests
 %%====================================================================
 
 h3_send_body_test_() ->
-    {
-        "HTTP/3 send_body tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"send body in chunks", fun test_h3_send_body_chunks/0}
-            ]
-        }
-    }.
+    with_server([
+        {"send body in chunks", fun test_h3_send_body_chunks/1}
+    ]).
 
-test_h3_send_body_chunks() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Connect with HTTP/3 to cloudflare (supports H3)
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}],
-            case hackney:connect(hackney_ssl, "cloudflare.com", 443, Opts) of
-                {ok, ConnPid} ->
-                    %% Send headers for POST request (will get redirect, but tests the mechanism)
-                    Headers = [{<<"content-type">>, <<"text/plain">>}],
-                    case hackney_conn:send_request_headers(ConnPid, <<"POST">>, <<"/">>, Headers) of
-                        ok ->
-                            ?debugFmt("send_request_headers ok", []),
-                            %% Send body in chunks
-                            ok = hackney_conn:send_body_chunk(ConnPid, <<"Hello ">>),
-                            ?debugFmt("send_body_chunk 1 ok", []),
-                            ok = hackney_conn:send_body_chunk(ConnPid, <<"World!">>),
-                            ?debugFmt("send_body_chunk 2 ok", []),
-                            ok = hackney_conn:finish_send_body(ConnPid),
-                            ?debugFmt("finish_send_body ok", []),
-                            %% Get response
-                            case hackney_conn:start_response(ConnPid) of
-                                {ok, Status, RespHeaders, _Pid} ->
-                                    ?debugFmt("send_body: Status=~p", [Status]),
-                                    %% Cloudflare returns redirect (301/302) for POST to /
-                                    ?assert(is_integer(Status)),
-                                    ?assert(is_list(RespHeaders)),
-                                    hackney:close(ConnPid);
-                                {error, Reason} ->
-                                    hackney:close(ConnPid),
-                                    ?debugFmt("start_response failed: ~p", [Reason])
-                            end;
-                        {error, Reason} ->
-                            hackney:close(ConnPid),
-                            ?debugFmt("send_request_headers failed: ~p", [Reason])
-                    end;
-                {error, Reason} ->
-                    ?debugFmt("H3 connect failed: ~p", [Reason])
-            end
-    end.
+test_h3_send_body_chunks(Server) ->
+    {ok, ConnPid} = connect(Server),
+    Headers = [{<<"content-type">>, <<"text/plain">>}],
+    ok = hackney_conn:send_request_headers(ConnPid, <<"POST">>, <<"/echo">>, Headers),
+    ok = hackney_conn:send_body_chunk(ConnPid, <<"Hello ">>),
+    ok = hackney_conn:send_body_chunk(ConnPid, <<"World!">>),
+    ok = hackney_conn:finish_send_body(ConnPid),
+    {ok, 200, RespHeaders, _} = hackney_conn:start_response(ConnPid),
+    ?assertEqual(<<"text/plain">>,
+                 proplists:get_value(<<"content-type">>, RespHeaders)),
+    ?assertEqual(<<"12">>, proplists:get_value(<<"content-length">>, RespHeaders)),
+    hackney:close(ConnPid).
 
-test_h3_async_true() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Async streaming request over HTTP/3
-            URL = <<"https://cloudflare.com/cdn-cgi/trace">>,
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}, {async, true}],
-            case hackney:get(URL, [], <<>>, Opts) of
-                {ok, Ref} when is_pid(Ref) ->
-                    %% Collect all async messages
-                    Messages = collect_async_messages(Ref, 10000),
-                    ?debugFmt("Async messages: ~p", [Messages]),
-                    %% Verify we got status, headers, body chunks, and done
-                    ?assert(has_status_message(Messages)),
-                    ?assert(has_headers_message(Messages)),
-                    ?assert(has_done_message(Messages));
-                {error, Reason} ->
-                    ?debugFmt("H3 async request failed (may be blocked): ~p", [Reason])
-            end
-    end.
+%%====================================================================
+%% Async tests
+%%====================================================================
 
-test_h3_async_once() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            %% Async once mode - should still work (data is pushed by QUIC)
-            URL = <<"https://cloudflare.com/cdn-cgi/trace">>,
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}, {async, once}],
-            case hackney:get(URL, [], <<>>, Opts) of
-                {ok, Ref} when is_pid(Ref) ->
-                    %% Collect messages
-                    Messages = collect_async_messages(Ref, 10000),
-                    ?debugFmt("Async once messages: ~p", [Messages]),
-                    ?assert(has_status_message(Messages)),
-                    ?assert(has_headers_message(Messages));
-                {error, Reason} ->
-                    ?debugFmt("H3 async once request failed: ~p", [Reason])
-            end
-    end.
+test_h3_async_true(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/large">>),
+    {ok, Ref} = hackney:get(URL, [], <<>>, [{async, true} | opts()]),
+    Messages = collect_async_messages(Ref, 5000),
+    ?assert(has_status_message(Messages)),
+    ?assert(has_headers_message(Messages)),
+    ?assert(has_done_message(Messages)),
+    ?assertEqual(binary:copy(<<"x">>, 65536), body_of(Messages)).
 
-test_h3_async_status() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            URL = <<"https://cloudflare.com/">>,
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}, {async, true}],
-            case hackney:get(URL, [], <<>>, Opts) of
-                {ok, Ref} when is_pid(Ref) ->
-                    Messages = collect_async_messages(Ref, 10000),
-                    %% Find status message
-                    StatusMsg = find_message(fun({hackney_response, _, {status, S, _}}) -> is_integer(S);
-                                                (_) -> false
-                                             end, Messages),
-                    ?assertNotEqual(undefined, StatusMsg),
-                    {hackney_response, _, {status, Status, _}} = StatusMsg,
-                    ?assert(Status >= 200 andalso Status < 400);
-                {error, Reason} ->
-                    ?debugFmt("H3 async status test failed: ~p", [Reason])
-            end
-    end.
+test_h3_async_once(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/cdn-cgi/trace">>),
+    {ok, Ref} = hackney:get(URL, [], <<>>, [{async, once} | opts()]),
+    Messages = collect_once_messages(Ref, 5000),
+    ?assert(has_status_message(Messages)),
+    ?assert(has_headers_message(Messages)),
+    ?assert(has_done_message(Messages)),
+    ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, body_of(Messages)).
 
-test_h3_async_headers() ->
-    case hackney_h3:is_available() of
-        false ->
-            {skip, "QUIC NIF not available"};
-        true ->
-            URL = <<"https://cloudflare.com/">>,
-            Opts = [{protocols, [http3]}, {connect_timeout, 15000}, {async, true}],
-            case hackney:get(URL, [], <<>>, Opts) of
-                {ok, Ref} when is_pid(Ref) ->
-                    Messages = collect_async_messages(Ref, 10000),
-                    %% Find headers message
-                    HeadersMsg = find_message(fun({hackney_response, _, {headers, H}}) -> is_list(H);
-                                                 (_) -> false
-                                              end, Messages),
-                    ?assertNotEqual(undefined, HeadersMsg),
-                    {hackney_response, _, {headers, Headers}} = HeadersMsg,
-                    ?assert(length(Headers) > 0),
-                    ?debugFmt("H3 async headers: ~p", [Headers]);
-                {error, Reason} ->
-                    ?debugFmt("H3 async headers test failed: ~p", [Reason])
-            end
-    end.
+test_h3_async_status(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/">>),
+    {ok, Ref} = hackney:get(URL, [], <<>>, [{async, true} | opts()]),
+    Messages = collect_async_messages(Ref, 5000),
+    ?assertMatch({hackney_response, _, {status, 200, _}},
+                 find_message(fun({hackney_response, _, {status, _, _}}) -> true;
+                                 (_) -> false
+                              end, Messages)).
+
+test_h3_async_headers(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/">>),
+    {ok, Ref} = hackney:get(URL, [], <<>>, [{async, true} | opts()]),
+    Messages = collect_async_messages(Ref, 5000),
+    {hackney_response, _, {headers, Headers}} =
+        find_message(fun({hackney_response, _, {headers, _}}) -> true;
+                        (_) -> false
+                     end, Messages),
+    ?assertEqual(<<"text/html">>, proplists:get_value(<<"content-type">>, Headers)).
 
 %%====================================================================
 %% Helper Functions
 %%====================================================================
+
+opts() ->
+    hackney_h3_test_server:hackney_opts().
+
+connect(Server) ->
+    hackney:connect(hackney_ssl, "127.0.0.1", hackney_h3_test_server:port(Server),
+                    opts()).
 
 collect_async_messages(Ref, Timeout) ->
     collect_async_messages(Ref, Timeout, []).
@@ -293,6 +167,23 @@ collect_async_messages(Ref, Timeout, Acc) ->
             lists:reverse([{hackney_response, Ref, Error} | Acc]);
         {hackney_response, Ref, Msg} ->
             collect_async_messages(Ref, Timeout, [{hackney_response, Ref, Msg} | Acc])
+    after Timeout ->
+        lists:reverse(Acc)
+    end.
+
+%% async once delivers one message per stream_next/1.
+collect_once_messages(Ref, Timeout) ->
+    collect_once_messages(Ref, Timeout, []).
+
+collect_once_messages(Ref, Timeout, Acc) ->
+    receive
+        {hackney_response, Ref, done} ->
+            lists:reverse([{hackney_response, Ref, done} | Acc]);
+        {hackney_response, Ref, {error, _Reason} = Error} ->
+            lists:reverse([{hackney_response, Ref, Error} | Acc]);
+        {hackney_response, Ref, Msg} ->
+            ok = hackney:stream_next(Ref),
+            collect_once_messages(Ref, Timeout, [{hackney_response, Ref, Msg} | Acc])
     after Timeout ->
         lists:reverse(Acc)
     end.
@@ -311,6 +202,10 @@ has_done_message(Messages) ->
     lists:any(fun({hackney_response, _, done}) -> true;
                  (_) -> false
               end, Messages).
+
+body_of(Messages) ->
+    iolist_to_binary([Data || {hackney_response, _, Data} <- Messages,
+                              is_binary(Data)]).
 
 find_message(Pred, Messages) ->
     case lists:filter(Pred, Messages) of

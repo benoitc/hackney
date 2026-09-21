@@ -7,7 +7,8 @@
 %%%
 %%% @doc Tests for HTTP/3 integration in hackney.
 %%%
-%%% These tests verify that HTTP/3 works through the standard hackney API.
+%%% These tests verify that HTTP/3 works through the standard hackney API,
+%%% against a local HTTP/3 server (hackney_h3_test_server).
 
 -module(hackney_http3_tests).
 
@@ -18,14 +19,11 @@
 %%====================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(hackney),
-    ok.
+    hackney_h3_test_server:start().
 
-cleanup(_) ->
+cleanup(Server) ->
     hackney_conn_sup:stop_all(),
-    %% Allow time for late UDP packets to be processed
-    timer:sleep(100),
-    ok.
+    hackney_h3_test_server:stop(Server).
 
 %%====================================================================
 %% hackney_h3 module tests
@@ -38,24 +36,18 @@ http3_request_test_() ->
         {
             setup,
             fun setup/0, fun cleanup/1,
-            [
-                {"Direct HTTP/3 request", fun test_http3_direct_request/0}
-            ]
+            fun(Server) ->
+                [{"Direct HTTP/3 request",
+                  {timeout, 30, fun() -> test_http3_direct_request(Server) end}}]
+            end
         }
     }.
 
-test_http3_direct_request() ->
-    %% Test HTTP/3 connection establishment
-    Result = hackney_h3:connect(<<"cloudflare.com">>, 443),
-    case Result of
-        {ok, ConnRef} ->
-            hackney_h3:close(ConnRef),
-            ok;
-        {error, Reason} ->
-            %% Connection issues are acceptable in test environments
-            ?debugFmt("HTTP/3 connect failed: ~p", [Reason]),
-            ok
-    end.
+test_http3_direct_request(Server) ->
+    {ok, ConnRef} = hackney_h3:connect(hackney_h3_test_server:host(),
+                                       hackney_h3_test_server:port(Server),
+                                       hackney_h3_test_server:h3_opts()),
+    hackney_h3:close(ConnRef).
 
 %% Test hackney_h3:parse_response_headers
 parse_response_headers_test() ->
@@ -86,32 +78,18 @@ hackney_conn_http3_config_test_() ->
         {
             setup,
             fun setup/0, fun cleanup/1,
-            [
-                {"Conn start with http3 protocol option", fun test_conn_http3_option/0}
-            ]
+            fun(Server) ->
+                [{"Conn start with http3 protocol option",
+                  {timeout, 30, fun() -> test_conn_http3_option(Server) end}}]
+            end
         }
     }.
 
-test_conn_http3_option() ->
-    %% Test that hackney_conn can be started with HTTP/3 configuration
-    Opts = #{
-        host => "cloudflare.com",
-        port => 443,
-        transport => hackney_ssl,
-        connect_options => [{protocols, [http3, http2, http1]}],
-        connect_timeout => 10000
-    },
+test_conn_http3_option(Server) ->
+    %% With http3 first in the protocol list, hackney_conn tries HTTP/3 first.
+    Opts0 = hackney_h3_test_server:conn_opts(Server),
+    Opts = Opts0#{connect_options => [{protocols, [http3, http2, http1]}]},
     {ok, Pid} = hackney_conn:start_link(Opts),
-    ?assert(is_pid(Pid)),
-    %% Connect - this should try HTTP/3 first
-    Result = hackney_conn:connect(Pid),
-    hackney_conn:stop(Pid),
-    case Result of
-        ok ->
-            ok;
-        {error, Reason} ->
-            %% HTTP/3 might fail and fall back to HTTP/2 or HTTP/1
-            %% That's acceptable behavior
-            ?debugFmt("Connect result: ~p", [Reason]),
-            ok
-    end.
+    ?assertEqual(ok, hackney_conn:connect(Pid)),
+    ?assertEqual(http3, hackney_conn:get_protocol(Pid)),
+    hackney_conn:stop(Pid).

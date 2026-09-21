@@ -40,6 +40,22 @@ cleanup(_) ->
 %% Helper Functions
 %%====================================================================
 
+%% Groups that make requests run against a local HTTP/3 server.
+with_server(Tests) ->
+    {setup,
+     fun hackney_h3_test_server:start/0,
+     fun(Server) ->
+         hackney_conn_sup:stop_all(),
+         hackney_h3_test_server:stop(Server)
+     end,
+     fun(Server) ->
+         [{Title, {timeout, 30, fun() -> Test(Server) end}} || {Title, Test} <- Tests]
+     end}.
+
+h3_request(Server, Path, Opts) ->
+    hackney_h3:request(get, hackney_h3_test_server:url(Server, Path), [], <<>>,
+                       maps:merge(hackney_h3_test_server:h3_opts(), Opts)).
+
 %%====================================================================
 %% Redirect Detection Tests
 %%====================================================================
@@ -102,37 +118,18 @@ test_relative_redirect() ->
 %%====================================================================
 
 follow_redirect_test_() ->
-    {
-        "HTTP/3 follow_redirect option tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Request without follow_redirect returns redirect status", fun test_no_follow_redirect/0},
-                {"Max redirect limit is enforced", fun test_max_redirect_limit/0}
-            ]
-        }
-    }.
+    {"HTTP/3 follow_redirect option tests",
+     [with_server([
+         {"Request without follow_redirect returns redirect status",
+          fun test_no_follow_redirect/1}
+      ]),
+      {"Max redirect limit is enforced", fun test_max_redirect_limit/0}]}.
 
-test_no_follow_redirect() ->
-    %% When follow_redirect is false (default), redirect responses are returned as-is
-    %% This tests the behavior by checking how redirects are handled
-
-    %% Using hackney_h3:request directly to test the low-level behavior
-    case hackney_h3:is_available() of
-        true ->
-            %% Test with a known URL that may redirect
-            case hackney_h3:request(get, <<"https://cloudflare.com/">>) of
-                {ok, Status, _Headers, _Body} ->
-                    %% Could be 200 or 3xx depending on server
-                    ?assert(Status >= 200 andalso Status < 400);
-                {error, _Reason} ->
-                    %% Network issues acceptable in tests
-                    ok
-            end;
-        false ->
-            ok
-    end.
+test_no_follow_redirect(Server) ->
+    %% follow_redirect defaults to false: the redirect comes back as is.
+    {ok, Status, Headers, _Body} = h3_request(Server, <<"/status/302">>, #{}),
+    ?assertEqual(302, Status),
+    ?assertEqual(<<"/">>, proplists:get_value(<<"location">>, Headers)).
 
 test_max_redirect_limit() ->
     %% Test that max_redirect option limits redirect following
@@ -331,77 +328,44 @@ test_build_opts_sni() ->
 %%====================================================================
 
 integration_test_() ->
-    {
-        "HTTP/3 redirect integration tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Full H3 request returns valid response", fun test_full_h3_request/0},
-                {"H3 request with custom headers", fun test_h3_request_custom_headers/0},
-                {"H3 request with follow_redirect=true", fun test_h3_follow_redirect/0},
-                {"H3 redirect without following returns 3xx", fun test_h3_no_follow_redirect/0},
-                {"H3 max_redirect limit works", fun test_h3_max_redirect/0}
-            ]
-        }
-    }.
+    {"HTTP/3 redirect integration tests",
+     with_server([
+         {"Full H3 request returns valid response", fun test_full_h3_request/1},
+         {"H3 request with custom headers", fun test_h3_request_custom_headers/1},
+         {"H3 request with follow_redirect=true", fun test_h3_follow_redirect/1},
+         {"H3 redirect without following returns 3xx", fun test_h3_no_follow_redirect/1},
+         {"H3 max_redirect limit works", fun test_h3_max_redirect/1}
+     ])}.
 
-test_h3_follow_redirect() ->
-    %% Test that follow_redirect option is accepted and doesn't break basic requests
-    %% cloudflare.com may or may not redirect depending on path
-    Options = #{follow_redirect => true, timeout => 10000},
-    case hackney_h3:request(get, <<"https://cloudflare.com/cdn-cgi/trace">>, [], <<>>, Options) of
-        {ok, Status, _Headers, _Body} ->
-            %% Should get 200 response (this path typically doesn't redirect)
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            %% Network issues acceptable
-            ok
-    end.
+test_h3_follow_redirect(Server) ->
+    %% Two hops, both followed, end on the 200.
+    ?assertMatch({ok, 200, _, <<"redirected">>},
+                 h3_request(Server, <<"/redirect/2">>, #{follow_redirect => true})).
 
-test_h3_no_follow_redirect() ->
-    %% Test that without follow_redirect, requests work normally
-    Options = #{follow_redirect => false, timeout => 10000},
-    case hackney_h3:request(get, <<"https://cloudflare.com/cdn-cgi/trace">>, [], <<>>, Options) of
-        {ok, Status, _Headers, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            ok
-    end.
+test_h3_no_follow_redirect(Server) ->
+    {ok, Status, Headers, _Body} =
+        h3_request(Server, <<"/redirect/2">>, #{follow_redirect => false}),
+    ?assertEqual(302, Status),
+    ?assertEqual(<<"/redirect/1">>, proplists:get_value(<<"location">>, Headers)).
 
-test_h3_max_redirect() ->
-    %% Test that max_redirect option is parsed correctly
-    Options = #{follow_redirect => true, max_redirect => 3, timeout => 10000},
-    case hackney_h3:request(get, <<"https://cloudflare.com/cdn-cgi/trace">>, [], <<>>, Options) of
-        {ok, _Status, _Headers, _Body} ->
-            ok;
-        {error, {max_redirect, _}} ->
-            ok;
-        {error, _Reason} ->
-            ok
-    end.
+test_h3_max_redirect(Server) ->
+    %% Three hops against a limit of one.
+    ?assertMatch({error, {max_redirect, _}},
+                 h3_request(Server, <<"/redirect/3">>,
+                            #{follow_redirect => true, max_redirect => 1})).
 
-test_full_h3_request() ->
-    %% Test a full HTTP/3 request using hackney_h3
-    case hackney_h3:request(get, <<"https://cloudflare.com/cdn-cgi/trace">>) of
-        {ok, Status, Headers, Body} ->
-            ?assert(Status >= 200 andalso Status < 400),
-            ?assert(is_list(Headers)),
-            ?assert(is_binary(Body));
-        {error, _Reason} ->
-            %% Network issues acceptable
-            ok
-    end.
+test_full_h3_request(Server) ->
+    {ok, Status, Headers, Body} = h3_request(Server, <<"/cdn-cgi/trace">>, #{}),
+    ?assertEqual(200, Status),
+    ?assertEqual(<<"text/plain">>, proplists:get_value(<<"content-type">>, Headers)),
+    ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, Body).
 
-test_h3_request_custom_headers() ->
+test_h3_request_custom_headers(Server) ->
     Headers = [{<<"user-agent">>, <<"hackney-test/1.0">>},
                {<<"accept">>, <<"*/*">>}],
-    case hackney_h3:request(get, <<"https://cloudflare.com/">>, Headers) of
-        {ok, Status, _RespHeaders, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            ok
-    end.
+    URL = hackney_h3_test_server:url(Server, <<"/">>),
+    ?assertMatch({ok, 200, _, _},
+                 hackney_h3:request(get, URL, Headers, <<>>, hackney_h3_test_server:h3_opts())).
 
 %%====================================================================
 %% Internal Helper Functions

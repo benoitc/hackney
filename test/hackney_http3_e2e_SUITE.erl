@@ -5,18 +5,15 @@
 %%%
 %%% Copyright (c) 2024-2026 Benoit Chesneau
 %%%
-%%% @doc End-to-end tests for HTTP/3 against real servers.
+%%% @doc End-to-end HTTP/3 tests.
 %%%
-%%% These tests validate HTTP/3 compliance against production servers:
-%%% - cloudflare-quic.com: Cloudflare's QUIC test server
-%%% - quic.tech: HTTP/3 test server
-%%% - www.google.com: Google with HTTP/3 support
+%%% The `local' group runs against an in-process HTTP/3 server
+%%% (hackney_h3_test_server) and always runs. The `interop' group checks
+%%% compliance against production servers (cloudflare-quic.com, quic.tech,
+%%% www.google.com); it needs the network, so it only runs when
+%%% HACKNEY_H3_INTEROP is set:
 %%%
-%%% Tests are skipped if:
-%%% - Network is unavailable
-%%% - QUIC library is not available
-%%%
-%%% To run: rebar3 ct --suite=hackney_http3_e2e_SUITE
+%%%   HACKNEY_H3_INTEROP=1 rebar3 ct --suite=test/hackney_http3_e2e_SUITE
 
 -module(hackney_http3_e2e_SUITE).
 
@@ -27,11 +24,15 @@
     groups/0,
     init_per_suite/1,
     end_per_suite/1,
+    init_per_group/2,
+    end_per_group/2,
     init_per_testcase/2,
     end_per_testcase/2
 ]).
 
 -export([
+    local_simple_get/1,
+    local_concurrent_streams/1,
     cloudflare_simple_get/1,
     cloudflare_concurrent_streams/1,
     google_http3/1,
@@ -45,10 +46,18 @@
 %%====================================================================
 
 all() ->
-    [{group, e2e_tests}].
+    Interop = case os:getenv("HACKNEY_H3_INTEROP") of
+        false -> [];
+        _ -> [{group, interop}]
+    end,
+    [{group, local} | Interop].
 
 groups() ->
-    [{e2e_tests, [sequence], [
+    [{local, [sequence], [
+        local_simple_get,
+        local_concurrent_streams
+    ]},
+    {interop, [sequence], [
         cloudflare_simple_get,
         cloudflare_concurrent_streams,
         google_http3,
@@ -65,6 +74,16 @@ init_per_suite(Config) ->
             Config
     end.
 
+init_per_group(local, Config) ->
+    [{server, hackney_h3_test_server:start()} | Config];
+init_per_group(_Group, Config) ->
+    Config.
+
+end_per_group(local, Config) ->
+    hackney_h3_test_server:stop(?config(server, Config));
+end_per_group(_Group, _Config) ->
+    ok.
+
 end_per_suite(_Config) ->
     ok.
 
@@ -79,7 +98,35 @@ end_per_testcase(_TestCase, _Config) ->
     ok.
 
 %%====================================================================
-%% Test Cases
+%% Test Cases: local server
+%%====================================================================
+
+%% @doc Simple GET request to the local HTTP/3 server.
+local_simple_get(Config) ->
+    URL = hackney_h3_test_server:url(?config(server, Config), <<"/">>),
+    {ok, 200, Headers, Body} =
+        hackney:get(URL, [], <<>>, hackney_h3_test_server:hackney_opts()),
+    <<"text/html">> = proplists:get_value(<<"content-type">>, Headers),
+    <<"<html><body>hackney h3 test server</body></html>">> = Body,
+    ok.
+
+%% @doc Five concurrent requests over HTTP/3 to the local server.
+local_concurrent_streams(Config) ->
+    URL = hackney_h3_test_server:url(?config(server, Config), <<"/cdn-cgi/trace">>),
+    Opts = hackney_h3_test_server:hackney_opts(),
+    Self = self(),
+    Pids = [spawn_link(fun() -> Self ! {done, self(), hackney:get(URL, [], <<>>, Opts)} end)
+            || _ <- lists:seq(1, 5)],
+    Results = [receive {done, Pid, Result} -> Result after ?TIMEOUT -> {error, timeout} end
+               || Pid <- Pids],
+    lists:foreach(fun
+        ({ok, 200, _Headers, <<"h=127.0.0.1\nhttp=http/3\n">>}) -> ok;
+        (Other) -> ct:fail({unexpected_result, Other})
+    end, Results),
+    ok.
+
+%%====================================================================
+%% Test Cases: interop with production servers (HACKNEY_H3_INTEROP)
 %%====================================================================
 
 %% @doc Simple GET request to Cloudflare's QUIC test server.
