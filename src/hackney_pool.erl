@@ -1253,7 +1253,8 @@ h2_conn_usable(Pid) ->
 
 %% @private Remove an HTTP/2 connection from the pool
 do_unregister_h2(Pid, State) ->
-    #state{h2_connections = H2Conns, pid_monitors = PidMonitors} = State,
+    #state{h2_connections = H2Conns, in_use = InUse,
+           pid_monitors = PidMonitors} = State,
     %% Find and remove the connection
     H2Conns2 = maps:fold(
         fun(Key, ConnPid, Acc) ->
@@ -1265,12 +1266,18 @@ do_unregister_h2(Pid, State) ->
         H2Conns,
         H2Conns
     ),
-    %% Demonitor if no longer tracked
-    PidMonitors2 = case maps:take(Pid, PidMonitors) of
-        {MonRef, PM} ->
-            erlang:demonitor(MonRef, [flush]),
-            PM;
-        error -> PidMonitors
+    %% Demonitor if no longer tracked. A checked-out conn keeps its monitor:
+    %% it holds a per-host slot until it stops, and only the DOWN releases it.
+    PidMonitors2 = case maps:is_key(Pid, InUse) of
+        true ->
+            PidMonitors;
+        false ->
+            case maps:take(Pid, PidMonitors) of
+                {MonRef, PM} ->
+                    erlang:demonitor(MonRef, [flush]),
+                    PM;
+                error -> PidMonitors
+            end
     end,
     State#state{h2_connections = H2Conns2, pid_monitors = PidMonitors2}.
 
