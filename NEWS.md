@@ -14,6 +14,9 @@ unreleased
 - Unregistering a pooled HTTP/2 connection no longer leaks its per-host slot.
   The pool dropped its monitor on the connection, so the slot was never
   released when the connection stopped.
+- A response that crosses a reset of its stream no longer closes the HTTP/2
+  connection. `h2` dropped the header block of that response without decoding
+  it, so the next response on the connection failed with COMPRESSION_ERROR.
 - A request that races a peer-initiated close now returns `{error, closed}`
   instead of `{error, invalid_state}`. A connection that sees the peer close
   stays alive briefly so late calls get an answer, and during that window every
@@ -21,6 +24,10 @@ unreleased
   race therefore had two answers: `{error, closed}` once the connection process
   was gone, `{error, invalid_state}` while it lingered. Callers can now tell a
   closed connection from a misuse of the API (#932, #933, thanks @kpy3).
+
+### Changed
+
+- Update `h2` to 0.12.1.
 
 4.7.4 - 2026-08-12
 ------------------

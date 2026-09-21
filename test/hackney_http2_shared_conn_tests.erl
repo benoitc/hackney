@@ -81,13 +81,15 @@ dead_async_consumer() ->
             receive stop -> ok end
         end),
         receive async_sent -> ok after 5000 -> error(no_async_request) end,
-        %% The handler never answers: a response crossing the client's
-        %% RST_STREAM is a separate h2 HPACK issue, not what this covers.
-        {_AsyncHandler, _} = started(<<"/async">>),
+        {AsyncHandler, _} = started(<<"/async">>),
         Conn = shared_conn(Opts, Port),
         ?assert(lists:member(Consumer, monitored(Conn))),
         exit(Consumer, kill),
         ok = wait_until(fun() -> not lists:member(Consumer, monitored(Conn)) end),
+        %% Answer the reset stream: the response can cross the client's
+        %% RST_STREAM, and its header block must still be decoded or the
+        %% next response fails with COMPRESSION_ERROR (fixed in h2 0.12.1).
+        AsyncHandler ! respond,
         ?assertMatch({ok, 200, _, <<"ok">>},
                      hackney:request(get, <<URL/binary, "/fast">>, [], <<>>, Opts)),
         ?assertEqual(Conn, shared_conn(Opts, Port))
