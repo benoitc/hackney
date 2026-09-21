@@ -258,6 +258,8 @@ end) || Path <- Paths].
 2. **Connection sharing** - Unlike HTTP/1.1, HTTP/2 connections are not "checked out" exclusively; multiple callers share the same connection
 3. **Stream isolation** - Each request gets a unique StreamId; responses are routed back to the correct caller via the `h2_streams` map
 4. **Automatic registration** - When a new SSL connection negotiates HTTP/2, it's automatically registered in the pool for future reuse
+5. **No single owner** - A shared connection does not belong to the process that opened it. If a caller exits, only its own stream is reset; the other callers' requests continue
+6. **Idle close** - A shared connection closes itself once it has had no open stream for the pool `timeout`, and the next request opens a new one
 
 ## Server Push
 
@@ -299,6 +301,13 @@ HTTP/1.1 behaviour.
 Each chunk is sent as a DATA frame and the request stream is closed with
 END_STREAM on `finish_send_body/1`. The `h2` connection buffers beyond the
 peer's flow-control window and drains as WINDOW_UPDATEs arrive.
+
+A streaming upload uses its pooled connection on its own. From
+`hackney:request/5` with `stream` until `start_response/1`, the connection
+takes no new requests: requests to the same host in the meantime open another
+connection, and streams already open on it are not affected. `send_body/2`
+and `finish_send_body/1` find the upload through the connection pid, so two
+uploads cannot share one connection.
 
 ## Bidirectional Streaming (gRPC-style)
 
