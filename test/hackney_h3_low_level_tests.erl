@@ -99,7 +99,7 @@ wait_connected(ConnRef) ->
         ({connected, Info}) -> {done, {ok, Info}};
         ({closed, Reason}) -> {done, {error, Reason}};
         (_) -> continue
-    end, 5000),
+    end, 15000),
     Result.
 
 %%====================================================================
@@ -168,7 +168,7 @@ test_full_request_response(Server) ->
         ({stream_headers, SId, Hdrs, _Fin}) when SId =:= StreamId -> {done, {ok, Hdrs}};
         ({closed, Reason}) -> {done, {error, {closed, Reason}}};
         (_) -> continue
-    end, 5000),
+    end, 15000),
     ?assertEqual({<<":status">>, <<"200">>}, lists:keyfind(<<":status">>, 1, RespHeaders)),
     ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, read_body(ConnRef, StreamId, <<>>)),
     hackney_h3:close(ConnRef, normal).
@@ -179,7 +179,7 @@ read_body(ConnRef, StreamId, Acc) ->
         ({stream_data, SId, Data, Fin}) when SId =:= StreamId -> {done, {Data, Fin}};
         ({closed, Reason}) -> {done, {error, {closed, Reason}}};
         (_) -> continue
-    end, 5000) of
+    end, 15000) of
         {Data, true} -> <<Acc/binary, Data/binary>>;
         {Data, false} -> read_body(ConnRef, StreamId, <<Acc/binary, Data/binary>>);
         Error -> Error

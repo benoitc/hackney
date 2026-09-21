@@ -22,7 +22,7 @@
 -export([start/0, stop/1]).
 -export([port/1, url/2, host/0]).
 -export([hackney_opts/0, h3_opts/0, conn_opts/1]).
--export([cert_file/0, ca_cacerts/0, unused_port/0]).
+-export([cert_file/0, ca_file/0, ca_cacerts/0, unused_port/0]).
 
 -define(LARGE_CHUNK, 4096).
 -define(LARGE_CHUNKS, 16).
@@ -53,16 +53,25 @@ host() -> <<"127.0.0.1">>.
 url(#{port := Port}, Path) ->
     iolist_to_binary(["https://127.0.0.1:", integer_to_list(Port), Path]).
 
+%% Budget for a QUIC handshake or a response. Generous: the handshake runs
+%% in pure Erlang on both ends, and slow CI runners are why these tests
+%% stopped using public servers.
+-define(TIMEOUT, 15000).
+
 %% @doc hackney:request/connect options for an HTTP/3 request to the server.
+%% Session resumption is off: these tests are not about it, and resuming
+%% from a cached ticket can stall the handshake (reproduced on one
+%% scheduler), which would make unrelated tests flaky.
 hackney_opts() ->
     [{protocols, [http3]},
-     {connect_timeout, 5000},
-     {recv_timeout, 5000},
+     {zero_rtt, false},
+     {connect_timeout, ?TIMEOUT},
+     {recv_timeout, ?TIMEOUT},
      {ssl_options, [{insecure, true}]}].
 
 %% @doc hackney_h3 options: the certificate is self-signed.
 h3_opts() ->
-    #{insecure_skip_verify => true, timeout => 5000, recv_timeout => 5000}.
+    #{insecure_skip_verify => true, timeout => ?TIMEOUT, recv_timeout => ?TIMEOUT}.
 
 %% @doc hackney_conn:start_link/1 options for an HTTP/3 connection.
 conn_opts(Ctx) ->
@@ -71,15 +80,19 @@ conn_opts(Ctx) ->
       transport => hackney_ssl,
       connect_options => [{protocols, [http3]}],
       ssl_options => [{insecure, true}],
-      connect_timeout => 5000,
-      recv_timeout => 5000}.
+      connect_timeout => ?TIMEOUT,
+      recv_timeout => ?TIMEOUT}.
 
 cert_file() ->
     filename:join(cert_dir(), "server.pem").
 
+%% @doc The PEM file of the CA that issued the server certificate.
+ca_file() ->
+    filename:join(cert_dir(), "ca.pem").
+
 %% @doc The CA that issued the server certificate, as DER trust anchors.
 ca_cacerts() ->
-    {ok, Pem} = file:read_file(filename:join(cert_dir(), "ca.pem")),
+    {ok, Pem} = file:read_file(ca_file()),
     [Der || {'Certificate', Der, not_encrypted} <- public_key:pem_decode(Pem)].
 
 %% @doc A UDP port with nothing listening on it.

@@ -86,7 +86,7 @@ wait_connected(ConnRef) ->
         ({closed, Reason}) -> {done, {error, Reason}};
         ({transport_error, Code, Msg}) -> {done, {error, {transport_error, Code, Msg}}};
         (_) -> continue
-    end, 5000).
+    end, 15000).
 
 %% Accumulate full response (headers + body)
 wait_response(ConnRef, StreamId, Timeout) ->
@@ -151,7 +151,8 @@ tls_test_() ->
      with_server([
          {"Connect without TLS verification", fun test_connect_no_verify/1},
          {"Connect with TLS verification against the test CA", fun test_connect_with_verify/1},
-         {"Verification fails without the test CA", fun test_connect_verify_untrusted/1}
+         {"Verification fails without the test CA", fun test_connect_verify_untrusted/1},
+         {"Connect with the test CA as a cacertfile", fun test_connect_verify_cacertfile/1}
      ])}.
 
 test_connect_no_verify(Server) ->
@@ -164,6 +165,14 @@ test_connect_with_verify(Server) ->
     %% The server certificate is issued by the test CA for 127.0.0.1 and
     %% localhost, so it verifies once that CA is trusted.
     Opts = #{verify => true, cacerts => hackney_h3_test_server:ca_cacerts()},
+    {ok, ConnRef} = connect(Server, Opts),
+    Result = wait_connected(ConnRef),
+    hackney_h3:close(ConnRef, normal),
+    ?assertMatch({ok, _}, Result).
+
+test_connect_verify_cacertfile(Server) ->
+    %% quic only takes DER cacerts; hackney_h3 decodes the PEM file.
+    Opts = #{verify => true, cacertfile => hackney_h3_test_server:ca_file()},
     {ok, ConnRef} = connect(Server, Opts),
     Result = wait_connected(ConnRef),
     hackney_h3:close(ConnRef, normal),
@@ -259,7 +268,7 @@ test_post_request(Server) ->
     ],
     {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, false),
     ok = hackney_h3:send_data(ConnRef, StreamId, <<"{}">>, true),
-    {ok, Status, RespHeaders, Body} = wait_response(ConnRef, StreamId, 5000),
+    {ok, Status, RespHeaders, Body} = wait_response(ConnRef, StreamId, 15000),
     hackney_h3:close(ConnRef, normal),
     ?assertEqual(200, Status),
     ?assertEqual(<<"application/json">>,
@@ -276,9 +285,9 @@ test_multiple_requests(Server) ->
                                               build_get_headers(Host, <<"/cdn-cgi/trace">>),
                                               true),
     ?assertNotEqual(StreamId1, StreamId2),
-    ?assertMatch({ok, 200, _, _}, wait_response(ConnRef, StreamId1, 5000)),
+    ?assertMatch({ok, 200, _, _}, wait_response(ConnRef, StreamId1, 15000)),
     ?assertMatch({ok, 200, _, <<"h=127.0.0.1\nhttp=http/3\n">>},
-                 wait_response(ConnRef, StreamId2, 5000)),
+                 wait_response(ConnRef, StreamId2, 15000)),
     hackney_h3:close(ConnRef, normal).
 
 %%====================================================================
@@ -300,7 +309,7 @@ test_h3_simple_request(Server) ->
 
 test_h3_request_with_options(Server) ->
     URL = hackney_h3_test_server:url(Server, <<"/cdn-cgi/trace">>),
-    Options = (hackney_h3_test_server:h3_opts())#{timeout => 5000, recv_timeout => 5000},
+    Options = (hackney_h3_test_server:h3_opts())#{timeout => 15000, recv_timeout => 15000},
     Headers = [{<<"user-agent">>, <<"hackney-test/1.0">>}],
     ?assertMatch({ok, 200, _, <<"h=127.0.0.1\nhttp=http/3\n">>},
                  hackney_h3:request(get, URL, Headers, <<>>, Options)).
@@ -350,7 +359,7 @@ make_h3_request(Server, Path) ->
     {ok, _} = wait_connected(ConnRef),
     Headers = build_get_headers(hackney_h3_test_server:host(), Path),
     {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, true),
-    Result = wait_response(ConnRef, StreamId, 5000),
+    Result = wait_response(ConnRef, StreamId, 15000),
     hackney_h3:close(ConnRef, normal),
     Result.
 

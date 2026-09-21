@@ -45,10 +45,10 @@ http3_conn_test_() ->
 
 test_h3_connection_request(Server) ->
     {ok, Pid} = hackney_conn:start_link(hackney_h3_test_server:conn_opts(Server)),
-    ok = hackney_conn:connect(Pid, 5000),
+    ok = hackney_conn:connect(Pid, 15000),
     ?assertEqual(http3, hackney_conn:get_protocol(Pid)),
     {ok, Status, Headers, Body} =
-        hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>, 5000),
+        hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>, 15000),
     ?assertEqual(200, Status),
     ?assertEqual(<<"text/html">>, proplists:get_value(<<"content-type">>, Headers)),
     ?assertEqual(<<"<html><body>hackney h3 test server</body></html>">>, Body),
@@ -58,14 +58,14 @@ test_h3_get_protocol(Server) ->
     {ok, Pid} = hackney_conn:start_link(hackney_h3_test_server:conn_opts(Server)),
     %% Before connecting, the protocol is the http1 default.
     ?assertEqual(http1, hackney_conn:get_protocol(Pid)),
-    ok = hackney_conn:connect(Pid, 5000),
+    ok = hackney_conn:connect(Pid, 15000),
     ?assertEqual(http3, hackney_conn:get_protocol(Pid)),
     hackney_conn:stop(Pid).
 
 test_h3_peer_info(Server) ->
     Port = hackney_h3_test_server:port(Server),
     {ok, Pid} = hackney_conn:start_link(hackney_h3_test_server:conn_opts(Server)),
-    ok = hackney_conn:connect(Pid, 5000),
+    ok = hackney_conn:connect(Pid, 15000),
     ?assertEqual(http3, hackney_conn:get_protocol(Pid)),
     ?assertMatch({ok, {{127, 0, 0, 1}, Port}}, hackney_conn:peername(Pid)),
     ?assertMatch({ok, {_, _}}, hackney_conn:sockname(Pid)),

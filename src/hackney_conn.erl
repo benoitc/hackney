@@ -1297,6 +1297,9 @@ connected({call, From}, stream_body, #conn_data{protocol = http2} = Data) ->
 connected({call, From}, body, #conn_data{protocol = http2} = Data) ->
     handle_h2_read_body(From, Data);
 
+connected({call, From}, body, #conn_data{protocol = http3, h3_streams = Streams} = Data) ->
+    handle_h3_read_body(From, Streams, Data);
+
 connected(EventType, Event, Data) ->
     handle_common(EventType, Event, connected, Data).
 
@@ -1469,7 +1472,7 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Da
     #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId, h3_streams = Streams} = Data,
     case hackney_h3:finish_send_body(ConnRef, StreamId, Streams) of
         {ok, _} ->
-            {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
+            {keep_state_and_data, [{reply, From, ok}]};
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1516,11 +1519,21 @@ streaming_body({call, From}, start_response, #conn_data{protocol = http2} = Data
             {next_state, connected, Data, [CancelIdle, {reply, From, {error, no_stream}}]}
     end;
 
-streaming_body({call, From}, start_response, #conn_data{protocol = http3} = Data) ->
-    %% HTTP/3 - wait for response headers via QUIC messages
-    %% Transition to connected and wait for QUIC stream_headers message
-    NewData = Data#conn_data{request_from = From},
-    {next_state, connected, NewData};
+streaming_body({call, From}, start_response,
+               #conn_data{protocol = http3, h3_stream_id = StreamId,
+                          h3_streams = Streams} = Data) ->
+    %% HTTP/3 - the response headers may already be in; otherwise park the
+    %% caller until handle_h3_headers/5 answers it.
+    case maps:get(StreamId, Streams, undefined) of
+        {_, {sending_body, _}} ->
+            {next_state, connected, Data#conn_data{request_from = From}};
+        {_, _Response} ->
+            #conn_data{status = Status, response_headers = Headers} = Data,
+            {next_state, connected, Data,
+             [{reply, From, {ok, Status, Headers, self()}}]};
+        undefined ->
+            {next_state, connected, Data, [{reply, From, {error, no_stream}}]}
+    end;
 
 streaming_body({call, From}, start_response, Data) ->
     %% Transition to receiving state and get response (HTTP/1.1)
@@ -2934,17 +2947,10 @@ h3_ca_opts(SslOpts) ->
         undefined ->
             case proplists:get_value(cacertfile, SslOpts) of
                 undefined -> #{};
-                File -> #{cacerts => cacertfile_ders(File)}
+                File -> #{cacerts => hackney_h3:cacertfile_ders(File)}
             end;
         CACerts ->
             #{cacerts => CACerts}
-    end.
-
-%% @private Read a PEM cacertfile into a list of DER certificates.
-cacertfile_ders(File) ->
-    case file:read_file(File) of
-        {ok, Pem} -> [Der || {'Certificate', Der, _} <- public_key:pem_decode(Pem)];
-        {error, _} -> []
     end.
 
 %% @private Drive QUIC event loop until connected
@@ -4038,6 +4044,26 @@ handle_h3_stream_body(From, Streams, Data) ->
             {keep_state_and_data, [{reply, From, {error, no_stream}}]}
     end.
 
+%% @private Handle HTTP/3 body call: the rest of the streaming response in
+%% one binary, returned at once if it already ended or when its FIN arrives.
+handle_h3_read_body(From, Streams, Data) ->
+    case find_streaming_stream(Streams) of
+        {ok, StreamId, {streaming_body, Status, Headers, Buffer, undefined}} ->
+            NewStreamState = {streaming_body_full, Status, Headers, Buffer, From},
+            {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
+                {undefined, NewStreamState}, Streams)}};
+        {ok, StreamId, {streaming_body_final, _Status, _Headers, Buffer}} ->
+            {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+             [{reply, From, {ok, Buffer}}]};
+        {ok, StreamId, {streaming_body_done, _Status, _Headers}} ->
+            {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+             [{reply, From, {ok, <<>>}}]};
+        {ok, _StreamId, _OtherState} ->
+            {keep_state_and_data, [{reply, From, {error, not_streaming}}]};
+        none ->
+            {keep_state_and_data, [{reply, From, {error, no_stream}}]}
+    end.
+
 %% @private Find a stream in streaming mode
 find_streaming_stream(Streams) ->
     Result = maps:fold(fun
@@ -4103,29 +4129,24 @@ handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
                         status = Status,
                         response_headers = RespHeaders
                     }, [{reply, From, {ok, Status, HeadersList}}]};
-                {From, {sending_body, From}} ->
-                    %% Response arrived while sending body - update state
-                    %% If request_from is set (from start_response), reply to it
+                {_, {sending_body, _}} ->
+                    %% Response to a streamed upload: read it like a
+                    %% request_streaming response, with stream_body/1 or
+                    %% body/1. start_response/1 may already be waiting.
+                    NewStreamState = case Fin of
+                        true -> {streaming_body_done, Status, RespHeaders};
+                        false -> {streaming_body, Status, RespHeaders, <<>>, undefined}
+                    end,
+                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                    NewData = Data#conn_data{h3_streams = UpdatedStreams,
+                                             status = Status,
+                                             response_headers = RespHeaders},
                     case Data#conn_data.request_from of
                         undefined ->
-                            %% No one waiting yet - just update state
-                            UpdatedStreams = maps:put(StreamId,
-                                {From, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
-                            {keep_state, Data#conn_data{
-                                h3_streams = UpdatedStreams,
-                                status = Status,
-                                response_headers = RespHeaders
-                            }};
+                            {keep_state, NewData};
                         WaitingFrom ->
-                            %% Someone called start_response - reply with status/headers
-                            UpdatedStreams = maps:put(StreamId,
-                                {WaitingFrom, {receiving_body, Status, RespHeaders, <<>>}}, Streams),
-                            {keep_state, Data#conn_data{
-                                h3_streams = UpdatedStreams,
-                                status = Status,
-                                response_headers = RespHeaders,
-                                request_from = undefined
-                            }, [{reply, WaitingFrom, {ok, Status, HeadersList, self()}}]}
+                            {keep_state, NewData#conn_data{request_from = undefined},
+                             [{reply, WaitingFrom, {ok, Status, HeadersList, self()}}]}
                     end;
                 _ ->
                     %% Unknown stream or wrong state
@@ -4240,6 +4261,18 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                             {keep_state, Data#conn_data{h3_streams = UpdatedStreams},
                              [{reply, PendingFrom, {ok, NewBuffer}}]}
                     end
+            end;
+        {_, {streaming_body_full, Status, Headers, Acc, From}} ->
+            %% body/1 is waiting for the whole body
+            NewAcc = <<Acc/binary, RecvData/binary>>,
+            case Fin of
+                true ->
+                    {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+                     [{reply, From, {ok, NewAcc}}]};
+                false ->
+                    NewStreamState = {streaming_body_full, Status, Headers, NewAcc, From},
+                    {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
+                        {undefined, NewStreamState}, Streams)}}
             end;
         {_, {streaming_body_final, Status, Headers, FinalBuffer}} ->
             %% Already got final data, just buffer more (shouldn't happen)

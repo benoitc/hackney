@@ -47,7 +47,8 @@ connect(Server, Opts) ->
 
 tcp_opts() ->
     [{protocols, [http3, http2, http1]},
-     {connect_timeout, 5000},
+     {zero_rtt, false},
+     {connect_timeout, 15000},
      {ssl_options, [{insecure, true}]}].
 
 %%====================================================================
@@ -69,7 +70,7 @@ test_explicit_h3_connect(Server) ->
 
 test_default_protocols(#{tcp_port := TcpPort}) ->
     %% Without http3 in the protocol list, hackney negotiates over TCP.
-    Opts = [{connect_timeout, 5000}, {ssl_options, [{insecure, true}]}],
+    Opts = [{connect_timeout, 15000}, {ssl_options, [{insecure, true}]}],
     {ok, ConnPid} = hackney:connect(hackney_ssl, "127.0.0.1", TcpPort, Opts),
     ?assertEqual(http2, hackney_conn:get_protocol(ConnPid)),
     hackney:close(ConnPid).

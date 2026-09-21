@@ -108,7 +108,7 @@ test_http3_opt_in(Server) ->
         ({connected, _Info}) -> {done, connected};
         ({closed, Reason}) -> {done, {closed, Reason}};
         (_) -> continue
-    end, 5000),
+    end, 15000),
     hackney_h3:close(ConnRef, normal),
     ?assertEqual(connected, Result).
 
