@@ -17,6 +17,15 @@ unreleased
 - A response that crosses a reset of its stream no longer closes the HTTP/2
   connection. `h2` dropped the header block of that response without decoding
   it, so the next response on the connection failed with COMPRESSION_ERROR.
+- The response to an HTTP/3 streaming upload can be read. After
+  `start_response/1`, `body/1` returned `{error, invalid_state}` and
+  `stream_body/1` returned `{error, no_stream}`: the body went to the
+  `start_response/1` caller as a second reply and was lost. When the response
+  headers arrived before `start_response/1` was called, it could wait forever.
+- `hackney_h3:connect/3,4` and `hackney_h3:request/5` honor a `cacertfile`
+  option. It was handed to quic, which only takes DER `cacerts`, so it was
+  ignored and verification failed as `{error, timeout}`. `hackney:request/5`
+  was not affected.
 - A request that races a peer-initiated close now returns `{error, closed}`
   instead of `{error, invalid_state}`. A connection that sees the peer close
   stays alive briefly so late calls get an answer, and during that window every
