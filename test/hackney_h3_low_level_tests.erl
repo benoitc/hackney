@@ -170,6 +170,8 @@ test_full_request_response(Server) ->
         (_) -> continue
     end, 15000),
     ?assertEqual({<<":status">>, <<"200">>}, lists:keyfind(<<":status">>, 1, RespHeaders)),
+    %% Exactly one :status: two would be a malformed response.
+    ?assertEqual(1, length([H || {<<":status">>, _} = H <- RespHeaders])),
     ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, read_body(ConnRef, StreamId, <<>>)),
     hackney_h3:close(ConnRef, normal).
 

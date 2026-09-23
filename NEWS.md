@@ -22,6 +22,12 @@ unreleased
   `stream_body/1` returned `{error, no_stream}`: the body went to the
   `start_response/1` caller as a second reply and was lost. When the response
   headers arrived before `start_response/1` was called, it could wait forever.
+- HTTP/3 response headers carry one `:status`. quic_h3 passes the status
+  separately and keeps it in the header list, and hackney prepended its own,
+  so every response reached the low-level `{h3, _, {stream_headers, ...}}`
+  consumer with the pseudo-header twice, which RFC 9114 4.3.1 makes a
+  malformed response. Requests through `hackney:request/5` were not affected:
+  pseudo-headers are filtered before the caller sees them.
 - An HTTP/3 connection that goes away reports why. `quic_h3` sends the reason
   with its close event, and the handler only matched the older shape without
   one, so the message was dropped: the caller waited out its own timeout and

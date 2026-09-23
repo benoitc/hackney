@@ -850,7 +850,11 @@ handle_info({quic_h3, Conn, connected},
 
 handle_info({quic_h3, Conn, {response, StreamId, Status, Headers}},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
-    Full = [{<<":status">>, integer_to_binary(Status)} | Headers],
+    %% quic_h3 passes the status separately and keeps it in the header list,
+    %% so drop it there before prepending the authoritative one: two
+    %% `:status' make a malformed response (RFC 9114 4.3.1).
+    Rest = [H || {Name, _} = H <- Headers, Name =/= <<":status">>],
+    Full = [{<<":status">>, integer_to_binary(Status)} | Rest],
     Owner ! {h3, Ref, {stream_headers, StreamId, Full, false}},
     {noreply, State};
 
