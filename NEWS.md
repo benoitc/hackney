@@ -22,6 +22,12 @@ unreleased
   `stream_body/1` returned `{error, no_stream}`: the body went to the
   `start_response/1` caller as a second reply and was lost. When the response
   headers arrived before `start_response/1` was called, it could wait forever.
+- An HTTP/3 connection that goes away reports why. `quic_h3` sends the reason
+  with its close event, and the handler only matched the older shape without
+  one, so the message was dropped: the caller waited out its own timeout and
+  the connection process stayed alive. A handshake that fails on a bad
+  certificate or a TLS alert now comes back as that error instead of
+  `{error, timeout}`.
 - `hackney_h3:connect/3,4` and `hackney_h3:request/5` honor a `cacertfile`
   option. It was handed to quic, which only takes DER `cacerts`, so it was
   ignored and verification failed as `{error, timeout}`. `hackney:request/5`

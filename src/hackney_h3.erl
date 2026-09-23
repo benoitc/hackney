@@ -889,8 +889,20 @@ handle_info({quic_h3, Conn, {early_data_rejected, StreamIds}},
     Owner ! {h3, Ref, {early_data_rejected, StreamIds}},
     {noreply, State};
 
+handle_info({quic_h3, Conn, {closed, Reason}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    %% quic_h3 reports why the connection went away: `normal' for a local
+    %% close or a drained GOAWAY, `owner_down', an {h3_error, Code, Phrase},
+    %% or whatever QUIC reported. A failure before HTTP/3 comes up (a bad
+    %% certificate, a TLS alert) arrives here too, so pass the reason on
+    %% rather than letting the caller wait out its timeout.
+    Owner ! {h3, Ref, {closed, Reason}},
+    {stop, normal, State};
+
 handle_info({quic_h3, Conn, closed},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    %% quic =< 1.10.0 closes without a reason on the local-close and
+    %% QUIC-down paths.
     Owner ! {h3, Ref, {closed, normal}},
     {stop, normal, State};
 

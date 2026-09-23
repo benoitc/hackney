@@ -152,6 +152,7 @@ tls_test_() ->
          {"Connect without TLS verification", fun test_connect_no_verify/1},
          {"Connect with TLS verification against the test CA", fun test_connect_with_verify/1},
          {"Verification fails without the test CA", fun test_connect_verify_untrusted/1},
+         {"A failed handshake reports why", fun test_connect_reports_close_reason/1},
          {"Connect with the test CA as a cacertfile", fun test_connect_verify_cacertfile/1}
      ])}.
 
@@ -187,7 +188,16 @@ test_connect_verify_untrusted(Server) ->
         {error, _} = Error ->
             Error
     end,
-    ?assertMatch({error, _}, Result).
+    %% quic_h3 reports why it gave up, rather than leaving the caller to
+    %% time out.
+    ?assertMatch({error, {certificate_invalid, _}}, Result).
+
+%% connect/3 surfaces the close reason of a handshake that failed.
+test_connect_reports_close_reason(Server) ->
+    Result = hackney_h3:connect(hackney_h3_test_server:host(),
+                                hackney_h3_test_server:port(Server),
+                                #{verify => true, timeout => 15000}),
+    ?assertMatch({error, {connection_closed, {certificate_invalid, _}}}, Result).
 
 %%====================================================================
 %% Redirect Tests
