@@ -15,6 +15,11 @@
 %%%   GET /large             200, a 64 KiB body sent in 16 DATA frames
 %%%   GET /redirect/N        302 to /redirect/N-1; /redirect/0 is 200
 %%%   GET /status/N          status N; a 3xx carries location: /
+%%%   GET /headers           200 text/plain, the request headers it received,
+%%%                          one "name: value" per line, sorted
+%%%   GET /reset             200 and part of a body, then resets the stream
+%%%                          when the process registered as
+%%%                          hackney_h3_test_reset sends `reset'
 %%%   POST any path          200, echoes the request body
 %%%   anything else          404
 -module(hackney_h3_test_server).
@@ -145,6 +150,13 @@ handle(Conn, StreamId, <<"GET">>, <<"/status/", N/binary>>, _Headers) ->
         false -> []
     end,
     respond(Conn, StreamId, Status, Headers, <<>>);
+handle(Conn, StreamId, <<"GET">>, <<"/headers">>, Headers) ->
+    %% Report the headers that reached the server, so a test can assert on
+    %% what hackney put on the wire.
+    Lines = [[Name, <<": ">>, Value, <<"\n">>]
+             || {Name, Value} <- lists:sort(Headers)],
+    respond(Conn, StreamId, 200, [{<<"content-type">>, <<"text/plain">>}],
+            iolist_to_binary(Lines));
 handle(Conn, StreamId, <<"GET">>, <<"/reset">>, _Headers) ->
     quic_h3:send_response(Conn, StreamId, 200, [{<<"content-type">>, <<"text/plain">>}]),
     quic_h3:send_data(Conn, StreamId, <<"part">>, false),

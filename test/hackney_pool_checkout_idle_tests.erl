@@ -16,7 +16,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(BODY, <<"{\"ok\":true}">>).
--define(IDLE_MS, 300).
+-define(IDLE_MS, 1000).
 
 checkout_idle_test_() ->
     {setup,
@@ -37,11 +37,13 @@ checkout_disarms_idle_timer() ->
     try
         {ok, 200, _} = hackney_conn:request(ConnPid, <<"GET">>, <<"/">>, [], <<>>),
         {ok, ?BODY} = hackney_conn:body(ConnPid),
-        %% Idle in connected, timer armed for ?IDLE_MS. Sit on most of it.
-        timer:sleep(?IDLE_MS - 100),
+        %% Idle in connected, timer armed for ?IDLE_MS. Probe halfway through:
+        %% far enough in to matter, far enough from the deadline that a slow
+        %% runner cannot close the conn before the probe.
+        timer:sleep(?IDLE_MS div 2),
         ?assertEqual({ok, connected}, hackney_conn:is_ready(ConnPid)),
         %% Past the original deadline. Before the fix the conn had closed here.
-        timer:sleep(200),
+        timer:sleep(?IDLE_MS),
         ?assertMatch({connected, _}, sys:get_state(ConnPid))
     after
         catch hackney_conn:close(ConnPid),
@@ -55,9 +57,9 @@ request_after_checkout_succeeds() ->
     try
         {ok, 200, _} = hackney_conn:request(ConnPid, <<"GET">>, <<"/">>, [], <<>>),
         {ok, ?BODY} = hackney_conn:body(ConnPid),
-        timer:sleep(?IDLE_MS - 100),
+        timer:sleep(?IDLE_MS div 2),
         ?assertEqual({ok, connected}, hackney_conn:is_ready(ConnPid)),
-        timer:sleep(200),
+        timer:sleep(?IDLE_MS),
         %% {error, invalid_state} before the fix.
         ?assertMatch({ok, 200, _},
                      hackney_conn:request(ConnPid, <<"GET">>, <<"/">>, [], <<>>)),
@@ -79,7 +81,7 @@ idle_timer_rearmed_after_response() ->
         {ok, 200, _} = hackney_conn:request(ConnPid, <<"GET">>, <<"/">>, [], <<>>),
         {ok, ?BODY} = hackney_conn:body(ConnPid),
         %% Now idle again with the timer re-armed; it must still fire.
-        timer:sleep(?IDLE_MS + 200),
+        timer:sleep(?IDLE_MS + 500),
         ?assertNotMatch({connected, _}, sys:get_state(ConnPid))
     after
         catch hackney_conn:close(ConnPid),
