@@ -28,6 +28,10 @@ unreleased
 ### Changed
 
 - Update `h2` to 0.12.1.
+- Update `quic` to 1.10.0 and `webtransport` to 0.4.6. quic 1.9 fixes a
+  handshake that stalled when the client's Initial flight spanned several
+  datagrams, and frames that waited for the next event after the handshake;
+  1.10 reworks loss detection and recovery along RFC 9002.
 
 4.7.4 - 2026-08-12
 ------------------
