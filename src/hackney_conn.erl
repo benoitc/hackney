@@ -3535,14 +3535,30 @@ to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8).
 %% @private Normalize headers to binary key-value pairs for HTTP/2
 %% Also filters out Host header since :authority pseudo-header is used instead.
 %% Having both Host and :authority causes protocol_error on strict servers (e.g. Google).
+%% The connection-specific headers go too: RFC 9113 8.2.2 forbids them, so the h2
+%% layer refuses to send a block containing one and the request fails before it
+%% reaches the socket. They are perfectly legal in HTTP/1.1, and a caller cannot
+%% know which protocol ALPN picked, so hackney drops them here rather than failing
+%% requests that are valid for its own API.
 normalize_headers(Headers) ->
     lists:filtermap(fun({K, V}) ->
         KeyLower = hackney_bstr:to_lower(to_binary(K)),
-        case KeyLower of
-            <<"host">> -> false;  %% Skip Host header - use :authority instead
-            _ -> {true, {KeyLower, to_binary(V)}}
+        case is_connection_specific(KeyLower) of
+            true -> false;
+            false -> {true, {KeyLower, to_binary(V)}}
         end
     end, Headers).
+
+%% @private Host is carried by :authority; the rest are the connection-specific
+%% header fields of RFC 9113 8.2.2. TE is left alone: it is allowed with the
+%% single value "trailers", and the h2 layer validates that itself.
+is_connection_specific(<<"host">>) -> true;
+is_connection_specific(<<"connection">>) -> true;
+is_connection_specific(<<"keep-alive">>) -> true;
+is_connection_specific(<<"proxy-connection">>) -> true;
+is_connection_specific(<<"transfer-encoding">>) -> true;
+is_connection_specific(<<"upgrade">>) -> true;
+is_connection_specific(_) -> false.
 
 %% @private Handle a {h2, Conn, Event} owner message from the h2 library.
 handle_h2_event({informational, _StreamId, _Status, _Headers}, Data) ->
