@@ -5,6 +5,9 @@ unreleased
 
 ### Fixed
 
+- A caller reading an HTTP/3 response with `body/1` or `stream_body/1` is
+  answered when the server resets its stream, instead of waiting for its own
+  timeout. Needs quic 2.0.0, the first release to report a peer RESET_STREAM.
 - A pooled HTTP/2 connection no longer closes when the caller that opened it
   exits. It stayed owned by that caller, so its exit failed every other
   caller's request on the connection with `{error, closed}`. A shared
@@ -49,6 +52,10 @@ unreleased
 ### Changed
 
 - Update `h2` to 0.12.1.
+- Update `quic` to 2.0.0 and `webtransport` to 0.4.7. quic 2.0.0 reports a
+  peer resetting a request stream, always sends a reason with its HTTP/3
+  close event, and fixes a handshake that could stall when resuming from a
+  cached session ticket.
 
 4.7.4 - 2026-08-12
 ------------------
