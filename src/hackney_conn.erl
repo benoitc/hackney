@@ -407,8 +407,10 @@ valid_method(Method) ->
 %% @doc Send an HTTP/3 request and return headers immediately.
 %% Returns {ok, Status, Headers} and allows subsequent stream_body/1 calls.
 %% This is for pull-based body streaming over HTTP/3.
+%% The HTTP/2 path answers `{ok, Status, Headers, pid()}', like
+%% start_response/1; the others answer `{ok, Status, Headers}'.
 -spec request_streaming(pid(), binary(), binary(), list(), binary() | iolist()) ->
-    {ok, integer(), list()} | {error, term()}.
+    {ok, integer(), list()} | {ok, integer(), list(), pid()} | {error, term()}.
 request_streaming(Pid, Method, Path, Headers, Body) ->
     case valid_request_line(Method, Path) of
         ok -> safe_call(Pid, {request_streaming, Method, Path, Headers, Body}, infinity);
@@ -1105,6 +1107,18 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
 connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 request with streaming body reads (returns headers, then stream_body for chunks)
     do_h3_request_streaming(From, Method, Path, Headers, Body, Data);
+
+connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_data{protocol = http2} = Data) ->
+    %% HTTP/2: reply with status and headers, leave the body for
+    %% stream_body/1 or body/1, like the HTTP/3 clause above.
+    do_h2_send(From, Method, Path, Headers, Body, {stream, waiting_headers, From},
+               sync, Data#conn_data.send_timeout, Data);
+
+connected({call, From}, {request_streaming, Method, Path, Headers, Body}, _Data) ->
+    %% HTTP/1.1 leaves the body on the connection anyway, so this is the
+    %% plain request path.
+    {keep_state_and_data,
+     [{next_event, {call, From}, {request, Method, Path, Headers, Body, []}}]};
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) ->
     %% HTTP/1.1 request
@@ -3302,7 +3316,13 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
             NewData0 = track_h2_stream(StreamId, Owner, StreamState, Data),
             NewData1 = NewData0#conn_data{
                 method = MethodBin,
-                path = PathBin
+                path = PathBin,
+                %% A streaming read is served by stream_body/1 and body/1,
+                %% which look the stream up by id.
+                h2_stream_id = case StreamState of
+                    {stream, waiting_headers, _} -> StreamId;
+                    _ -> NewData0#conn_data.h2_stream_id
+                end
             },
             NewData = case Mode of
                 sync ->
@@ -3422,9 +3442,10 @@ stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout) when is_function
 %% @private stream_body/1 over an HTTP/2 streaming response. Returns the next
 %% buffered chunk, parks the caller until data arrives, or signals done.
 %% Mirrors handle_h3_stream_body/3.
-handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Streams} = Data) ->
+handle_h2_stream_body(From, #conn_data{h2_streams = Streams} = Data) ->
+    StreamId = h2_read_stream(From, Data),
     case maps:get(StreamId, Streams, undefined) of
-        {_, {stream, headers, Status, Hdrs, Buffer, undefined}} ->
+        {Owner, {stream, headers, Status, Hdrs, Buffer, undefined}} ->
             case Buffer of
                 <<>> ->
                     %% No data yet - park the caller; h2_on_data/4 replies.
@@ -3434,7 +3455,7 @@ handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Str
                     {keep_state, Data#conn_data{h2_streams = Streams2}};
                 _ ->
                     Streams2 = maps:put(StreamId,
-                                        {undefined, {stream, headers, Status, Hdrs, <<>>, undefined}},
+                                        {Owner, {stream, headers, Status, Hdrs, <<>>, undefined}},
                                         Streams),
                     {keep_state, Data#conn_data{h2_streams = Streams2},
                      [{reply, From, {ok, Buffer}}]}
@@ -3442,9 +3463,9 @@ handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Str
         {_, {stream, done, _Status, _Hdrs, <<>>}} ->
             h2_stream_result(drop_h2_stream(StreamId, Data),
                              [{reply, From, done}]);
-        {_, {stream, done, Status, Hdrs, Buffer}} ->
+        {Owner, {stream, done, Status, Hdrs, Buffer}} ->
             %% Hand back the last buffered chunk; next call returns done.
-            Streams2 = maps:put(StreamId, {undefined, {stream, done, Status, Hdrs, <<>>}}, Streams),
+            Streams2 = maps:put(StreamId, {Owner, {stream, done, Status, Hdrs, <<>>}}, Streams),
             {keep_state, Data#conn_data{h2_streams = Streams2}, [{reply, From, {ok, Buffer}}]};
         _ ->
             {keep_state_and_data, [{reply, From, {error, no_stream}}]}
@@ -3452,7 +3473,8 @@ handle_h2_stream_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Str
 
 %% @private body/1 over an HTTP/2 streaming response: accumulate the whole body
 %% then reply. Parks the caller until END_STREAM (h2_on_data/4 replies).
-handle_h2_read_body(From, #conn_data{h2_stream_id = StreamId, h2_streams = Streams} = Data) ->
+handle_h2_read_body(From, #conn_data{h2_streams = Streams} = Data) ->
+    StreamId = h2_read_stream(From, Data),
     case maps:get(StreamId, Streams, undefined) of
         {_, {stream, headers, Status, Hdrs, Buffer, undefined}} ->
             Streams2 = maps:put(StreamId,
@@ -3586,10 +3608,12 @@ h2_on_response(StreamId, Status, Headers, Data) ->
             {keep_state, Data#conn_data{h2_streams = Streams2,
                                         status = Status,
                                         response_headers = Headers}};
-        {_, {stream, waiting_headers, From}} ->
-            %% start_response/1 is parked - reply with status/headers now.
+        {Owner, {stream, waiting_headers, From}} ->
+            %% start_response/1 or request_streaming/5 is parked - reply with
+            %% status/headers now. The owner is kept so the reader of this
+            %% stream is found by caller, not by the connection's last id.
             Streams2 = maps:put(StreamId,
-                                {undefined, {stream, headers, Status, Headers, <<>>, undefined}},
+                                {Owner, {stream, headers, Status, Headers, <<>>, undefined}},
                                 Streams),
             {keep_state, Data#conn_data{h2_streams = Streams2,
                                         status = Status,
@@ -3693,7 +3717,7 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
                     Streams2 = maps:put(StreamId, {StreamTo, NewState}, Streams),
                     {keep_state, Data#conn_data{h2_streams = Streams2}}
             end;
-        {_, {stream, headers, Status, Headers, Buffer, Pending}} ->
+        {Owner, {stream, headers, Status, Headers, Buffer, Pending}} ->
             %% Streaming-body response, pull reads via stream_body/1.
             NewBuffer = <<Buffer/binary, Body/binary>>,
             case Pending of
@@ -3702,7 +3726,9 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
                         true -> {stream, done, Status, Headers, NewBuffer};
                         false -> {stream, headers, Status, Headers, NewBuffer, undefined}
                     end,
-                    Streams2 = maps:put(StreamId, {undefined, NextState}, Streams),
+                    %% Keep the owner: a reader of this stream is found by
+                    %% caller, and its body may land before it reads.
+                    Streams2 = maps:put(StreamId, {Owner, NextState}, Streams),
                     {keep_state, Data#conn_data{h2_streams = Streams2}};
                 From when NewBuffer =/= <<>> ->
                     NextState = case EndStream of
@@ -4000,8 +4026,8 @@ do_h3_send_headers(From, Method, Path, Headers, Data) ->
 %% @private Handle HTTP/3 stream_body call
 %% Returns buffered chunk, waits for data, or returns done
 handle_h3_stream_body(From, Streams, Data) ->
-    %% Find the streaming stream
-    case find_streaming_stream(Streams) of
+    %% Find the stream this caller is reading
+    case find_streaming_stream(From, Streams) of
         {ok, StreamId, {streaming_body, Status, Headers, Buffer, undefined}} ->
             %% No pending caller, check buffer
             case Buffer of
@@ -4047,7 +4073,7 @@ handle_h3_stream_body(From, Streams, Data) ->
 %% @private Handle HTTP/3 body call: the rest of the streaming response in
 %% one binary, returned at once if it already ended or when its FIN arrives.
 handle_h3_read_body(From, Streams, Data) ->
-    case find_streaming_stream(Streams) of
+    case find_streaming_stream(From, Streams) of
         {ok, StreamId, {streaming_body, Status, Headers, Buffer, undefined}} ->
             NewStreamState = {streaming_body_full, Status, Headers, Buffer, From},
             {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
@@ -4063,6 +4089,50 @@ handle_h3_read_body(From, Streams, Data) ->
         none ->
             {keep_state_and_data, [{reply, From, {error, no_stream}}]}
     end.
+
+%% @private The HTTP/2 stream a reader owns. Several callers can have a
+%% stream open on one connection, so a read is resolved by the calling
+%% process; the streaming-body upload path has no owner recorded per read
+%% and falls back to the connection's current stream id.
+h2_read_stream(From, #conn_data{h2_stream_id = StreamId, h2_streams = Streams}) ->
+    Caller = h2_stream_owner_pid(From),
+    Owned = [Id || {Id, {Owner, State}} <- maps:to_list(Streams),
+                   Owner =/= undefined,
+                   h2_stream_owner_pid(Owner) =:= Caller,
+                   is_tuple(State), element(1, State) =:= stream],
+    case Owned of
+        [Id | _] -> Id;
+        [] -> StreamId
+    end.
+
+%% @private Find the stream a reader owns, or any streaming one when the
+%% caller owns none: several callers can read on one connection, and the
+%% streaming-body upload path records no owner for its reads.
+find_streaming_stream(From, Streams) ->
+    Caller = h3_stream_owner_pid(From),
+    Owned = maps:fold(fun
+        (StreamId, {Owner, State}, none) when Owner =/= undefined ->
+            case h3_stream_owner_pid(Owner) =:= Caller andalso is_streaming_state(State) of
+                true -> {ok, StreamId, State};
+                false -> none
+            end;
+        (_, _, Acc) -> Acc
+    end, none, Streams),
+    case Owned of
+        none -> find_streaming_stream(Streams);
+        Found -> Found
+    end.
+
+h3_stream_owner_pid({Pid, _Tag}) when is_pid(Pid) -> Pid;
+h3_stream_owner_pid(Pid) when is_pid(Pid) -> Pid;
+h3_stream_owner_pid(_) -> undefined.
+
+is_streaming_state(State) when is_tuple(State) ->
+    lists:member(element(1, State),
+                 [streaming_body, streaming_body_done, streaming_body_final,
+                  streaming_body_full]);
+is_streaming_state(_) ->
+    false.
 
 %% @private Find a stream in streaming mode
 find_streaming_stream(Streams) ->
@@ -4120,16 +4190,19 @@ handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
                         status = Status,
                         response_headers = RespHeaders
                     }};
-                {From, {waiting_headers_streaming, From}} ->
-                    %% Streaming mode - reply with headers, then allow stream_body calls
+                {Owner, {waiting_headers_streaming, From}} ->
+                    %% Streaming mode - reply with headers, then allow
+                    %% stream_body calls. The owner is kept so this stream's
+                    %% reader is found by caller: a connection can carry
+                    %% several.
                     NewStreamState = {streaming_body, Status, RespHeaders, <<>>, undefined},
-                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                    UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                     {keep_state, Data#conn_data{
                         h3_streams = UpdatedStreams,
                         status = Status,
                         response_headers = RespHeaders
                     }, [{reply, From, {ok, Status, HeadersList}}]};
-                {_, {sending_body, _}} ->
+                {Owner, {sending_body, _}} ->
                     %% Response to a streamed upload: read it like a
                     %% request_streaming response, with stream_body/1 or
                     %% body/1. start_response/1 may already be waiting.
@@ -4137,7 +4210,7 @@ handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
                         true -> {streaming_body_done, Status, RespHeaders};
                         false -> {streaming_body, Status, RespHeaders, <<>>, undefined}
                     end,
-                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                    UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                     NewData = Data#conn_data{h3_streams = UpdatedStreams,
                                              status = Status,
                                              response_headers = RespHeaders},
@@ -4211,8 +4284,10 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                     UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
                     {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}
             end;
-        {_, {streaming_body, Status, Headers, Buffer, PendingFrom}} ->
-            %% Pull-based streaming mode
+        {Owner, {streaming_body, Status, Headers, Buffer, PendingFrom}} ->
+            %% Pull-based streaming mode. The owner is kept through these
+            %% transitions: a connection can carry several readers, and a
+            %% response may land before its caller reads it.
             case Fin of
                 true ->
                     %% Stream complete
@@ -4220,12 +4295,12 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                         undefined when Buffer =:= <<>>, RecvData =:= <<>> ->
                             %% No pending caller, no data - mark done
                             NewStreamState = {streaming_body_done, Status, Headers},
-                            UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                            UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                             {keep_state, Data#conn_data{h3_streams = UpdatedStreams}};
                         undefined ->
                             %% No pending caller, has data - store final chunk for next stream_body call
                             NewBuffer = <<Buffer/binary, RecvData/binary>>,
-                            FinalStreams = maps:put(StreamId, {undefined, {streaming_body_final, Status, Headers, NewBuffer}}, Streams),
+                            FinalStreams = maps:put(StreamId, {Owner, {streaming_body_final, Status, Headers, NewBuffer}}, Streams),
                             {keep_state, Data#conn_data{h3_streams = FinalStreams}};
                         _ ->
                             %% Has pending caller - reply with last chunk or done
@@ -4239,7 +4314,7 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                                 _ ->
                                     %% Has data - reply with it, next call gets done
                                     NewStreamState = {streaming_body_done, Status, Headers},
-                                    UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                                    UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                                     {keep_state, Data#conn_data{h3_streams = UpdatedStreams},
                                      [{reply, PendingFrom, {ok, NewBuffer}}]}
                             end
@@ -4251,13 +4326,13 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
                             %% No pending caller - buffer data
                             NewBuffer = <<Buffer/binary, RecvData/binary>>,
                             NewStreamState = {streaming_body, Status, Headers, NewBuffer, undefined},
-                            UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                            UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                             {keep_state, Data#conn_data{h3_streams = UpdatedStreams}};
                         _ ->
                             %% Has pending caller - reply with data
                             NewBuffer = <<Buffer/binary, RecvData/binary>>,
                             NewStreamState = {streaming_body, Status, Headers, <<>>, undefined},
-                            UpdatedStreams = maps:put(StreamId, {undefined, NewStreamState}, Streams),
+                            UpdatedStreams = maps:put(StreamId, {Owner, NewStreamState}, Streams),
                             {keep_state, Data#conn_data{h3_streams = UpdatedStreams},
                              [{reply, PendingFrom, {ok, NewBuffer}}]}
                     end

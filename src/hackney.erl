@@ -683,21 +683,31 @@ request_with_transport(Method, URL, Headers0, Body, Options0,
   end.
 
 %% @doc Send a request on an existing connection.
+%% Returns the connection, so the body is read with body/1 or pulled with
+%% stream_body/1. A HEAD response has no body and comes back as
+%% {ok, Status, Headers}.
 -spec send_request(conn(), {atom(), binary(), list(), term()}) ->
     {ok, integer(), list(), conn()} | {ok, integer(), list()} | {error, term()}.
 send_request(ConnPid, {Method, Path, Headers, Body}) when is_pid(ConnPid) ->
   %% Convert method to binary
   MethodBin = hackney_bstr:to_upper(hackney_bstr:to_binary(Method)),
-  case hackney_conn:request(ConnPid, MethodBin, Path, Headers, Body) of
+  %% request_streaming/5 answers with the status and headers on every
+  %% protocol and leaves the body on the connection. The plain request/5
+  %% would hand back the whole body on HTTP/2 and HTTP/3, which this API
+  %% has no place to put.
+  case hackney_conn:request_streaming(ConnPid, MethodBin, Path, Headers, Body) of
     {ok, Status, RespHeaders} ->
-      %% HEAD request or no body
-      case MethodBin of
-        <<"HEAD">> -> {ok, Status, RespHeaders};
-        _ -> {ok, Status, RespHeaders, ConnPid}
-      end;
+      send_request_reply(MethodBin, Status, RespHeaders, ConnPid);
+    {ok, Status, RespHeaders, _Pid} ->
+      send_request_reply(MethodBin, Status, RespHeaders, ConnPid);
     {error, Reason} ->
       {error, Reason}
   end.
+
+send_request_reply(<<"HEAD">>, Status, RespHeaders, _ConnPid) ->
+  {ok, Status, RespHeaders};
+send_request_reply(_Method, Status, RespHeaders, ConnPid) ->
+  {ok, Status, RespHeaders, ConnPid}.
 
 %%====================================================================
 %% Streaming Request Body API

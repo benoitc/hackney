@@ -5,6 +5,15 @@ unreleased
 
 ### Fixed
 
+- `hackney:send_request/2` works on HTTP/2 and HTTP/3. Those protocols answer
+  a request with the body included, which the function did not handle, so it
+  failed with a `case_clause`. It returns the connection on every protocol
+  now, so the response is read with `body/1` or pulled with `stream_body/1`.
+- Several callers reading responses on one HTTP/2 or HTTP/3 connection each
+  get their own. The read was resolved from the connection's last stream
+  rather than the caller's, so on HTTP/2 all but one caller got
+  `{error, no_stream}`, and on HTTP/3 two callers could be handed each
+  other's body.
 - A pooled HTTP/2 connection no longer closes when the caller that opened it
   exits. It stayed owned by that caller, so its exit failed every other
   caller's request on the connection with `{error, closed}`. A shared

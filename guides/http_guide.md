@@ -325,12 +325,27 @@ Protocol = hackney_conn:get_protocol(ConnPid).  %% http1 | http2 | http3
 ### Send Requests on the Connection
 
 ```erlang
-%% Send multiple requests on the same connection
-{ok, 200, Headers1, Body1} = hackney:send_request(ConnPid, {get, <<"/api/users">>, [], <<>>}).
-{ok, 201, Headers2, Body2} = hackney:send_request(ConnPid, {post, <<"/api/users">>,
+%% Send multiple requests on the same connection. send_request returns the
+%% connection; read each response before sending the next one.
+{ok, 200, Headers1, ConnPid} = hackney:send_request(ConnPid, {get, <<"/api/users">>, [], <<>>}).
+{ok, Body1} = hackney:body(ConnPid).
+
+{ok, 201, Headers2, ConnPid} = hackney:send_request(ConnPid, {post, <<"/api/users">>,
     [{<<"content-type">>, <<"application/json">>}],
     <<"{\"name\": \"Alice\"}">>}).
-{ok, 200, Headers3, Body3} = hackney:send_request(ConnPid, {get, <<"/api/users/1">>, [], <<>>}).
+{ok, Body2} = hackney:body(ConnPid).
+```
+
+Pull a response in chunks instead of reading it whole:
+
+```erlang
+{ok, 200, _Headers, ConnPid} = hackney:send_request(ConnPid, {get, <<"/big">>, [], <<>>}).
+stream_loop(ConnPid) ->
+    case hackney:stream_body(ConnPid) of
+        {ok, Chunk} -> handle(Chunk), stream_loop(ConnPid);
+        done        -> ok;
+        {error, R}  -> {error, R}
+    end.
 ```
 
 ### Close the Connection
@@ -351,10 +366,11 @@ case hackney_conn:get_protocol(Conn) of
     http1 -> io:format("Using HTTP/1.1 keep-alive~n")
 end,
 
-%% Make requests
-{ok, 200, _, Token} = hackney:send_request(Conn, {post, <<"/auth">>, [], Credentials}),
-{ok, 200, _, Users} = hackney:send_request(Conn, {get, <<"/users">>, AuthHeaders, <<>>}),
-{ok, 200, _, Data} = hackney:send_request(Conn, {get, <<"/data">>, AuthHeaders, <<>>}),
+%% Make requests, reading each body before the next request
+{ok, 200, _, Conn} = hackney:send_request(Conn, {post, <<"/auth">>, [], Credentials}),
+{ok, Token} = hackney:body(Conn),
+{ok, 200, _, Conn} = hackney:send_request(Conn, {get, <<"/users">>, AuthHeaders, <<>>}),
+{ok, Users} = hackney:body(Conn),
 
 %% Clean up
 hackney:close(Conn).
