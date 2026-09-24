@@ -14,6 +14,9 @@ unreleased
   rather than the caller's, so on HTTP/2 all but one caller got
   `{error, no_stream}`, and on HTTP/3 two callers could be handed each
   other's body.
+- A caller reading an HTTP/3 response with `body/1` or `stream_body/1` is
+  answered when the server resets its stream, instead of waiting for its own
+  timeout. Needs quic 2.0.0, the first release to report a peer RESET_STREAM.
 - A pooled HTTP/2 connection no longer closes when the caller that opened it
   exits. It stayed owned by that caller, so its exit failed every other
   caller's request on the connection with `{error, closed}`. A shared
@@ -57,11 +60,14 @@ unreleased
 
 ### Changed
 
-- Update `h2` to 0.12.1.
-- Update `quic` to 1.10.0 and `webtransport` to 0.4.6. quic 1.9 fixes a
-  handshake that stalled when the client's Initial flight spanned several
-  datagrams, and frames that waited for the next event after the handshake;
-  1.10 reworks loss detection and recovery along RFC 9002.
+- Update `h2` to 0.12.3. 0.12.3 sends the DATA already buffered on a stream
+  when a SETTINGS frame raises the initial window, so a request body queued
+  against a zero window no longer stalls until an unrelated WINDOW_UPDATE
+  arrives.
+- Update `quic` to 2.0.0 and `webtransport` to 0.4.7. quic 2.0.0 reports a
+  peer resetting a request stream, always sends a reason with its HTTP/3
+  close event, and fixes a handshake that could stall when resuming from a
+  cached session ticket.
 
 4.7.4 - 2026-08-12
 ------------------
