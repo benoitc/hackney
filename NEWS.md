@@ -5,6 +5,15 @@ unreleased
 
 ### Fixed
 
+- `hackney:send_request/2` works on HTTP/2 and HTTP/3. Those protocols answer
+  a request with the body included, which the function did not handle, so it
+  failed with a `case_clause`. It returns the connection on every protocol
+  now, so the response is read with `body/1` or pulled with `stream_body/1`.
+- Several callers reading responses on one HTTP/2 or HTTP/3 connection each
+  get their own. The read was resolved from the connection's last stream
+  rather than the caller's, so on HTTP/2 all but one caller got
+  `{error, no_stream}`, and on HTTP/3 two callers could be handed each
+  other's body.
 - A caller reading an HTTP/3 response with `body/1` or `stream_body/1` is
   answered when the server resets its stream, instead of waiting for its own
   timeout. Needs quic 2.0.0, the first release to report a peer RESET_STREAM.
