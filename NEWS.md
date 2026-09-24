@@ -1,7 +1,7 @@
 # NEWS
 
-unreleased
-----------
+4.8.0 - 2026-09-24
+------------------
 
 ### Fixed
 
@@ -50,6 +50,20 @@ unreleased
   option. It was handed to quic, which only takes DER `cacerts`, so it was
   ignored and verification failed as `{error, timeout}`. `hackney:request/5`
   was not affected.
+- Connection-specific headers are dropped from HTTP/2 and HTTP/3 requests.
+  A caller's `Connection: keep-alive`, legal in HTTP/1.1 and banned by
+  RFC 9113 8.2.2 and RFC 9114 4.2, reached the header block and every request
+  failed before anything was written. hackney picks the protocol through ALPN,
+  so the caller cannot know which rules apply: `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `Transfer-Encoding` and `Upgrade` are stripped alongside
+  `Host`. `TE` is kept, being allowed with the value `trailers`
+  (#935, thanks @lennartschoch).
+- A pooled HTTP/1.1 connection handed to a requester no longer closes itself
+  under the request. Checkout left the keepalive timer running, armed before
+  the readiness probe, so a connection could pass the probe and then fire the
+  timer, and the request that followed came back as `{error, invalid_state}`.
+  The timer is disarmed on checkout and re-armed when the connection returns
+  to the pool (#934, thanks @lennartschoch).
 - A request that races a peer-initiated close now returns `{error, closed}`
   instead of `{error, invalid_state}`. A connection that sees the peer close
   stays alive briefly so late calls get an answer, and during that window every
