@@ -64,7 +64,6 @@ url(#{port := Port}, Path) ->
 %% scheduler), which would make unrelated tests flaky.
 hackney_opts() ->
     [{protocols, [http3]},
-     {zero_rtt, false},
      {connect_timeout, ?TIMEOUT},
      {recv_timeout, ?TIMEOUT},
      {ssl_options, [{insecure, true}]}].
@@ -146,6 +145,13 @@ handle(Conn, StreamId, <<"GET">>, <<"/status/", N/binary>>, _Headers) ->
         false -> []
     end,
     respond(Conn, StreamId, Status, Headers, <<>>);
+handle(Conn, StreamId, <<"GET">>, <<"/reset">>, _Headers) ->
+    quic_h3:send_response(Conn, StreamId, 200, [{<<"content-type">>, <<"text/plain">>}]),
+    quic_h3:send_data(Conn, StreamId, <<"part">>, false),
+    hackney_h3_test_reset ! {reset_ready, self()},
+    receive reset -> quic_h3:cancel(Conn, StreamId, 16#010c)
+    after 15000 -> ok
+    end;
 handle(Conn, StreamId, _Method, _Path, _Headers) ->
     respond(Conn, StreamId, 404, [], <<>>).
 

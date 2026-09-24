@@ -4306,9 +4306,21 @@ handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
             StreamTo ! {hackney_response, Ref, {error, {stream_reset, ErrorCode}}},
             UpdatedStreams = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined}};
+        {_, StreamState} when element(1, StreamState) =:= streaming_body;
+                              element(1, StreamState) =:= streaming_body_full ->
+            %% A stream_body/1 or body/1 caller may be parked on this stream.
+            Replies = [{reply, Waiting, {error, {stream_reset, ErrorCode}}}
+                       || Waiting <- [h3_parked_from(StreamState)], Waiting =/= undefined],
+            {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+             Replies};
         _ ->
             {keep_state, Data}
     end.
+
+%% @private The caller parked on a pull-mode stream, if any.
+h3_parked_from({streaming_body, _Status, _Headers, _Buffer, From}) -> From;
+h3_parked_from({streaming_body_full, _Status, _Headers, _Acc, From}) -> From;
+h3_parked_from(_) -> undefined.
 
 %% @private Cache the H3 session ticket in the pool (best effort, guarded so a
 %% custom pool handler without the callback degrades to no caching).
@@ -4417,6 +4429,12 @@ handle_h3_termination(Error, Data) ->
                 %% Async stream waiting for headers
                 StreamTo ! {hackney_response, Ref, {error, Error}},
                 Acc;
+            {_, PullState} ->
+                %% A stream_body/1 or body/1 caller parked on this stream
+                case h3_parked_from(PullState) of
+                    undefined -> Acc;
+                    Waiting -> [{reply, Waiting, {error, Error}} | Acc]
+                end;
             _ ->
                 Acc
         end

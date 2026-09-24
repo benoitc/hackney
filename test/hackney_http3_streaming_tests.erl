@@ -91,7 +91,8 @@ h3_send_body_test_() ->
         {"send body in chunks", fun test_h3_send_body_chunks/1},
         {"stream_body after an upload", fun test_h3_upload_stream_body/1},
         {"upload through hackney:request", fun test_h3_upload_public_api/1},
-        {"start_response after the response arrived", fun test_h3_upload_response_first/1}
+        {"start_response after the response arrived", fun test_h3_upload_response_first/1},
+        {"body/1 on a reset stream returns an error", fun test_h3_body_stream_reset/1}
     ]).
 
 test_h3_send_body_chunks(Server) ->
@@ -134,6 +135,40 @@ test_h3_upload_response_first(Server) ->
     {ok, 200, _RespHeaders, _} = hackney_conn:start_response(ConnPid),
     ?assertEqual({ok, <<"early">>}, hackney_conn:body(ConnPid)),
     hackney:close(ConnPid).
+
+%% A body/1 caller parked on a stream the server resets gets an error
+%% instead of waiting forever. Needs a quic that reports a peer reset.
+test_h3_body_stream_reset(Server) ->
+    true = register(hackney_h3_test_reset, self()),
+    try
+        {ok, ConnPid} = connect(Server),
+        {ok, 200, _Headers} =
+            hackney_conn:request_streaming(ConnPid, <<"GET">>, <<"/reset">>, [], <<>>),
+        Handler = receive {reset_ready, H} -> H after 15000 -> error(no_reset_handler) end,
+        Parent = self(),
+        spawn_link(fun() -> Parent ! {body, hackney_conn:body(ConnPid)} end),
+        ok = wait_until(fun() -> body_parked(ConnPid) end),
+        Handler ! reset,
+        receive
+            {body, Result} -> ?assertMatch({error, {stream_reset, _}}, Result)
+        after 15000 ->
+            error(body_not_answered)
+        end,
+        hackney:close(ConnPid)
+    after
+        unregister(hackney_h3_test_reset)
+    end.
+
+%% True once a body/1 call is parked on an HTTP/3 stream of the connection.
+body_parked(ConnPid) ->
+    {_StateName, Data} = sys:get_state(ConnPid),
+    lists:any(fun(Field) ->
+                  is_map(Field) andalso
+                  lists:any(fun({_, State}) when is_tuple(State), tuple_size(State) > 0 ->
+                                    element(1, State) =:= streaming_body_full;
+                               (_) -> false
+                            end, maps:values(Field))
+              end, tuple_to_list(Data)).
 
 %%====================================================================
 %% Async tests

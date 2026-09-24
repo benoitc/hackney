@@ -47,7 +47,6 @@ connect(Server, Opts) ->
 
 tcp_opts() ->
     [{protocols, [http3, http2, http1]},
-     {zero_rtt, false},
      {connect_timeout, 15000},
      {ssl_options, [{insecure, true}]}].
 

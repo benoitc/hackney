@@ -15,4 +15,3 @@ rebar3.crashdump
 doc/
 priv/*.so
 priv/*.dll
-rebar.lock
