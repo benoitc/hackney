@@ -2,7 +2,8 @@
 
 ## Supported Versions
 
-Security fixes are applied to the latest minor release on the `master` branch.
+Security fixes are applied to the latest minor release on the `master` branch,
+currently the 4.8.x line.
 
 | Version | Supported |
 | ------- | --------- |
