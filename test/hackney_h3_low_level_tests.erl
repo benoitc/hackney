@@ -17,14 +17,29 @@
 %%====================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(hackney),
-    ok.
+    hackney_h3_test_server:start().
 
-cleanup(_) ->
+cleanup(Server) ->
     hackney_conn_sup:stop_all(),
-    %% Allow time for late UDP packets to be processed
-    timer:sleep(100),
-    ok.
+    hackney_h3_test_server:stop(Server).
+
+with_server(Tests) ->
+    {setup, fun setup/0, fun cleanup/1,
+     fun(Server) ->
+         [{Title, {timeout, 30, fun() -> Test(Server) end}} || {Title, Test} <- Tests]
+     end}.
+
+connect(Server) ->
+    hackney_h3:connect(hackney_h3_test_server:host(),
+                       hackney_h3_test_server:port(Server),
+                       hackney_h3_test_server:h3_opts(), self()).
+
+get_headers(Path) ->
+    [{<<":method">>, <<"GET">>},
+     {<<":scheme">>, <<"https">>},
+     {<<":authority">>, hackney_h3_test_server:host()},
+     {<<":path">>, Path},
+     {<<"user-agent">>, <<"hackney-quic-test/1.0">>}].
 
 %%====================================================================
 %% Helper Functions
@@ -91,54 +106,26 @@ wait_connected(ConnRef) ->
 %% Connection Tests
 %%====================================================================
 
-%% Test QUIC connection to a real HTTP/3 server
+%% QUIC connection to a local HTTP/3 server.
 quic_connection_test_() ->
-    {
-        "QUIC connection tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Connect to cloudflare.com", fun test_cloudflare_connect/0},
-                {"Test stream opening", fun test_open_stream/0}
-            ]
-        }
-    }.
+    {"QUIC connection tests",
+     with_server([
+         {"Connect to a local server", fun test_local_connect/1},
+         {"Test stream opening", fun test_open_stream/1}
+     ])}.
 
-test_cloudflare_connect() ->
-    Result = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
-    ?assertMatch({ok, _}, Result),
-    {ok, ConnRef} = Result,
-
+test_local_connect(Server) ->
+    {ok, ConnRef} = connect(Server),
     ConnResult = wait_connected(ConnRef),
     hackney_h3:close(ConnRef, normal),
+    ?assertMatch({ok, #{}}, ConnResult).
 
-    case ConnResult of
-        {ok, Info} ->
-            ?assert(is_map(Info));
-        {error, Reason} ->
-            ?assertEqual(unexpected_close, Reason)
-    end.
-
-test_open_stream() ->
-    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
-
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            %% send_request atomically opens a stream and sends HEADERS
-            Headers = [
-                {<<":method">>, <<"GET">>},
-                {<<":scheme">>, <<"https">>},
-                {<<":authority">>, <<"cloudflare.com">>},
-                {<<":path">>, <<"/">>}
-            ],
-            Result = hackney_h3:send_request(ConnRef, Headers, true),
-            ?assertMatch({ok, _}, Result),
-            hackney_h3:close(ConnRef, normal);
-        {error, _} ->
-            hackney_h3:close(ConnRef, normal),
-            ?assert(false, "Connection closed unexpectedly")
-    end.
+test_open_stream(Server) ->
+    {ok, ConnRef} = connect(Server),
+    {ok, _} = wait_connected(ConnRef),
+    %% send_request atomically opens a stream and sends HEADERS
+    ?assertMatch({ok, _}, hackney_h3:send_request(ConnRef, get_headers(<<"/">>), true)),
+    hackney_h3:close(ConnRef, normal).
 
 %%====================================================================
 %% get_fd Tests
@@ -159,87 +146,45 @@ get_fd_test() ->
 %%====================================================================
 
 %% Test sending HTTP/3 request headers
-test_send_request() ->
-    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
-
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            Headers = [
-                {<<":method">>, <<"GET">>},
-                {<<":path">>, <<"/">>},
-                {<<":scheme">>, <<"https">>},
-                {<<":authority">>, <<"cloudflare.com">>},
-                {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
-            ],
-            Result = hackney_h3:send_request(ConnRef, Headers, true),
-            ?assertMatch({ok, _}, Result),
-            hackney_h3:close(ConnRef, normal);
-        {error, _} ->
-            hackney_h3:close(ConnRef, normal),
-            ?assert(false, "Connection closed unexpectedly")
-    end.
+test_send_request(Server) ->
+    {ok, ConnRef} = connect(Server),
+    {ok, _} = wait_connected(ConnRef),
+    ?assertMatch({ok, _}, hackney_h3:send_request(ConnRef, get_headers(<<"/">>), true)),
+    hackney_h3:close(ConnRef, normal).
 
 http3_request_test_() ->
-    {
-        "HTTP/3 request tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Send HTTP/3 headers", fun test_send_request/0},
-                {"Full HTTP/3 request/response", fun test_full_request_response/0}
-            ]
-        }
-    }.
+    {"HTTP/3 request tests",
+     with_server([
+         {"Send HTTP/3 headers", fun test_send_request/1},
+         {"Full HTTP/3 request/response", fun test_full_request_response/1}
+     ])}.
 
 %% Test full HTTP/3 request and response flow
-test_full_request_response() ->
-    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
+test_full_request_response(Server) ->
+    {ok, ConnRef} = connect(Server),
+    {ok, _} = wait_connected(ConnRef),
+    {ok, StreamId} = hackney_h3:send_request(ConnRef, get_headers(<<"/cdn-cgi/trace">>), true),
+    {ok, RespHeaders} = quic_loop(ConnRef, fun
+        ({stream_headers, SId, Hdrs, _Fin}) when SId =:= StreamId -> {done, {ok, Hdrs}};
+        ({closed, Reason}) -> {done, {error, {closed, Reason}}};
+        (_) -> continue
+    end, 15000),
+    ?assertEqual({<<":status">>, <<"200">>}, lists:keyfind(<<":status">>, 1, RespHeaders)),
+    %% Exactly one :status: two would be a malformed response.
+    ?assertEqual(1, length([H || {<<":status">>, _} = H <- RespHeaders])),
+    ?assertEqual(<<"h=127.0.0.1\nhttp=http/3\n">>, read_body(ConnRef, StreamId, <<>>)),
+    hackney_h3:close(ConnRef, normal).
 
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            Headers = [
-                {<<":method">>, <<"GET">>},
-                {<<":scheme">>, <<"https">>},
-                {<<":authority">>, <<"cloudflare.com">>},
-                {<<":path">>, <<"/">>},
-                {<<"user-agent">>, <<"hackney-quic-test/1.0">>}
-            ],
-            {ok, _StreamId} = hackney_h3:send_request(ConnRef, Headers, true),
-
-            %% Wait for response headers
-            HeaderResult = quic_loop(ConnRef, fun
-                ({stream_headers, _SId, RespHeaders, _Fin}) ->
-                    {done, {ok, RespHeaders}};
-                ({closed, Reason}) ->
-                    {done, {error, {closed, Reason}}};
-                (_) -> continue
-            end, 5000),
-
-            case HeaderResult of
-                {ok, RespHeaders} ->
-                    ?assert(lists:keymember(<<":status">>, 1, RespHeaders));
-                {error, timeout} ->
-                    hackney_h3:close(ConnRef, normal),
-                    ?assert(false, "Timeout waiting for response headers");
-                {error, Other} ->
-                    hackney_h3:close(ConnRef, normal),
-                    ?assertEqual(ok, Other)
-            end,
-
-            %% Wait for response body (optional - might be empty for redirects)
-            _ = quic_loop(ConnRef, fun
-                ({stream_data, _SId, Body, _BodyFin}) when byte_size(Body) > 0 ->
-                    {done, {ok, Body}};
-                ({closed, _}) ->
-                    {done, ok};
-                (_) -> continue
-            end, 5000),
-
-            hackney_h3:close(ConnRef, normal);
-        {error, _} ->
-            hackney_h3:close(ConnRef, normal),
-            ?assert(false, "Connection closed unexpectedly")
+%% Collect DATA until the frame that carries FIN.
+read_body(ConnRef, StreamId, Acc) ->
+    case quic_loop(ConnRef, fun
+        ({stream_data, SId, Data, Fin}) when SId =:= StreamId -> {done, {Data, Fin}};
+        ({closed, Reason}) -> {done, {error, {closed, Reason}}};
+        (_) -> continue
+    end, 15000) of
+        {Data, true} -> <<Acc/binary, Data/binary>>;
+        {Data, false} -> read_body(ConnRef, StreamId, <<Acc/binary, Data/binary>>);
+        Error -> Error
     end.
 
 %%====================================================================

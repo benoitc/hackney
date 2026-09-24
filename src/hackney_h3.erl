@@ -45,6 +45,7 @@
     update_stream_state/3,
     %% Response parsing
     parse_response_headers/1,
+    cacertfile_ders/1,
     %% 0-RTT / session resumption
     early_data_accepted/1,
     get_session_ticket/1,
@@ -849,7 +850,11 @@ handle_info({quic_h3, Conn, connected},
 
 handle_info({quic_h3, Conn, {response, StreamId, Status, Headers}},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
-    Full = [{<<":status">>, integer_to_binary(Status)} | Headers],
+    %% quic_h3 passes the status separately and keeps it in the header list,
+    %% so drop it there before prepending the authoritative one: two
+    %% `:status' make a malformed response (RFC 9114 4.3.1).
+    Rest = [H || {Name, _} = H <- Headers, Name =/= <<":status">>],
+    Full = [{<<":status">>, integer_to_binary(Status)} | Rest],
     Owner ! {h3, Ref, {stream_headers, StreamId, Full, false}},
     {noreply, State};
 
@@ -888,8 +893,20 @@ handle_info({quic_h3, Conn, {early_data_rejected, StreamIds}},
     Owner ! {h3, Ref, {early_data_rejected, StreamIds}},
     {noreply, State};
 
+handle_info({quic_h3, Conn, {closed, Reason}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    %% quic_h3 reports why the connection went away: `normal' for a local
+    %% close or a drained GOAWAY, `owner_down', an {h3_error, Code, Phrase},
+    %% or whatever QUIC reported. A failure before HTTP/3 comes up (a bad
+    %% certificate, a TLS alert) arrives here too, so pass the reason on
+    %% rather than letting the caller wait out its timeout.
+    Owner ! {h3, Ref, {closed, Reason}},
+    {stop, normal, State};
+
 handle_info({quic_h3, Conn, closed},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    %% quic =< 1.10.0 closes without a reason on the local-close and
+    %% QUIC-down paths.
     Owner ! {h3, Ref, {closed, normal}},
     {stop, normal, State};
 
@@ -948,11 +965,13 @@ build_h3_opts(Host, Opts) ->
         disable -> #{};
         Sni -> #{server_name_indication => Sni}
     end,
+    %% quic takes trust anchors as DER `cacerts' only, so a cacertfile is
+    %% decoded here; passed through as is, quic ignored it.
     QuicOpts1 = case maps:get(cacerts, Opts, undefined) of
         undefined ->
             case maps:get(cacertfile, Opts, undefined) of
                 undefined -> QuicOpts0;
-                File -> QuicOpts0#{cacertfile => File}
+                File -> QuicOpts0#{cacerts => cacertfile_ders(File)}
             end;
         CACerts -> QuicOpts0#{cacerts => CACerts}
     end,
@@ -975,6 +994,15 @@ build_h3_opts(Host, Opts) ->
     case maps:get(settings, Opts, undefined) of
         undefined -> Base;
         Settings -> Base#{settings => Settings}
+    end.
+
+%% @doc Read a PEM CA file into the DER certificates quic takes as `cacerts'.
+%% An unreadable file gives no anchors, so verification fails closed.
+-spec cacertfile_ders(file:filename_all()) -> [public_key:der_encoded()].
+cacertfile_ders(File) ->
+    case file:read_file(File) of
+        {ok, Pem} -> [Der || {'Certificate', Der, _} <- public_key:pem_decode(Pem)];
+        {error, _} -> []
     end.
 
 ensure_table() ->

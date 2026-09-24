@@ -17,6 +17,27 @@ unreleased
 - A response that crosses a reset of its stream no longer closes the HTTP/2
   connection. `h2` dropped the header block of that response without decoding
   it, so the next response on the connection failed with COMPRESSION_ERROR.
+- The response to an HTTP/3 streaming upload can be read. After
+  `start_response/1`, `body/1` returned `{error, invalid_state}` and
+  `stream_body/1` returned `{error, no_stream}`: the body went to the
+  `start_response/1` caller as a second reply and was lost. When the response
+  headers arrived before `start_response/1` was called, it could wait forever.
+- HTTP/3 response headers carry one `:status`. quic_h3 passes the status
+  separately and keeps it in the header list, and hackney prepended its own,
+  so every response reached the low-level `{h3, _, {stream_headers, ...}}`
+  consumer with the pseudo-header twice, which RFC 9114 4.3.1 makes a
+  malformed response. Requests through `hackney:request/5` were not affected:
+  pseudo-headers are filtered before the caller sees them.
+- An HTTP/3 connection that goes away reports why. `quic_h3` sends the reason
+  with its close event, and the handler only matched the older shape without
+  one, so the message was dropped: the caller waited out its own timeout and
+  the connection process stayed alive. A handshake that fails on a bad
+  certificate or a TLS alert now comes back as that error instead of
+  `{error, timeout}`.
+- `hackney_h3:connect/3,4` and `hackney_h3:request/5` honor a `cacertfile`
+  option. It was handed to quic, which only takes DER `cacerts`, so it was
+  ignored and verification failed as `{error, timeout}`. `hackney:request/5`
+  was not affected.
 - A request that races a peer-initiated close now returns `{error, closed}`
   instead of `{error, invalid_state}`. A connection that sees the peer close
   stays alive briefly so late calls get an answer, and during that window every

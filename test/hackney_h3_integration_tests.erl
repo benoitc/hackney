@@ -13,7 +13,7 @@
 %%% - Various HTTP methods over HTTP/3
 %%% - Error handling and edge cases
 %%%
-%%% Tests use cloudflare.com and other public HTTP/3 servers.
+%%% Tests run against a local HTTP/3 server (hackney_h3_test_server).
 
 -module(hackney_h3_integration_tests).
 
@@ -24,14 +24,21 @@
 %%====================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(hackney),
-    ok.
+    hackney_h3_test_server:start().
 
-cleanup(_) ->
+cleanup(Server) ->
     hackney_conn_sup:stop_all(),
-    %% Allow time for late UDP packets to be processed
-    timer:sleep(100),
-    ok.
+    hackney_h3_test_server:stop(Server).
+
+with_server(Tests) ->
+    {setup, fun setup/0, fun cleanup/1,
+     fun(Server) ->
+         [{Title, {timeout, 30, fun() -> Test(Server) end}} || {Title, Test} <- Tests]
+     end}.
+
+connect(Server, Opts) ->
+    hackney_h3:connect(hackney_h3_test_server:host(),
+                       hackney_h3_test_server:port(Server), Opts, self()).
 
 %%====================================================================
 %% Helper Functions
@@ -140,88 +147,80 @@ get_location(Headers) ->
 %%====================================================================
 
 tls_test_() ->
-    {
-        "HTTP/3 TLS verification tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Connect without TLS verification (default)", fun test_connect_no_verify/0},
-                {"Connect with TLS verification enabled", fun test_connect_with_verify/0}
-            ]
-        }
-    }.
+    {"HTTP/3 TLS verification tests",
+     with_server([
+         {"Connect without TLS verification", fun test_connect_no_verify/1},
+         {"Connect with TLS verification against the test CA", fun test_connect_with_verify/1},
+         {"Verification fails without the test CA", fun test_connect_verify_untrusted/1},
+         {"A failed handshake reports why", fun test_connect_reports_close_reason/1},
+         {"Connect with the test CA as a cacertfile", fun test_connect_verify_cacertfile/1}
+     ])}.
 
-test_connect_no_verify() ->
-    %% Default behavior - no certificate verification
-    Result = hackney_h3:connect(<<"cloudflare.com">>, 443, #{verify => false}, self()),
-    ?assertMatch({ok, _}, Result),
-    {ok, ConnRef} = Result,
-    case wait_connected(ConnRef) of
-        {ok, _Info} ->
-            hackney_h3:close(ConnRef, normal),
-            ok;
-        {error, Reason} ->
-            hackney_h3:close(ConnRef, normal),
-            %% Connection might fail for network reasons, but should not be TLS error
-            ?assertNotMatch({tls_error, _}, Reason)
-    end.
-
-test_connect_with_verify() ->
-    %% Explicit TLS verification
-    Result = hackney_h3:connect(<<"cloudflare.com">>, 443, #{verify => true}, self()),
-    ?assertMatch({ok, _}, Result),
-    {ok, ConnRef} = Result,
-    ConnResult = wait_connected(ConnRef),
+test_connect_no_verify(Server) ->
+    {ok, ConnRef} = connect(Server, #{verify => false}),
+    Result = wait_connected(ConnRef),
     hackney_h3:close(ConnRef, normal),
-    %% Should succeed with valid certificate
-    case ConnResult of
-        {ok, _} -> ok;
-        {error, _Reason} ->
-            %% May fail if CA certs not properly configured, but at least we tried
-            ok
-    end.
+    ?assertMatch({ok, _}, Result).
+
+test_connect_with_verify(Server) ->
+    %% The server certificate is issued by the test CA for 127.0.0.1 and
+    %% localhost, so it verifies once that CA is trusted.
+    Opts = #{verify => true, cacerts => hackney_h3_test_server:ca_cacerts()},
+    {ok, ConnRef} = connect(Server, Opts),
+    Result = wait_connected(ConnRef),
+    hackney_h3:close(ConnRef, normal),
+    ?assertMatch({ok, _}, Result).
+
+test_connect_verify_cacertfile(Server) ->
+    %% quic only takes DER cacerts; hackney_h3 decodes the PEM file.
+    Opts = #{verify => true, cacertfile => hackney_h3_test_server:ca_file()},
+    {ok, ConnRef} = connect(Server, Opts),
+    Result = wait_connected(ConnRef),
+    hackney_h3:close(ConnRef, normal),
+    ?assertMatch({ok, _}, Result).
+
+test_connect_verify_untrusted(Server) ->
+    Result = case connect(Server, #{verify => true}) of
+        {ok, ConnRef} ->
+            R = wait_connected(ConnRef),
+            hackney_h3:close(ConnRef, normal),
+            R;
+        {error, _} = Error ->
+            Error
+    end,
+    %% quic_h3 reports why it gave up, rather than leaving the caller to
+    %% time out.
+    ?assertMatch({error, {certificate_invalid, _}}, Result).
+
+%% connect/3 surfaces the close reason of a handshake that failed.
+test_connect_reports_close_reason(Server) ->
+    Result = hackney_h3:connect(hackney_h3_test_server:host(),
+                                hackney_h3_test_server:port(Server),
+                                #{verify => true, timeout => 15000}),
+    ?assertMatch({error, {connection_closed, {certificate_invalid, _}}}, Result).
 
 %%====================================================================
 %% Redirect Tests
 %%====================================================================
 
 redirect_test_() ->
-    {
-        "HTTP/3 redirect handling tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Detect 301 redirect", fun test_detect_301/0},
-                {"Detect 302 redirect", fun test_detect_302/0},
-                {"Extract Location header", fun test_location_extraction/0},
-                {"Redirect to different path", fun test_redirect_path/0}
-            ]
-        }
-    }.
+    {setup, fun setup/0, fun cleanup/1,
+     fun(Server) ->
+         [{"Detect 301 redirect", {timeout, 30, fun() -> test_detect_301(Server) end}},
+          {"Detect 302 redirect", {timeout, 30, fun() -> test_detect_302(Server) end}},
+          {"Extract Location header", fun test_location_extraction/0},
+          {"Redirect to different path", {timeout, 30, fun() -> test_redirect_path(Server) end}}]
+     end}.
 
-test_detect_301() ->
-    %% Many servers return 301 for http -> https or www redirect
-    %% Using httpbin.org which supports HTTP/3 and redirects
-    case make_h3_request(<<"cloudflare.com">>, 443, <<"/cdn-cgi/trace">>) of
-        {ok, Status, _Headers, _Body} ->
-            %% Cloudflare trace endpoint returns 200
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            %% Network issues are acceptable
-            ok
-    end.
+test_detect_301(Server) ->
+    {ok, Status, Headers, _Body} = make_h3_request(Server, <<"/status/301">>),
+    ?assertEqual(301, Status),
+    ?assertEqual({ok, <<"/">>}, get_location(Headers)).
 
-test_detect_302() ->
-    %% Test with a server that returns 302
-    %% Many API endpoints return 302 for temp redirects
-    case make_h3_request(<<"cloudflare.com">>, 443, <<"/">>) of
-        {ok, Status, _Headers, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            ok
-    end.
+test_detect_302(Server) ->
+    {ok, Status, Headers, _Body} = make_h3_request(Server, <<"/status/302">>),
+    ?assertEqual(302, Status),
+    ?assertEqual({ok, <<"/">>}, get_location(Headers)).
 
 test_location_extraction() ->
     %% Test that we can properly extract Location header from redirect response
@@ -233,203 +232,129 @@ test_location_extraction() ->
     FilteredHeaders = filter_pseudo_headers(Headers),
     ?assertMatch({ok, <<"https://www.example.com/new-path">>}, get_location(FilteredHeaders)).
 
-test_redirect_path() ->
-    %% Test redirect to different path on same host
-    case make_h3_request(<<"cloudflare.com">>, 443, <<"/favicon.ico">>) of
-        {ok, Status, Headers, _Body} ->
-            %% May return 200 (found) or 3xx (redirect)
-            ?assert(Status >= 200),
-            %% If redirect, should have Location header
-            case Status >= 300 andalso Status < 400 of
-                true -> ?assertMatch({ok, _}, get_location(Headers));
-                false -> ok
-            end;
-        {error, _Reason} ->
-            ok
-    end.
+test_redirect_path(Server) ->
+    %% Redirect to a different path on the same host.
+    {ok, Status, Headers, _Body} = make_h3_request(Server, <<"/redirect/1">>),
+    ?assertEqual(302, Status),
+    ?assertEqual({ok, <<"/redirect/0">>}, get_location(Headers)).
 
 %%====================================================================
 %% HTTP Methods Tests
 %%====================================================================
 
 methods_test_() ->
-    {
-        "HTTP/3 method tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"GET request", fun test_get_request/0},
-                {"HEAD request", fun test_head_request/0},
-                {"POST request", fun test_post_request/0},
-                {"Multiple requests on same connection", fun test_multiple_requests/0}
-            ]
-        }
-    }.
+    {"HTTP/3 method tests",
+     with_server([
+         {"GET request", fun test_get_request/1},
+         {"HEAD request", fun test_head_request/1},
+         {"POST request", fun test_post_request/1},
+         {"Multiple requests on same connection", fun test_multiple_requests/1}
+     ])}.
 
-test_get_request() ->
-    case make_h3_request(<<"cloudflare.com">>, 443, <<"/">>) of
-        {ok, Status, _Headers, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _} ->
-            ok
-    end.
+test_get_request(Server) ->
+    {ok, Status, Headers, Body} = make_h3_request(Server, <<"/">>),
+    ?assertEqual(200, Status),
+    ?assertEqual(<<"text/html">>, proplists:get_value(<<"content-type">>, Headers)),
+    ?assertEqual(<<"<html><body>hackney h3 test server</body></html>">>, Body).
 
-test_head_request() ->
-    %% Use hackney_h3:request for HEAD which properly handles no-body responses
-    case hackney_h3:request(head, <<"https://cloudflare.com/">>) of
-        {ok, Status, _RespHeaders, Body} ->
-            ?assert(Status >= 200 andalso Status < 400),
-            %% HEAD response should have empty body
-            ?assertEqual(<<>>, Body);
-        {error, _} ->
-            %% Network issues acceptable
-            ok
-    end.
+test_head_request(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/">>),
+    {ok, Status, _RespHeaders, Body} =
+        hackney_h3:request(head, URL, [], <<>>, hackney_h3_test_server:h3_opts()),
+    ?assertEqual(200, Status),
+    ?assertEqual(<<>>, Body).
 
-test_post_request() ->
-    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            Headers = [
-                {<<":method">>, <<"POST">>},
-                {<<":scheme">>, <<"https">>},
-                {<<":authority">>, <<"cloudflare.com">>},
-                {<<":path">>, <<"/cdn-cgi/trace">>},
-                {<<"content-type">>, <<"application/json">>},
-                {<<"content-length">>, <<"2">>},
-                {<<"user-agent">>, <<"hackney-h3-test/1.0">>}
-            ],
-            {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, false),
-            ok = hackney_h3:send_data(ConnRef, StreamId, <<"{}">>, true),
-            case wait_response(ConnRef, StreamId, 10000) of
-                {ok, Status, _RespHeaders, _Body} ->
-                    %% Should get a response (may be 200 or 405 or other)
-                    ?assert(Status >= 200 andalso Status < 600);
-                {error, _} ->
-                    ok
-            end,
-            hackney_h3:close(ConnRef, normal);
-        {error, _} ->
-            hackney_h3:close(ConnRef, normal),
-            ok
-    end.
+test_post_request(Server) ->
+    {ok, ConnRef} = connect(Server, hackney_h3_test_server:h3_opts()),
+    {ok, _} = wait_connected(ConnRef),
+    Headers = [
+        {<<":method">>, <<"POST">>},
+        {<<":scheme">>, <<"https">>},
+        {<<":authority">>, hackney_h3_test_server:host()},
+        {<<":path">>, <<"/echo">>},
+        {<<"content-type">>, <<"application/json">>},
+        {<<"content-length">>, <<"2">>},
+        {<<"user-agent">>, <<"hackney-h3-test/1.0">>}
+    ],
+    {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, false),
+    ok = hackney_h3:send_data(ConnRef, StreamId, <<"{}">>, true),
+    {ok, Status, RespHeaders, Body} = wait_response(ConnRef, StreamId, 15000),
+    hackney_h3:close(ConnRef, normal),
+    ?assertEqual(200, Status),
+    ?assertEqual(<<"application/json">>,
+                 proplists:get_value(<<"content-type">>, RespHeaders)),
+    ?assertEqual(<<"{}">>, Body).
 
-test_multiple_requests() ->
-    {ok, ConnRef} = hackney_h3:connect(<<"cloudflare.com">>, 443, #{}, self()),
-    case wait_connected(ConnRef) of
-        {ok, _} ->
-            %% First request
-            Headers1 = build_get_headers(<<"cloudflare.com">>, <<"/">>),
-            {ok, StreamId1} = hackney_h3:send_request(ConnRef, Headers1, true),
-
-            %% Second request (concurrent)
-            Headers2 = build_get_headers(<<"cloudflare.com">>, <<"/cdn-cgi/trace">>),
-            {ok, StreamId2} = hackney_h3:send_request(ConnRef, Headers2, true),
-
-            %% Both stream IDs should be different
-            ?assertNotEqual(StreamId1, StreamId2),
-
-            %% Wait for both responses (just verify we get them)
-            _ = wait_response(ConnRef, StreamId1, 10000),
-            _ = wait_response(ConnRef, StreamId2, 10000),
-
-            hackney_h3:close(ConnRef, normal);
-        {error, _} ->
-            hackney_h3:close(ConnRef, normal),
-            ok
-    end.
+test_multiple_requests(Server) ->
+    {ok, ConnRef} = connect(Server, hackney_h3_test_server:h3_opts()),
+    {ok, _} = wait_connected(ConnRef),
+    Host = hackney_h3_test_server:host(),
+    %% Two concurrent requests on the same connection.
+    {ok, StreamId1} = hackney_h3:send_request(ConnRef, build_get_headers(Host, <<"/">>), true),
+    {ok, StreamId2} = hackney_h3:send_request(ConnRef,
+                                              build_get_headers(Host, <<"/cdn-cgi/trace">>),
+                                              true),
+    ?assertNotEqual(StreamId1, StreamId2),
+    ?assertMatch({ok, 200, _, _}, wait_response(ConnRef, StreamId1, 15000)),
+    ?assertMatch({ok, 200, _, <<"h=127.0.0.1\nhttp=http/3\n">>},
+                 wait_response(ConnRef, StreamId2, 15000)),
+    hackney_h3:close(ConnRef, normal).
 
 %%====================================================================
 %% High-level API Tests
 %%====================================================================
 
 high_level_api_test_() ->
-    {
-        "HTTP/3 high-level API tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"hackney_h3:request/2", fun test_h3_simple_request/0},
-                {"hackney_h3:request/5 with options", fun test_h3_request_with_options/0},
-                {"hackney_h3:connect/3", fun test_h3_connect_api/0}
-            ]
-        }
-    }.
+    {"HTTP/3 high-level API tests",
+     with_server([
+         {"hackney_h3:request/5", fun test_h3_simple_request/1},
+         {"hackney_h3:request/5 with headers and options", fun test_h3_request_with_options/1},
+         {"hackney_h3:connect/3", fun test_h3_connect_api/1}
+     ])}.
 
-test_h3_simple_request() ->
-    case hackney_h3:request(get, <<"https://cloudflare.com/">>) of
-        {ok, Status, _Headers, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            %% Network issues acceptable
-            ok
-    end.
+test_h3_simple_request(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/">>),
+    ?assertMatch({ok, 200, _, _},
+                 hackney_h3:request(get, URL, [], <<>>, hackney_h3_test_server:h3_opts())).
 
-test_h3_request_with_options() ->
-    Options = #{timeout => 15000, recv_timeout => 10000},
+test_h3_request_with_options(Server) ->
+    URL = hackney_h3_test_server:url(Server, <<"/cdn-cgi/trace">>),
+    Options = (hackney_h3_test_server:h3_opts())#{timeout => 15000, recv_timeout => 15000},
     Headers = [{<<"user-agent">>, <<"hackney-test/1.0">>}],
-    case hackney_h3:request(get, <<"https://cloudflare.com/">>, Headers, <<>>, Options) of
-        {ok, Status, _RespHeaders, _Body} ->
-            ?assert(Status >= 200 andalso Status < 400);
-        {error, _Reason} ->
-            ok
-    end.
+    ?assertMatch({ok, 200, _, <<"h=127.0.0.1\nhttp=http/3\n">>},
+                 hackney_h3:request(get, URL, Headers, <<>>, Options)).
 
-test_h3_connect_api() ->
-    case hackney_h3:connect(<<"cloudflare.com">>, 443, #{}) of
-        {ok, ConnRef} ->
-            %% Should be connected
-            ?assert(is_reference(ConnRef)),
-            hackney_h3:close(ConnRef);
-        {error, _Reason} ->
-            ok
-    end.
+test_h3_connect_api(Server) ->
+    {ok, ConnRef} = hackney_h3:connect(hackney_h3_test_server:host(),
+                                       hackney_h3_test_server:port(Server),
+                                       hackney_h3_test_server:h3_opts()),
+    ?assert(is_reference(ConnRef)),
+    hackney_h3:close(ConnRef).
 
 %%====================================================================
 %% Error Handling Tests
 %%====================================================================
 
 error_handling_test_() ->
-    {
-        "HTTP/3 error handling tests",
-        {
-            setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"Invalid host", fun test_invalid_host/0},
-                {"Connection timeout", fun test_connection_timeout/0},
-                {"Invalid port", fun test_invalid_port/0}
-            ]
-        }
-    }.
+    {"HTTP/3 error handling tests",
+     [{"Nothing listening", {timeout, 30, fun test_invalid_host/0}},
+      {"Connection timeout", {timeout, 30, fun test_connection_timeout/0}},
+      {"Invalid port", fun test_invalid_port/0}]}.
 
 test_invalid_host() ->
-    %% Non-existent domain - DNS resolution should fail
-    case hackney_h3:request(get, <<"https://nonexistent.invalid.domain.test/">>, [], <<>>, #{timeout => 2000}) of
-        {error, _Reason} ->
-            %% Expected - DNS or connection should fail
-            ok;
-        {ok, _Status, _Headers, _Body} ->
-            %% Very unlikely but not impossible with DNS wildcards
-            ok
-    end.
+    %% Nothing listens on this port: the request fails instead of hanging.
+    {ok, _} = application:ensure_all_started(hackney),
+    URL = iolist_to_binary(["https://127.0.0.1:",
+                            integer_to_list(hackney_h3_test_server:unused_port()), "/"]),
+    Opts = (hackney_h3_test_server:h3_opts())#{timeout => 1000},
+    ?assertMatch({error, _}, hackney_h3:request(get, URL, [], <<>>, Opts)).
 
 test_connection_timeout() ->
-    %% Test with very short timeout
-    Options = #{timeout => 100},
-    case hackney_h3:connect(<<"cloudflare.com">>, 443, Options) of
-        {ok, ConnRef} ->
-            %% Fast network, connection succeeded anyway
-            hackney_h3:close(ConnRef);
-        {error, timeout} ->
-            %% Expected
-            ok;
-        {error, _Other} ->
-            %% Some other error
-            ok
-    end.
+    {ok, _} = application:ensure_all_started(hackney),
+    Opts = (hackney_h3_test_server:h3_opts())#{timeout => 100},
+    ?assertMatch({error, _},
+                 hackney_h3:connect(hackney_h3_test_server:host(),
+                                    hackney_h3_test_server:unused_port(), Opts)).
 
 test_invalid_port() ->
     ?assertMatch({error, badarg}, hackney_h3:connect(<<"test">>, 0, #{}, self())),
@@ -439,23 +364,14 @@ test_invalid_port() ->
 %% Internal Functions
 %%====================================================================
 
-make_h3_request(Host, Port, Path) ->
-    case hackney_h3:connect(Host, Port, #{}, self()) of
-        {ok, ConnRef} ->
-            case wait_connected(ConnRef) of
-                {ok, _} ->
-                    Headers = build_get_headers(Host, Path),
-                    {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, true),
-                    Result = wait_response(ConnRef, StreamId, 10000),
-                    hackney_h3:close(ConnRef, normal),
-                    Result;
-                {error, _} = Err ->
-                    hackney_h3:close(ConnRef, normal),
-                    Err
-            end;
-        {error, _} = Err ->
-            Err
-    end.
+make_h3_request(Server, Path) ->
+    {ok, ConnRef} = connect(Server, hackney_h3_test_server:h3_opts()),
+    {ok, _} = wait_connected(ConnRef),
+    Headers = build_get_headers(hackney_h3_test_server:host(), Path),
+    {ok, StreamId} = hackney_h3:send_request(ConnRef, Headers, true),
+    Result = wait_response(ConnRef, StreamId, 15000),
+    hackney_h3:close(ConnRef, normal),
+    Result.
 
 build_get_headers(Host, Path) ->
     [

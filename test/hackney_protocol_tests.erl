@@ -82,7 +82,7 @@ per_request_protocols_test() ->
     ).
 
 %%====================================================================
-%% HTTP/3 Request Opt-In Test (requires network)
+%% HTTP/3 Request Opt-In Test (local HTTP/3 server)
 %%====================================================================
 
 http3_opt_in_request_test_() ->
@@ -90,35 +90,27 @@ http3_opt_in_request_test_() ->
         "HTTP/3 opt-in request tests",
         {
             setup,
-            fun setup/0, fun cleanup/1,
-            [
-                {"HTTP/3 opt-in to cloudflare", fun test_http3_opt_in/0}
-            ]
+            fun() -> setup(), hackney_h3_test_server:start() end,
+            fun(Server) -> cleanup(Server), hackney_h3_test_server:stop(Server) end,
+            fun(Server) ->
+                [{"HTTP/3 opt-in to a local server",
+                  {timeout, 30, fun() -> test_http3_opt_in(Server) end}}]
+            end
         }
     }.
 
-test_http3_opt_in() ->
-    %% Test that HTTP/3 can be enabled via protocols option
-    %% Cloudflare supports HTTP/3
-    case gen_tcp:connect("cloudflare.com", 443, [], 5000) of
-        {ok, TestSock} ->
-            gen_tcp:close(TestSock),
-            %% This should attempt HTTP/3 first
-            {ok, ConnRef} = hackney_h3:connect(
-                <<"cloudflare.com">>, 443, #{}, self()
-            ),
-            %% Drive the QUIC event loop until connected or closed
-            Result = quic_loop(ConnRef, fun
-                ({connected, _Info}) -> {done, connected};
-                ({closed, _Reason}) -> {done, closed};
-                (_) -> continue
-            end, 10000),
-            hackney_h3:close(ConnRef, normal),
-            %% Either connected or closed is valid - we're testing opt-in works
-            ?assert(Result =:= connected orelse Result =:= closed orelse Result =:= {error, timeout});
-        {error, _} ->
-            ?debugMsg("Skipping HTTP/3 opt-in test - network not available")
-    end.
+test_http3_opt_in(Server) ->
+    %% hackney_h3 connects over QUIC once HTTP/3 is opted in.
+    {ok, ConnRef} = hackney_h3:connect(hackney_h3_test_server:host(),
+                                       hackney_h3_test_server:port(Server),
+                                       hackney_h3_test_server:h3_opts(), self()),
+    Result = quic_loop(ConnRef, fun
+        ({connected, _Info}) -> {done, connected};
+        ({closed, Reason}) -> {done, {closed, Reason}};
+        (_) -> continue
+    end, 15000),
+    hackney_h3:close(ConnRef, normal),
+    ?assertEqual(connected, Result).
 
 %% Helper to drive the QUIC event loop until a condition is met or timeout
 quic_loop(ConnRef, Condition, Timeout) ->
