@@ -51,7 +51,10 @@ unreleased
 
 ### Changed
 
-- Update `h2` to 0.12.1.
+- Update `h2` to 0.12.3. 0.12.3 sends the DATA already buffered on a stream
+  when a SETTINGS frame raises the initial window, so a request body queued
+  against a zero window no longer stalls until an unrelated WINDOW_UPDATE
+  arrives.
 - Update `quic` to 2.0.0 and `webtransport` to 0.4.7. quic 2.0.0 reports a
   peer resetting a request stream, always sends a reason with its HTTP/3
   close event, and fixes a handshake that could stall when resuming from a
