@@ -1,5 +1,15 @@
 # NEWS
 
+4.8.1 - 2026-09-25
+------------------
+
+### Changed
+
+- Update `quic` to 2.0.1, which compiles on Windows again. Its NIF build and
+  clean hooks ran through `sh`, which Windows lacks, so the compile failed
+  there for anything that reaches quic, hackney included. Windows runs on OTP
+  crypto.
+
 4.8.0 - 2026-09-24
 ------------------
 
