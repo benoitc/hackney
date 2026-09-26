@@ -17,6 +17,9 @@
 - An HTTP/1.1 connection waiting for a response closes within a second of
   its owner dying. It was blocked in the socket read and noticed only when
   the response came, the server closed, or `recv_timeout` expired.
+- A CONNECT or SOCKS5 tunnel socket belongs to its connection. It stayed with
+  the process that opened it, so after `hackney_conn:set_owner/2` it still
+  closed when that process died.
 
 4.8.1 - 2026-09-25
 ------------------

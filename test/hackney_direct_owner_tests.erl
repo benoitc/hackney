@@ -47,6 +47,8 @@ direct_owner_test_() ->
       {"HTTP/3 connect without a pool", {timeout, 60, fun t_h3_connect/0}},
       {"async body read blocked on a silent server", {timeout, 30, fun t_async_blocked/0}},
       {"pooled conn blocked on a silent server", {timeout, 30, fun t_pooled_blocked/0}},
+      {"set_owner/2 keeps a CONNECT tunnel open", {timeout, 30, fun t_connect_proxy_handover/0}},
+      {"set_owner/2 keeps a SOCKS5 tunnel open", {timeout, 30, fun t_socks5_proxy_handover/0}},
       {"set_owner/2 still moves ownership", {timeout, 30, fun t_set_owner/0}}]}.
 
 %%====================================================================
@@ -274,6 +276,46 @@ t_pooled_blocked() ->
     after
         hackney_pool:stop_pool(Pool)
     end.
+
+t_connect_proxy_handover() ->
+    {ok, Proxy, ProxyPort} = mock_proxy_server:start_connect_proxy(),
+    try
+        tunnel_handover([{proxy, {connect, "127.0.0.1", ProxyPort}} | opts()])
+    after
+        mock_proxy_server:stop(Proxy)
+    end.
+
+t_socks5_proxy_handover() ->
+    {ok, Proxy, ProxyPort} = mock_proxy_server:start_socks5_proxy(),
+    try
+        tunnel_handover([{proxy, {socks5, "127.0.0.1", ProxyPort}} | opts()])
+    after
+        mock_proxy_server:stop(Proxy)
+    end.
+
+%% The opener reads the status of a tunneled response, hands the conn to the
+%% test process and dies. The tunnel socket must go with the conn, not close
+%% with the opener, so the rest of the body still arrives.
+tunnel_handover(Opts) ->
+    with_hold_server(fun(Srv) ->
+        Url = url(Srv),
+        Test = self(),
+        Opener = spawn(fun() ->
+            {ok, Conn} = hackney:request(post, Url, [], stream, Opts),
+            ok = hackney:send_body(Conn, <<"body">>),
+            ok = hackney:finish_send_body(Conn),
+            {ok, 200, _, Conn} = hackney:start_response(Conn),
+            ok = hackney_conn:set_owner(Conn, Test),
+            Test ! {conn, Conn},
+            block()
+        end),
+        H = wait_server(Srv, request_seen),
+        H ! {send, ?PARTIAL},
+        Conn = receive {conn, C} -> C after ?WAIT -> error(no_conn) end,
+        kill_and_wait(Opener),
+        H ! {send, <<"4\r\nmore\r\n0\r\n\r\n">>},
+        ?assertEqual({ok, <<"okmore">>}, hackney:body(Conn))
+    end).
 
 %% A caller that hands its connection to another process keeps working.
 t_set_owner() ->

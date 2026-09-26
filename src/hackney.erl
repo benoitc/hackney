@@ -532,7 +532,18 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
     {ok, ConnPid} ->
-      {ok, ConnPid};
+      %% The socket was opened in this process, so it closes with it unless
+      %% the conn controls it. A caller that passes a socket it does not own
+      %% keeps the old behaviour.
+      case Transport:controlling_process(Socket, ConnPid) of
+        ok ->
+          {ok, ConnPid};
+        {error, not_owner} ->
+          {ok, ConnPid};
+        {error, Reason} ->
+          stop_conn(ConnPid),
+          {error, Reason}
+      end;
     {error, Reason} ->
       {error, Reason}
   end.
