@@ -72,6 +72,8 @@
     set_location/2,
     %% Pool management
     release_to_pool/1,
+    hold/1,
+    release_held/1,
     verify_socket/1,
     is_ready/1,
     is_ready/2,
@@ -260,7 +262,10 @@
     pool_name = default :: term(),
     pool_handler :: module() | undefined,
     %% Last H3 session ticket delivered by hackney_h3 (opaque term).
-    h3_session_ticket :: term() | undefined
+    h3_session_ticket :: term() | undefined,
+    %% A pooled HTTP/1.1 conn goes back to the pool once its response is
+    %% read. false while a hackney:connect/* caller holds it (hold/1).
+    auto_release = true :: boolean()
 }).
 
 %%====================================================================
@@ -606,6 +611,24 @@ close(Pid) ->
 release_to_pool(Pid) ->
     gen_statem:call(Pid, release_to_pool, 5000).
 
+%% @doc Keep a pooled HTTP/1.1 connection with its owner between requests.
+%% It is not handed back to the pool after each response; release_held/1
+%% does that. Used by hackney:connect/*, whose caller reuses the connection.
+%% No effect on an unpooled or multiplexed connection.
+-spec hold(pid()) -> ok | {error, term()}.
+hold(Pid) ->
+    try gen_statem:call(Pid, hold, 5000)
+    catch exit:_ -> {error, closed}
+    end.
+
+%% @doc Check a held connection back into its pool. Returns ok if it went
+%% back, an error if it is not a held, idle pooled connection.
+-spec release_held(pid()) -> ok | {error, term()}.
+release_held(Pid) ->
+    try gen_statem:call(Pid, release_held, 5000)
+    catch exit:_ -> {error, closed}
+    end.
+
 %% @doc Set a new owner for this connection (sync).
 %% This updates the process being monitored - if the new owner crashes,
 %% the connection will terminate. Used by the pool when checking out
@@ -880,6 +903,9 @@ connected(enter, OldState, #conn_data{transport = Transport, socket = Socket,
             Data;
         {_, false} ->
             Data;
+        {_, true} when not Data#conn_data.auto_release ->
+            %% Held by a hackney:connect/* caller until release_held/1.
+            Data;
         {_, true} ->
             %% Transfer ownership back to pool and notify it
             auto_release_to_pool(Data)
@@ -906,6 +932,17 @@ connected({call, From}, share_h2, #conn_data{protocol = http2, pool_pid = PoolPi
     Data2 = Data#conn_data{owner = undefined, owner_mon = undefined,
                            h2_shared = true},
     {keep_state, Data2, [{reply, From, ok} | h2_idle_actions(Data2)]};
+
+connected({call, From}, hold, #conn_data{pool_pid = PoolPid, protocol = http1} = Data)
+  when is_pid(PoolPid) ->
+    {keep_state, Data#conn_data{auto_release = false}, [{reply, From, ok}]};
+
+connected({call, From}, hold, _Data) ->
+    {keep_state_and_data, [{reply, From, ok}]};
+
+connected({call, From}, release_held, #conn_data{pool_pid = PoolPid, auto_release = false} = Data)
+  when is_pid(PoolPid) ->
+    connected({call, From}, release_to_pool, Data#conn_data{auto_release = true});
 
 connected({call, From}, release_to_pool, #conn_data{pool_pid = PoolPid, owner_mon = OldMon,
                                                     transport = Transport, socket = Socket} = Data) ->

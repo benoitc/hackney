@@ -114,6 +114,19 @@ connect(Transport, Host, Port) ->
 connect(Transport, Host, Port, Options) when is_binary(Host) ->
   connect(Transport, binary_to_list(Host), Port, Options);
 connect(Transport, Host, Port, Options) ->
+  %% The caller keeps the connection for its own requests, so a pooled one
+  %% must not go back to the pool after each response: close/1 does that.
+  case open_conn(Transport, Host, Port, Options) of
+    {ok, ConnPid} ->
+      _ = hackney_conn:hold(ConnPid),
+      {ok, ConnPid};
+    Error ->
+      Error
+  end.
+
+%% @private Open a connection for one request (request/5 and the proxy
+%% paths). A pooled one returns to the pool once its response is read.
+open_conn(Transport, Host, Port, Options) ->
   %% Check if using a pool
   UsePool = use_pool(Options),
   case UsePool of
@@ -487,7 +500,12 @@ shutdown_ws(WsPid) ->
 %% @doc Close a connection.
 -spec close(conn()) -> ok.
 close(ConnPid) when is_pid(ConnPid) ->
-  hackney_conn:stop(ConnPid).
+  %% A pooled connection held by a connect/* caller goes back to its pool;
+  %% any other one is stopped.
+  case hackney_conn:release_held(ConnPid) of
+    ok -> ok;
+    {error, _} -> hackney_conn:stop(ConnPid)
+  end.
 
 %% @doc Start a connection with a pre-established socket.
 %% Used for proxy connections where the tunnel is established first.
@@ -1799,7 +1817,7 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
   case get_proxy_config(Scheme, Host, Options) of
     false ->
       %% No proxy configured, direct connection
-      connect(Transport, Host, Port, Options);
+      open_conn(Transport, Host, Port, Options);
     {connect, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
       %% HTTP CONNECT tunnel (for HTTPS through HTTP/HTTPS proxy)
       connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options);
@@ -1922,7 +1940,7 @@ connect_via_http_proxy(TargetScheme, TargetHost, TargetPort, ProxyHost, ProxyPor
       {hackney_tcp, Options}
   end,
   %% Connect directly to the proxy server
-  case connect(ProxyTransportMod, ProxyHost, ProxyPort, ConnectOpts) of
+  case open_conn(ProxyTransportMod, ProxyHost, ProxyPort, ConnectOpts) of
     {ok, ConnPid} ->
       %% Return connection with proxy info for absolute URL mode
       {ok, ConnPid, {http_proxy, TargetScheme, TargetHost, TargetPort, ProxyAuth}};

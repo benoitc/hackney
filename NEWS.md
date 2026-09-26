@@ -16,6 +16,11 @@
 - An HTTPS request through a CONNECT proxy reached over TLS
   (`{proxy_transport, ssl}`) works. The target TLS handshake ran over the
   proxy TLS socket as if it were plain TCP and failed.
+- A pooled connection from `hackney:connect/*` stays with its caller between
+  requests, and `hackney:close/1` checks it back into the pool. It went back
+  to the pool after every response while the caller still used it, so the
+  pool could stop it in the middle of the next request (`{error, closed}`)
+  or lend it to another process.
 
 4.8.2 - 2026-09-26
 ------------------

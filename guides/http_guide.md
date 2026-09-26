@@ -354,6 +354,8 @@ stream_loop(ConnPid) ->
 hackney:close(ConnPid).
 ```
 
+A connection from a pool stays yours between requests; it does not go back to the pool after each response. `hackney:close/1` returns it to the pool when it can be reused, and closes it otherwise.
+
 ### Hand the Connection to Another Process
 
 A connection opened without a pool belongs to the process that opened it and closes when that process exits. To keep it open after that, give it to the process that will use it:

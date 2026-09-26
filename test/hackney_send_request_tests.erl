@@ -29,7 +29,10 @@ h1_test_() ->
      [{"body/1 reads the response", {timeout, 30, fun h1_body/0}},
       {"stream_body/1 pulls the response", {timeout, 30, fun h1_stream/0}},
       {"a HEAD response has no body", {timeout, 30, fun h1_head/0}},
-      {"the connection serves more requests", {timeout, 30, fun h1_reuse/0}}]}.
+      {"the connection serves more requests", {timeout, 30, fun h1_reuse/0}},
+      {"a pooled connect/* conn is reused many times", {timeout, 60, fun h1_reuse_loop/0}},
+      {"a pooled connect/* conn stays out of the pool until close", {timeout, 30, fun h1_held_until_close/0}},
+      {"request/5 still returns its conn to the pool", {timeout, 30, fun h1_request_releases/0}}]}.
 
 start_h1() ->
     error_logger:tty(false),
@@ -76,6 +79,46 @@ h1_reuse() ->
     {ok, Body2} = hackney:body(Conn),
     ?assertEqual(Body1, Body2),
     hackney:close(Conn).
+
+%% h1_reuse goes through the default pool. The pool's checkin of the first
+%% response used to race the second request and stop the conn under it
+%% about one run in ten.
+h1_reuse_loop() ->
+    [h1_reuse() || _ <- lists:seq(1, 100)],
+    ok.
+
+%% The caller holds a pooled conn from connect/4 across requests: it is not
+%% in the pool's free list, and close/1 puts it back.
+h1_held_until_close() ->
+    Pool = send_request_hold_pool,
+    ok = hackney_pool:start_pool(Pool, [{pool_size, 2}]),
+    try
+        {ok, Conn} = hackney:connect(hackney_tcp, "localhost", ?H1_PORT, [{pool, Pool}]),
+        {ok, 200, _, Conn} = hackney:send_request(Conn, {get, <<"/get">>, [], <<>>}),
+        {ok, _} = hackney:body(Conn),
+        ?assertMatch(#{in_use_count := 1, free_count := 0}, stats(Pool)),
+        {ok, 200, _, Conn} = hackney:send_request(Conn, {get, <<"/get">>, [], <<>>}),
+        {ok, _} = hackney:body(Conn),
+        ok = hackney:close(Conn),
+        ?assertMatch(#{in_use_count := 0, free_count := 1}, stats(Pool)),
+        ?assert(is_process_alive(Conn))
+    after
+        hackney_pool:stop_pool(Pool)
+    end.
+
+h1_request_releases() ->
+    Pool = send_request_release_pool,
+    ok = hackney_pool:start_pool(Pool, [{pool_size, 2}]),
+    try
+        Url = <<"http://localhost:", (integer_to_binary(?H1_PORT))/binary, "/get">>,
+        {ok, 200, _, _} = hackney:request(get, Url, [], <<>>, [{pool, Pool}]),
+        ?assertMatch(#{in_use_count := 0, free_count := 1}, stats(Pool))
+    after
+        hackney_pool:stop_pool(Pool)
+    end.
+
+stats(Pool) ->
+    maps:from_list(hackney_pool:get_stats(Pool)).
 
 %% Pull a response with stream_body/1 until it ends.
 read_chunks(Conn) ->
