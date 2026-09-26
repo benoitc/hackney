@@ -49,6 +49,7 @@ direct_owner_test_() ->
       {"pooled conn blocked on a silent server", {timeout, 30, fun t_pooled_blocked/0}},
       {"set_owner/2 keeps a CONNECT tunnel open", {timeout, 30, fun t_connect_proxy_handover/0}},
       {"set_owner/2 keeps a SOCKS5 tunnel open", {timeout, 30, fun t_socks5_proxy_handover/0}},
+      {"set_owner/2 during an upload", {timeout, 30, fun t_set_owner_upload/0}},
       {"set_owner/2 still moves ownership", {timeout, 30, fun t_set_owner/0}}]}.
 
 %%====================================================================
@@ -315,6 +316,31 @@ tunnel_handover(Opts) ->
         kill_and_wait(Opener),
         H ! {send, <<"4\r\nmore\r\n0\r\n\r\n">>},
         ?assertEqual({ok, <<"okmore">>}, hackney:body(Conn))
+    end).
+
+%% The opener starts an upload, hands the conn over and dies; the new owner
+%% finishes the upload and reads the response.
+t_set_owner_upload() ->
+    with_hold_server(fun(Srv) ->
+        Url = url(Srv),
+        Test = self(),
+        Opener = spawn(fun() ->
+            {ok, Conn} = hackney:request(post, Url, [], stream, opts()),
+            ok = hackney:send_body(Conn, <<"part1">>),
+            Test ! {set_owner, Conn, hackney_conn:set_owner(Conn, Test)},
+            block()
+        end),
+        Conn = receive
+                   {set_owner, C, Result} -> ?assertEqual(ok, Result), C
+               after ?WAIT -> error(no_conn)
+               end,
+        H = wait_server(Srv, request_seen),
+        kill_and_wait(Opener),
+        ok = hackney:send_body(Conn, <<"part2">>),
+        ok = hackney:finish_send_body(Conn),
+        H ! {send, ?FULL},
+        ?assertMatch({ok, 200, _, Conn}, hackney:start_response(Conn)),
+        ?assertEqual({ok, <<"ok">>}, hackney:body(Conn))
     end).
 
 %% A caller that hands its connection to another process keeps working.
