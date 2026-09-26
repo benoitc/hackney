@@ -7,6 +7,12 @@
 
 - `hackney_conn:set_owner/2` works while a streamed request body is being
   sent. It returned `{error, invalid_state}`.
+- A response body cut short by the server closing the connection is an
+  error. For a chunked or `Content-Length` body, `body/1` returns
+  `{error, {closed, Partial}}` with the bytes that arrived, and
+  `stream_body/1` and async responses end with `{error, closed}`. They
+  reported a short body as complete. A body with neither still ends when the
+  connection closes.
 
 4.8.2 - 2026-09-26
 ------------------
