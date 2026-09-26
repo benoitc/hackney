@@ -1,5 +1,13 @@
 # NEWS
 
+4.8.3 - UNRELEASED
+------------------
+
+### Fixed
+
+- `hackney_conn:set_owner/2` works while a streamed request body is being
+  sent. It returned `{error, invalid_state}`.
+
 4.8.2 - 2026-09-26
 ------------------
 

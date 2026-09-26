@@ -1617,6 +1617,17 @@ streaming_body(info, {select, _Resource, _Ref, ready_input},
 streaming_body(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Ref} = Data) ->
     {stop, normal, Data};
 
+streaming_body({call, From}, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    %% Hand over mid-upload: the new owner sends the rest of the body.
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon},
+     [{reply, From, ok}]};
+streaming_body(cast, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon} = Data) ->
+    demonitor(OldMon, [flush]),
+    NewMon = monitor(process, NewOwner),
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}};
+
 streaming_body(EventType, Event, Data) ->
     handle_common(EventType, Event, streaming_body, Data).
 
