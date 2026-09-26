@@ -748,7 +748,9 @@ start_response(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:start_response(ConnPid).
 
 %% @doc Read the full response body after start_response/1.
-%% Consumes the response stream and returns it as a single binary.
+%% Consumes the response stream and returns it as a single binary. If the
+%% server closes before a chunked or Content-Length body is complete, it
+%% returns `{error, {closed, Partial}}' with the bytes that did arrive.
 -spec body(conn()) -> {ok, binary()} | {error, term()}.
 body(ConnPid) when is_pid(ConnPid) ->
   hackney_conn:body(ConnPid).

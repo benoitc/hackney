@@ -2594,6 +2594,9 @@ read_full_body(Data, Acc) ->
         {done, NewData} ->
             %% Body complete - apply decompression if needed
             maybe_decompress_body(Acc, NewData);
+        {error, closed} ->
+            %% Cut short: hand back what did arrive.
+            {error, {closed, Acc}};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -2675,8 +2678,7 @@ stream_body_chunk(#conn_data{parser = Parser} = Data) ->
                 {ok, RecvData} ->
                     stream_body_chunk_result(hackney_http:execute(NewParser, RecvData), Data);
                 {error, closed} ->
-                    %% Connection closed by server - mark socket as undefined
-                    {done, Data#conn_data{socket = undefined}};
+                    body_closed(Data);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -2687,8 +2689,7 @@ stream_body_chunk(#conn_data{parser = Parser} = Data) ->
                     %% Execute with new data and handle result
                     stream_body_chunk_result(hackney_http:execute(NewParser, RecvData), Data);
                 {error, closed} ->
-                    %% Connection closed by server - mark socket as undefined
-                    {done, Data#conn_data{socket = undefined}};
+                    body_closed(Data);
                 {error, Reason} ->
                     {error, Reason}
             end;
@@ -2700,6 +2701,15 @@ stream_body_chunk(#conn_data{parser = Parser} = Data) ->
             {done, Data#conn_data{buffer = <<>>, parser = undefined}};
         {error, Reason} ->
             {error, Reason}
+    end.
+
+%% @private The peer closed the socket mid-body. That ends a body framed by
+%% the close itself; a chunked or Content-Length body is cut short.
+body_closed(#conn_data{parser = Parser} = Data) ->
+    case hackney_http:get(Parser, [transfer_encoding, content_length]) of
+        [<<"chunked">>, _] -> {error, closed};
+        [_, CLen] when is_integer(CLen) -> {error, closed};
+        _ -> {done, Data#conn_data{socket = undefined}}
     end.
 
 %% @private Handle result of parsing received data

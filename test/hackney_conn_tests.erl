@@ -76,6 +76,10 @@ hackney_conn_integration_test_() ->
       {"truncated body on an unpooled conn stops it", {timeout, 30, fun test_truncated_body_unpooled_stops/0}},
       {"truncated stream_body on an unpooled conn stops it", {timeout, 30, fun test_truncated_stream_body_unpooled_stops/0}},
       {"truncated body on a pooled conn keeps the grace window", {timeout, 30, fun test_truncated_body_pooled_keeps_grace/0}},
+      {"truncated chunked body is an error", {timeout, 30, fun test_truncated_chunked_body/0}},
+      {"truncated chunked stream_body is an error", {timeout, 30, fun test_truncated_chunked_stream_body/0}},
+      {"truncated chunked async body ends in an error", {timeout, 30, fun test_truncated_chunked_async/0}},
+      {"close-delimited body still ends on close", {timeout, 30, fun test_close_delimited_body/0}},
       {"location accessors are noproc-safe", {timeout, 30, fun test_location_accessors_noproc_safe/0}},
       %% 1XX response handling
       {"skip 1XX informational responses", {timeout, 30, fun test_skip_1xx_responses/0}}
@@ -1015,9 +1019,9 @@ test_truncated_body_unpooled_stops() ->
     try
         Pid = truncating_conn(Port),
         MRef = erlang:monitor(process, Pid),
-        %% The short read still reports success, so the caller has no reason
-        %% (and under hackney 4 no handle) to close anything.
-        {ok, Body} = hackney_conn:body(Pid),
+        %% The short read is an error carrying what arrived; the caller has no
+        %% handle to close, so the conn must stop by itself.
+        {error, {closed, Body}} = hackney_conn:body(Pid),
         ?assertEqual(1024 * 64, byte_size(Body)),
         ?assertEqual(normal, wait_down_reason(Pid, MRef))
     after
@@ -1030,7 +1034,7 @@ test_truncated_stream_body_unpooled_stops() ->
     try
         Pid = truncating_conn(Port),
         MRef = erlang:monitor(process, Pid),
-        _ = stream_all(Pid, <<>>),
+        ?assertEqual({error, closed}, stream_until_error(Pid)),
         ?assertEqual(normal, wait_down_reason(Pid, MRef))
     after
         catch gen_tcp:close(LSock)
@@ -1043,13 +1047,84 @@ test_truncated_body_pooled_keeps_grace() ->
     Pool = spawn(fun() -> receive stop -> ok end end),
     try
         Pid = truncating_conn(Port, #{pool_pid => Pool}),
-        {ok, _Body} = hackney_conn:body(Pid),
+        {error, {closed, _Body}} = hackney_conn:body(Pid),
         ?assertEqual({ok, closed}, hackney_conn:get_state(Pid)),
         ?assert(is_process_alive(Pid))
     after
         Pool ! stop,
         catch gen_tcp:close(LSock)
     end.
+
+%% A chunked body cut short before its last chunk is an error, not a short
+%% success.
+test_truncated_chunked_body() ->
+    {LSock, Port} = start_raw_server([<<"Transfer-Encoding: chunked\r\n\r\n">>,
+                                      <<"5\r\nhello\r\n">>]),
+    try
+        Pid = truncating_conn(Port),
+        ?assertEqual({error, {closed, <<"hello">>}}, hackney_conn:body(Pid))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+test_truncated_chunked_stream_body() ->
+    {LSock, Port} = start_raw_server([<<"Transfer-Encoding: chunked\r\n\r\n">>,
+                                      <<"5\r\nhello\r\n">>]),
+    try
+        Pid = truncating_conn(Port),
+        ?assertEqual({ok, <<"hello">>}, hackney_conn:stream_body(Pid)),
+        ?assertEqual({error, closed}, hackney_conn:stream_body(Pid))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+test_truncated_chunked_async() ->
+    {LSock, Port} = start_raw_server([<<"Transfer-Encoding: chunked\r\n\r\n">>,
+                                      <<"5\r\nhello\r\n">>]),
+    try
+        {ok, Pid} = hackney_conn:start_link(#{host => "127.0.0.1", port => Port,
+                                              transport => hackney_tcp,
+                                              recv_timeout => 5000}),
+        ok = hackney_conn:connect(Pid),
+        {ok, Ref} = hackney_conn:request_async(Pid, <<"GET">>, <<"/">>, [], <<>>, true),
+        ?assertMatch([{status, 200, _}, {headers, _}, <<"hello">>, {error, closed}],
+                     receive_all_async(Ref, []))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+%% No Content-Length and not chunked: the close is the end of the body.
+test_close_delimited_body() ->
+    {LSock, Port} = start_raw_server([<<"\r\n">>, <<"hello">>]),
+    try
+        Pid = truncating_conn(Port),
+        ?assertEqual({ok, <<"hello">>}, hackney_conn:body(Pid))
+    after
+        catch gen_tcp:close(LSock)
+    end.
+
+stream_until_error(Pid) ->
+    case hackney_conn:stream_body(Pid) of
+        {ok, _} -> stream_until_error(Pid);
+        Other -> Other
+    end.
+
+%% Sends a 200 status line, then each of Parts, then closes.
+start_raw_server(Parts) ->
+    {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    spawn(fun() ->
+        case gen_tcp:accept(LSock, 5000) of
+            {ok, Sock} ->
+                _ = gen_tcp:recv(Sock, 0, 5000),
+                _ = gen_tcp:send(Sock, <<"HTTP/1.1 200 OK\r\n">>),
+                [_ = gen_tcp:send(Sock, P) || P <- Parts],
+                gen_tcp:close(Sock);
+            _ ->
+                ok
+        end
+    end),
+    {LSock, Port}.
 
 truncating_conn(Port) ->
     truncating_conn(Port, #{}).
