@@ -13,8 +13,10 @@
   async responses, HTTP proxies, CONNECT and SOCKS5 tunnels, HTTP/2 and
   HTTP/3, and `h2_open/*` streams. With `stream_to`, the `stream_to` process
   owns the connection, as before. `hackney_conn:set_owner/2` still moves
-  ownership. An HTTP/1.1 connection waiting for a response notices its
-  owner's death once the read returns, at the latest after `recv_timeout`.
+  ownership.
+- An HTTP/1.1 connection waiting for a response closes within a second of
+  its owner dying. It was blocked in the socket read and noticed only when
+  the response came, the server closed, or `recv_timeout` expired.
 
 4.8.1 - 2026-09-25
 ------------------

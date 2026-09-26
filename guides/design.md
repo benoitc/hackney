@@ -90,7 +90,7 @@ Each connection is a `gen_statem` process that manages:
 
 ### Owner Monitoring
 
-The connection process monitors its owner: the process that checked out the connection, or for a connection opened without a pool, the process that opened it (with `stream_to`, the `stream_to` process once the async request starts). If the owner crashes, the connection terminates automatically, preventing socket leaks. `hackney_conn:set_owner/2` moves ownership to another process.
+The connection process monitors its owner: the process that checked out the connection, or for a connection opened without a pool, the process that opened it (with `stream_to`, the `stream_to` process once the async request starts). If the owner crashes, the connection terminates automatically, preventing socket leaks. An HTTP/1.1 read waiting on the server checks for this every second. `hackney_conn:set_owner/2` moves ownership to another process.
 
 ```erlang
 %% When connection is checked out
