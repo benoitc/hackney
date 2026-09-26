@@ -1,5 +1,21 @@
 # NEWS
 
+4.8.2 - UNRELEASED
+------------------
+
+### Fixed
+
+- A connection opened without a pool is owned by the process that opened it
+  and closes when that process dies. It was started under `hackney_conn_sup`
+  and owned by it, so a killed caller left the connection and its socket open
+  until the server closed it (`idle_timeout` defaults to `infinity`). Covers
+  `request/5` and `connect/*` with `{pool, false}`, streamed request bodies,
+  async responses, HTTP proxies, CONNECT and SOCKS5 tunnels, HTTP/2 and
+  HTTP/3, and `h2_open/*` streams. With `stream_to`, the `stream_to` process
+  owns the connection, as before. `hackney_conn:set_owner/2` still moves
+  ownership. An HTTP/1.1 connection waiting for a response notices its
+  owner's death once the read returns, at the latest after `recv_timeout`.
+
 4.8.1 - 2026-09-25
 ------------------
 
