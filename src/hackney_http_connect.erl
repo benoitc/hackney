@@ -79,7 +79,7 @@ connect(ProxyHost, ProxyPort, Opts, Timeout)
           %% upgrade the tunnel to handle SSL (end-to-end encryption).
           case Transport of
             hackney_ssl ->
-              SSLOpts = ssl_opts(Host, Opts),
+              SSLOpts = tunnel_ssl_opts(ProxyTransport, ssl_opts(Host, Opts)),
               %% upgrade the tunnel to TLS. GHSA-gp9c: forward the
               %% caller's timeout so a stalled proxy upstream cannot pin
               %% the process on the TLS handshake forever.
@@ -129,6 +129,13 @@ connect_to_proxy(ProxyHost, ProxyPort, ssl, ConnectOpts, Opts, Timeout) ->
 connect_to_proxy(ProxyHost, ProxyPort, tcp, ConnectOpts, _Opts, Timeout) ->
   %% HTTP proxy: plain TCP connection
   hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout).
+
+%% Target TLS over a TLS proxy connection: ssl:connect/3 drives its socket
+%% with gen_tcp by default, so point it at the ssl API of the proxy socket.
+tunnel_ssl_opts(ssl, SSLOpts) ->
+  [{cb_info, {ssl, ssl, ssl_closed, ssl_error, ssl_passive}} | SSLOpts];
+tunnel_ssl_opts(_, SSLOpts) ->
+  SSLOpts.
 
 %% Close proxy socket based on transport type
 close_proxy_socket(Socket, ssl) ->

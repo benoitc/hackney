@@ -13,6 +13,9 @@
   `stream_body/1` and async responses end with `{error, closed}`. They
   reported a short body as complete. A body with neither still ends when the
   connection closes.
+- An HTTPS request through a CONNECT proxy reached over TLS
+  (`{proxy_transport, ssl}`) works. The target TLS handshake ran over the
+  proxy TLS socket as if it were plain TCP and failed.
 
 4.8.2 - 2026-09-26
 ------------------
