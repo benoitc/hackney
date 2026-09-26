@@ -81,12 +81,12 @@ wait_target(#{tag := Tag}) ->
 
 with_servers(Fun) ->
     Target = start_target(),
-    {Proxy, ProxyPort} = start_proxy(),
+    {ProxyHolder, ProxyPort} = start_proxy(),
     try
         Fun(Target, ProxyPort)
     after
-        exit(Proxy, kill),
-        exit(maps:get(acceptor, Target), kill)
+        exit(ProxyHolder, kill),
+        exit(maps:get(holder, Target), kill)
     end.
 
 server_opts() ->
@@ -95,33 +95,38 @@ server_opts() ->
      {certfile, filename:join(Certs, "server.pem")},
      {keyfile, filename:join(Certs, "server.key")}].
 
+%% Listen with Handle(Socket) run for each connection, in the process that
+%% accepted it: each acceptor spawns the next one before handling its own
+%% connection. The listen socket belongs to a holder that outlives them.
+listen(Handle) ->
+    {ok, L} = ssl:listen(0, server_opts()),
+    {ok, {_, Port}} = ssl:sockname(L),
+    Holder = spawn(fun() -> receive stop -> ok end end),
+    ok = ssl:controlling_process(L, Holder),
+    spawn(fun() -> accept(L, Handle) end),
+    {Holder, Port}.
+
+accept(L, Handle) ->
+    case ssl:transport_accept(L) of
+        {ok, S0} ->
+            spawn(fun() -> accept(L, Handle) end),
+            {ok, S} = ssl:handshake(S0, ?WAIT),
+            Handle(S);
+        {error, _} ->
+            ok
+    end.
+
 %% TLS server that reports each request and answers when told to
 %% ({send, Bytes}).
 start_target() ->
     Tag = make_ref(),
     Test = self(),
-    {ok, L} = ssl:listen(0, server_opts()),
-    {ok, {_, Port}} = ssl:sockname(L),
-    Acceptor = spawn(fun() -> target_accept(L, Tag, Test) end),
-    ok = ssl:controlling_process(L, Acceptor),
-    #{tag => Tag, port => Port, acceptor => Acceptor}.
-
-target_accept(L, Tag, Test) ->
-    case ssl:transport_accept(L) of
-        {ok, S0} ->
-            H = spawn(fun() ->
-                receive go -> ok end,
-                {ok, S} = ssl:handshake(S0, ?WAIT),
-                {ok, _} = ssl:recv(S, 0, ?WAIT),
-                Test ! {Tag, request_seen, self()},
-                target_loop(S)
-            end),
-            ok = ssl:controlling_process(S0, H),
-            H ! go,
-            target_accept(L, Tag, Test);
-        {error, _} ->
-            ok
-    end.
+    {Holder, Port} = listen(fun(S) ->
+        {ok, _} = ssl:recv(S, 0, ?WAIT),
+        Test ! {Tag, request_seen, self()},
+        target_loop(S)
+    end),
+    #{tag => Tag, port => Port, holder => Holder}.
 
 target_loop(S) ->
     receive
@@ -132,25 +137,9 @@ target_loop(S) ->
 %% CONNECT proxy listening on TLS. It relays the tunnel to the target over
 %% plain TCP, so the target TLS session passes through it untouched.
 start_proxy() ->
-    {ok, L} = ssl:listen(0, server_opts()),
-    {ok, {_, Port}} = ssl:sockname(L),
-    Pid = spawn(fun() -> proxy_accept(L) end),
-    ok = ssl:controlling_process(L, Pid),
-    {Pid, Port}.
+    listen(fun proxy_handle/1).
 
-proxy_accept(L) ->
-    case ssl:transport_accept(L) of
-        {ok, S0} ->
-            H = spawn(fun() -> receive go -> proxy_handle(S0) end end),
-            ok = ssl:controlling_process(S0, H),
-            H ! go,
-            proxy_accept(L);
-        {error, _} ->
-            ok
-    end.
-
-proxy_handle(S0) ->
-    {ok, C} = ssl:handshake(S0, ?WAIT),
+proxy_handle(C) ->
     {ok, Req} = recv_headers(C, <<>>),
     [Line | _] = binary:split(Req, <<"\r\n">>),
     [<<"CONNECT">>, HostPort | _] = binary:split(Line, <<" ">>, [global]),

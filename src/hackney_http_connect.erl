@@ -132,8 +132,11 @@ connect_to_proxy(ProxyHost, ProxyPort, tcp, ConnectOpts, _Opts, Timeout) ->
 
 %% Target TLS over a TLS proxy connection: ssl:connect/3 drives its socket
 %% with gen_tcp by default, so point it at the ssl API of the proxy socket.
+%% The binary mode is not reliably inherited through cb_info (seen handing
+%% back lists in CI), so ask for it.
 tunnel_ssl_opts(ssl, SSLOpts) ->
-  [{cb_info, {ssl, ssl, ssl_closed, ssl_error, ssl_passive}} | SSLOpts];
+  [{cb_info, {ssl, ssl, ssl_closed, ssl_error, ssl_passive}}, {mode, binary}
+   | SSLOpts];
 tunnel_ssl_opts(_, SSLOpts) ->
   SSLOpts.
 
