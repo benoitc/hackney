@@ -354,6 +354,14 @@ stream_loop(ConnPid) ->
 hackney:close(ConnPid).
 ```
 
+### Hand the Connection to Another Process
+
+A connection opened without a pool belongs to the process that opened it and closes when that process exits. To keep it open after that, give it to the process that will use it:
+
+```erlang
+ok = hackney_conn:set_owner(ConnPid, NewOwner).
+```
+
 ### Complete Example
 
 ```erlang

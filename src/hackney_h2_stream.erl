@@ -384,6 +384,9 @@ establish(Timeout, Data) ->
               recv_timeout = RT, method = Method, path = Path,
               headers = Headers, flow_control = FC} = Data,
     ConnOpts = #{
+        %% This stream process owns the dedicated connection, so the
+        %% connection closes even if the stream is killed before terminate/3.
+        owner => self(),
         host => Host,
         port => Port,
         transport => Transport,

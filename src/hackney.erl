@@ -135,6 +135,10 @@ connect_direct(Transport, Host, Port, Options) ->
     _ -> [{protocols, Protocols} | BaseConnectOpts]
   end,
   ConnOpts = #{
+    %% The caller owns the connection: it is started under hackney_conn_sup,
+    %% so without this the supervisor is the owner and the connection
+    %% outlives a caller that dies.
+    owner => self(),
     host => Host,
     port => Port,
     transport => Transport,
@@ -512,6 +516,8 @@ start_conn_with_socket_internal(Host, Port, Transport, Socket, Options) ->
   %% Check if this is a proxy tunnel connection (should not be reused)
   NoReuse = proplists:get_value(no_reuse, Options, false),
   ConnOpts = #{
+    %% The caller owns the tunneled connection, as in connect_direct.
+    owner => self(),
     host => Host,
     port => Port,
     transport => Transport,

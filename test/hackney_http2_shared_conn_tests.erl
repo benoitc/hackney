@@ -193,10 +193,14 @@ unpooled_conn_not_shared() ->
         Conn = receive {uploading, C} -> C after 5000 -> error(no_conn) end,
         {_Handler, _} = started(<<"/upload">>),
         ?assertEqual({error, invalid_state}, hackney_conn:share_h2(Conn)),
-        %% Its lifetime stays with its owner, so streams are not monitored.
-        ?assertNot(lists:member(Uploader, monitored(Conn))),
+        %% Its lifetime stays with its owner, the uploader: monitored once as
+        %% owner, with no per-stream monitor on top.
+        ?assertEqual([Uploader], [P || P <- monitored(Conn), P =:= Uploader]),
+        ConnMon = monitor(process, Conn),
         exit(Uploader, kill),
-        hackney_conn:stop(Conn)
+        receive {'DOWN', ConnMon, process, Conn, _} -> ok
+        after 5000 -> error(conn_outlived_owner)
+        end
     end).
 
 %%====================================================================
