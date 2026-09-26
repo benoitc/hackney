@@ -131,6 +131,10 @@
 %% late-arriving calls race the pool DOWN cleanup and still get a proper
 %% error reply instead of exit:{normal, _}. See issue #836.
 -define(CLOSED_GRACE_MS, 50).
+%% A blocking HTTP/1.1 read is cut into slices this long; between slices the
+%% conn checks whether its owner died, so a dead owner does not keep the
+%% socket open until the response comes or recv_timeout expires.
+-define(OWNER_CHECK_INTERVAL, 1000).
 %% Cap on bytes buffered from an idle HTTP/1.1 connection via #544 {active,
 %% once}. A well-behaved peer sends nothing while idle; the next response's
 %% stranded prefix is small. Past this, treat the peer as misbehaving (flooding
@@ -2652,11 +2656,11 @@ stream_body_chunk(#conn_data{status = Status} = Data) when Status =:= 204; Statu
     %% Force connection close to avoid corrupting subsequent requests if
     %% a misbehaving server sent Content-Length or body data
     {done, Data#conn_data{socket = undefined}};
-stream_body_chunk(#conn_data{parser = Parser, transport = Transport, socket = Socket, recv_timeout = Timeout} = Data) ->
+stream_body_chunk(#conn_data{parser = Parser} = Data) ->
     case hackney_http:execute(Parser) of
         {more, NewParser, _Buffer} ->
             %% Need more data
-            case Transport:recv(Socket, 0, Timeout) of
+            case owner_recv(Data) of
                 {ok, RecvData} ->
                     stream_body_chunk_result(hackney_http:execute(NewParser, RecvData), Data);
                 {error, closed} ->
@@ -2667,7 +2671,7 @@ stream_body_chunk(#conn_data{parser = Parser, transport = Transport, socket = So
             end;
         {more, NewParser} ->
             %% Need more data
-            case Transport:recv(Socket, 0, Timeout) of
+            case owner_recv(Data) of
                 {ok, RecvData} ->
                     %% Execute with new data and handle result
                     stream_body_chunk_result(hackney_http:execute(NewParser, RecvData), Data);
@@ -2702,7 +2706,7 @@ stream_body_chunk_result({error, Reason}, _Data) ->
     {error, Reason}.
 
 %% @private Receive data from socket
-recv_data(#conn_data{transport = Transport, socket = Socket, recv_timeout = Timeout}) ->
+recv_data(#conn_data{socket = Socket} = Data) ->
     %% Consume any bytes stranded in the mailbox by #544 {active, once} before
     %% falling back to a passive socket read, so a reused connection never blocks
     %% on an empty socket buffer while the response sits unread as a message.
@@ -2710,11 +2714,45 @@ recv_data(#conn_data{transport = Transport, socket = Socket, recv_timeout = Time
         <<>> ->
             case has_pending_close(Socket) of
                 true -> {error, closed};
-                false -> Transport:recv(Socket, 0, Timeout)
+                false -> owner_recv(Data)
             end;
         Bytes ->
             {ok, Bytes}
     end.
+
+%% @private Passive read that still notices the owner dying. The read runs
+%% in slices of at most ?OWNER_CHECK_INTERVAL, with a look for the owner's
+%% 'DOWN' between them. The 'DOWN' is put back in the mailbox, so once the
+%% error unwinds the current callback, the state's owner-'DOWN' clause stops
+%% the conn as it always did. The whole read still honours recv_timeout.
+owner_recv(#conn_data{transport = Transport, socket = Socket,
+                      recv_timeout = Timeout, owner_mon = undefined}) ->
+    Transport:recv(Socket, 0, Timeout);
+owner_recv(#conn_data{transport = Transport, socket = Socket,
+                      recv_timeout = Timeout, owner_mon = OwnerMon}) ->
+    owner_recv(Transport, Socket, OwnerMon, recv_deadline(Timeout)).
+
+owner_recv(Transport, Socket, OwnerMon, Deadline) ->
+    Remaining = recv_remaining(Deadline),
+    case Transport:recv(Socket, 0, min(Remaining, ?OWNER_CHECK_INTERVAL)) of
+        {error, timeout} when Remaining > ?OWNER_CHECK_INTERVAL ->
+            receive
+                {'DOWN', OwnerMon, process, _, _} = Down ->
+                    self() ! Down,
+                    {error, owner_down}
+            after 0 ->
+                owner_recv(Transport, Socket, OwnerMon, Deadline)
+            end;
+        Result ->
+            Result
+    end.
+
+recv_deadline(infinity) -> infinity;
+recv_deadline(Timeout) -> erlang:monotonic_time(millisecond) + Timeout.
+
+%% Atoms sort after integers, so min/2 keeps a slice when this is infinity.
+recv_remaining(infinity) -> infinity;
+recv_remaining(Deadline) -> max(0, Deadline - erlang:monotonic_time(millisecond)).
 
 %% @private Determine if we should enable active mode when entering connected state
 %% We only want active mode for close detection when the connection is truly idle

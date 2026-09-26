@@ -13,10 +13,8 @@
 %%% hackney_conn process to go down and for the server to see its socket
 %%% close.
 %%%
-%%% An HTTP/1.1 conn waiting for a response is blocked in a passive recv and
-%%% handles its owner's 'DOWN' once that recv returns. Those tests have the
-%%% server answer after the kill, so the conn goes back to its mailbox; before
-%%% the fix it then stayed alive, owned by hackney_conn_sup.
+%%% An HTTP/1.1 conn waiting for a response reads in slices and checks for
+%%% its owner's 'DOWN' between them, so those tests keep the server silent.
 -module(hackney_direct_owner_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -47,6 +45,10 @@ direct_owner_test_() ->
       {"HTTP/2 request without a pool", {timeout, 30, fun t_h2_request/0}},
       {"h2_open stream process killed", {timeout, 30, fun t_h2_open/0}},
       {"HTTP/3 connect without a pool", {timeout, 60, fun t_h3_connect/0}},
+      {"async body read blocked on a silent server", {timeout, 30, fun t_async_blocked/0}},
+      {"pooled conn blocked on a silent server", {timeout, 30, fun t_pooled_blocked/0}},
+      {"set_owner/2 keeps a CONNECT tunnel open", {timeout, 30, fun t_connect_proxy_handover/0}},
+      {"set_owner/2 keeps a SOCKS5 tunnel open", {timeout, 30, fun t_socks5_proxy_handover/0}},
       {"set_owner/2 still moves ownership", {timeout, 30, fun t_set_owner/0}}]}.
 
 %%====================================================================
@@ -56,7 +58,7 @@ direct_owner_test_() ->
 t_request() ->
     with_hold_server(fun(Srv) ->
         Url = url(Srv),
-        kill_and_check(Srv, request_seen, ?FULL, fun() ->
+        kill_and_check(Srv, request_seen, none, fun() ->
             hackney:request(get, Url, [], <<>>, opts())
         end)
     end).
@@ -131,7 +133,7 @@ t_http_proxy() ->
     %% absolute URL and is never answered.
     with_hold_server(fun(Srv) ->
         Opts = [{proxy, {"127.0.0.1", port(Srv)}} | opts()],
-        kill_and_check(Srv, request_seen, ?FULL, fun() ->
+        kill_and_check(Srv, request_seen, none, fun() ->
             hackney:request(get, <<"http://example.invalid/">>, [], <<>>, Opts)
         end)
     end).
@@ -142,7 +144,7 @@ t_connect_proxy() ->
         with_hold_server(fun(Srv) ->
             Url = url(Srv),
             Opts = [{proxy, {connect, "127.0.0.1", ProxyPort}} | opts()],
-            kill_and_check(Srv, request_seen, ?FULL, fun() ->
+            kill_and_check(Srv, request_seen, none, fun() ->
                 hackney:request(get, Url, [], <<>>, Opts)
             end)
         end)
@@ -156,7 +158,7 @@ t_socks5_proxy() ->
         with_hold_server(fun(Srv) ->
             Url = url(Srv),
             Opts = [{proxy, {socks5, "127.0.0.1", ProxyPort}} | opts()],
-            kill_and_check(Srv, request_seen, ?FULL, fun() ->
+            kill_and_check(Srv, request_seen, none, fun() ->
                 hackney:request(get, Url, [], <<>>, Opts)
             end)
         end)
@@ -219,6 +221,101 @@ t_h3_connect() ->
         hackney_altsvc:clear_all(),
         hackney_h3_test_server:stop(Server)
     end.
+
+%% {async, true}: after the first chunk the conn blocks reading the next one.
+%% The consumer is killed only once that chunk has reached it.
+t_async_blocked() ->
+    with_hold_server(fun(Srv) ->
+        Url = url(Srv),
+        Before = conn_pids(),
+        Test = self(),
+        Consumer = spawn(fun() ->
+            {ok, _Ref} = hackney:request(get, Url, [], <<>>, [async | opts()]),
+            forward(Test)
+        end),
+        H = wait_server(Srv, request_seen),
+        Conn = new_conn(Before),
+        ConnMon = monitor(process, Conn),
+        H ! {send, ?PARTIAL},
+        receive
+            {consumer, {hackney_response, Conn, <<"ok">>}} -> ok
+        after ?WAIT ->
+            error(no_chunk)
+        end,
+        kill_and_wait(Consumer),
+        wait_down(ConnMon),
+        wait_closed(Srv, H)
+    end).
+
+%% A pooled conn whose owner dies mid-read stops and gives back its slot:
+%% with max_per_host 1, a second request only gets through once it has.
+t_pooled_blocked() ->
+    Pool = direct_owner_pool,
+    ok = hackney_pool:start_pool(Pool, [{pool_size, 1}, {max_per_host, 1}]),
+    try
+        with_hold_server(fun(Srv) ->
+            Url = url(Srv),
+            Opts = [{pool, Pool}, {recv_timeout, infinity}],
+            kill_and_check(Srv, request_seen, none, fun() ->
+                hackney:request(get, Url, [], <<>>, Opts)
+            end),
+            Test = self(),
+            Caller = spawn(fun() ->
+                Test ! {second, hackney:request(get, Url, [], <<>>,
+                                                [{checkout_timeout, ?WAIT} | Opts])}
+            end),
+            H = wait_server(Srv, request_seen),
+            H ! {send, ?FULL},
+            receive
+                {second, Result} -> ?assertMatch({ok, 200, _, <<"ok">>}, Result)
+            after ?WAIT ->
+                exit(Caller, kill),
+                error(slot_not_released)
+            end
+        end)
+    after
+        hackney_pool:stop_pool(Pool)
+    end.
+
+t_connect_proxy_handover() ->
+    {ok, Proxy, ProxyPort} = mock_proxy_server:start_connect_proxy(),
+    try
+        tunnel_handover([{proxy, {connect, "127.0.0.1", ProxyPort}} | opts()])
+    after
+        mock_proxy_server:stop(Proxy)
+    end.
+
+t_socks5_proxy_handover() ->
+    {ok, Proxy, ProxyPort} = mock_proxy_server:start_socks5_proxy(),
+    try
+        tunnel_handover([{proxy, {socks5, "127.0.0.1", ProxyPort}} | opts()])
+    after
+        mock_proxy_server:stop(Proxy)
+    end.
+
+%% The opener reads the status of a tunneled response, hands the conn to the
+%% test process and dies. The tunnel socket must go with the conn, not close
+%% with the opener, so the rest of the body still arrives.
+tunnel_handover(Opts) ->
+    with_hold_server(fun(Srv) ->
+        Url = url(Srv),
+        Test = self(),
+        Opener = spawn(fun() ->
+            {ok, Conn} = hackney:request(post, Url, [], stream, Opts),
+            ok = hackney:send_body(Conn, <<"body">>),
+            ok = hackney:finish_send_body(Conn),
+            {ok, 200, _, Conn} = hackney:start_response(Conn),
+            ok = hackney_conn:set_owner(Conn, Test),
+            Test ! {conn, Conn},
+            block()
+        end),
+        H = wait_server(Srv, request_seen),
+        H ! {send, ?PARTIAL},
+        Conn = receive {conn, C} -> C after ?WAIT -> error(no_conn) end,
+        kill_and_wait(Opener),
+        H ! {send, <<"4\r\nmore\r\n0\r\n\r\n">>},
+        ?assertEqual({ok, <<"okmore">>}, hackney:body(Conn))
+    end).
 
 %% A caller that hands its connection to another process keeps working.
 t_set_owner() ->
