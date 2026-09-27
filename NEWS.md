@@ -9,6 +9,11 @@
   caller's own streams. It stopped the connection, failing every other
   caller's streams on it. The connection still closes itself once idle with
   no stream open.
+- A connection opened without a pool honours `connect_timeout` above 8
+  seconds, and a dial that outlives it returns `{error, connect_timeout}`.
+  The wait was capped at 8 seconds and ended as an exit in the caller. A
+  dial stuck in the transport no longer holds the caller past its deadline
+  either (#945).
 
 4.8.3 - 2026-09-27
 ------------------

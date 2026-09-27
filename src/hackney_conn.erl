@@ -320,9 +320,17 @@ kill(Pid) ->
 connect(Pid) ->
     connect(Pid, ?CONNECT_TIMEOUT).
 
+%% A dial that outlives `Timeout', or a connection that dies while dialing,
+%% is an error for the caller, not an exit: the caller stops the conn on any
+%% error return.
 -spec connect(pid(), timeout()) -> ok | {error, term()}.
 connect(Pid, Timeout) ->
-    gen_statem:call(Pid, connect, Timeout).
+    try gen_statem:call(Pid, connect, Timeout)
+    catch
+        exit:{timeout, _} -> {error, connect_timeout};
+        exit:{Reason, {gen_statem, call, _}} -> {error, Reason};
+        exit:Reason -> {error, Reason}
+    end.
 
 %% @doc Get current state name for debugging.
 -spec get_state(pid()) -> {ok, atom()} | {error, term()}.
