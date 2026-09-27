@@ -147,6 +147,7 @@ connect_direct(Transport, Host, Port, Options) ->
     undefined -> BaseConnectOpts;
     _ -> [{protocols, Protocols} | BaseConnectOpts]
   end,
+  ConnectTimeout = proplists:get_value(connect_timeout, Options, 8000),
   ConnOpts = #{
     %% The caller owns the connection: it is started under hackney_conn_sup,
     %% so without this the supervisor is the owner and the connection
@@ -155,7 +156,7 @@ connect_direct(Transport, Host, Port, Options) ->
     host => Host,
     port => Port,
     transport => Transport,
-    connect_timeout => proplists:get_value(connect_timeout, Options, 8000),
+    connect_timeout => ConnectTimeout,
     recv_timeout => proplists:get_value(recv_timeout, Options, 5000),
     %% Single-owner connection: seed the conn-level send_timeout so
     %% hackney:send_request/2 (which has no options channel) honors it.
@@ -167,7 +168,7 @@ connect_direct(Transport, Host, Port, Options) ->
   },
   case hackney_conn_sup:start_conn(ConnOpts) of
     {ok, ConnPid} ->
-      case hackney_conn:connect(ConnPid) of
+      case hackney_conn:connect(ConnPid, ConnectTimeout) of
         ok ->
           {ok, ConnPid};
         {error, Reason} ->
@@ -491,7 +492,9 @@ maybe_upgrade_ssl(_, _ConnPid, _FinalSslOpts) ->
 
 %% @private Stop a connection, tolerating an already-dead process.
 stop_conn(ConnPid) ->
-  try hackney_conn:stop(ConnPid) catch _:_ -> ok end.
+  %% Bounded: a conn wedged in a dial past its deadline is killed rather
+  %% than holding the caller.
+  try hackney_conn:stop(ConnPid, 100) catch _:_ -> ok end.
 
 %% @private Signal the websocket process to shut down, ignoring errors.
 shutdown_ws(WsPid) ->
@@ -500,8 +503,9 @@ shutdown_ws(WsPid) ->
 %% @doc Close a connection.
 -spec close(conn()) -> ok.
 close(ConnPid) when is_pid(ConnPid) ->
-  %% A pooled connection held by a connect/* caller goes back to its pool;
-  %% any other one is stopped.
+  %% A pooled connection held by a connect/* caller goes back to its pool,
+  %% and a shared HTTP/2 one only drops this caller's streams; any other one
+  %% is stopped.
   case hackney_conn:release_held(ConnPid) of
     ok -> ok;
     {error, _} -> hackney_conn:stop(ConnPid)

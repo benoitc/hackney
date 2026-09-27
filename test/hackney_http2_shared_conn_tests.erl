@@ -28,7 +28,11 @@ shared_conn_test_() ->
         {"an unregistered connection still releases its slot",
          fun unregistered_conn_releases_slot/0},
         {"an unpooled connection is not shared",
-         fun unpooled_conn_not_shared/0}
+         fun unpooled_conn_not_shared/0},
+        {"close/1 by one caller keeps the shared connection",
+         fun close_keeps_shared_conn/0},
+        {"close/1 resets only the caller's own stream",
+         fun close_resets_own_stream/0}
     ]].
 
 %%====================================================================
@@ -201,6 +205,46 @@ unpooled_conn_not_shared() ->
         receive {'DOWN', ConnMon, process, Conn, _} -> ok
         after 5000 -> error(conn_outlived_owner)
         end
+    end).
+
+%% Another caller holding the shared connection through connect/2 closes
+%% it while a stream is in flight: the stream still completes.
+close_keeps_shared_conn() ->
+    with_server([], fun(URL, Port, Opts) ->
+        _ = sync_request(first, <<URL/binary, "/first">>, Opts),
+        {Handler, _} = started(<<"/first">>),
+        Conn = shared_conn(Opts, Port),
+        {ok, Conn} = hackney:connect(URL, Opts),
+        ok = hackney:close(Conn),
+        ?assert(is_process_alive(Conn)),
+        Handler ! respond,
+        ?assertMatch({ok, 200, _, <<"ok">>}, result(first))
+    end).
+
+%% A caller with its own stream open closes the connection: that stream is
+%% reset and its monitor dropped, the other caller's stream is untouched.
+close_resets_own_stream() ->
+    with_server([], fun(URL, Port, Opts) ->
+        _ = sync_request(first, <<URL/binary, "/first">>, Opts),
+        {FirstHandler, _} = started(<<"/first">>),
+        Conn = shared_conn(Opts, Port),
+        Parent = self(),
+        Closer = spawn(fun() ->
+            {ok, Conn} = hackney:connect(URL, Opts),
+            {ok, _} = hackney_conn:request_async(Conn, <<"GET">>, <<"/second">>,
+                                                 [], <<>>, true),
+            receive close -> Parent ! {closed, hackney:close(Conn)} end,
+            receive after infinity -> ok end
+        end),
+        _ = started(<<"/second">>),
+        ?assert(lists:member(Closer, monitored(Conn))),
+        Closer ! close,
+        receive {closed, R} -> ?assertEqual(ok, R) after 5000 -> error(no_close) end,
+        ?assertNot(lists:member(Closer, monitored(Conn))),
+        ?assert(is_process_alive(Conn)),
+        FirstHandler ! respond,
+        ?assertMatch({ok, 200, _, <<"ok">>}, result(first)),
+        exit(Closer, kill)
     end).
 
 %%====================================================================

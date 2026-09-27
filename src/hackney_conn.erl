@@ -320,9 +320,17 @@ kill(Pid) ->
 connect(Pid) ->
     connect(Pid, ?CONNECT_TIMEOUT).
 
+%% A dial that outlives `Timeout', or a connection that dies while dialing,
+%% is an error for the caller, not an exit: the caller stops the conn on any
+%% error return.
 -spec connect(pid(), timeout()) -> ok | {error, term()}.
 connect(Pid, Timeout) ->
-    gen_statem:call(Pid, connect, Timeout).
+    try gen_statem:call(Pid, connect, Timeout)
+    catch
+        exit:{timeout, _} -> {error, connect_timeout};
+        exit:{Reason, {gen_statem, call, _}} -> {error, Reason};
+        exit:Reason -> {error, Reason}
+    end.
 
 %% @doc Get current state name for debugging.
 -spec get_state(pid()) -> {ok, atom()} | {error, term()}.
@@ -621,8 +629,11 @@ hold(Pid) ->
     catch exit:_ -> {error, closed}
     end.
 
-%% @doc Check a held connection back into its pool. Returns ok if it went
-%% back, an error if it is not a held, idle pooled connection.
+%% @doc Give up the caller's hold on a pooled connection. A held HTTP/1.1
+%% connection goes back to its pool. On a shared HTTP/2 connection only the
+%% caller's own streams are reset: the connection stays up for the other
+%% callers and closes itself once idle with no stream open. Returns an error
+%% for any other connection, which the caller then stops.
 -spec release_held(pid()) -> ok | {error, term()}.
 release_held(Pid) ->
     try gen_statem:call(Pid, release_held, 5000)
@@ -939,6 +950,17 @@ connected({call, From}, hold, #conn_data{pool_pid = PoolPid, protocol = http1} =
 
 connected({call, From}, hold, _Data) ->
     {keep_state_and_data, [{reply, From, ok}]};
+
+connected({call, {Caller, _} = From}, release_held,
+          #conn_data{h2_shared = true, h2_streams = Streams} = Data) ->
+    Mine = [StreamId || {StreamId, {Owner, _}} <- maps:to_list(Streams),
+                        h2_stream_owner_pid(Owner) =:= Caller],
+    Data1 = lists:foldl(
+              fun(StreamId, D) ->
+                      _ = cancel_h2_stream(D#conn_data.h2_conn, StreamId),
+                      drop_h2_stream(StreamId, D)
+              end, Data, Mine),
+    h2_stream_result(Data1, [{reply, From, ok}]);
 
 connected({call, From}, release_held, #conn_data{pool_pid = PoolPid, auto_release = false} = Data)
   when is_pid(PoolPid) ->
