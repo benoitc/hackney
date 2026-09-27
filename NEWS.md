@@ -1,5 +1,15 @@
 # NEWS
 
+4.8.4 - UNRELEASED
+------------------
+
+### Fixed
+
+- `hackney:close/1` on a shared pooled HTTP/2 connection resets only the
+  caller's own streams. It stopped the connection, failing every other
+  caller's streams on it. The connection still closes itself once idle with
+  no stream open.
+
 4.8.3 - 2026-09-27
 ------------------
 

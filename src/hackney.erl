@@ -500,8 +500,9 @@ shutdown_ws(WsPid) ->
 %% @doc Close a connection.
 -spec close(conn()) -> ok.
 close(ConnPid) when is_pid(ConnPid) ->
-  %% A pooled connection held by a connect/* caller goes back to its pool;
-  %% any other one is stopped.
+  %% A pooled connection held by a connect/* caller goes back to its pool,
+  %% and a shared HTTP/2 one only drops this caller's streams; any other one
+  %% is stopped.
   case hackney_conn:release_held(ConnPid) of
     ok -> ok;
     {error, _} -> hackney_conn:stop(ConnPid)

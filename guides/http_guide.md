@@ -354,7 +354,7 @@ stream_loop(ConnPid) ->
 hackney:close(ConnPid).
 ```
 
-A connection from a pool stays yours between requests; it does not go back to the pool after each response. `hackney:close/1` returns it to the pool when it can be reused, and closes it otherwise.
+A connection from a pool stays yours between requests; it does not go back to the pool after each response. `hackney:close/1` returns it to the pool when it can be reused, and closes it otherwise. A pooled HTTP/2 connection is shared with other callers: `hackney:close/1` only resets your own streams on it.
 
 ### Hand the Connection to Another Process
 
