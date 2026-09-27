@@ -112,13 +112,27 @@ h1_request_releases() ->
     try
         Url = <<"http://localhost:", (integer_to_binary(?H1_PORT))/binary, "/get">>,
         {ok, 200, _, _} = hackney:request(get, Url, [], <<>>, [{pool, Pool}]),
-        ?assertMatch(#{in_use_count := 0, free_count := 1}, stats(Pool))
+        %% The conn checks itself in with a cast sent after it answers the
+        %% caller, so the pool can lag request/5 by a moment.
+        ?assertMatch(#{in_use_count := 0, free_count := 1},
+                     wait_stats(Pool, fun(#{free_count := F}) -> F =:= 1 end))
     after
         hackney_pool:stop_pool(Pool)
     end.
 
 stats(Pool) ->
     maps:from_list(hackney_pool:get_stats(Pool)).
+
+%% Pool stats once Done holds, or the last stats after 5 s.
+wait_stats(Pool, Done) ->
+    wait_stats(Pool, Done, erlang:monotonic_time(millisecond) + 5000).
+
+wait_stats(Pool, Done, Deadline) ->
+    Stats = stats(Pool),
+    case Done(Stats) orelse erlang:monotonic_time(millisecond) > Deadline of
+        true -> Stats;
+        false -> receive after 5 -> ok end, wait_stats(Pool, Done, Deadline)
+    end.
 
 %% Pull a response with stream_body/1 until it ends.
 read_chunks(Conn) ->
