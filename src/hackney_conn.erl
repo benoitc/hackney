@@ -1521,6 +1521,18 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
 
+streaming_body({call, From}, Req, #conn_data{protocol = http2, h2_stream_id = StreamId,
+                                             h2_streams = Streams,
+                                             h2_goaway = ErrorCode} = Data)
+  when (Req =:= finish_send_body orelse Req =:= start_response orelse
+        element(1, Req) =:= send_body_chunk),
+       is_map_key(StreamId, Streams),
+       element(2, map_get(StreamId, Streams)) =:= {stream, refused} ->
+    %% A GOAWAY refused this upload while other streams drain: nothing more
+    %% goes out on it, and its caller learns it the next time it asks.
+    h2_upload_done(drop_h2_stream(StreamId, Data),
+                   [{reply, From, {error, {goaway, ErrorCode}}}]);
+
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 - send a DATA frame without END_STREAM.
     #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId,
@@ -1538,7 +1550,7 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
         ok ->
             {keep_state_and_data, [{reply, From, ok}]};
         {error, Reason} ->
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            h2_upload_failed(From, Reason, Data)
     end;
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
@@ -1577,7 +1589,7 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Da
         ok ->
             {keep_state, Data, [{reply, From, ok}]};
         {error, Reason} ->
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            h2_upload_failed(From, Reason, Data)
     end;
 
 streaming_body({call, From}, finish_send_body, Data) ->
@@ -3310,8 +3322,7 @@ h2_stream_owner_down_result(streaming_body, StreamId,
                             #conn_data{h2_stream_id = StreamId} = Data) ->
     %% The caller streaming a request body died: its stream is gone, so the
     %% connection can take requests again.
-    {next_state, connected,
-     Data#conn_data{h2_stream_id = undefined, request_from = undefined}};
+    h2_upload_done(Data, []);
 h2_stream_owner_down_result(_State, _StreamId, Data) ->
     h2_stream_result(Data, []).
 
@@ -3991,31 +4002,54 @@ h2_idle_actions(_Data) ->
 %% here, and close once the accepted streams end. Aborting those too reported
 %% requests the server went on to complete as failed.
 %%
-%% A streamed request or response body (a `stream' entry) drives the
-%% connection through states of its own, so with one in flight the connection
-%% still closes at once.
+%% A refused upload has no caller parked to tell, so it stays marked until its
+%% caller next sends or asks for the response.
 h2_on_goaway(LastStreamId, ErrorCode, #conn_data{h2_streams = Streams} = Data) ->
     {Accepted, Refused} = lists:partition(fun(SId) -> SId =< LastStreamId end,
                                           maps:keys(Streams)),
-    case Accepted =/= [] andalso not h2_streaming_in_flight(Streams) of
-        true ->
-            {Replies, Data1} = abort_h2_streams(Refused, {goaway, ErrorCode}, Data),
+    case Accepted of
+        [] ->
+            h2_close_on_goaway(ErrorCode, Data);
+        _ ->
+            {Uploads, Others} =
+                lists:partition(fun(SId) ->
+                                        element(2, maps:get(SId, Streams)) =:= {stream, sending}
+                                end, Refused),
+            {Replies, Data1} = abort_h2_streams(Others, {goaway, ErrorCode}, Data),
+            Streams1 = lists:foldl(fun(SId, Acc) ->
+                                           {Owner, _} = maps:get(SId, Acc),
+                                           maps:put(SId, {Owner, {stream, refused}}, Acc)
+                                   end, Data1#conn_data.h2_streams, Uploads),
             ok = leave_h2_pool(Data1),
-            {keep_state, Data1#conn_data{h2_goaway = ErrorCode}, Replies};
-        false ->
-            h2_close_on_goaway(ErrorCode, Data)
+            {keep_state, Data1#conn_data{h2_streams = Streams1, h2_goaway = ErrorCode},
+             Replies}
     end.
 
-h2_streaming_in_flight(Streams) ->
-    lists:any(fun({_Owner, Inner}) -> element(1, Inner) =:= stream end,
-              maps:values(Streams)).
+%% @private Leave streaming_body once the upload stream is gone: back to
+%% connected, or closed when a GOAWAY drain has nothing left.
+h2_upload_done(Data, Replies) ->
+    Data1 = Data#conn_data{h2_stream_id = undefined, request_from = undefined},
+    case Data1 of
+        #conn_data{h2_goaway = ErrorCode, h2_streams = Streams}
+          when ErrorCode =/= undefined, map_size(Streams) =:= 0 ->
+            {next_state, closed, Data2, CloseReplies} = h2_close_on_goaway(ErrorCode, Data1),
+            {next_state, closed, Data2, Replies ++ CloseReplies};
+        _ ->
+            {next_state, connected, Data1, Replies}
+    end.
+
+%% @private A body send failed: the connection is unusable, so fail every
+%% other stream on it too instead of leaving their callers waiting.
+h2_upload_failed(From, Reason, Data) ->
+    {next_state, closed, Data1, Replies} = h2_teardown({closed, Reason}, Data),
+    {next_state, closed, Data1, [{reply, From, {error, Reason}} | Replies]}.
 
 leave_h2_pool(#conn_data{pool_pid = PoolPid}) when is_pid(PoolPid) ->
     gen_server:cast(PoolPid, {unregister_h2, self()});
 leave_h2_pool(_Data) ->
     ok.
 
-h2_close_on_goaway(ErrorCode, #conn_data{h2_conn = H2Conn, h2_mon = H2Mon} = Data) ->
+h2_close_on_goaway(ErrorCode, Data) ->
     %% A GOAWAY means the peer will not service new streams on this connection.
     %% AWS ALBs recycle connections this way, sending GOAWAY but keeping the
     %% socket open for a drain window. Leaving the conn `connected` and pooled
@@ -4024,7 +4058,10 @@ h2_close_on_goaway(ErrorCode, #conn_data{h2_conn = H2Conn, h2_mon = H2Mon} = Dat
     %% to recv_timeout. Tear the connection down and transition to `closed` (like
     %% h2_on_closed/2): the pool then stops reusing it (h2_conn_usable requires
     %% `connected`) and new requests dial a fresh connection.
-    {Replies, Data1} = collect_h2_aborts({goaway, ErrorCode}, Data),
+    h2_teardown({goaway, ErrorCode}, Data).
+
+h2_teardown(Err, #conn_data{h2_conn = H2Conn, h2_mon = H2Mon} = Data) ->
+    {Replies, Data1} = collect_h2_aborts(Err, Data),
     Data2 = cancel_all_h2_timers(Data1),
     _ = case H2Mon of
         undefined -> ok;

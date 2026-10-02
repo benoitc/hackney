@@ -21,7 +21,10 @@ goaway_drain_test_() ->
      [{timeout, 30, fun accepted_streams_complete/0},
       {timeout, 30, fun unaccepted_stream_fails_fast/0},
       {timeout, 30, fun two_step_shutdown/0},
-      {timeout, 30, fun stalled_drain_ends_with_the_stream/0}]}.
+      {timeout, 30, fun stalled_drain_ends_with_the_stream/0},
+      {timeout, 30, fun accepted_upload_completes/0},
+      {timeout, 30, fun refused_upload_fails_on_next_send/0},
+      {timeout, 30, fun accepted_streamed_response_completes/0}]}.
 
 setup() ->
     _ = application:ensure_all_started(hackney),
@@ -41,7 +44,7 @@ stop_pool() ->
 %% complete. A request made while they drain must not land on the draining
 %% connection, where the peer would ignore it, but dial a fresh one.
 accepted_streams_complete() ->
-    {Server, Url} = start_server(fun(_First, Second) -> Second end),
+    {Server, Url} = start_server(fun([_First, Second]) -> Second end),
     try
         [R1, R2, R3] = concurrent_requests(Url, 3),
         ?assertEqual({ok, 200, <<"1">>}, R1),
@@ -54,7 +57,7 @@ accepted_streams_complete() ->
 %% GOAWAY(last_stream_id = 1) after streams 1 and 3: stream 3 was not accepted
 %% and fails at once with the goaway reason, stream 1 still completes.
 unaccepted_stream_fails_fast() ->
-    {Server, Url} = start_server(fun(First, _Second) -> First end),
+    {Server, Url} = start_server(fun([First, _Second]) -> First end),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
@@ -67,7 +70,7 @@ unaccepted_stream_fails_fast() ->
 %% without refusing any, then a second GOAWAY gives the real last_stream_id.
 %% The first frame alone must not fail anything.
 two_step_shutdown() ->
-    {Server, Url} = start_server(fun(First, _Second) -> {two_step, First} end),
+    {Server, Url} = start_server(fun([First, _Second]) -> {two_step, First} end),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
@@ -80,7 +83,7 @@ two_step_shutdown() ->
 %% draining connection around: the stream's own recv_timeout ends it, and with
 %% it the connection, so the next request gets a fresh one.
 stalled_drain_ends_with_the_stream() ->
-    {Server, Url} = start_server(fun(First, _Second) -> {never, First} end),
+    {Server, Url} = start_server(fun([First, _Second]) -> {never, First} end),
     try
         [R1, R2] = concurrent_requests(Url, 2, [{recv_timeout, 1000}]),
         ?assertEqual({error, timeout}, R1),
@@ -88,6 +91,86 @@ stalled_drain_ends_with_the_stream() ->
         ?assertEqual({ok, 200, <<"1">>}, fetch(Url, []))
     after
         stop_server(Server)
+    end.
+
+%% GOAWAY(last_stream_id = 1) while stream 1 still uploads its body: the
+%% stream was accepted, so the rest of the body goes out and the response
+%% arrives. The drained connection then closes.
+accepted_upload_completes() ->
+    {Server, Port} = start_server(1, fun([First]) -> First end),
+    Conn = direct_conn(Port),
+    try
+        ok = hackney_conn:send_request_headers(Conn, <<"POST">>, <<"/">>, []),
+        ok = hackney_conn:send_body_chunk(Conn, <<"part">>),
+        ok = hackney_conn:finish_send_body(Conn),
+        {ok, 200, _, _} = hackney_conn:start_response(Conn),
+        ?assertEqual({ok, <<"1">>}, hackney_conn:body(Conn)),
+        ?assertEqual({ok, closed}, hackney_conn:get_state(Conn))
+    after
+        stop_conn(Conn),
+        stop_server(Server)
+    end.
+
+%% A GET on stream 1 and an upload on stream 3, then GOAWAY(last_stream_id = 1):
+%% the GET completes, the upload was refused and its next send says so. With
+%% nothing left to drain the connection closes.
+refused_upload_fails_on_next_send() ->
+    {Server, Port} = start_server(2, fun([First, _Second]) -> First end),
+    Conn = direct_conn(Port),
+    try
+        {ok, Ref} = hackney_conn:request_async(Conn, <<"GET">>, <<"/">>, [], <<>>,
+                                               false),
+        ok = hackney_conn:send_request_headers(Conn, <<"POST">>, <<"/">>, []),
+        ?assertEqual({ok, 200, <<"1">>}, await_async(Ref, <<>>)),
+        ?assertEqual({error, {goaway, no_error}},
+                     hackney_conn:send_body_chunk(Conn, <<"part">>)),
+        ?assertEqual({ok, closed}, hackney_conn:get_state(Conn))
+    after
+        stop_conn(Conn),
+        stop_server(Server)
+    end.
+
+%% GOAWAY(last_stream_id = 1) while a streamed response waits on stream 1: the
+%% stream was accepted, so its headers and body still arrive.
+accepted_streamed_response_completes() ->
+    {Server, Port} = start_server(1, fun([First]) -> First end),
+    Conn = direct_conn(Port),
+    try
+        {ok, 200, _, _} = hackney_conn:request_streaming(Conn, <<"GET">>, <<"/">>,
+                                                          [], <<>>),
+        ?assertEqual({ok, <<"1">>}, hackney_conn:stream_body(Conn)),
+        ?assertEqual(done, hackney_conn:stream_body(Conn)),
+        ?assertEqual({ok, closed}, hackney_conn:get_state(Conn))
+    after
+        stop_conn(Conn),
+        stop_server(Server)
+    end.
+
+stop_conn(Conn) ->
+    try hackney_conn:stop(Conn) catch _:_ -> ok end.
+
+direct_conn(Port) ->
+    {ok, Conn} = hackney_conn_sup:start_conn(#{
+        host => "localhost",
+        port => Port,
+        transport => hackney_ssl,
+        connect_options => [{protocols, [http2]}],
+        ssl_options => [{insecure, true}, {verify, verify_none}]
+    }),
+    ok = hackney_conn:connect(Conn),
+    Conn.
+
+await_async(Ref, Acc) ->
+    receive
+        {hackney_response, Ref, {status, Status, _}} ->
+            put(async_status, Status),
+            await_async(Ref, Acc);
+        {hackney_response, Ref, {headers, _}} -> await_async(Ref, Acc);
+        {hackney_response, Ref, done} -> {ok, get(async_status), Acc};
+        {hackney_response, Ref, {error, E}} -> {error, E};
+        {hackney_response, Ref, Bin} when is_binary(Bin) ->
+            await_async(Ref, <<Acc/binary, Bin/binary>>)
+    after 10000 -> {error, test_timeout}
     end.
 
 %% The first request registers the shared connection before the second checks
@@ -104,9 +187,6 @@ concurrent_requests(Url, N, Extra) ->
             end || Delay <- lists:sublist([0, 300, 100], N)],
     [receive {P, R} -> R after 10000 -> {error, test_timeout} end || P <- Pids].
 
-fetch(Url) ->
-    fetch(Url, []).
-
 fetch(Url, Extra) ->
     Opts = Extra ++ [{pool, ?POOL}, {protocols, [http2]}, {recv_timeout, 5000},
                      {ssl_options, [{insecure, true}, {verify, verify_none}]}],
@@ -120,6 +200,13 @@ fetch(Url, Extra) ->
 %%====================================================================
 
 start_server(PickLastStreamId) ->
+    {Pid, Port} = start_server(2, PickLastStreamId),
+    Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
+    {Pid, Url}.
+
+%% Hold the first Count streams of the first connection, then send GOAWAY with
+%% the last_stream_id PickLastStreamId(HeldIds) returns.
+start_server(Count, PickLastStreamId) ->
     Certs = cert_dir(),
     {ok, LSock} = ssl:listen(0,
         [{certfile, filename:join(Certs, "server.pem")},
@@ -128,9 +215,8 @@ start_server(PickLastStreamId) ->
          {versions, ['tlsv1.2', 'tlsv1.3']},
          {active, false}, {mode, binary}, {reuseaddr, true}]),
     {ok, {_, Port}} = ssl:sockname(LSock),
-    Pid = spawn(fun() -> accept_loop(LSock, {hold, PickLastStreamId}) end),
-    Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
-    {Pid, Url}.
+    Pid = spawn(fun() -> accept_loop(LSock, {hold, Count, PickLastStreamId}) end),
+    {Pid, Port}.
 
 stop_server(Pid) ->
     exit(Pid, kill).
@@ -151,7 +237,7 @@ serve(TSock, Mode) ->
                 {ok, Rest} ->
                     send(Sock, h2_frame:settings([])),
                     loop(Sock, Rest, #{enc => h2_hpack:new_context(), mode => Mode,
-                                       held => []});
+                                       held => [], ended => [], waiting => []});
                 _ -> ok
             end;
         _ -> ok
@@ -185,20 +271,31 @@ loop(Sock, Buf, St) ->
 handle(Sock, {settings, _}, St) -> send(Sock, h2_frame:settings_ack()), {continue, St};
 handle(Sock, {ping, D}, St) -> send(Sock, h2_frame:ping_ack(D)), {continue, St};
 handle(_Sock, {goaway, _, _, _}, _St) -> stop;
-handle(Sock, {headers, Sid, _B, _E, _H}, #{mode := immediate} = St) ->
+handle(Sock, {headers, Sid, _B, true, _H}, #{mode := immediate} = St) ->
     {continue, respond(Sock, Sid, St)};
-handle(Sock, {headers, Sid, _B, _E, _H}, #{mode := {hold, Pick}, held := Held} = St) ->
+handle(Sock, {headers, Sid, _B, EndStream, _H},
+       #{mode := {hold, Count, Pick}, held := Held, ended := Ended} = St) ->
+    Ended2 = case EndStream of true -> [Sid | Ended]; false -> Ended end,
     case Held ++ [Sid] of
-        [First, Second] ->
-            LastStreamId = send_goaway(Sock, Pick(First, Second)),
-            %% The drain: the peer is told, then the accepted streams finish.
+        Held2 when length(Held2) =:= Count ->
+            LastStreamId = send_goaway(Sock, Pick(Held2)),
+            %% The drain: the peer is told, then the accepted streams finish,
+            %% an upload once its body has ended.
             timer:sleep(200),
+            Accepted = [S || S <- Held2, S =< LastStreamId],
             St2 = lists:foldl(fun(S, Acc) -> respond(Sock, S, Acc) end,
                               St#{held := []},
-                              [S || S <- [First, Second], S =< LastStreamId]),
-            {continue, St2#{mode := draining}};
+                              [S || S <- Accepted, lists:member(S, Ended2)]),
+            {continue, St2#{mode := draining, waiting := Accepted -- Ended2}};
         Held2 ->
-            {continue, St#{held := Held2}}
+            {continue, St#{held := Held2, ended := Ended2}}
+    end;
+handle(Sock, Data, #{waiting := Waiting} = St)
+  when element(1, Data) =:= data, element(4, Data) =:= true ->
+    Sid = element(2, Data),
+    case lists:member(Sid, Waiting) of
+        true -> {continue, respond(Sock, Sid, St#{waiting := Waiting -- [Sid]})};
+        false -> {continue, St#{ended := [Sid | maps:get(ended, St)]}}
     end;
 handle(_Sock, _Other, St) -> {continue, St}.
 
