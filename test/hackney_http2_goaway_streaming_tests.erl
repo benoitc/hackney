@@ -20,7 +20,8 @@ goaway_streaming_test_() ->
       {timeout, 30, fun() -> refused_upload_fails_on(finish_send_body) end},
       {timeout, 30, fun() -> refused_upload_fails_on(start_response) end},
       {timeout, 30, fun accepted_streamed_response_completes/0},
-      {timeout, 30, fun refused_streamed_response_fails_fast/0}]}.
+      {timeout, 30, fun refused_streamed_response_fails_fast/0},
+      {timeout, 30, fun failed_upload_send_fails_other_streams/0}]}.
 
 setup() ->
     _ = application:ensure_all_started(hackney),
@@ -109,6 +110,39 @@ refused_streamed_response_fails_fast() ->
                      hackney:send_request(Conn, {get, <<"/">>, [], <<>>})),
         ?assertEqual({ok, 200, <<"1">>}, await(P1))
     after
+        hackney_h2_goaway_server:stop(Server)
+    end.
+
+%% A body send that fails takes the connection down. The other streams on it
+%% must fail with it rather than wait for a response that can no longer come.
+%% The server never answers and never opens its flow-control window, so a
+%% chunk larger than the initial window times out.
+failed_upload_send_fails_other_streams() ->
+    {Server, Url} = hackney_h2_goaway_server:start(never),
+    #{port := Port} = uri_string:parse(Url),
+    {ok, Conn} = hackney_conn_sup:start_conn(#{
+        host => "localhost",
+        port => Port,
+        transport => hackney_ssl,
+        connect_options => [{protocols, [http2]}],
+        ssl_options => [{insecure, true}, {verify, verify_none}]
+    }),
+    try
+        ok = hackney_conn:connect(Conn),
+        {ok, Ref} = hackney_conn:request_async(Conn, <<"GET">>, <<"/">>, [], <<>>,
+                                               false),
+        ok = hackney_conn:send_request_headers(Conn, <<"POST">>, <<"/">>, [],
+                                               [{send_timeout, 200}]),
+        {error, Reason} = hackney_conn:send_body_chunk(Conn, binary:copy(<<"x">>, 70000)),
+        receive
+            {hackney_response, Ref, Msg} ->
+                ?assertEqual({error, {closed, Reason}}, Msg)
+        after 5000 ->
+            ?assert(false)
+        end,
+        ?assertEqual({ok, closed}, hackney_conn:get_state(Conn))
+    after
+        try hackney_conn:stop(Conn) catch _:_ -> ok end,
         hackney_h2_goaway_server:stop(Server)
     end.
 
