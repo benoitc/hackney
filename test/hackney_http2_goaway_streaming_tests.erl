@@ -41,7 +41,7 @@ stop_pool() ->
 %% body chunk arrives. The rest of the body goes out, the response comes back,
 %% and the connection is gone for the request after.
 accepted_upload_completes() ->
-    {Server, Url} = hackney_h2_goaway_server:start(first_data),
+    {Server, Url} = hackney_h2_goaway_server:start(first_data, #{notify => self()}),
     try
         {ok, Conn} = hackney:request(post, Url, [], stream, opts()),
         ok = hackney:send_body(Conn, <<"abc">>),
@@ -49,6 +49,7 @@ accepted_upload_completes() ->
         ok = hackney:finish_send_body(Conn),
         {ok, 200, _Headers, Conn} = hackney:start_response(Conn),
         ?assertEqual({ok, <<"1">>}, hackney:body(Conn)),
+        ?assertEqual([], hackney_h2_goaway_server:rst_streams()),
         ?assertEqual({ok, 200, <<"1">>}, fetch(Url))
     after
         hackney_h2_goaway_server:stop(Server)
@@ -59,7 +60,8 @@ accepted_upload_completes() ->
 %% the one that fails, stream 1 still completes, and the connection is gone for
 %% the request after.
 refused_upload_fails_on(Call) ->
-    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end}),
+    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
+                                                   #{notify => self()}),
     try
         P1 = spawn_fetch(Url),
         timer:sleep(300),
@@ -72,6 +74,8 @@ refused_upload_fails_on(Call) ->
         end,
         ?assertEqual({error, {goaway, no_error}}, Result),
         ?assertEqual({ok, 200, <<"1">>}, await(P1)),
+        %% The upload was reset when the GOAWAY refused it, and nothing after.
+        ?assertEqual([3], hackney_h2_goaway_server:rst_streams()),
         ?assertEqual({ok, 200, <<"1">>}, fetch(Url))
     after
         hackney_h2_goaway_server:stop(Server)
@@ -101,14 +105,16 @@ accepted_streamed_response_completes() ->
 %% Stream 1 is a plain request the server holds, stream 3 a request whose
 %% response would be read as a stream, and the GOAWAY covers only stream 1.
 refused_streamed_response_fails_fast() ->
-    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end}),
+    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
+                                                   #{notify => self()}),
     try
         P1 = spawn_fetch(Url),
         timer:sleep(300),
         {ok, Conn} = connect(Url),
         ?assertEqual({error, {goaway, no_error}},
                      hackney:send_request(Conn, {get, <<"/">>, [], <<>>})),
-        ?assertEqual({ok, 200, <<"1">>}, await(P1))
+        ?assertEqual({ok, 200, <<"1">>}, await(P1)),
+        ?assertEqual([3], hackney_h2_goaway_server:rst_streams())
     after
         hackney_h2_goaway_server:stop(Server)
     end.
