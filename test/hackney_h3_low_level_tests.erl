@@ -111,8 +111,26 @@ quic_connection_test_() ->
     {"QUIC connection tests",
      with_server([
          {"Connect to a local server", fun test_local_connect/1},
-         {"Test stream opening", fun test_open_stream/1}
+         {"Test stream opening", fun test_open_stream/1},
+         {"Closing a connection leaves the others usable",
+          fun test_close_keeps_other_conns/1}
      ])}.
+
+%% The connection table belongs to hackney_sup. Owned by the first connection,
+%% it went away when that one closed, and every other live connection could no
+%% longer be reached.
+test_close_keeps_other_conns(Server) ->
+    ?assertEqual(whereis(hackney_sup), ets:info(hackney_h3_conns, owner)),
+    {ok, RefA} = connect(Server),
+    {ok, _} = wait_connected(RefA),
+    {ok, RefB} = connect(Server),
+    {ok, _} = wait_connected(RefB),
+    [{RefA, PidA}] = ets:lookup(hackney_h3_conns, RefA),
+    Mon = erlang:monitor(process, PidA),
+    hackney_h3:close(RefA, normal),
+    receive {'DOWN', Mon, process, PidA, _} -> ok after 5000 -> error(not_closed) end,
+    ?assertMatch({ok, _}, hackney_h3:peername(RefB)),
+    hackney_h3:close(RefB, normal).
 
 test_local_connect(Server) ->
     {ok, ConnRef} = connect(Server),
