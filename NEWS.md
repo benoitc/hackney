@@ -1,5 +1,27 @@
 # NEWS
 
+4.8.5 - 2026-10-04
+------------------
+
+### Fixed
+
+- A GOAWAY fails only the requests the server refused. HTTP/2 failed every
+  in-flight request with `{error, {goaway, _}}`, including ones the server
+  went on to complete, and HTTP/3 ignored the GOAWAY and kept sending new
+  requests on the connection. Accepted streams now finish, streamed uploads
+  and responses included, refused ones fail and are reset, and the
+  connection leaves the pool and closes once drained (#961, #962, #964,
+  #965, #968).
+- A failed HTTP/2 request body send fails the other streams on the
+  connection instead of leaving them waiting (#964).
+- Closing an HTTP/3 connection no longer makes the other live HTTP/3
+  connections unreachable. The connection table was owned by the first
+  connection and went away with it (#967).
+
+### Changed
+
+- Update `h2` to 0.12.4, `quic` to 2.1.1 and `webtransport` to 0.4.8.
+
 4.8.4 - 2026-09-27
 ------------------
 
