@@ -576,9 +576,12 @@ await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, A
             %% Server rejected 0-RTT; the request stream was reset. Surface a
             %% distinct error so the caller can retry once at 1-RTT.
             {error, early_data_rejected};
-        {h3, ConnRef, {goaway, _StreamId2}} ->
-            %% GOAWAY frame - connection is shutting down
-            {error, goaway}
+        {h3, ConnRef, {goaway, GoawayId}} when StreamId >= GoawayId ->
+            %% RFC 9114 5.2: the GOAWAY refused this request.
+            {error, goaway};
+        {h3, ConnRef, {goaway, _GoawayId}} ->
+            %% Accepted before the GOAWAY: the response still comes.
+            await_response_loop(ConnRef, StreamId, Deadline, MaxBodySize, Status, Headers, AccBody)
     after remaining(Deadline) ->
         {error, timeout}
     end.
