@@ -45,6 +45,9 @@ init([]) ->
   %% initialize the TLS options key memo table
   ok = hackney_ssl:init_key_cache(),
 
+  %% initialize the HTTP/3 connection table
+  ok = hackney_h3:init_table(),
+
   Specs = [
            %% manager
            ?CHILD(hackney_manager, worker),

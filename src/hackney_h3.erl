@@ -30,6 +30,8 @@
 -include("hackney_lib.hrl").
 
 -export([
+    %% Connection table, created by hackney_sup
+    init_table/0,
     %% High-level API
     is_available/0,
     request/2, request/3, request/4, request/5,
@@ -788,7 +790,7 @@ init({Host, Port, Opts, Owner}) ->
     case quic_h3:connect(Host, Port, H3Opts) of
         {ok, H3Conn} ->
             ConnRef = make_ref(),
-            _ = ensure_table(),
+            ok = init_table(),
             ets:insert(?CONN_TABLE, {ConnRef, self()}),
             {ok, #state{h3_conn = H3Conn,
                         conn_ref = ConnRef,
@@ -1005,12 +1007,19 @@ cacertfile_ders(File) ->
         {error, _} -> []
     end.
 
-ensure_table() ->
+%% @doc Create the table mapping connection refs to their processes. hackney_sup
+%% calls this at start so the table outlives every connection: owned by the
+%% first connection, it vanished when that one closed and took every other
+%% live connection's entry with it. The call in init/1 only covers hackney_h3
+%% used without the hackney application.
+-spec init_table() -> ok.
+init_table() ->
     case ets:whereis(?CONN_TABLE) of
         undefined ->
             try
-                ets:new(?CONN_TABLE,
-                        [named_table, public, set, {read_concurrency, true}])
+                _ = ets:new(?CONN_TABLE,
+                            [named_table, public, set, {read_concurrency, true}]),
+                ok
             catch
                 error:badarg -> ok
             end;
