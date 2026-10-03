@@ -16,9 +16,12 @@
 %%%                                 graceful shutdown of RFC 9113 6.8 (default direct)
 %%%   answer => boolean()           false answers nothing after the GOAWAY, not
 %%%                                 even the accepted streams (default true)
+%%%   notify => pid()               gets {goaway_server, rst_stream, StreamId} for
+%%%                                 each RST_STREAM on the first connection, then
+%%%                                 {goaway_server, done} when that connection ends
 -module(hackney_h2_goaway_server).
 
--export([start/1, start/2, stop/1]).
+-export([start/1, start/2, stop/1, rst_streams/0]).
 
 -define(PREFACE, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n">>).
 
@@ -46,12 +49,31 @@ accept_loop(LSock, Trigger, Opts) ->
     case ssl:transport_accept(LSock, 2000) of
         {ok, TSock} ->
             spawn(fun() -> serve(TSock, Trigger, Opts) end),
-            accept_loop(LSock, none, Opts);
+            accept_loop(LSock, none, maps:remove(notify, Opts));
         {error, timeout} -> accept_loop(LSock, Trigger, Opts);
         {error, closed} -> ok
     end.
 
 serve(TSock, Trigger, Opts) ->
+    serve_conn(TSock, Trigger, Opts),
+    notify(done, Opts).
+
+%% @doc The stream ids the client reset on the first connection, in order,
+%% once that connection has ended. Use with the notify option.
+rst_streams() ->
+    rst_streams([]).
+
+rst_streams(Acc) ->
+    receive
+        {goaway_server, rst_stream, StreamId} -> rst_streams([StreamId | Acc]);
+        {goaway_server, done} -> lists:reverse(Acc)
+    after 10000 -> {timeout, lists:reverse(Acc)}
+    end.
+
+notify(Msg, #{notify := Pid}) -> Pid ! {goaway_server, Msg};
+notify(_Msg, _Opts) -> ok.
+
+serve_conn(TSock, Trigger, Opts) ->
     case ssl:handshake(TSock, 5000) of
         {ok, Sock} ->
             case recv_preface(Sock, <<>>) of
@@ -95,6 +117,9 @@ loop(Sock, Buf, St) ->
 handle(Sock, {settings, _}, St) -> send(Sock, h2_frame:settings_ack()), {continue, St};
 handle(Sock, {ping, D}, St) -> send(Sock, h2_frame:ping_ack(D)), {continue, St};
 handle(_Sock, {goaway, _, _, _}, _St) -> stop;
+handle(_Sock, {rst_stream, Sid, _Code}, #{notify := Pid} = St) ->
+    Pid ! {goaway_server, rst_stream, Sid},
+    {continue, St};
 handle(Sock, {headers, Sid, _Block, EndStream, _EndHeaders}, St) ->
     {continue, on_request_frame(Sock, headers, Sid, EndStream, St)};
 %% decode/1 adds the flow-controlled size as a fifth element.

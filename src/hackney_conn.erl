@@ -4085,16 +4085,21 @@ collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->
 %% @private Fail the refused streams and keep the rest of the connection
 %% running. A request body still being sent has no caller parked on it, so
 %% its stream is kept as a `refused' entry for the caller's next call to find.
-abort_h2_streams(StreamIds, ErrorCode, #conn_data{h2_streams = Streams} = Data) ->
+%% Each newly refused stream is reset so the h2 layer drops it too; a marker
+%% left by an earlier GOAWAY was reset then.
+abort_h2_streams(StreamIds, ErrorCode, #conn_data{h2_streams = Streams,
+                                                  h2_conn = H2Conn} = Data) ->
     Refused = maps:with(StreamIds, Streams),
     Replies = h2_abort_replies({goaway, ErrorCode}, Refused),
     Data1 = maps:fold(fun
-        (StreamId, {Owner, {stream, sending}}, D) ->
-            D#conn_data{h2_streams = maps:put(StreamId, {Owner, {stream, refused, ErrorCode}},
-                                              D#conn_data.h2_streams)};
         (_StreamId, {_Owner, {stream, refused, _}}, D) ->
             D;
+        (StreamId, {Owner, {stream, sending}}, D) ->
+            _ = cancel_h2_stream(H2Conn, StreamId),
+            D#conn_data{h2_streams = maps:put(StreamId, {Owner, {stream, refused, ErrorCode}},
+                                              D#conn_data.h2_streams)};
         (StreamId, _Entry, D) ->
+            _ = cancel_h2_stream(H2Conn, StreamId),
             drop_h2_stream(StreamId, D)
     end, Data, Refused),
     {Replies, Data1}.

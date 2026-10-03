@@ -40,24 +40,30 @@ stop_pool() ->
 %% complete. A request made while they drain must not land on the draining
 %% connection, where the peer would ignore it, but dial a fresh one.
 accepted_streams_complete() ->
-    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(_First, Second) -> Second end}),
+    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(_First, Second) -> Second end},
+                                                   #{notify => self()}),
     try
         [R1, R2, R3] = concurrent_requests(Url, 3),
         ?assertEqual({ok, 200, <<"1">>}, R1),
         ?assertEqual({ok, 200, <<"3">>}, R2),
-        ?assertEqual({ok, 200, <<"1">>}, R3)
+        ?assertEqual({ok, 200, <<"1">>}, R3),
+        %% Nothing was refused, so nothing is reset.
+        ?assertEqual([], hackney_h2_goaway_server:rst_streams())
     after
         hackney_h2_goaway_server:stop(Server)
     end.
 
 %% GOAWAY(last_stream_id = 1) after streams 1 and 3: stream 3 was not accepted
-%% and fails at once with the goaway reason, stream 1 still completes.
+%% and fails at once with the goaway reason, stream 1 still completes. Only
+%% the refused stream is reset.
 unaccepted_stream_fails_fast() ->
-    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end}),
+    {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
+                                                   #{notify => self()}),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
-        ?assertEqual({error, {goaway, no_error}}, R2)
+        ?assertEqual({error, {goaway, no_error}}, R2),
+        ?assertEqual([3], hackney_h2_goaway_server:rst_streams())
     after
         hackney_h2_goaway_server:stop(Server)
     end.
@@ -67,11 +73,12 @@ unaccepted_stream_fails_fast() ->
 %% The first frame alone must not fail anything.
 two_step_shutdown() ->
     {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
-                                                   #{goaway => two_step}),
+                                                   #{goaway => two_step, notify => self()}),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
-        ?assertEqual({error, {goaway, no_error}}, R2)
+        ?assertEqual({error, {goaway, no_error}}, R2),
+        ?assertEqual([3], hackney_h2_goaway_server:rst_streams())
     after
         hackney_h2_goaway_server:stop(Server)
     end.
