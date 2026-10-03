@@ -234,6 +234,7 @@
     %%   {stream, headers, Status, Headers, Buffer, Pending}
     %%   {stream, body_full, Status, Headers, Acc, From}
     %%   {stream, done, Status, Headers, Buffer}
+    %%   {stream, refused, ErrorCode}  (refused by a GOAWAY, caller not yet told)
     h2_streams = #{} :: #{pos_integer() => {term(), tuple()}},
     %% Shared through the pool (share_h2/1): no owner, each stream monitors
     %% its caller, and the connection closes itself once idle.
@@ -1032,6 +1033,17 @@ connected({call, From}, get_state, #conn_data{h2_goaway = ErrorCode})
     {keep_state_and_data, [{reply, From, {ok, draining}}]};
 connected({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, {ok, connected}}]};
+
+%% The streaming-body calls only make sense in streaming_body, except for a
+%% request a GOAWAY refused while its caller was between them: the connection
+%% came back here then (h2_on_goaway/3), and the caller's next call is the
+%% first chance to tell it.
+connected({call, From}, {send_body_chunk, _}, #conn_data{protocol = http2} = Data) ->
+    h2_answer_refused_request(From, Data);
+connected({call, From}, finish_send_body, #conn_data{protocol = http2} = Data) ->
+    h2_answer_refused_request(From, Data);
+connected({call, From}, start_response, #conn_data{protocol = http2} = Data) ->
+    h2_answer_refused_request(From, Data);
 
 connected({call, From}, verify_socket, #conn_data{socket = undefined} = Data) ->
     %% Socket not connected
@@ -3309,9 +3321,16 @@ handle_h2_stream_owner_down(Ref, State,
 h2_stream_owner_down_result(streaming_body, StreamId,
                             #conn_data{h2_stream_id = StreamId} = Data) ->
     %% The caller streaming a request body died: its stream is gone, so the
-    %% connection can take requests again.
-    {next_state, connected,
-     Data#conn_data{h2_stream_id = undefined, request_from = undefined}};
+    %% connection can take requests again, unless that stream was the last
+    %% one of a GOAWAY drain.
+    case h2_stream_result(Data#conn_data{h2_stream_id = undefined,
+                                         request_from = undefined}, []) of
+        {keep_state, Data1, Actions} ->
+            {next_state, connected, Data1,
+             [{state_timeout, infinity, idle_timeout} | Actions]};
+        Closed ->
+            Closed
+    end;
 h2_stream_owner_down_result(_State, _StreamId, Data) ->
     h2_stream_result(Data, []).
 
@@ -3991,24 +4010,42 @@ h2_idle_actions(_Data) ->
 %% here, and close once the accepted streams end. Aborting those too reported
 %% requests the server went on to complete as failed.
 %%
-%% A streamed request or response body (a `stream' entry) drives the
-%% connection through states of its own, so with one in flight the connection
-%% still closes at once.
+%% A streaming-body request the GOAWAY refuses has no caller parked on it, so
+%% it is kept as a `refused' entry and the connection leaves streaming_body:
+%% the caller learns of it on its next call (h2_answer_refused_request/2).
 h2_on_goaway(LastStreamId, ErrorCode, #conn_data{h2_streams = Streams} = Data) ->
-    {Accepted, Refused} = lists:partition(fun(SId) -> SId =< LastStreamId end,
-                                          maps:keys(Streams)),
-    case Accepted =/= [] andalso not h2_streaming_in_flight(Streams) of
+    Refused = [SId || SId <- maps:keys(Streams), SId > LastStreamId],
+    {Replies, Data1} = abort_h2_streams(Refused, ErrorCode, Data),
+    #conn_data{h2_streams = Streams1, h2_stream_id = StreamId} = Data1,
+    case map_size(Streams1) =:= 0 of
         true ->
-            {Replies, Data1} = abort_h2_streams(Refused, {goaway, ErrorCode}, Data),
-            ok = leave_h2_pool(Data1),
-            {keep_state, Data1#conn_data{h2_goaway = ErrorCode}, Replies};
+            {next_state, closed, Data2, CloseReplies} = h2_close_on_goaway(ErrorCode, Data1),
+            {next_state, closed, Data2, Replies ++ CloseReplies};
         false ->
-            h2_close_on_goaway(ErrorCode, Data)
+            ok = leave_h2_pool(Data1),
+            Data3 = Data1#conn_data{h2_goaway = ErrorCode},
+            case maps:get(StreamId, Streams1, undefined) of
+                {_, {stream, refused, _}} ->
+                    {next_state, connected, Data3,
+                     [{state_timeout, infinity, idle_timeout} | Replies]};
+                _ ->
+                    {keep_state, Data3, Replies}
+            end
     end.
 
-h2_streaming_in_flight(Streams) ->
-    lists:any(fun({_Owner, Inner}) -> element(1, Inner) =:= stream end,
-              maps:values(Streams)).
+%% @private Answer a streaming-body call made after the request's stream was
+%% refused by a GOAWAY (see h2_on_goaway/3). Any other such call in
+%% `connected' is a misuse, as before.
+h2_answer_refused_request({Caller, _} = From, #conn_data{h2_streams = Streams} = Data) ->
+    case [{Id, Code} || {Id, {Owner, {stream, refused, Code}}} <- maps:to_list(Streams),
+                        h2_stream_owner_pid(Owner) =:= Caller] of
+        [{StreamId, ErrorCode}] ->
+            Data1 = Data#conn_data{h2_stream_id = undefined, request_from = undefined},
+            h2_stream_result(drop_h2_stream(StreamId, Data1),
+                             [{reply, From, {error, {goaway, ErrorCode}}}]);
+        [] ->
+            {keep_state_and_data, [{reply, From, {error, invalid_state}}]}
+    end.
 
 leave_h2_pool(#conn_data{pool_pid = PoolPid}) when is_pid(PoolPid) ->
     gen_server:cast(PoolPid, {unregister_h2, self()});
@@ -4051,10 +4088,22 @@ collect_h2_aborts(Err, #conn_data{h2_streams = Streams} = Data) ->
               Data#conn_data{h2_streams = #{}, request_from = undefined}),
     {Replies, Data1}.
 
-%% @private Fail some streams and keep the rest of the connection running.
-abort_h2_streams(StreamIds, Err, #conn_data{h2_streams = Streams} = Data) ->
-    Replies = h2_abort_replies(Err, maps:with(StreamIds, Streams)),
-    {Replies, lists:foldl(fun drop_h2_stream/2, Data, StreamIds)}.
+%% @private Fail the refused streams and keep the rest of the connection
+%% running. A request body still being sent has no caller parked on it, so
+%% its stream is kept as a `refused' entry for the caller's next call to find.
+abort_h2_streams(StreamIds, ErrorCode, #conn_data{h2_streams = Streams} = Data) ->
+    Refused = maps:with(StreamIds, Streams),
+    Replies = h2_abort_replies({goaway, ErrorCode}, Refused),
+    Data1 = maps:fold(fun
+        (StreamId, {Owner, {stream, sending}}, D) ->
+            D#conn_data{h2_streams = maps:put(StreamId, {Owner, {stream, refused, ErrorCode}},
+                                              D#conn_data.h2_streams)};
+        (_StreamId, {_Owner, {stream, refused, _}}, D) ->
+            D;
+        (StreamId, _Entry, D) ->
+            drop_h2_stream(StreamId, D)
+    end, Data, Refused),
+    {Replies, Data1}.
 
 h2_abort_replies(Err, Streams) ->
     maps:fold(fun
