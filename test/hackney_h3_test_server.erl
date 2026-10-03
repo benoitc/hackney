@@ -20,6 +20,12 @@
 %%%   GET /reset             200 and part of a body, then resets the stream
 %%%                          when the process registered as
 %%%                          hackney_h3_test_reset sends `reset'
+%%%   GET|POST /hold         holds the request: sends {held, Handler, Conn,
+%%%                          StreamId} to the process registered as
+%%%                          hackney_h3_test_hold, then answers 200 with the
+%%%                          stream id as body on `release', or sends
+%%%                          {held_reset, StreamId} there if the client
+%%%                          resets the stream
 %%%   POST any path          200, echoes the request body
 %%%   anything else          404
 -module(hackney_h3_test_server).
@@ -110,6 +116,10 @@ unused_port() ->
 %% Handler
 %%====================================================================
 
+handle(Conn, StreamId, _Method, <<"/hold">>, _Headers) ->
+    _ = quic_h3:set_stream_handler(Conn, StreamId, self()),
+    hackney_h3_test_hold ! {held, self(), Conn, StreamId},
+    hold(Conn, StreamId);
 handle(Conn, StreamId, <<"POST">>, _Path, Headers) ->
     Body = read_body(Conn, StreamId),
     ContentType = proplists:get_value(<<"content-type">>, Headers,
@@ -166,6 +176,18 @@ handle(Conn, StreamId, <<"GET">>, <<"/reset">>, _Headers) ->
     end;
 handle(Conn, StreamId, _Method, _Path, _Headers) ->
     respond(Conn, StreamId, 404, [], <<>>).
+
+hold(Conn, StreamId) ->
+    receive
+        release ->
+            respond(Conn, StreamId, 200, [], integer_to_binary(StreamId));
+        {quic_h3, Conn, {stream_reset, StreamId, _Code}} ->
+            hackney_h3_test_hold ! {held_reset, StreamId};
+        {quic_h3, Conn, _Other} ->
+            hold(Conn, StreamId)
+    after 15000 ->
+        ok
+    end.
 
 index() ->
     <<"<html><body>hackney h3 test server</body></html>">>.

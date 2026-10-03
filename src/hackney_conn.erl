@@ -133,6 +133,10 @@
 %% late-arriving calls race the pool DOWN cleanup and still get a proper
 %% error reply instead of exit:{normal, _}. See issue #836.
 -define(CLOSED_GRACE_MS, 50).
+
+%% HTTP/3 H3_REQUEST_CANCELLED (RFC 9114 8.1), used to reset refused streams.
+-define(H3_REQUEST_CANCELLED, 16#10c).
+
 %% A blocking HTTP/1.1 read is cut into slices this long; between slices the
 %% conn checks whether its owner died, so a dead owner does not keep the
 %% socket open until the response comes or recv_timeout expires.
@@ -260,6 +264,10 @@
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
     %% Current HTTP/3 stream ID for streaming body mode
     h3_stream_id :: non_neg_integer() | undefined,
+    %% Stream ID of a GOAWAY that left accepted streams to finish. While set,
+    %% new requests are refused and the connection closes when the last
+    %% stream ends.
+    h3_goaway :: non_neg_integer() | undefined,
     %% Whether to try HTTP/3 (requires UDP)
     try_http3 = false :: boolean(),
     %% Pool name + handler module, so the connection can cache the H3
@@ -1026,6 +1034,9 @@ connected(state_timeout, idle_timeout, Data) ->
     %% Idle timeout - close connection
     {next_state, closed, Data};
 
+connected({call, From}, get_state, #conn_data{h3_goaway = GoawayId})
+  when GoawayId =/= undefined ->
+    {keep_state_and_data, [{reply, From, {ok, draining}}]};
 connected({call, From}, get_state, #conn_data{h2_goaway = ErrorCode})
   when ErrorCode =/= undefined ->
     %% Draining after a GOAWAY: still serving its accepted streams, but the
@@ -1350,15 +1361,18 @@ connected(info, {ssl, Socket, Data}, #conn_data{socket = Socket} = D) ->
 %% HTTP/3 message handling
 connected(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
+    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams, Data));
 
 connected(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
+    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams, Data));
 
 connected(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
+    h3_drain_result(handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data));
+
+connected(info, {h3, ConnRef, {goaway, GoawayId}}, #conn_data{h3_conn = ConnRef} = Data) ->
+    h3_on_goaway(GoawayId, connected, Data);
 
 connected(info, {h3, ConnRef, {closed, Reason}},
           #conn_data{h3_conn = ConnRef} = Data) ->
@@ -1381,7 +1395,7 @@ connected(info, {'DOWN', Ref, process, _Pid, _Reason}, #conn_data{owner_mon = Re
 
 %% HTTP/3 stream_body call - returns buffered chunk or waits for data
 connected({call, From}, stream_body, #conn_data{protocol = http3, h3_streams = Streams} = Data) ->
-    handle_h3_stream_body(From, Streams, Data);
+    h3_drain_result(handle_h3_stream_body(From, Streams, Data));
 
 %% HTTP/2 streaming-body response reads (after start_response/1).
 connected({call, From}, stream_body, #conn_data{protocol = http2} = Data) ->
@@ -1391,7 +1405,7 @@ connected({call, From}, body, #conn_data{protocol = http2} = Data) ->
     handle_h2_read_body(From, Data);
 
 connected({call, From}, body, #conn_data{protocol = http3, h3_streams = Streams} = Data) ->
-    handle_h3_read_body(From, Streams, Data);
+    h3_drain_result(handle_h3_read_body(From, Streams, Data));
 
 connected(EventType, Event, Data) ->
     handle_common(EventType, Event, connected, Data).
@@ -1502,6 +1516,22 @@ streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
         {error, Reason} ->
             From = Data#conn_data.request_from,
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end;
+
+%% A GOAWAY refused this upload between two of its caller's calls (see
+%% h3_on_goaway/3): its next call is the first chance to tell it.
+streaming_body({call, From}, Req, #conn_data{protocol = http3, h3_stream_id = StreamId,
+                                             h3_streams = Streams} = Data)
+  when (Req =:= finish_send_body orelse Req =:= start_response orelse
+        element(1, Req) =:= send_body_chunk),
+       is_map_key(StreamId, Streams),
+       element(2, map_get(StreamId, Streams)) =:= refused ->
+    Data1 = Data#conn_data{h3_streams = maps:remove(StreamId, Streams),
+                           h3_stream_id = undefined, request_from = undefined},
+    Reply = {reply, From, {error, {goaway, no_error}}},
+    case h3_drain_result({keep_state, Data1, [Reply]}) of
+        {keep_state, Data2, Actions} -> {next_state, connected, Data2, Actions};
+        Closed -> Closed
     end;
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http3} = Data) ->
@@ -1672,15 +1702,18 @@ streaming_body(info, {'DOWN', Mon, process, _Pid, Reason}, #conn_data{h2_mon = M
 streaming_body(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     %% Early response headers while still sending body
-    handle_h3_headers(StreamId, Headers, Fin, Streams, Data);
+    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams, Data));
 
 streaming_body(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_data(StreamId, RecvData, Fin, Streams, Data);
+    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams, Data));
 
 streaming_body(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data);
+    h3_drain_result(handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data));
+
+streaming_body(info, {h3, ConnRef, {goaway, GoawayId}}, #conn_data{h3_conn = ConnRef} = Data) ->
+    h3_on_goaway(GoawayId, streaming_body, Data);
 
 streaming_body(info, {h3, ConnRef, {closed, Reason}},
                #conn_data{h3_conn = ConnRef} = Data) ->
@@ -2228,7 +2261,7 @@ handle_common(info, {h3, ConnRef, {early_data_rejected, StreamIds}}, _State,
               #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     maybe_delete_h3_session(Data),
     {NewStreams, Actions} = fail_rejected_h3_streams(StreamIds, Streams),
-    {keep_state, Data#conn_data{h3_streams = NewStreams}, Actions};
+    h3_drain_result({keep_state, Data#conn_data{h3_streams = NewStreams}, Actions});
 
 %% With trap_exit = true, an EXIT signal from any linked process (other than
 %% h2_conn, handled in connected/3) arrives here. Swallow it rather than
@@ -4134,6 +4167,10 @@ h2_abort_replies(Err, Streams) ->
 
 %% @private Send an HTTP/3 request
 %% Opens a stream, sends headers and optionally body
+do_h3_request(From, _Method, _Path, _Headers, _Body, #conn_data{h3_goaway = GoawayId})
+  when GoawayId =/= undefined ->
+    %% Draining after a GOAWAY: the peer would refuse a new stream.
+    {keep_state_and_data, [{reply, From, {error, {goaway, no_error}}}]};
 do_h3_request(From, Method, Path, Headers, Body, Data) ->
     #conn_data{
         host = Host,
@@ -4167,6 +4204,10 @@ do_h3_request(From, Method, Path, Headers, Body, Data) ->
 
 %% @private Send an HTTP/3 async request
 %% Opens a stream, sends headers and body, sets up async streaming
+do_h3_request_async(From, _Method, _Path, _Headers, _Body, _AsyncMode, _StreamTo, #conn_data{h3_goaway = GoawayId})
+  when GoawayId =/= undefined ->
+    %% Draining after a GOAWAY: the peer would refuse a new stream.
+    {keep_state_and_data, [{reply, From, {error, {goaway, no_error}}}]};
 do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, Data) ->
     #conn_data{
         host = Host,
@@ -4207,6 +4248,10 @@ do_h3_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, Data
 
 %% @private Send an HTTP/3 request with streaming body reads
 %% Returns {ok, Status, Headers} and allows subsequent stream_body calls
+do_h3_request_streaming(From, _Method, _Path, _Headers, _Body, #conn_data{h3_goaway = GoawayId})
+  when GoawayId =/= undefined ->
+    %% Draining after a GOAWAY: the peer would refuse a new stream.
+    {keep_state_and_data, [{reply, From, {error, {goaway, no_error}}}]};
 do_h3_request_streaming(From, Method, Path, Headers, Body, Data) ->
     #conn_data{
         host = Host,
@@ -4241,6 +4286,10 @@ do_h3_request_streaming(From, Method, Path, Headers, Body, Data) ->
 
 %% @private Send HTTP/3 request headers only (for streaming body mode)
 %% Returns ok and transitions to streaming_body state
+do_h3_send_headers(From, _Method, _Path, _Headers, #conn_data{h3_goaway = GoawayId})
+  when GoawayId =/= undefined ->
+    %% Draining after a GOAWAY: the peer would refuse a new stream.
+    {keep_state_and_data, [{reply, From, {error, {goaway, no_error}}}]};
 do_h3_send_headers(From, Method, Path, Headers, Data) ->
     #conn_data{
         host = Host,
@@ -4692,6 +4741,75 @@ maybe_delete_h3_session(#conn_data{pool_handler = PoolHandler, host = Host,
             ok
     end.
 
+%% RFC 9114 5.2: a GOAWAY refuses the requests on stream GoawayId and above,
+%% while the ones below it may still be processed. Fail and reset only the
+%% refused streams, leave the pool so no new request lands here, and close
+%% once the accepted streams end. An upload refused while its caller is
+%% between calls is marked `refused' until that caller's next call.
+h3_on_goaway(GoawayId, State, #conn_data{h3_streams = Streams, h3_conn = ConnRef,
+                                         pool_pid = PoolPid} = Data) ->
+    Refused = [S || {S, Entry} <- maps:to_list(Streams), S >= GoawayId,
+                    element(2, Entry) =/= refused],
+    {Streams1, Actions, RequestFrom} =
+        lists:foldl(fun(S, Acc) -> refuse_h3_stream(S, State, Data, Acc) end,
+                    {Streams, [], Data#conn_data.request_from}, Refused),
+    _ = [hackney_h3:reset_stream(ConnRef, S, ?H3_REQUEST_CANCELLED) || S <- Refused],
+    _ = case PoolPid of
+        undefined -> ok;
+        _ -> gen_server:cast(PoolPid, {unregister_h3, self()})
+    end,
+    h3_drain_result({keep_state, Data#conn_data{h3_streams = Streams1,
+                                                request_from = RequestFrom,
+                                                h3_goaway = GoawayId},
+                     Actions}).
+
+refuse_h3_stream(S, State, #conn_data{h3_stream_id = UploadId},
+                 {Streams, Actions, RequestFrom}) ->
+    Err = {error, {goaway, no_error}},
+    case maps:get(S, Streams) of
+        {Owner, {sending_body, _}} when State =:= streaming_body, S =:= UploadId ->
+            {maps:put(S, {Owner, refused}, Streams), Actions, RequestFrom};
+        {_, {sending_body, _}} when RequestFrom =/= undefined ->
+            %% start_response/1 is parked waiting for this response.
+            {maps:remove(S, Streams), [{reply, RequestFrom, Err} | Actions], undefined};
+        {_, {waiting_headers_streaming, From}} ->
+            {maps:remove(S, Streams), [{reply, From, Err} | Actions],
+             h3_clear_from(From, RequestFrom)};
+        {_, PullState} when element(1, PullState) =:= streaming_body;
+                            element(1, PullState) =:= streaming_body_full ->
+            Actions1 = case h3_parked_from(PullState) of
+                undefined -> Actions;
+                Waiting -> [{reply, Waiting, Err} | Actions]
+            end,
+            {maps:remove(S, Streams), Actions1, RequestFrom};
+        _ ->
+            {Streams1, Actions1} = fail_h3_stream(S, Err, Streams, Actions),
+            {Streams1, Actions1, h3_clear_from(element(1, maps:get(S, Streams)), RequestFrom)}
+    end.
+
+h3_clear_from(From, From) -> undefined;
+h3_clear_from(_From, RequestFrom) -> RequestFrom.
+
+%% @private Result for a handler on a connection draining after a GOAWAY:
+%% once its last stream has ended it closes.
+h3_drain_result({keep_state, #conn_data{h3_goaway = GoawayId, h3_streams = Streams} = Data})
+  when GoawayId =/= undefined, map_size(Streams) =:= 0 ->
+    h3_close_drained(Data, []);
+h3_drain_result({keep_state, #conn_data{h3_goaway = GoawayId, h3_streams = Streams} = Data,
+                 Actions})
+  when GoawayId =/= undefined, map_size(Streams) =:= 0 ->
+    h3_close_drained(Data, Actions);
+h3_drain_result(Result) ->
+    Result.
+
+h3_close_drained(#conn_data{h3_conn = ConnRef} = Data, Actions) ->
+    _ = hackney_h3:close(ConnRef),
+    {next_state, closed, Data1, Actions1} =
+        handle_h3_termination({goaway, no_error},
+                              Data#conn_data{request_from = undefined, no_reuse = true}),
+    {next_state, closed, Data1#conn_data{h3_goaway = undefined, h3_stream_id = undefined},
+     Actions ++ Actions1}.
+
 %% @private Fail any in-flight stream whose 0-RTT data the server rejected.
 %% Returns the updated stream map plus gen_statem reply actions for sync
 %% callers; async callers are notified via their StreamTo mailbox directly.
@@ -4705,7 +4823,9 @@ fail_rejected_h3_streams(StreamIds, Streams) ->
                 end, {Streams, []}, Ids).
 
 fail_rejected_h3_stream(StreamId, Streams, Actions) ->
-    Err = {error, early_data_rejected},
+    fail_h3_stream(StreamId, {error, early_data_rejected}, Streams, Actions).
+
+fail_h3_stream(StreamId, Err, Streams, Actions) ->
     case maps:get(StreamId, Streams, undefined) of
         undefined ->
             {Streams, Actions};
@@ -4730,8 +4850,31 @@ fail_rejected_h3_stream(StreamId, Streams, Actions) ->
     end.
 
 %% @private Handle HTTP/3 connection closed
+%% After a GOAWAY the connection closes once its last stream is answered, which
+%% can be before the caller has read that answer. Fully received responses stay
+%% readable; the drain ends when they have been read.
+handle_h3_conn_closed(Reason, #conn_data{h3_goaway = GoawayId, h3_streams = Streams} = Data)
+  when GoawayId =/= undefined ->
+    Received = maps:filter(fun(_StreamId, {_, StreamState}) ->
+                                   h3_response_received(StreamState)
+                           end, Streams),
+    case map_size(Received) of
+        0 ->
+            handle_h3_termination({connection_closed, Reason}, Data);
+        _ ->
+            Pending = maps:without(maps:keys(Received), Streams),
+            {next_state, closed, _, Actions} =
+                handle_h3_termination({connection_closed, Reason},
+                                      Data#conn_data{h3_streams = Pending}),
+            {keep_state, Data#conn_data{h3_conn = undefined, h3_streams = Received,
+                                        request_from = undefined}, Actions}
+    end;
 handle_h3_conn_closed(Reason, Data) ->
     handle_h3_termination({connection_closed, Reason}, Data).
+
+h3_response_received({streaming_body_done, _Status, _Headers}) -> true;
+h3_response_received({streaming_body_final, _Status, _Headers, _Buffer}) -> true;
+h3_response_received(_StreamState) -> false.
 
 %% @private Handle HTTP/3 transport error
 handle_h3_error(Error, Data) ->
