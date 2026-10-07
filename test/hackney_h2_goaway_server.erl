@@ -11,11 +11,17 @@
 %%%                          Pick(FirstStreamId, SecondStreamId) as last_stream_id
 %%%   first_data             when a stream's first body chunk arrives, with that
 %%%                          stream as last_stream_id
+%%%   {first_stream, Ms}     Ms after the first stream opens, accepting it
 %%% and shaped by options:
 %%%   goaway => direct | two_step   two_step first sends GOAWAY(2^31-1), the
 %%%                                 graceful shutdown of RFC 9113 6.8 (default direct)
-%%%   answer => boolean()           false answers nothing after the GOAWAY, not
-%%%                                 even the accepted streams (default true)
+%%%   answer => boolean()           false makes the first connection answer
+%%%                                 nothing, not even streams a GOAWAY accepted
+%%%                                 (default true)
+%%%   answer_after => Ms            delay before a complete request is answered
+%%%                                 (default 0)
+%%%   max_streams => N              SETTINGS_MAX_CONCURRENT_STREAMS the server
+%%%                                 advertises (default unlimited)
 %%%   notify => pid()               gets {goaway_server, rst_stream, StreamId} for
 %%%                                 each RST_STREAM on the first connection, then
 %%%                                 {goaway_server, done} when that connection ends
@@ -37,7 +43,8 @@ start(Trigger, Opts) ->
          {versions, ['tlsv1.2', 'tlsv1.3']},
          {active, false}, {mode, binary}, {reuseaddr, true}]),
     {ok, {_, Port}} = ssl:sockname(LSock),
-    Options = maps:merge(#{goaway => direct, answer => true}, Opts),
+    Options = maps:merge(#{goaway => direct, answer => true, answer_after => 0,
+                           max_streams => unlimited}, Opts),
     Pid = spawn(fun() -> accept_loop(LSock, Trigger, Options) end),
     Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
     {Pid, Url}.
@@ -49,7 +56,7 @@ accept_loop(LSock, Trigger, Opts) ->
     case ssl:transport_accept(LSock, 2000) of
         {ok, TSock} ->
             spawn(fun() -> serve(TSock, Trigger, Opts) end),
-            accept_loop(LSock, none, maps:remove(notify, Opts));
+            accept_loop(LSock, none, maps:remove(notify, Opts#{answer => true}));
         {error, timeout} -> accept_loop(LSock, Trigger, Opts);
         {error, closed} -> ok
     end.
@@ -78,7 +85,7 @@ serve_conn(TSock, Trigger, Opts) ->
         {ok, Sock} ->
             case recv_preface(Sock, <<>>) of
                 {ok, Rest} ->
-                    send(Sock, h2_frame:settings([])),
+                    send(Sock, h2_frame:settings(settings(Opts))),
                     %% seen: stream ids in order of arrival. complete: streams
                     %% whose request has fully arrived and is not answered yet.
                     %% accepted: after the GOAWAY, the streams it let through.
@@ -141,6 +148,9 @@ goaway_for(headers, _Sid, _EndStream, #{trigger := {second_stream, Pick}, seen :
     Pick(First, Second);
 goaway_for(data, Sid, false, #{trigger := first_data}) ->
     Sid;
+goaway_for(headers, Sid, _EndStream, #{trigger := {first_stream, Ms}, seen := [Sid]}) ->
+    timer:sleep(Ms),
+    Sid;
 goaway_for(_Kind, _Sid, _EndStream, _St) ->
     none.
 
@@ -166,11 +176,18 @@ send_goaway(Sock, LastStreamId, #{seen := Seen, goaway := Shape, answer := Answe
 %% flight when it does.
 answer_ready(_Sock, #{trigger := Trigger} = St) when Trigger =/= none ->
     St;
-answer_ready(Sock, #{complete := Complete, accepted := Accepted} = St) ->
+answer_ready(_Sock, #{answer := false} = St) ->
+    St;
+answer_ready(Sock, #{complete := Complete, accepted := Accepted,
+                     answer_after := Delay} = St) ->
     Ready = [S || S <- lists:reverse(Complete),
                   Accepted =:= all orelse lists:member(S, Accepted)],
+    _ = [timer:sleep(Delay) || Ready =/= [], Delay > 0],
     lists:foldl(fun(S, Acc) -> respond(Sock, S, Acc) end,
                 St#{complete := Complete -- Ready}, Ready).
+
+settings(#{max_streams := unlimited}) -> [];
+settings(#{max_streams := N}) -> [{max_concurrent_streams, N}].
 
 respond(Sock, Sid, #{enc := Enc} = St) ->
     {HBlock, Enc2} = h2_hpack:encode([{<<":status">>, <<"200">>}], Enc),
