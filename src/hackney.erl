@@ -720,17 +720,58 @@ request_with_transport(Method, URL, Headers0, Body, Options0,
                 _ -> <<Path/binary, "?", Query/binary>>
               end,
 
-  %% Check for proxy
-  case maybe_proxy(Transport, URL#hackney_url.scheme, Host, Port, Options) of
+  Dial = fun() -> maybe_proxy(Transport, URL#hackney_url.scheme, Host, Port, Options) end,
+  Send = fun(ConnPid, ReqPath, ReqHeaders) ->
+           do_request(ConnPid, Method, ReqPath, ReqHeaders, Body, Options, URL, Host)
+         end,
+  case dial_and_send(Dial, Send, FinalPath, Headers0) of
+    {{error, {goaway, _}} = Refused, ConnPid} ->
+      %% The server refused the stream with a GOAWAY, so it never processed the
+      %% request (RFC 9113 6.8) and the request can go again on a fresh
+      %% connection whatever its method, as long as the body can be sent twice.
+      %% Once only: a refusal from the fresh connection is the caller's.
+      case replayable_body(Body) of
+        true ->
+          maybe_stop_unpooled(ConnPid, Options),
+          {Result, _} = dial_and_send(Dial, Send, FinalPath, Headers0),
+          Result;
+        false ->
+          Refused
+      end;
+    {Result, _} ->
+      Result
+  end.
+
+%% @private Dial (possibly through a proxy) and send, returning the connection
+%% alongside the result so a refused request can be retried elsewhere.
+dial_and_send(Dial, Send, FinalPath, Headers0) ->
+  case Dial() of
     {ok, ConnPid} ->
-      do_request(ConnPid, Method, FinalPath, Headers0, Body, Options, URL, Host);
+      {Send(ConnPid, FinalPath, Headers0), ConnPid};
     {ok, ConnPid, {http_proxy, TargetScheme, TargetHost, TargetPort, ProxyAuth}} ->
       %% HTTP proxy mode - use absolute URLs
       AbsolutePath = build_absolute_url(TargetScheme, TargetHost, TargetPort, FinalPath),
       Headers1 = add_proxy_auth_header(Headers0, ProxyAuth),
-      do_request(ConnPid, Method, AbsolutePath, Headers1, Body, Options, URL, Host);
+      {Send(ConnPid, AbsolutePath, Headers1), ConnPid};
     Error ->
-      Error
+      {Error, undefined}
+  end.
+
+%% @private A body produced by a fun may already have been consumed by the
+%% first attempt. Everything else hackney accepts is re-sendable: binaries,
+%% iolists, forms, multipart, files, and `stream', whose chunks only start
+%% after the headers were accepted.
+replayable_body(Body) when is_function(Body) -> false;
+replayable_body({Fun, _State}) when is_function(Fun, 1) -> false;
+replayable_body(_Body) -> true.
+
+%% @private A pooled connection a GOAWAY refused has already left its pool and
+%% closes on its own. An unpooled one belongs to this caller, who is about to
+%% replace it.
+maybe_stop_unpooled(ConnPid, Options) ->
+  case use_pool(Options) of
+    false -> stop_conn(ConnPid);
+    _ -> ok
   end.
 
 %% @doc Send a request on an existing connection.
