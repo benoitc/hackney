@@ -1,5 +1,24 @@
 # NEWS
 
+4.8.6 - 2026-10-24
+------------------
+
+### Fixed
+
+- Large HTTP/2 downloads over slow links no longer fail with
+  `{error, {stream_error, internal_error}}`. hackney let only 64 KB of a
+  response travel per round trip, so over a 120 ms link a 40 MB body took
+  longer than the server allowed and the server cancelled it. HTTP/2
+  downloads now run about as fast as HTTP/1.1 (#976).
+- Closing a pooled TLS connection no longer logs a supervisor report with
+  reason `killed`. The connection waited for the server to close its side,
+  which took longer than the pool allows, and was killed (#976).
+
+### Changed
+
+- Update `h2` to 0.12.5 and `certifi` to 2.18.0. The new `certifi` removes
+  the compromised eMudhra certificates from the CA bundle (#975).
+
 4.8.5 - 2026-10-04
 ------------------
 
