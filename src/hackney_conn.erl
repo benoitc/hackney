@@ -129,6 +129,13 @@
 %% opts out of blocking: sends then fail fast with {error, send_buffer_full}
 %% once the h2 per-stream buffer cap is hit.
 -define(SEND_TIMEOUT, 30000).
+%% HTTP/2 receive windows. The protocol default (65,535 bytes for each stream
+%% and for the connection) allows one 64 KB window in flight per round trip,
+%% so over a 120 ms link a large download outlasts the server's stream timeout.
+%% 8 MB per stream and 32 MB for the connection bring a download over a 250 ms
+%% link to HTTP/1.1 speed.
+-define(H2_STREAM_WINDOW, 8 * 1024 * 1024).
+-define(H2_CONN_WINDOW, 32 * 1024 * 1024).
 %% Grace window for pooled hackney_conn in `closed` state, during which
 %% late-arriving calls race the pool DOWN cleanup and still get a proper
 %% error reply instead of exit:{normal, _}. See issue #836.
@@ -826,10 +833,24 @@ terminate(_Reason, _State, #conn_data{socket = Socket, transport = Transport,
     %% Close socket (only still owned by us for HTTP/1.1; h2 lib closes its own)
     case {Socket, H2Conn} of
         {undefined, _} -> ok;
-        {_, undefined} -> Transport:close(Socket);
+        {_, undefined} -> close_on_terminate(Transport, Socket);
         _ -> ok
     end,
     ok.
+
+%% ssl:close/1 sends close_notify, then waits up to 5 s for the server to close
+%% the TCP connection (ssl:close/2 ignores its timeout on an established
+%% connection): at least one round trip. The pool stops a conn with a 100 ms
+%% budget and kills it past that, which logged a supervisor report for every
+%% pooled TLS conn closed over a slow link. The conn reads nothing more, so
+%% shutdown/2 sends close_notify and closes both directions, and close/1 then
+%% returns without waiting.
+close_on_terminate(hackney_ssl, Socket) ->
+    _ = hackney_ssl:shutdown(Socket, read_write),
+    _ = hackney_ssl:close(Socket),
+    ok;
+close_on_terminate(Transport, Socket) ->
+    Transport:close(Socket).
 
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
@@ -3249,7 +3270,9 @@ init_h2_after_upgrade(SslSocket, Data, From) ->
 
 start_h2_connection(Socket, Data, From, Origin) ->
     #conn_data{transport = Transport} = Data,
-    case h2_connection:start_link(client, Socket, self(), #{}) of
+    H2Opts = #{settings => #{initial_window_size => ?H2_STREAM_WINDOW},
+               connection_window_size => ?H2_CONN_WINDOW},
+    case h2_connection:start_link(client, Socket, self(), H2Opts) of
         {ok, H2Conn} ->
             %% Transfer socket ownership then activate handshake.
             _ = Transport:controlling_process(Socket, H2Conn),
