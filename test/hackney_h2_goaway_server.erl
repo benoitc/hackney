@@ -11,7 +11,10 @@
 %%%                          Pick(FirstStreamId, SecondStreamId) as last_stream_id
 %%%   first_data             when a stream's first body chunk arrives, with that
 %%%                          stream as last_stream_id
+%%%   first_stream           when the first stream opens, refusing it
 %%% and shaped by options:
+%%%   trigger_on => first | all     only the first connection gets the GOAWAY,
+%%%                                 or every connection does (default first)
 %%%   goaway => direct | two_step   two_step first sends GOAWAY(2^31-1), the
 %%%                                 graceful shutdown of RFC 9113 6.8 (default direct)
 %%%   answer => boolean()           false answers nothing after the GOAWAY, not
@@ -37,7 +40,7 @@ start(Trigger, Opts) ->
          {versions, ['tlsv1.2', 'tlsv1.3']},
          {active, false}, {mode, binary}, {reuseaddr, true}]),
     {ok, {_, Port}} = ssl:sockname(LSock),
-    Options = maps:merge(#{goaway => direct, answer => true}, Opts),
+    Options = maps:merge(#{goaway => direct, answer => true, trigger_on => first}, Opts),
     Pid = spawn(fun() -> accept_loop(LSock, Trigger, Options) end),
     Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
     {Pid, Url}.
@@ -45,11 +48,12 @@ start(Trigger, Opts) ->
 stop(Pid) ->
     exit(Pid, kill).
 
-accept_loop(LSock, Trigger, Opts) ->
+accept_loop(LSock, Trigger, #{trigger_on := TriggerOn} = Opts) ->
     case ssl:transport_accept(LSock, 2000) of
         {ok, TSock} ->
             spawn(fun() -> serve(TSock, Trigger, Opts) end),
-            accept_loop(LSock, none, maps:remove(notify, Opts));
+            Next = case TriggerOn of all -> Trigger; first -> none end,
+            accept_loop(LSock, Next, maps:remove(notify, Opts));
         {error, timeout} -> accept_loop(LSock, Trigger, Opts);
         {error, closed} -> ok
     end.
@@ -141,6 +145,8 @@ goaway_for(headers, _Sid, _EndStream, #{trigger := {second_stream, Pick}, seen :
     Pick(First, Second);
 goaway_for(data, Sid, false, #{trigger := first_data}) ->
     Sid;
+goaway_for(headers, Sid, _EndStream, #{trigger := first_stream, seen := [Sid]}) ->
+    max(Sid - 2, 0);
 goaway_for(_Kind, _Sid, _EndStream, _St) ->
     none.
 
