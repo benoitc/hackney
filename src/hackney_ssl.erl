@@ -89,11 +89,24 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
                              orddict:from_list(DefaultOpts),
                              orddict:from_list(OverrideOpts)),
   %% If cacertfile was provided in override opts remove cacerts
-  case lists:keymember(cacertfile, 1, MergedOpts) of
+  MergedOpts1 = case lists:keymember(cacertfile, 1, MergedOpts) of
     true ->
       lists:keydelete(cacerts, 1, MergedOpts);
     false ->
       MergedOpts
+  end,
+  %% hackney's partial_chain accepts any cert in the peer chain whose key
+  %% matches a certifi root as the trust anchor, and OTP honours that over
+  %% the configured CA set. Keep it only for hackney's own trust store: a
+  %% caller who pins cacerts/cacertfile must not keep trusting the bundled
+  %% roots behind their back. A caller-supplied partial_chain is kept.
+  CustomCA = lists:keymember(cacerts, 1, OverrideOpts)
+    orelse lists:keymember(cacertfile, 1, OverrideOpts),
+  case CustomCA andalso not lists:keymember(partial_chain, 1, OverrideOpts) of
+    true ->
+      lists:keydelete(partial_chain, 1, MergedOpts1);
+    false ->
+      MergedOpts1
   end.
 
 %% @doc Build the exact options handed to `ssl:connect/2' for an SSL upgrade.

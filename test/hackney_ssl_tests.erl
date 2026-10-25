@@ -101,6 +101,44 @@ partial_chain_preserved_test() ->
     PartialChain = proplists:get_value(partial_chain, Opts),
     ?assert(is_function(PartialChain, 1)).
 
+partial_chain_dropped_with_cacerts_test() ->
+    %% A caller pinning its own cacerts must not keep the certifi-backed
+    %% partial_chain: OTP lets that callback pick the trust anchor over the
+    %% configured CA set, so any chain containing a bundled root would pass.
+    Opts = hackney_ssl:ssl_opts("pinned.example",
+                                [{ssl_options, [{cacerts, [<<"der-a">>]}]}]),
+    ?assertEqual([<<"der-a">>], proplists:get_value(cacerts, Opts)),
+    ?assertNot(lists:keymember(partial_chain, 1, Opts)).
+
+partial_chain_dropped_with_cacertfile_test() ->
+    Opts = hackney_ssl:ssl_opts("pinned.example",
+                                [{ssl_options, [{cacertfile, "/tmp/ca.pem"}]}]),
+    ?assertEqual("/tmp/ca.pem", proplists:get_value(cacertfile, Opts)),
+    ?assertNot(lists:keymember(cacerts, 1, Opts)),
+    ?assertNot(lists:keymember(partial_chain, 1, Opts)).
+
+partial_chain_kept_without_custom_ca_test() ->
+    %% ssl_options that leave the trust store alone keep hackney's default.
+    Opts = hackney_ssl:ssl_opts("example.com",
+                                [{ssl_options, [{versions, ['tlsv1.3']}]}]),
+    ?assert(is_function(proplists:get_value(partial_chain, Opts), 1)),
+    ?assert(lists:keymember(cacerts, 1, Opts)).
+
+partial_chain_user_supplied_kept_test() ->
+    %% A caller who pins cacerts and brings their own partial_chain keeps it.
+    Mine = fun(_Certs) -> unknown_ca end,
+    Opts = hackney_ssl:ssl_opts("pinned.example",
+                                [{ssl_options, [{cacerts, [<<"der-a">>]},
+                                                {partial_chain, Mine}]}]),
+    ?assertEqual(Mine, proplists:get_value(partial_chain, Opts)).
+
+partial_chain_dropped_in_effective_opts_test() ->
+    %% The handshake path (effective_opts/3) goes through the same merge.
+    Opts = hackney_ssl:effective_opts("pinned.example",
+                                      [{cacerts, [<<"der-a">>]}], []),
+    ?assertEqual([<<"der-a">>], proplists:get_value(cacerts, Opts)),
+    ?assertNot(lists:keymember(partial_chain, 1, Opts)).
+
 %%====================================================================
 %% effective_opts / options_key Tests (Unit tests)
 %%====================================================================
