@@ -1,5 +1,16 @@
 # NEWS
 
+Unreleased
+----------
+
+### Fixed
+
+- A slow or unreachable host no longer stalls every request that goes
+  through the same pool. The pool opened new connections itself, so while
+  one host took its time to answer, checkouts for every other host waited,
+  for up to `connect_timeout`. The requester now opens its own connection,
+  as in hackney 1.x (#973).
+
 4.8.7 - 2026-10-25
 ------------------
 

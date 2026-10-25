@@ -52,6 +52,12 @@ pool_fault_test_() ->
                fun t_checkout_ssl_dial_failure/1),
       scenario("a failed checkout leaves the next one working",
                fun t_pool_still_serves_after_fault/1),
+      scenario("a slow dial does not hold an idle checkout (#973)",
+               fun t_idle_checkout_during_slow_dial/1),
+      scenario("a slow dial does not hold another dial (#973)",
+               fun t_dial_during_slow_dial/1),
+      scenario("a requester dying mid-dial releases its slot",
+               fun t_requester_dies_while_dialing/1),
       scenario("a connection crashing mid-request does not crash the pool",
                fun t_crash_mid_request/1),
       scenario("a connection killed while checked out does not crash the pool",
@@ -156,6 +162,52 @@ t_pool_still_serves_after_fault(Baseline) ->
     assert_pool_healthy(Baseline).
 
 %%====================================================================
+%% Dials run in the requester, not the pool (#973)
+%%====================================================================
+
+%% A dial that hangs used to run inside the pool gen_server, so a checkout
+%% for another host waited for it even with an idle connection available.
+t_idle_checkout_during_slow_dial(Baseline) ->
+    {ok, Info, Idle} = tcp_checkout(),
+    ok = hackney_pool:checkin(Info, Idle),
+    wait_until(fun() ->
+                       proplists:get_value(free_count,
+                                           hackney_pool:get_stats(?POOL)) >= 1
+               end, 2000),
+    Slow = start_slow_dial(),
+    {Elapsed, {ok, Info2, Pid2}} = timer:tc(fun tcp_checkout/0),
+    ?assertEqual(Idle, Pid2),
+    ?assert(Elapsed div 1000 < 200),
+    ok = hackney_pool:checkin(Info2, Pid2),
+    ?assertEqual({error, connect_timeout}, await_slow_dial(Slow)),
+    assert_pool_healthy(Baseline).
+
+%% Same, for a checkout that has to dial too: two dials run side by side.
+t_dial_during_slow_dial(Baseline) ->
+    Slow = start_slow_dial(),
+    {Elapsed, {ok, Info, Pid}} = timer:tc(fun tcp_checkout/0),
+    ?assert(Elapsed div 1000 < 200),
+    ok = hackney_pool:checkin(Info, Pid),
+    ?assertEqual({error, connect_timeout}, await_slow_dial(Slow)),
+    assert_pool_healthy(Baseline).
+
+%% The requester holds a load-regulation slot while it dials. If it dies
+%% before reporting the dial, the pool is the only one left to release it.
+t_requester_dies_while_dialing(Baseline) ->
+    ok = hackney_load_regulation:reset(?HOST, ?PORT),
+    Before = hackney_fault_transport:calls(connect),
+    hackney_fault_transport:set(connect, {hang, 500}),
+    Requester = spawn(fun() ->
+                              ok = hackney_load_regulation:acquire(?HOST, ?PORT, 10, 1000),
+                              checkout([{connect_timeout, 5000}])
+                      end),
+    wait_until(fun() -> hackney_fault_transport:calls(connect) > Before end, 2000),
+    ?assertEqual(1, hackney_load_regulation:current(?HOST, ?PORT)),
+    exit(Requester, kill),
+    wait_until(fun() -> hackney_load_regulation:current(?HOST, ?PORT) =:= 0 end, 2000),
+    assert_pool_healthy(Baseline).
+
+%%====================================================================
 %% Faults on a checked out connection
 %%====================================================================
 
@@ -229,6 +281,29 @@ storm_worker(Parent, Seed, Faults) ->
 checkout(Extra) ->
     Opts = [{pool, ?POOL}, {checkout_timeout, 2000} | Extra],
     hackney_pool:checkout(?HOST, ?PORT, hackney_fault_transport, Opts).
+
+%% A plain TCP checkout: its pool key differs from the fault transport's, so
+%% it never shares a bucket with the dial under test.
+tcp_checkout() ->
+    Opts = [{pool, ?POOL}, {connect_timeout, 2000}, {checkout_timeout, 2000}],
+    hackney_pool:checkout(?HOST, ?PORT, hackney_tcp, Opts).
+
+%% Start a checkout whose dial hangs, and return once the dial is under way.
+start_slow_dial() ->
+    Before = hackney_fault_transport:calls(connect),
+    hackney_fault_transport:set(connect, {hang, 1500}),
+    Self = self(),
+    Ref = make_ref(),
+    _ = spawn_link(fun() -> Self ! {Ref, checkout([{connect_timeout, 1000}])} end),
+    wait_until(fun() -> hackney_fault_transport:calls(connect) > Before end, 2000),
+    Ref.
+
+await_slow_dial(Ref) ->
+    receive
+        {Ref, Result} -> Result
+    after 5000 ->
+        erlang:error(slow_dial_never_returned)
+    end.
 
 checkout_ok() ->
     ok = hackney_fault_transport:clear(),

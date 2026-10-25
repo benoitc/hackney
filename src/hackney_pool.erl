@@ -74,6 +74,9 @@
     available = #{},
     %% In-use connections: #{Pid => Key}
     in_use = #{},
+    %% Connections handed out undialed, while their requester dials them:
+    %% #{Pid => {Key, RequesterMonitorRef}}. They move to in_use on dial_ok.
+    dialing = #{},
     %% Pid to monitor ref mapping: #{Pid => MonitorRef}
     pid_monitors = #{},
     %% Hosts that have been activated (prewarm triggered): sets:set(Key)
@@ -130,11 +133,15 @@ do_checkout(Requester, Host, Port, Transport, Opts) ->
     Pool = find_pool(PoolName, Opts),
     Key = connection_key(Host, Port, Transport),
 
+    PoolInfo = {PoolName, Key, Pool, Transport},
     case gen_server:call(Pool, {checkout, Key, Requester, Opts}, CheckoutTimeout) of
         {ok, Pid} ->
-            %% Return pool info for later checkin
-            PoolInfo = {PoolName, Key, Pool, Transport},
             {ok, PoolInfo, Pid};
+        {new, Pid} ->
+            case dial(Pool, Pid, ConnectTimeout) of
+                ok -> {ok, PoolInfo, Pid};
+                {error, _} = Error -> Error
+            end;
         {error, _} = Error ->
             Error;
         {'EXIT', {timeout, _}} ->
@@ -170,10 +177,15 @@ do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
     TlsKey = proplists:get_value(tls_key, Opts, default),
     SslKey = connection_key(Host, Port, Transport, TlsKey),
 
+    PoolInfo = {PoolName, SslKey, Pool, Transport},
     case gen_server:call(Pool, {checkout_ssl, SslKey, Requester, Opts}, CheckoutTimeout) of
         {ok, Pid, ConnState} ->
-            PoolInfo = {PoolName, SslKey, Pool, Transport},
             {ok, PoolInfo, Pid, ConnState};
+        {new, Pid, needs_upgrade} ->
+            case dial(Pool, Pid, ConnectTimeout) of
+                ok -> {ok, PoolInfo, Pid, needs_upgrade};
+                {error, _} = Error -> Error
+            end;
         {error, _} = Error ->
             Error;
         {'EXIT', {timeout, _}} ->
@@ -560,10 +572,9 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
                     %% set_owner (server-side close race). It is already out of
                     %% Available2; drop it and start a fresh connection rather
                     %% than crashing the pool on a bad match.
-                    case start_connection(Key, Requester, Opts, State#state{available=Available2}) of
+                    case spawn_connection(Key, Requester, Opts, State#state{available=Available2}) of
                         {ok, Pid2, State2} ->
-                            InUse2 = maps:put(Pid2, Key, State2#state.in_use),
-                            {reply, {ok, Pid2}, State2#state{in_use=InUse2}};
+                            {reply, {new, Pid2}, State2};
                         {error, Reason} ->
                             {reply, {error, Reason}, State#state{available=Available2}}
                     end
@@ -577,10 +588,9 @@ handle_call({checkout, Key, Requester, Opts}, _From, State) ->
             %% concurrent connections.
             ?report_trace("pool: starting new connection",
                           [{pool, PoolName}, {overflow, TotalInUse >= MaxConn}]),
-            case start_connection(Key, Requester, Opts, State) of
+            case spawn_connection(Key, Requester, Opts, State) of
                 {ok, Pid, State2} ->
-                    InUse2 = maps:put(Pid, Key, State2#state.in_use),
-                    {reply, {ok, Pid}, State2#state{in_use=InUse2}};
+                    {reply, {new, Pid}, State2};
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end
@@ -610,6 +620,30 @@ handle_call({checkout_ssl, SslKey, Requester, Opts}, _From, State) ->
             end;
         none ->
             checkout_ssl_fallback(SslKey, Requester, Opts, State)
+    end;
+
+%% The requester finished dialing a conn handed out by a checkout miss. A conn
+%% that died in between is no longer in dialing: the caller gets an error and
+%% releases its slot itself.
+handle_call({dial_ok, Pid}, _From, #state{dialing=Dialing, in_use=InUse}=State) ->
+    case maps:take(Pid, Dialing) of
+        {{Key, ReqMon}, Dialing2} ->
+            erlang:demonitor(ReqMon, [flush]),
+            {reply, ok, State#state{dialing=Dialing2,
+                                    in_use=maps:put(Pid, Key, InUse)}};
+        error ->
+            {reply, {error, closed}, State}
+    end;
+
+%% The requester's dial failed. Forget the conn without releasing its slot:
+%% the caller releases it on the checkout error, as for any failed checkout.
+handle_call({dial_failed, Pid}, _From, #state{dialing=Dialing}=State) ->
+    case maps:take(Pid, Dialing) of
+        {{_Key, ReqMon}, Dialing2} ->
+            erlang:demonitor(ReqMon, [flush]),
+            {reply, ok, forget_monitor(Pid, State#state{dialing=Dialing2})};
+        error ->
+            {reply, ok, State}
     end;
 
 handle_call({checkin_sync, Pid}, _From, State) ->
@@ -748,10 +782,36 @@ handle_cast({delete_h3_session, Key}, #state{h3_sessions = Sessions} = State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
-    %% Connection process died, remove from available, in_use, h2_connections, and h3_connections
+handle_info({'DOWN', MonRef, process, Pid, Reason}, #state{dialing=Dialing}=State) ->
+    case take_dialing_requester(MonRef, Dialing) of
+        {ConnPid, Key, Dialing2} ->
+            %% The requester died while dialing: nobody is left to release its
+            %% slot. The conn stops on its own when it sees its owner go.
+            ?report_trace("pool: requester DOWN while dialing",
+                          [{pid, Pid}, {conn, ConnPid}]),
+            {Host, Port} = key_host_port(Key),
+            hackney_load_regulation:release(Host, Port),
+            {noreply, State#state{dialing=Dialing2}};
+        none ->
+            conn_down(Pid, Reason, State)
+    end;
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @private A connection process died: remove it from every map that holds
+%% it. A conn still dialing only leaves dialing: its requester sees the dial
+%% fail and releases the slot itself.
+conn_down(Pid, Reason, State) ->
     #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
-           h2_connections=H2Conns, h3_connections=H3Conns} = State,
+           h2_connections=H2Conns, h3_connections=H3Conns, dialing=Dialing} = State,
+    Dialing2 = case maps:take(Pid, Dialing) of
+        {{_Key, ReqMon}, D} ->
+            erlang:demonitor(ReqMon, [flush]),
+            D;
+        error ->
+            Dialing
+    end,
     ?report_trace("pool: connection DOWN", [{pool, PoolName}, {pid, Pid}, {reason, Reason},
         {was_in_use, maps:is_key(Pid, InUse)}]),
 
@@ -805,17 +865,19 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
 
     PidMonitors2 = maps:remove(Pid, PidMonitors),
     {noreply, State#state{available=Available2, in_use=InUse2, pid_monitors=PidMonitors2,
-                          h2_connections=H2Conns2, h3_connections=H3Conns2}};
-
-handle_info(_Info, State) ->
-    {noreply, State}.
+                          h2_connections=H2Conns2, h3_connections=H3Conns2,
+                          dialing=Dialing2}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #state{available=Available, in_use=InUse,
                          h2_connections=H2Conns, h3_connections=H3Conns,
-                         pid_monitors=PidMonitors}) ->
+                         pid_monitors=PidMonitors, dialing=Dialing}) ->
+    %% Stop conns still being dialed. Their requesters see the dial fail and
+    %% release their own slots.
+    maps:foreach(fun(Pid, _) -> stop_conn(Pid) end, Dialing),
+
     %% Stop all available connections
     maps:foreach(
         fun(_Key, Pids) ->
@@ -898,9 +960,9 @@ h3_connection_key(Host0, Port, Transport, Options) ->
 
 %% @private Stop a connection, tolerating an already-dead process. Bounded on
 %% purpose: this runs inside the pool gen_server, and a conn wedged in a
-%% transport call (the dial that just outlived its timeout, typically) would
-%% otherwise hold every caller of the pool for as long as the transport takes
-%% to return. Past the deadline the conn is killed.
+%% transport call would otherwise hold every caller of the pool for as long
+%% as the transport takes to return. A requester whose dial just outlived its
+%% timeout uses it too. Past the deadline the conn is killed.
 stop_conn(Pid) ->
     try hackney_conn:stop(Pid, ?STOP_CONN_TIMEOUT) catch _:_ -> ok end.
 
@@ -983,26 +1045,30 @@ checkout_ssl_fallback(SslKey, Requester, Opts, State) ->
             start_ssl_checkout_conn(SslKey, Requester, Opts, State)
     end.
 
-%% @private Dial a fresh TCP connection for an SSL checkout. The caller
-%% upgrades it, so the dialed transport is TCP even though the in_use key
+%% @private Start a fresh TCP connection for an SSL checkout. The caller
+%% dials and upgrades it, so the transport is TCP even though the in_use key
 %% carries hackney_ssl.
 start_ssl_checkout_conn(SslKey, Requester, Opts, State) ->
     {Host, Port} = key_host_port(SslKey),
-    case start_connection(Host, Port, hackney_tcp, Requester, Opts, State) of
+    case spawn_connection(Host, Port, hackney_tcp, SslKey, Requester, Opts, State) of
         {ok, Pid, State2} ->
-            InUse2 = maps:put(Pid, SslKey, State2#state.in_use),
-            {reply, {ok, Pid, needs_upgrade}, State2#state{in_use=InUse2}};
+            {reply, {new, Pid, needs_upgrade}, State2};
         {error, Reason} ->
             {reply, {error, Reason}, State}
     end.
 
-start_connection(Key, Owner, Opts, State) ->
+spawn_connection(Key, Owner, Opts, State) ->
     %% Plain checkouts dial the key's transport; SSL-bucket checkouts dial
-    %% TCP explicitly via start_connection/6.
+    %% TCP explicitly via spawn_connection/7.
     {Host, Port, Transport, _TlsKey} = Key,
-    start_connection(Host, Port, Transport, Owner, Opts, State).
+    spawn_connection(Host, Port, Transport, Key, Owner, Opts, State).
 
-start_connection(Host, Port, Transport, Owner, Opts, State) ->
+%% @private Start an undialed connection for `Owner' and record it in dialing
+%% under `Key'. The owner dials it in its own process (dial/4): dialing here
+%% would hold every caller of the pool for as long as one host takes to
+%% answer (#973). The owner is monitored so its slot is released if it dies
+%% before reporting the dial.
+spawn_connection(Host, Port, Transport, Key, Owner, Opts, State) ->
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
     RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
     IdleTimeout = State#state.keepalive_timeout,
@@ -1024,25 +1090,65 @@ start_connection(Host, Port, Transport, Owner, Opts, State) ->
 
     case hackney_conn_sup:start_conn(ConnOpts) of
         {ok, Pid} ->
-            %% Connect the connection
-            case connect_connection(Pid, ConnectTimeout) of
-                ok ->
-                    %% Monitor the process
-                    MonRef = erlang:monitor(process, Pid),
-                    PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
-                    {ok, Pid, State#state{pid_monitors=PidMonitors}};
-                {error, Reason} ->
-                    stop_conn(Pid),
-                    {error, Reason}
-            end;
+            MonRef = erlang:monitor(process, Pid),
+            ReqMon = erlang:monitor(process, Owner),
+            PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
+            Dialing = maps:put(Pid, {Key, ReqMon}, State#state.dialing),
+            {ok, Pid, State#state{pid_monitors=PidMonitors, dialing=Dialing}};
         {error, Reason} ->
             {error, Reason}
     end.
 
-%% @private Convert a failed connection call into a checkout error. The pool
-%% must not terminate because a DNS/TCP/TLS attempt outlives its timeout, nor
-%% because the connection process dies while dialing (a transport raising, or
-%% the conn being killed). The caller stops the conn on any error return.
+%% @private Dial a conn the pool handed out undialed, in the requester's
+%% process, then report the outcome to the pool. A pool that went away in
+%% between is a checkout error like any other.
+dial(Pool, Pid, Timeout) ->
+    case connect_connection(Pid, Timeout) of
+        ok ->
+            case pool_call(Pool, {dial_ok, Pid}) of
+                ok ->
+                    ok;
+                {error, _} = Error ->
+                    stop_conn(Pid),
+                    Error
+            end;
+        {error, _} = Error ->
+            _ = pool_call(Pool, {dial_failed, Pid}),
+            stop_conn(Pid),
+            Error
+    end.
+
+pool_call(Pool, Msg) ->
+    try
+        gen_server:call(Pool, Msg)
+    catch
+        exit:_ -> {error, checkout_failure}
+    end.
+
+%% @private Forget the monitor the pool holds on a conn.
+forget_monitor(Pid, #state{pid_monitors=PidMonitors}=State) ->
+    case maps:take(Pid, PidMonitors) of
+        {MonRef, PidMonitors2} ->
+            erlang:demonitor(MonRef, [flush]),
+            State#state{pid_monitors=PidMonitors2};
+        error ->
+            State
+    end.
+
+%% @private Find the dialing entry whose requester monitor is `MonRef'.
+take_dialing_requester(MonRef, Dialing) ->
+    Found = maps:fold(fun(Pid, {Key, Ref}, none) when Ref =:= MonRef -> {Pid, Key};
+                         (_, _, Acc) -> Acc
+                      end, none, Dialing),
+    case Found of
+        {Pid, Key} -> {Pid, Key, maps:remove(Pid, Dialing)};
+        none -> none
+    end.
+
+%% @private Convert a failed connection call into a checkout error. Nothing
+%% may crash because a DNS/TCP/TLS attempt outlives its timeout, nor because
+%% the connection process dies while dialing (a transport raising, or the
+%% conn being killed). The caller stops the conn on any error return.
 connect_connection(Pid, Timeout) ->
     try hackney_conn:connect(Pid, Timeout) of
         Result ->
