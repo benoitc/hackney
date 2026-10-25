@@ -218,17 +218,17 @@ do_handshake(Socket, ProxyTransport, Host, Port, Options) ->
   %% and the Host header. A percent-decoded host can carry raw CR/LF/NUL, which
   %% would split the request sent to the proxy. Reject it before building any
   %% payload, mirroring the WebSocket/WebTransport authority guards.
-  case host_has_ctl_bytes(Host) of
+  case has_ctl_bytes(Host) of
     true ->
       {error, invalid_connect_host};
     false ->
       do_handshake_1(Socket, ProxyTransport, Host, Port, Options)
   end.
 
-host_has_ctl_bytes(Host) when is_list(Host) ->
-  lists:any(fun(C) -> C =:= $\r orelse C =:= $\n orelse C =:= 0 end, Host);
-host_has_ctl_bytes(Host) when is_binary(Host) ->
-  binary:match(Host, [<<"\r">>, <<"\n">>, <<0>>]) =/= nomatch.
+has_ctl_bytes(Value) when is_list(Value) ->
+  lists:any(fun(C) -> C =:= $\r orelse C =:= $\n orelse C =:= 0 end, Value);
+has_ctl_bytes(Value) when is_binary(Value) ->
+  binary:match(Value, [<<"\r">>, <<"\n">>, <<0>>]) =/= nomatch.
 
 do_handshake_1(Socket, ProxyTransport, Host, Port, Options) ->
   ProxyUser = proplists:get_value(connect_user, Options),
@@ -304,17 +304,30 @@ handle_proxy_auth(Socket, ProxyTransport, Host, Port, Headers,
   %% Call the user's auth function
   case ProxyAuthFun(StatusCode, RespHeaders) of
     {ok, AuthHeader} when is_binary(AuthHeader) ->
-      %% Remove any existing Proxy-Authorization and add new one
-      Headers1 = lists:filter(fun(H) -> not is_proxy_auth_header(H) end, Headers),
-      Headers2 = Headers1 ++ [<<"Proxy-Authorization: ", AuthHeader/binary>>],
-      %% Retry with new auth header
-      do_handshake_with_auth(Socket, ProxyTransport, Host, Port, Headers2,
-                            RecvTimeout, OnConnectResponse, ProxyAuthFun, Retries + 1);
+      %% The value is written as one header line: CR/LF/NUL in it would add
+      %% lines of its own to the CONNECT request.
+      case has_ctl_bytes(AuthHeader) of
+        true ->
+          {error, {proxy_auth_error, invalid_header}};
+        false ->
+          retry_with_auth(Socket, ProxyTransport, Host, Port, Headers,
+                          RecvTimeout, OnConnectResponse, ProxyAuthFun,
+                          AuthHeader, Retries)
+      end;
     {error, Reason} ->
       {error, {proxy_auth_error, Reason}};
     _ ->
       {error, proxy_auth_failed}
   end.
+
+retry_with_auth(Socket, ProxyTransport, Host, Port, Headers, RecvTimeout,
+                OnConnectResponse, ProxyAuthFun, AuthHeader, Retries) ->
+  %% Remove any existing Proxy-Authorization and add new one
+  Headers1 = lists:filter(fun(H) -> not is_proxy_auth_header(H) end, Headers),
+  Headers2 = Headers1 ++ [<<"Proxy-Authorization: ", AuthHeader/binary>>],
+  %% Retry with new auth header
+  do_handshake_with_auth(Socket, ProxyTransport, Host, Port, Headers2,
+                         RecvTimeout, OnConnectResponse, ProxyAuthFun, Retries + 1).
 
 %% Check if a header is a Proxy-Authorization header
 is_proxy_auth_header(Header) when is_binary(Header) ->
