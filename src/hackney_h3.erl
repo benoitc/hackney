@@ -227,19 +227,11 @@ maybe_strip_redirect_headers(OldUrl, NewUrl, Headers, Opts) ->
     case maps:get(location_trusted, Opts, false) of
         true -> Headers;
         false ->
-            case same_origin(OldUrl, NewUrl) of
+            case hackney_url:same_origin(OldUrl, NewUrl) of
                 true -> Headers;
                 false -> drop_credential_headers(Headers)
             end
     end.
-
-same_origin(UrlA, UrlB) ->
-    #hackney_url{scheme = SchemeA, host = HostA, port = PortA} =
-        hackney_url:parse_url(UrlA),
-    #hackney_url{scheme = SchemeB, host = HostB, port = PortB} =
-        hackney_url:parse_url(UrlB),
-    {SchemeA, string:to_lower(HostA), PortA} =:=
-        {SchemeB, string:to_lower(HostB), PortB}.
 
 drop_credential_headers(Headers) ->
     Sensitive = [<<"authorization">>, <<"cookie">>, <<"proxy-authorization">>],

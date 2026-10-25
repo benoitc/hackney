@@ -26,6 +26,7 @@
 
 -export([idnconvert_hostname/1]).
 -export([is_ip_literal/1]).
+-export([same_origin/2]).
 
 -include("hackney_lib.hrl").
 
@@ -241,6 +242,22 @@ fold_dot(16#3002) -> $.;
 fold_dot(16#FF0E) -> $.;
 fold_dot(16#FF61) -> $.;
 fold_dot(C) -> C.
+
+%% @doc True when both URLs share an origin: the same scheme, host (compared
+%% case-insensitively) and port. Redirects to another origin drop credentials
+%% (CVE-2018-1000007, GHSA-h73q). Takes parsed URLs or URLs to parse; the
+%% default port is filled in by parse_url/1, so an explicit default port is
+%% the same origin as none.
+-spec same_origin(hackney_url() | binary() | string(),
+                  hackney_url() | binary() | string()) -> boolean().
+same_origin(#hackney_url{scheme = SchemeA, host = HostA, port = PortA},
+            #hackney_url{scheme = SchemeB, host = HostB, port = PortB}) ->
+  {SchemeA, string:lowercase(HostA), PortA} =:=
+    {SchemeB, string:lowercase(HostB), PortB};
+same_origin(#hackney_url{} = UrlA, UrlB) ->
+  same_origin(UrlA, parse_url(UrlB));
+same_origin(UrlA, UrlB) ->
+  same_origin(parse_url(UrlA), UrlB).
 
 %% @doc True when Host is an IPv4/IPv6 literal. RFC 6066 forbids sending SNI
 %% for IP literals. Hosts reach the TLS layer bracket-stripped, but strip a
