@@ -161,6 +161,19 @@ When `auto_decompress` is enabled:
 - Automatically decompresses the response body based on `Content-Encoding`
 - Supports gzip, deflate, and x-gzip encodings
 - Non-compressed responses are returned unchanged
+- The decompressed body counts against `max_body_size` (see below)
+
+### Response Body Size Limit
+
+A response body returned whole (`hackney:request/5`, `hackney:body/1`) is
+capped at 512 MiB, measured after decompression. Past the cap the request
+fails with `{error, body_too_large}` instead of buffering the body in memory.
+Set `max_body_size` to change the cap, or `infinity` to disable it; for very
+large downloads use the streaming API instead.
+
+```erlang
+hackney:get(URL, [], <<>>, [{max_body_size, 10 * 1024 * 1024}]).
+```
 
 ### Stream Response Body (Async Mode)
 
