@@ -153,6 +153,14 @@
 %% stranded prefix is small. Past this, treat the peer as misbehaving (flooding
 %% an idle connection) and drop it rather than buffer unboundedly.
 -define(MAX_IDLE_BUFFER, 65536).
+%% Cap on a response body buffered whole for the caller (hackney:request/5
+%% with a body, hackney:body/1), after decompression when auto_decompress is
+%% on. Without it any server could make the client hold an arbitrarily large
+%% body in memory. Same default and option as the standalone HTTP/3 API
+%% (hackney_h3, GHSA-jq4m): max_body_size, `infinity' disables it, and the
+%% read fails with {error, body_too_large}. Larger downloads should use the
+%% streaming API.
+-define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
 
 %% State data record
 -record(conn_data, {
@@ -184,6 +192,7 @@
     ssl_options = [] :: list(),
     inform_fun :: fun((integer(), binary(), list()) -> any()) | undefined,
     auto_decompress = false :: boolean(),
+    max_body_size = ?DEFAULT_MAX_BODY_SIZE :: non_neg_integer() | infinity,
 
     %% Pool integration
     pool_pid :: pid() | undefined,  %% If set, connection is from a pool
@@ -1187,14 +1196,16 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_d
     %% send_timeout is passed along, never stored: a per-request override must
     %% not leak into later requests on a pooled connection.
     SendTimeout = proplists:get_value(send_timeout, ReqOpts, Data#conn_data.send_timeout),
-    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    NewData = Data#conn_data{recv_timeout = RecvTimeout,
+                             max_body_size = max_body_size(ReqOpts)},
     do_h2_request(From, Method, Path, Headers, Body, SendTimeout, NewData);
 
 connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 request - use hackney_h3 (1xx not applicable for HTTP/3)
     %% Allow recv_timeout to be overridden per-request (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
-    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    NewData = Data#conn_data{recv_timeout = RecvTimeout,
+                             max_body_size = max_body_size(ReqOpts)},
     do_h3_request(From, Method, Path, Headers, Body, NewData);
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, #conn_data{protocol = http2} = Data) ->
@@ -1217,13 +1228,15 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
 
 connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 request with streaming body reads (returns headers, then stream_body for chunks)
-    do_h3_request_streaming(From, Method, Path, Headers, Body, Data);
+    do_h3_request_streaming(From, Method, Path, Headers, Body,
+                            Data#conn_data{max_body_size = ?DEFAULT_MAX_BODY_SIZE});
 
 connected({call, From}, {request_streaming, Method, Path, Headers, Body}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2: reply with status and headers, leave the body for
     %% stream_body/1 or body/1, like the HTTP/3 clause above.
     do_h2_send(From, Method, Path, Headers, Body, {stream, waiting_headers, From},
-               sync, Data#conn_data.send_timeout, Data);
+               sync, Data#conn_data.send_timeout,
+               Data#conn_data{max_body_size = ?DEFAULT_MAX_BODY_SIZE});
 
 connected({call, From}, {request_streaming, Method, Path, Headers, Body}, _Data) ->
     %% HTTP/1.1 leaves the body on the connection anyway, so this is the
@@ -1255,6 +1268,7 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         stream_to = undefined,
         inform_fun = InformFun,
         auto_decompress = AutoDecompress,
+        max_body_size = max_body_size(ReqOpts),
         recv_timeout = RecvTimeout
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
@@ -1287,14 +1301,16 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
     NewData = Data#conn_data{recv_timeout = RecvTimeout},
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
 
-connected({call, From}, {send_headers, Method, Path, Headers, _ReqOpts}, #conn_data{protocol = http3} = Data) ->
+connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 streaming body - send headers only via QUIC
-    do_h3_send_headers(From, Method, Path, Headers, Data);
+    do_h3_send_headers(From, Method, Path, Headers,
+                       Data#conn_data{max_body_size = max_body_size(ReqOpts)});
 
 connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 streaming body - send headers without END_STREAM, then accept body
     %% chunks via send_body_chunk/finish_send_body. Mirrors do_h3_send_headers/5.
-    do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data);
+    do_h2_send_headers(From, Method, Path, Headers, ReqOpts,
+                       Data#conn_data{max_body_size = max_body_size(ReqOpts)});
 
 connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts},
           #conn_data{protocol = http2, h2_conn = H2Conn} = Data) ->
@@ -1315,7 +1331,7 @@ connected({call, From}, {open_h2_stream, Method, Path, Headers, HandlerPid, Opts
     end,
     {keep_state_and_data, [{reply, From, Reply}]};
 
-connected({call, From}, {send_headers, Method, Path, Headers, _ReqOpts}, Data) ->
+connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, Data) ->
     %% Send only headers for streaming body mode (HTTP/1.1)
     NewData = Data#conn_data{
         request_from = From,
@@ -1330,7 +1346,8 @@ connected({call, From}, {send_headers, Method, Path, Headers, _ReqOpts}, Data) -
         %% response bytes buffered from #544 {active, once}.
         async = false,
         async_ref = undefined,
-        stream_to = undefined
+        stream_to = undefined,
+        max_body_size = max_body_size(ReqOpts)
     },
     %% Transition to streaming_body state
     {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
@@ -2725,10 +2742,17 @@ read_full_body(#conn_data{status = Status} = Data, Acc) when Status =:= 204; Sta
     %% Force connection close to avoid corrupting subsequent requests if
     %% a misbehaving server sent Content-Length or body data
     {ok, Acc, Data#conn_data{socket = undefined}};
-read_full_body(Data, Acc) ->
+read_full_body(#conn_data{max_body_size = Max} = Data, Acc) ->
     case stream_body_chunk(Data) of
         {ok, Chunk, NewData} ->
-            read_full_body(NewData, <<Acc/binary, Chunk/binary>>);
+            case body_within_limit(byte_size(Acc) + byte_size(Chunk), Max) of
+                true ->
+                    read_full_body(NewData, <<Acc/binary, Chunk/binary>>);
+                false ->
+                    %% The rest of the body stays unread on the socket; the
+                    %% caller's error path drops the connection.
+                    {error, body_too_large}
+            end;
         {done, NewData} ->
             %% Body complete - apply decompression if needed
             maybe_decompress_body(Acc, NewData);
@@ -2739,12 +2763,24 @@ read_full_body(Data, Acc) ->
             {error, Reason}
     end.
 
+%% @private Per-request body cap: max_body_size, with max_body (the 1.x
+%% option name) accepted as an alias.
+max_body_size(ReqOpts) ->
+    case proplists:get_value(max_body_size, ReqOpts) of
+        undefined -> proplists:get_value(max_body, ReqOpts, ?DEFAULT_MAX_BODY_SIZE);
+        Max -> Max
+    end.
+
+body_within_limit(_Size, infinity) -> true;
+body_within_limit(Size, Max) -> Size =< Max.
+
 %% @private Apply decompression if auto_decompress is enabled and Content-Encoding is set
 maybe_decompress_body(Body, #conn_data{auto_decompress = false} = Data) ->
     {ok, Body, Data};
 maybe_decompress_body(Body, #conn_data{response_headers = undefined} = Data) ->
     {ok, Body, Data};
-maybe_decompress_body(Body, #conn_data{response_headers = Headers, auto_decompress = true} = Data) ->
+maybe_decompress_body(Body, #conn_data{response_headers = Headers, auto_decompress = true,
+                                       max_body_size = Max} = Data) ->
     %% Get Content-Encoding from response headers
     ContentEncoding = case hackney_headers:get_value(<<"content-encoding">>, Headers) of
         undefined -> <<>>;
@@ -2752,19 +2788,22 @@ maybe_decompress_body(Body, #conn_data{response_headers = Headers, auto_decompre
     end,
     case ContentEncoding of
         <<"gzip">> ->
-            case decompress_gzip(Body) of
+            case decompress_gzip(Body, Max) of
                 {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, body_too_large} -> {error, body_too_large};
                 {error, Reason} -> {error, {decompress_error, gzip, Reason}}
             end;
         <<"deflate">> ->
-            case decompress_deflate(Body) of
+            case decompress_deflate(Body, Max) of
                 {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, body_too_large} -> {error, body_too_large};
                 {error, Reason} -> {error, {decompress_error, deflate, Reason}}
             end;
         <<"x-gzip">> ->
             %% x-gzip is an alias for gzip
-            case decompress_gzip(Body) of
+            case decompress_gzip(Body, Max) of
                 {ok, Decompressed} -> {ok, Decompressed, Data};
+                {error, body_too_large} -> {error, body_too_large};
                 {error, Reason} -> {error, {decompress_error, gzip, Reason}}
             end;
         _ ->
@@ -2772,32 +2811,48 @@ maybe_decompress_body(Body, #conn_data{response_headers = Headers, auto_decompre
             {ok, Body, Data}
     end.
 
-%% @private Decompress gzip-encoded data
-decompress_gzip(Data) ->
-    try
-        {ok, zlib:gunzip(Data)}
-    catch
-        error:Reason -> {error, Reason};
-        exit:Reason -> {error, Reason}
-    end.
+%% @private Decompress gzip-encoded data (RFC 1952), at most Max bytes out.
+decompress_gzip(Data, Max) ->
+    inflate_bounded(Data, 16 + 15, Max).
 
-%% @private Decompress deflate-encoded data
+%% @private Decompress deflate-encoded data, at most Max bytes out.
 %% Note: Some servers send raw deflate, others send zlib-wrapped deflate
-decompress_deflate(Data) ->
-    %% Try zlib-wrapped first (RFC 1950), then raw deflate (RFC 1951)
+decompress_deflate(Data, Max) ->
+    %% zlib-wrapped (RFC 1950), as before
+    inflate_bounded(Data, 15, Max).
+
+%% @private Inflate in bounded steps so a small compressed body cannot expand
+%% past max_body_size in memory (a gzip bomb inflates ~1000x). zlib:gunzip/1
+%% and zlib:inflate/2 produce the whole output before returning.
+inflate_bounded(Data, WindowBits, Max) ->
     try
         Z = zlib:open(),
         try
-            ok = zlib:inflateInit(Z),
-            Decompressed = zlib:inflate(Z, Data),
-            ok = zlib:inflateEnd(Z),
-            {ok, iolist_to_binary(Decompressed)}
+            ok = zlib:inflateInit(Z, WindowBits),
+            case inflate_loop(Z, zlib:safeInflate(Z, Data), [], 0, Max) of
+                {ok, Chunks} ->
+                    ok = zlib:inflateEnd(Z),
+                    {ok, iolist_to_binary(lists:reverse(Chunks))};
+                {error, _} = Error ->
+                    Error
+            end
         after
             zlib:close(Z)
         end
     catch
         error:Reason -> {error, Reason};
         exit:Reason -> {error, Reason}
+    end.
+
+inflate_loop(Z, {Status, Output}, Acc, Size, Max) ->
+    Size1 = Size + iolist_size(Output),
+    case body_within_limit(Size1, Max) of
+        false ->
+            {error, body_too_large};
+        true when Status =:= continue ->
+            inflate_loop(Z, zlib:safeInflate(Z, []), [Output | Acc], Size1, Max);
+        true ->
+            {ok, [Output | Acc]}
     end.
 
 %% @private Stream a single body chunk
@@ -3894,24 +3949,16 @@ handle_h2_stream_next(Caller, #conn_data{h2_streams = Streams} = Data) ->
     end.
 
 h2_on_data(StreamId, Body, EndStream, Data) ->
-    #conn_data{h2_streams = Streams} = Data,
+    #conn_data{h2_streams = Streams, max_body_size = Max} = Data,
     case maps:get(StreamId, Streams, undefined) of
         {From, {sync, body, Status, Headers, Acc}} ->
-            NewAcc = <<Acc/binary, Body/binary>>,
-            case EndStream of
-                true ->
-                    Data2 = drop_h2_stream(
-                              StreamId,
-                              Data#conn_data{request_from = undefined}),
-                    h2_stream_result(Data2,
-                                     [{reply, From, {ok, Status, Headers, NewAcc}}]);
+            case body_within_limit(byte_size(Acc) + byte_size(Body), Max) of
                 false ->
-                    Streams2 = maps:put(StreamId,
-                                        {From, {sync, body, Status, Headers, NewAcc}},
-                                        Streams),
-                    Data2 = rearm_h2_timer(StreamId,
-                                           Data#conn_data{h2_streams = Streams2}),
-                    {keep_state, Data2}
+                    h2_body_too_large(StreamId, From,
+                                      Data#conn_data{request_from = undefined});
+                true ->
+                    h2_on_sync_data(StreamId, From, Status, Headers,
+                                    <<Acc/binary, Body/binary>>, EndStream, Data)
             end;
         {StreamTo, {async_once, StreamTo, Ref, Queue, Credit}} ->
             %% Queue the frame; deliver only when the consumer has pulled.
@@ -3978,20 +4025,43 @@ h2_on_data(StreamId, Body, EndStream, Data) ->
             end;
         {From, {stream, body_full, Status, Headers, Acc, From}} ->
             %% Full-body read via body/1 after start_response/1.
-            NewAcc = <<Acc/binary, Body/binary>>,
-            case EndStream of
-                true ->
-                    h2_stream_result(drop_h2_stream(StreamId, Data),
-                                     [{reply, From, {ok, NewAcc}}]);
+            case body_within_limit(byte_size(Acc) + byte_size(Body), Max) of
                 false ->
-                    Streams2 = maps:put(StreamId,
-                                        {From, {stream, body_full, Status, Headers, NewAcc, From}},
-                                        Streams),
-                    {keep_state, Data#conn_data{h2_streams = Streams2}}
+                    h2_body_too_large(StreamId, From, Data);
+                true ->
+                    NewAcc = <<Acc/binary, Body/binary>>,
+                    case EndStream of
+                        true ->
+                            h2_stream_result(drop_h2_stream(StreamId, Data),
+                                             [{reply, From, {ok, NewAcc}}]);
+                        false ->
+                            Streams2 = maps:put(StreamId,
+                                                {From, {stream, body_full, Status, Headers, NewAcc, From}},
+                                                Streams),
+                            {keep_state, Data#conn_data{h2_streams = Streams2}}
+                    end
             end;
         _ ->
             {keep_state, Data}
     end.
+
+%% @private DATA for a sync request whose body is buffered whole.
+h2_on_sync_data(StreamId, From, Status, Headers, NewAcc, true, Data) ->
+    Data2 = drop_h2_stream(StreamId, Data#conn_data{request_from = undefined}),
+    h2_stream_result(Data2, [{reply, From, {ok, Status, Headers, NewAcc}}]);
+h2_on_sync_data(StreamId, From, Status, Headers, NewAcc, false,
+                #conn_data{h2_streams = Streams} = Data) ->
+    Streams2 = maps:put(StreamId, {From, {sync, body, Status, Headers, NewAcc}}, Streams),
+    Data2 = rearm_h2_timer(StreamId, Data#conn_data{h2_streams = Streams2}),
+    {keep_state, Data2}.
+
+%% @private A buffered body passed max_body_size: RST_STREAM(CANCEL) it so the
+%% peer stops sending (as the recv_timeout watchdog does), drop the stream and
+%% fail the parked reader. The connection itself stays usable.
+h2_body_too_large(StreamId, From, #conn_data{h2_conn = H2Conn} = Data) ->
+    _ = cancel_h2_stream(H2Conn, StreamId),
+    h2_stream_result(drop_h2_stream(StreamId, Data),
+                     [{reply, From, {error, body_too_large}}]).
 
 h2_on_stream_reset(StreamId, ErrorCode, Data) ->
     #conn_data{h2_streams = Streams} = Data,
@@ -4566,22 +4636,17 @@ handle_h3_headers(StreamId, Headers, Fin, Streams, Data) ->
     end.
 
 %% @private Handle HTTP/3 response body data
-handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
+handle_h3_data(StreamId, RecvData, Fin, Streams, #conn_data{max_body_size = Max} = Data) ->
     case maps:get(StreamId, Streams, undefined) of
         {From, {receiving_body, Status, Headers, AccBody}} ->
             %% Sync mode - buffer body
-            NewBody = <<AccBody/binary, RecvData/binary>>,
-            case Fin of
-                true ->
-                    %% Stream complete - reply with full response
-                    UpdatedStreams = maps:remove(StreamId, Streams),
-                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
-                     [{reply, From, {ok, Status, Headers, NewBody}}]};
+            case body_within_limit(byte_size(AccBody) + byte_size(RecvData), Max) of
                 false ->
-                    %% More data expected
-                    UpdatedStreams = maps:put(StreamId,
-                        {From, {receiving_body, Status, Headers, NewBody}}, Streams),
-                    {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}
+                    h3_body_too_large(StreamId, From, Streams,
+                                      Data#conn_data{request_from = undefined});
+                true ->
+                    h3_on_sync_data(StreamId, From, Status, Headers,
+                                    <<AccBody/binary, RecvData/binary>>, Fin, Streams, Data)
             end;
         {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, Status, Headers}} ->
             %% Async mode - send chunk to StreamTo
@@ -4662,15 +4727,20 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
             end;
         {_, {streaming_body_full, Status, Headers, Acc, From}} ->
             %% body/1 is waiting for the whole body
-            NewAcc = <<Acc/binary, RecvData/binary>>,
-            case Fin of
-                true ->
-                    {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
-                     [{reply, From, {ok, NewAcc}}]};
+            case body_within_limit(byte_size(Acc) + byte_size(RecvData), Max) of
                 false ->
-                    NewStreamState = {streaming_body_full, Status, Headers, NewAcc, From},
-                    {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
-                        {undefined, NewStreamState}, Streams)}}
+                    h3_body_too_large(StreamId, From, Streams, Data);
+                true ->
+                    NewAcc = <<Acc/binary, RecvData/binary>>,
+                    case Fin of
+                        true ->
+                            {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+                             [{reply, From, {ok, NewAcc}}]};
+                        false ->
+                            NewStreamState = {streaming_body_full, Status, Headers, NewAcc, From},
+                            {keep_state, Data#conn_data{h3_streams = maps:put(StreamId,
+                                {undefined, NewStreamState}, Streams)}}
+                    end
             end;
         {_, {streaming_body_final, Status, Headers, FinalBuffer}} ->
             %% Already got final data, just buffer more (shouldn't happen)
@@ -4685,6 +4755,24 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, Data) ->
             %% Unknown stream
             {keep_state, Data}
     end.
+
+%% @private DATA for a sync HTTP/3 request whose body is buffered whole.
+h3_on_sync_data(StreamId, From, Status, Headers, NewBody, true, Streams, Data) ->
+    %% Stream complete - reply with full response
+    {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams),
+                                request_from = undefined},
+     [{reply, From, {ok, Status, Headers, NewBody}}]};
+h3_on_sync_data(StreamId, From, Status, Headers, NewBody, false, Streams, Data) ->
+    %% More data expected
+    UpdatedStreams = maps:put(StreamId, {From, {receiving_body, Status, Headers, NewBody}}, Streams),
+    {keep_state, Data#conn_data{h3_streams = UpdatedStreams}}.
+
+%% @private A buffered body passed max_body_size: reset the stream so the peer
+%% stops sending, forget it and fail the parked reader.
+h3_body_too_large(StreamId, From, Streams, #conn_data{h3_conn = ConnRef} = Data) ->
+    _ = hackney_h3:reset_stream(ConnRef, StreamId, ?H3_REQUEST_CANCELLED),
+    {keep_state, Data#conn_data{h3_streams = maps:remove(StreamId, Streams)},
+     [{reply, From, {error, body_too_large}}]}.
 
 %% @private Handle HTTP/3 stream reset
 handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->

@@ -649,6 +649,9 @@ request(Method, URL, Headers, Body) ->
 %% - pool: Pool name or false for no pooling
 %% - connect_timeout: Connection timeout in ms (default 8000)
 %% - recv_timeout: Receive timeout in ms (default 5000)
+%% - max_body_size: Cap in bytes on a response body returned whole, after
+%%   decompression (default 512 MiB, `infinity' disables it). Past it the
+%%   request fails with {error, body_too_large}; stream larger bodies.
 %%
 %% Returns:
 %% - {ok, Status, Headers, Body}: Success with response body
@@ -1419,10 +1422,15 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
     stream ->
       %% For streaming body, send headers and return immediately. Forward
       %% send_timeout so the body chunks use the caller's deadline even on a
-      %% reused pooled connection.
-      ReqOpts = case proplists:get_value(send_timeout, Options) of
+      %% reused pooled connection, and max_body_size for the later body/1.
+      ReqOpts0 = case proplists:get_value(send_timeout, Options) of
         undefined -> [];
         SendTimeout -> [{send_timeout, SendTimeout}]
+      end,
+      ReqOpts = case proplists:get_value(max_body_size, Options,
+                                         proplists:get_value(max_body, Options)) of
+        undefined -> ReqOpts0;
+        MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts0]
       end,
       case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList, ReqOpts) of
         ok -> {ok, ConnPid};
@@ -1451,9 +1459,15 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
   end,
   %% Pass send_timeout through so HTTP/2 body sends blocked on flow control
   %% use the caller's deadline
-  ReqOpts = case proplists:get_value(send_timeout, Options) of
+  ReqOpts3 = case proplists:get_value(send_timeout, Options) of
     undefined -> ReqOpts2;
     SendTimeout -> [{send_timeout, SendTimeout} | ReqOpts2]
+  end,
+  %% Cap on the buffered response body (max_body_size, or the 1.x max_body)
+  ReqOpts = case proplists:get_value(max_body_size, Options,
+                                     proplists:get_value(max_body, Options)) of
+    undefined -> ReqOpts3;
+    MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts3]
   end,
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
     %% HTTP/2 returns body directly - handle 4-tuple first
