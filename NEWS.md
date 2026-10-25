@@ -1,18 +1,21 @@
 # NEWS
 
-Unreleased
-----------
+4.9.0 - 2026-10-25
+------------------
+
+### Added
+
+- A `max_body_size` request option caps a response body that hackney
+  buffers for you (the default `hackney:request` result, or `body/1`).
+  It defaults to 512 MiB and also accepts the 1.x name `max_body`;
+  `infinity` turns it off (#980).
 
 ### Fixed
 
-- A slow or unreachable host no longer stalls every request that goes
-  through the same pool. The pool opened new connections itself, so while
-  one host took its time to answer, checkouts for every other host waited,
-  for up to `connect_timeout`. The requester now opens its own connection,
-  as in hackney 1.x (#973).
-- A failed TLS handshake on a pooled connection no longer frees a
-  `max_per_host` slot held by another request. The slot was released twice,
-  so the host could get one more concurrent connection than allowed (#984).
+- URLs that hide a loopback or private IP inside a percent-encoded
+  bracketed IPv6 address, or behind a trailing dot, are now refused like
+  other IP literals. The earlier fix for CVE-2026-47076 missed these two
+  spellings, so such a URL still reached the address it denotes (#987).
 - Pinning your own CA with `cacerts` or `cacertfile` now actually limits
   which servers are trusted. hackney still accepted any certificate chain
   that included a publicly trusted root, so a pinned connection could reach
@@ -21,16 +24,10 @@ Unreleased
   another port on the same host, or over plain HTTP after HTTPS. Only a
   redirect to the same scheme, host and port keeps them, unless you set
   `location_trusted` (#979).
-- A buffered response body is now capped at 512 MiB on HTTP/1.1, HTTP/2
-  and HTTP/3, including after `auto_decompress`, so a server sending an
-  endless or highly compressed body can no longer exhaust memory. Past the
-  cap you get `{error, body_too_large}`. Set `max_body_size` (or the 1.x
-  `max_body`) to change it, `infinity` to remove it, and stream larger
-  downloads (#980).
-- URLs that hide a loopback or private IP inside a percent-encoded
-  bracketed IPv6 address, or behind a trailing dot, are now refused like
-  other IP literals. The earlier fix for CVE-2026-47076 missed these two
-  spellings, so such a URL still reached the address it denotes (#987).
+- A server sending an endless or highly compressed body can no longer
+  exhaust memory. Buffered bodies had no limit on HTTP/1.1, HTTP/2 and
+  HTTP/3, and `auto_decompress` inflated the whole body at once. Both now
+  stop at `max_body_size` with `{error, body_too_large}` (#980).
 - HTTPS proxies reached through CONNECT now get the same certificate checks
   as the target: hackney's CA bundle and a hostname check against the
   proxy. The connection to the proxy only set the server name, so on
@@ -40,6 +37,14 @@ Unreleased
   refused with `{error, {proxy_auth_error, invalid_header}}`. The value was
   written as is into the CONNECT request, so those bytes added header lines
   of their own (#989).
+- A slow or unreachable host no longer stalls every request that goes
+  through the same pool. The pool opened new connections itself, so while
+  one host took its time to answer, checkouts for every other host waited,
+  for up to `connect_timeout`. The requester now opens its own connection,
+  as in hackney 1.x (#973).
+- A failed TLS handshake on a pooled connection no longer frees a
+  `max_per_host` slot held by another request. The slot was released twice,
+  so the host could get one more concurrent connection than allowed (#984).
 
 ### Changed
 
