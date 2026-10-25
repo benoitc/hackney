@@ -58,6 +58,10 @@ pool_fault_test_() ->
                fun t_dial_during_slow_dial/1),
       scenario("a requester dying mid-dial releases its slot",
                fun t_requester_dies_while_dialing/1),
+      scenario("a failed TLS upgrade releases its slot once",
+               fun t_upgrade_failure_releases_once/1),
+      scenario("a failed TLS upgrade releases its slot once (ssl_pooling)",
+               fun t_upgrade_failure_releases_once_ssl_pooling/1),
       scenario("a connection crashing mid-request does not crash the pool",
                fun t_crash_mid_request/1),
       scenario("a connection killed while checked out does not crash the pool",
@@ -206,6 +210,28 @@ t_requester_dies_while_dialing(Baseline) ->
     exit(Requester, kill),
     wait_until(fun() -> hackney_load_regulation:current(?HOST, ?PORT) =:= 0 end, 2000),
     assert_pool_healthy(Baseline).
+
+%% The listener speaks plain HTTP, so an https request through the pool dials
+%% fine and fails its TLS upgrade. The caller releases its slot; the pool must
+%% not release it again when the dropped conn dies, or it frees the slot held
+%% by someone else on the same host.
+t_upgrade_failure_releases_once(Baseline) ->
+    upgrade_failure_releases_once([], Baseline).
+
+t_upgrade_failure_releases_once_ssl_pooling(Baseline) ->
+    upgrade_failure_releases_once([{ssl_pooling, true}], Baseline).
+
+upgrade_failure_releases_once(Extra, Baseline) ->
+    ok = hackney_load_regulation:reset(?HOST, ?PORT),
+    ok = hackney_load_regulation:acquire(?HOST, ?PORT, 10, 1000),
+    Url = "https://" ++ ?HOST ++ ":" ++ integer_to_list(?PORT) ++ "/get",
+    Opts = [{pool, ?POOL}, {protocols, [http1]}, {connect_timeout, 2000},
+            {ssl_options, [{verify, verify_none}]} | Extra],
+    ?assertMatch({error, _}, hackney:request(get, Url, [], <<>>, Opts)),
+    %% Every conn the request used is gone and the pool has seen it go.
+    assert_pool_healthy(Baseline),
+    ?assertEqual(1, hackney_load_regulation:current(?HOST, ?PORT)),
+    ok = hackney_load_regulation:release(?HOST, ?PORT).
 
 %%====================================================================
 %% Faults on a checked out connection
