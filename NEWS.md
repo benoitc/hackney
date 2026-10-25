@@ -10,6 +10,9 @@ Unreleased
   one host took its time to answer, checkouts for every other host waited,
   for up to `connect_timeout`. The requester now opens its own connection,
   as in hackney 1.x (#973).
+- A failed TLS handshake on a pooled connection no longer frees a
+  `max_per_host` slot held by another request. The slot was released twice,
+  so the host could get one more concurrent connection than allowed.
 
 4.8.7 - 2026-10-25
 ------------------

@@ -402,7 +402,7 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
         false ->
           %% Always checkout as TCP - pool only stores TCP connections
           case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
-            {ok, _PoolRef, ConnPid} ->
+            {ok, PoolRef, ConnPid} ->
               %% Got TCP connection - upgrade to SSL if needed
               case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
                 ok ->
@@ -411,8 +411,7 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
                   {ok, ConnPid};
                 {error, Reason} ->
                   %% Upgrade failed - release slot and close connection
-                  hackney_load_regulation:release(Host, Port),
-                  stop_conn(ConnPid),
+                  discard_conn(PoolHandler, PoolRef, ConnPid, Host, Port),
                   {error, Reason}
               end;
             {error, Reason} ->
@@ -434,15 +433,14 @@ connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
   case PoolHandler:checkout_ssl(Host, Port, Transport, Options) of
     {ok, _PoolRef, ConnPid, ready} ->
       {ok, ConnPid};
-    {ok, _PoolRef, ConnPid, needs_upgrade} ->
+    {ok, PoolRef, ConnPid, needs_upgrade} ->
       case hackney_conn:upgrade_to_ssl(ConnPid, FinalSslOpts,
                                        #{final => true, pool_ssl => true}) of
         ok ->
           maybe_register_h2(ConnPid, Host, Port, Transport, Options, PoolHandler),
           {ok, ConnPid};
         {error, Reason} ->
-          hackney_load_regulation:release(Host, Port),
-          stop_conn(ConnPid),
+          discard_conn(PoolHandler, PoolRef, ConnPid, Host, Port),
           {error, Reason}
       end;
     {error, Reason} ->
@@ -491,6 +489,17 @@ maybe_upgrade_ssl(_, _ConnPid, _FinalSslOpts) ->
   ok.
 
 %% @private Stop a connection, tolerating an already-dead process.
+%% @private Drop a checked-out conn whose TLS upgrade failed: the pool
+%% forgets it first, so its DOWN does not release the slot released here a
+%% second time. A pool handler without discard/2 keeps the old behaviour.
+discard_conn(PoolHandler, PoolRef, ConnPid, Host, Port) ->
+  _ = case erlang:function_exported(PoolHandler, discard, 2) of
+        true -> PoolHandler:discard(PoolRef, ConnPid);
+        false -> ok
+      end,
+  hackney_load_regulation:release(Host, Port),
+  stop_conn(ConnPid).
+
 stop_conn(ConnPid) ->
   %% Bounded: a conn wedged in a dial past its deadline is killed rather
   %% than holding the caller.

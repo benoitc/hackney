@@ -19,7 +19,8 @@
 -export([start/0,
          checkout/4,
          checkout_ssl/4,
-         checkin/2]).
+         checkin/2,
+         discard/2]).
 
 %% HTTP/2 connection pooling
 -export([checkout_h2/4,
@@ -196,6 +197,15 @@ do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
 -spec checkin(PoolInfo :: term(), Pid :: pid()) -> ok.
 checkin({_PoolName, _Key, Pool, _Transport}, Pid) ->
     gen_server:cast(Pool, {checkin, nil, Pid}),
+    ok.
+
+%% @doc Stop tracking a checked-out connection the caller is about to stop,
+%% without releasing its load-regulation slot: the caller releases it. Used
+%% when the TLS upgrade of a checked-out connection fails; otherwise the
+%% pool would release the slot a second time when the connection dies.
+-spec discard(PoolInfo :: term(), Pid :: pid()) -> ok.
+discard({_PoolName, _Key, Pool, _Transport}, Pid) ->
+    _ = pool_call(Pool, {discard, Pid}),
     ok.
 
 %%====================================================================
@@ -645,6 +655,9 @@ handle_call({dial_failed, Pid}, _From, #state{dialing=Dialing}=State) ->
         error ->
             {reply, ok, State}
     end;
+
+handle_call({discard, Pid}, _From, #state{in_use=InUse}=State) ->
+    {reply, ok, forget_monitor(Pid, State#state{in_use=maps:remove(Pid, InUse)})};
 
 handle_call({checkin_sync, Pid}, _From, State) ->
     %% Synchronous checkin - caller waits for acknowledgement
