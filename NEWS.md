@@ -31,6 +31,11 @@ Unreleased
   bracketed IPv6 address, or behind a trailing dot, are now refused like
   other IP literals. The earlier fix for CVE-2026-47076 missed these two
   spellings, so such a URL still reached the address it denotes (#987).
+- HTTPS proxies reached through CONNECT now get the same certificate checks
+  as the target: hackney's CA bundle and a hostname check against the
+  proxy. The connection to the proxy only set the server name, so on
+  OTP 27 and later it failed unless `proxy_ssl_options` set `cacerts` or
+  `verify_none`. An explicit `{verify, verify_none}` is still honoured (#988).
 
 ### Changed
 
