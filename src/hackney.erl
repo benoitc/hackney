@@ -69,6 +69,7 @@
 -export([get_proxy_config/3]).
 -export([check_no_proxy/2]).
 -export([start_conn_with_socket/5]).
+-export([maybe_strip_auth_on_redirect/3]).
 -endif.
 
 -define(METHOD_TPL(Method),
@@ -1544,8 +1545,8 @@ follow_redirect(ConnPid, Method, Body, WithBody, Options, CurrentURL, RespHeader
       %% Make new request to the redirect URL
       %% Remove old redirect_count and add incremented one
       Options1 = proplists:delete(redirect_count, Options),
-      %% CVE-2018-1000007: Strip sensitive auth options when redirecting to different host
-      %% unless force_redirect is set (similar to curl's --location-trusted)
+      %% CVE-2018-1000007: Strip sensitive auth options when redirecting to a different origin
+      %% unless location_trusted is set (similar to curl's --location-trusted)
       Options2 = maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options1),
       case request(NewMethod, NewURL, [], NewBody,
                    [{follow_redirect, true}, {max_redirect, MaxRedirect},
@@ -1630,25 +1631,26 @@ find_last_slash(Bin, Pos) ->
     _ -> find_last_slash(Bin, Pos - 1)
   end.
 
-%% @private Strip sensitive auth options when redirecting to a different host.
-%% This prevents credential leakage per CVE-2018-1000007.
-%% Use location_trusted option to allow forwarding auth to different hosts (like curl's --location-trusted).
+%% @private Strip sensitive auth options when redirecting to a different origin.
+%% This prevents credential leakage per CVE-2018-1000007. The origin is the
+%% {scheme, host, port} triple (as in hackney_h3:same_origin/2, GHSA-h73q):
+%% comparing the host alone let an https -> http redirect resend basic_auth
+%% and cookie in cleartext, and a redirect to another port hand them to a
+%% different service on the same host.
+%% Use location_trusted option to allow forwarding auth to different origins (like curl's --location-trusted).
 maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
   LocationTrusted = proplists:get_value(location_trusted, Options, false),
   case LocationTrusted of
     true ->
-      %% User explicitly allows forwarding auth to different hosts
+      %% User explicitly allows forwarding auth to different origins
       Options;
     false ->
-      %% Check if host changed
-      CurrentHost = CurrentURL#hackney_url.host,
-      NewHost = NewURL#hackney_url.host,
-      case CurrentHost =:= NewHost of
+      case same_origin(CurrentURL, NewURL) of
         true ->
-          %% Same host - keep auth options
+          %% Same origin - keep auth options
           Options;
         false ->
-          %% Different host - strip sensitive options
+          %% Different origin - strip sensitive options
           lists:filter(fun
             ({basic_auth, _}) -> false;
             ({cookie, _}) -> false;
@@ -1656,6 +1658,12 @@ maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
           end, Options)
       end
   end.
+
+%% @private Same scheme, host (case-insensitive) and port.
+same_origin(#hackney_url{scheme = SchemeA, host = HostA, port = PortA},
+            #hackney_url{scheme = SchemeB, host = HostB, port = PortB}) ->
+  {SchemeA, string:to_lower(HostA), PortA} =:=
+    {SchemeB, string:to_lower(HostB), PortB}.
 
 async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Options) ->
   %% Handle body encoding

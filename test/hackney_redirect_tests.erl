@@ -4,6 +4,8 @@
 -include("hackney_lib.hrl").
 
 -define(PORT, 9877).
+%% Second listener on another port: same host, different origin.
+-define(OTHER_PORT, 9887).
 
 %% Setup/teardown for integration tests
 setup() ->
@@ -15,14 +17,21 @@ setup() ->
     {ok, _} = cowboy:start_clear(test_redirect_http, [{port, ?PORT}], #{
         env => #{dispatch => Dispatch}
     }),
+    {ok, _} = cowboy:start_clear(test_redirect_http_other, [{port, ?OTHER_PORT}], #{
+        env => #{dispatch => Dispatch}
+    }),
     ok.
 
 cleanup(_) ->
     cowboy:stop_listener(test_redirect_http),
+    cowboy:stop_listener(test_redirect_http_other),
     ok.
 
 url(Path) ->
     <<"http://localhost:", (integer_to_binary(?PORT))/binary, Path/binary>>.
+
+other_url(Path) ->
+    <<"http://localhost:", (integer_to_binary(?OTHER_PORT))/binary, Path/binary>>.
 
 %% =============================================================================
 %% Unit tests for resolve_redirect_url logic
@@ -196,7 +205,11 @@ redirect_integration_test_() ->
           fun test_redirect_port_in_host/0},
          %% Issue #617: long redirect URLs should not crash
          {"long redirect URL does not crash",
-          fun test_long_redirect_url/0}
+          fun test_long_redirect_url/0},
+         {"same-origin redirect keeps basic_auth and cookie",
+          fun test_same_origin_redirect_keeps_auth/0},
+         {"same-host other-port redirect strips basic_auth and cookie",
+          fun test_other_port_redirect_strips_auth/0}
      ]}.
 
 test_absolute_redirect_follow() ->
@@ -250,62 +263,95 @@ test_long_redirect_url() ->
             ok
     end.
 
+auth_opts() ->
+    [{follow_redirect, true}, {pool, false},
+     {basic_auth, {<<"alice">>, <<"s3cret">>}}, {cookie, <<"sid=abc">>}].
+
+%% /get echoes the request headers as JSON.
+redirected_request_headers(Target) ->
+    URL = url(<<"/redirect-to?url=", (hackney_url:urlencode(Target))/binary>>),
+    {ok, 200, _Headers, Body} = hackney:request(get, URL, [], <<>>, auth_opts()),
+    #{<<"headers">> := Seen} = jsx:decode(Body, [return_maps]),
+    Seen.
+
+test_same_origin_redirect_keeps_auth() ->
+    Seen = redirected_request_headers(url(<<"/get">>)),
+    ?assertMatch(#{<<"authorization">> := <<"Basic ", _/binary>>}, Seen),
+    ?assertEqual(<<"sid=abc">>, maps:get(<<"cookie">>, Seen)).
+
+test_other_port_redirect_strips_auth() ->
+    %% Same hostname but another port is another origin: the credentials
+    %% must not follow the redirect there.
+    Seen = redirected_request_headers(other_url(<<"/get">>)),
+    ?assertNot(maps:is_key(<<"authorization">>, Seen)),
+    ?assertNot(maps:is_key(<<"cookie">>, Seen)).
+
 %% =============================================================================
-%% Tests for CVE-2018-1000007 - auth stripping on cross-host redirects
+%% Tests for CVE-2018-1000007 - auth stripping on cross-origin redirects
 %% =============================================================================
 
-%% Test that auth options are stripped on cross-host redirects by default
+%% Test that auth options are stripped on cross-origin redirects by default
 auth_strip_on_cross_host_redirect_test_() ->
     BaseURL = hackney_url:parse_url(<<"https://api.example.com/resource">>),
     SameHostURL = hackney_url:parse_url(<<"https://api.example.com/other">>),
+    SameOriginCaseURL = hackney_url:parse_url(<<"https://API.Example.com:443/other">>),
     DiffHostURL = hackney_url:parse_url(<<"https://s3.amazonaws.com/bucket/file">>),
+    DowngradeURL = hackney_url:parse_url(<<"http://api.example.com/resource">>),
+    DiffPortURL = hackney_url:parse_url(<<"https://api.example.com:8443/resource">>),
     OptionsWithAuth = [{basic_auth, {"user", "pass"}}, {cookie, "session=abc"}, {timeout, 5000}],
+    Strip = fun hackney:maybe_strip_auth_on_redirect/3,
 
     [
         {"same host keeps auth options",
          fun() ->
-             Result = maybe_strip_auth_on_redirect(BaseURL, SameHostURL, OptionsWithAuth),
+             Result = Strip(BaseURL, SameHostURL, OptionsWithAuth),
              ?assert(proplists:is_defined(basic_auth, Result)),
              ?assert(proplists:is_defined(cookie, Result)),
              ?assert(proplists:is_defined(timeout, Result))
          end},
+        {"host case and explicit default port are the same origin",
+         fun() ->
+             Result = Strip(BaseURL, SameOriginCaseURL, OptionsWithAuth),
+             ?assert(proplists:is_defined(basic_auth, Result)),
+             ?assert(proplists:is_defined(cookie, Result))
+         end},
         {"different host strips auth options",
          fun() ->
-             Result = maybe_strip_auth_on_redirect(BaseURL, DiffHostURL, OptionsWithAuth),
+             Result = Strip(BaseURL, DiffHostURL, OptionsWithAuth),
              ?assertNot(proplists:is_defined(basic_auth, Result)),
              ?assertNot(proplists:is_defined(cookie, Result)),
              %% Non-auth options should be kept
              ?assert(proplists:is_defined(timeout, Result))
          end},
+        {"https -> http on the same host strips auth options",
+         fun() ->
+             Result = Strip(BaseURL, DowngradeURL, OptionsWithAuth),
+             ?assertNot(proplists:is_defined(basic_auth, Result)),
+             ?assertNot(proplists:is_defined(cookie, Result)),
+             ?assert(proplists:is_defined(timeout, Result))
+         end},
+        {"different port on the same host strips auth options",
+         fun() ->
+             Result = Strip(BaseURL, DiffPortURL, OptionsWithAuth),
+             ?assertNot(proplists:is_defined(basic_auth, Result)),
+             ?assertNot(proplists:is_defined(cookie, Result)),
+             ?assert(proplists:is_defined(timeout, Result))
+         end},
         {"location_trusted keeps auth on different host",
          fun() ->
              OptionsWithTrusted = [{location_trusted, true} | OptionsWithAuth],
-             Result = maybe_strip_auth_on_redirect(BaseURL, DiffHostURL, OptionsWithTrusted),
+             Result = Strip(BaseURL, DiffHostURL, OptionsWithTrusted),
+             ?assert(proplists:is_defined(basic_auth, Result)),
+             ?assert(proplists:is_defined(cookie, Result))
+         end},
+        {"location_trusted keeps auth on https -> http",
+         fun() ->
+             OptionsWithTrusted = [{location_trusted, true} | OptionsWithAuth],
+             Result = Strip(BaseURL, DowngradeURL, OptionsWithTrusted),
              ?assert(proplists:is_defined(basic_auth, Result)),
              ?assert(proplists:is_defined(cookie, Result))
          end}
     ].
-
-%% Helper that mirrors hackney.erl's maybe_strip_auth_on_redirect
-maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
-    LocationTrusted = proplists:get_value(location_trusted, Options, false),
-    case LocationTrusted of
-        true ->
-            Options;
-        false ->
-            CurrentHost = CurrentURL#hackney_url.host,
-            NewHost = NewURL#hackney_url.host,
-            case CurrentHost =:= NewHost of
-                true ->
-                    Options;
-                false ->
-                    lists:filter(fun
-                        ({basic_auth, _}) -> false;
-                        ({cookie, _}) -> false;
-                        (_) -> true
-                    end, Options)
-            end
-    end.
 
 %% =============================================================================
 %% Tests for HTTP 1xx Informational Responses (issue #631)
