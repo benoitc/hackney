@@ -29,17 +29,26 @@
 ssl_opts(Host, Opts) ->
   hackney_ssl:ssl_opts(Host, Opts).
 
-%% @doc TLS options for the proxy leg. Add SNI for the proxy host unless the
-%% user already set one or the proxy is addressed by IP literal (RFC 6066
-%% forbids SNI for IP literals).
+%% @doc TLS options for the proxy leg: the same verification as the target
+%% leg (verify_peer, the bundled CA store, a hostname check against the proxy
+%% host) with `proxy_ssl_options' on top. A caller who sets
+%% `{verify, verify_none}' gets their options as given. SNI is set to the
+%% proxy host unless the user set one or the proxy is addressed by IP literal
+%% (RFC 6066 forbids SNI for IP literals).
 -spec proxy_ssl_opts(string() | binary(), list()) -> list().
+proxy_ssl_opts(ProxyHost, ProxySslOpts) when is_binary(ProxyHost) ->
+  proxy_ssl_opts(binary_to_list(ProxyHost), ProxySslOpts);
 proxy_ssl_opts(ProxyHost, ProxySslOpts) ->
-  case lists:keymember(server_name_indication, 1, ProxySslOpts) of
-    true -> ProxySslOpts;
+  Opts = case proplists:get_value(verify, ProxySslOpts) of
+    verify_none -> ProxySslOpts;
+    _ -> hackney_ssl:ssl_opts(ProxyHost, [{ssl_options, ProxySslOpts}])
+  end,
+  case lists:keymember(server_name_indication, 1, Opts) of
+    true -> Opts;
     false ->
       case hackney_url:is_ip_literal(ProxyHost) of
-        true -> ProxySslOpts;
-        false -> [{server_name_indication, ProxyHost} | ProxySslOpts]
+        true -> Opts;
+        false -> [{server_name_indication, ProxyHost} | Opts]
       end
   end.
 

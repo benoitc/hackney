@@ -1068,6 +1068,29 @@ proxy_ssl_opts_ipv6_test() ->
     Opts = hackney_http_connect:proxy_ssl_opts("::1", []),
     ?assertNot(proplists:is_defined(server_name_indication, Opts)).
 
+%% The proxy leg verifies the proxy's certificate like the target leg does;
+%% it used to carry SNI only, which OTP 27+ refuses to connect with.
+proxy_ssl_opts_verifies_by_default_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("proxy.example", []),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
+    ?assertMatch([_ | _], proplists:get_value(cacerts, Opts)),
+    ?assert(proplists:is_defined(verify_fun, Opts)).
+
+%% An explicit opt-out is used as given, with SNI still set.
+proxy_ssl_opts_verify_none_as_given_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("proxy.example",
+                                               [{verify, verify_none}]),
+    ?assertEqual(verify_none, proplists:get_value(verify, Opts)),
+    ?assertNot(proplists:is_defined(verify_fun, Opts)),
+    ?assertEqual("proxy.example", proplists:get_value(server_name_indication, Opts)).
+
+%% Caller trust options are merged over the defaults, not replacing them.
+proxy_ssl_opts_custom_ca_test() ->
+    Opts = hackney_http_connect:proxy_ssl_opts("proxy.example",
+                                               [{cacerts, [<<"der">>]}]),
+    ?assertEqual(verify_peer, proplists:get_value(verify, Opts)),
+    ?assertEqual([<<"der">>], proplists:get_value(cacerts, Opts)).
+
 proxy_ssl_opts_user_sni_test() ->
     Opts = hackney_http_connect:proxy_ssl_opts(
              "proxy.example", [{server_name_indication, "set.by.user"}]),
