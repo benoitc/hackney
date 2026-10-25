@@ -46,7 +46,7 @@ checkout_disarms_idle_timer() ->
         timer:sleep(?IDLE_MS),
         ?assertMatch({connected, _}, sys:get_state(ConnPid))
     after
-        catch hackney_conn:close(ConnPid),
+        _ = (try hackney_conn:close(ConnPid) catch _:_ -> ok end),
         stop_server(Server)
     end.
 
@@ -65,7 +65,7 @@ request_after_checkout_succeeds() ->
                      hackney_conn:request(ConnPid, <<"GET">>, <<"/">>, [], <<>>)),
         ?assertEqual({ok, ?BODY}, hackney_conn:body(ConnPid))
     after
-        catch hackney_conn:close(ConnPid),
+        _ = (try hackney_conn:close(ConnPid) catch _:_ -> ok end),
         stop_server(Server)
     end.
 
@@ -84,7 +84,7 @@ idle_timer_rearmed_after_response() ->
         timer:sleep(?IDLE_MS + 500),
         ?assertNotMatch({connected, _}, sys:get_state(ConnPid))
     after
-        catch hackney_conn:close(ConnPid),
+        _ = (try hackney_conn:close(ConnPid) catch _:_ -> ok end),
         stop_server(Server)
     end.
 

@@ -41,7 +41,7 @@ h2_frame_fails_fast() ->
     Pid = connect_tcp(Port),
     ?assertMatch({error, {bad_response, _}},
                  hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>)),
-    catch hackney_conn:stop(Pid).
+    _ = (try hackney_conn:stop(Pid) catch _:_ -> ok end).
 
 normal_response_ok() ->
     Resp = <<"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n"
@@ -50,7 +50,7 @@ normal_response_ok() ->
     Pid = connect_tcp(Port),
     ?assertMatch({ok, 200, _}, hackney_conn:request(Pid, <<"GET">>, <<"/">>, [], <<>>)),
     ?assertEqual({ok, <<"hi">>}, hackney_conn:body(Pid)),
-    catch hackney_conn:stop(Pid).
+    _ = (try hackney_conn:stop(Pid) catch _:_ -> ok end).
 
 %%====================================================================
 %% Helpers

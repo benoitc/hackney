@@ -113,7 +113,7 @@ start_server() ->
     {Server, h2:server_port(Server), Self}.
 
 stop_server(Server) ->
-    catch h2:stop_server(Server),
+    _ = (try h2:stop_server(Server) catch _:_ -> ok end),
     ok.
 
 cert_dir() ->

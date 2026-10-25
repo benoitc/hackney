@@ -57,7 +57,7 @@ init_per_testcase(_Case, Config) ->
     start_server(Config, []).
 
 end_per_testcase(_Case, _Config) ->
-    catch quic_h3:stop_server(?SERVER),
+    _ = (try quic_h3:stop_server(?SERVER) catch _:_ -> ok end),
     ok.
 
 %%====================================================================

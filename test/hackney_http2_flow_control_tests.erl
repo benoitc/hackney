@@ -259,7 +259,7 @@ t_send_timeout_not_sticky() ->
         body_size => 128
     }),
     Pool = h2_fc_sticky_pool,
-    catch hackney_pool:stop_pool(Pool),
+    _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
     ok = hackney_pool:start_pool(Pool, [{max_connections, 5}]),
     Body = binary:copy(<<"s">>, 150 * 1024),
     try
@@ -268,7 +268,7 @@ t_send_timeout_not_sticky() ->
         Res = hackney:request(post, url(Srv, <<"/">>), [], Body, pool_opts(Pool, [])),
         ?assertMatch({ok, 200, _, _}, Res)
     after
-        catch hackney_pool:stop_pool(Pool),
+        _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
@@ -282,7 +282,7 @@ t_streamed_send_timeout_reused_conn() ->
         body_size => 128
     }),
     Pool = h2_fc_stream_reuse_pool,
-    catch hackney_pool:stop_pool(Pool),
+    _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
     ok = hackney_pool:start_pool(Pool, [{max_connections, 5}]),
     Chunk = binary:copy(<<"r">>, 200 * 1024),
     try
@@ -298,7 +298,7 @@ t_streamed_send_timeout_reused_conn() ->
         ?assertEqual({error, timeout}, Res),
         ?assert(Elapsed < 1500)
     after
-        catch hackney_pool:stop_pool(Pool),
+        _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
@@ -330,7 +330,7 @@ t_async_direct_conn_api() ->
                                                [], Body, true, self()}),
         ok = await_async_status(Ref2, 200)
     after
-        catch hackney_conn:stop(ConnPid),
+        _ = (try hackney_conn:stop(ConnPid) catch _:_ -> ok end),
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 
@@ -375,7 +375,7 @@ t_manual_connect_send_timeout() ->
         ?assertEqual({error, timeout}, Res),
         ?assert(Elapsed < 1500)
     after
-        catch hackney:close(ConnPid),
+        _ = (try hackney:close(ConnPid) catch _:_ -> ok end),
         repro_h2_raw_server:stop(element(1, Srv))
     end.
 

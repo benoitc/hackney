@@ -42,7 +42,7 @@ streaming_header_value_sanitized() ->
            Pid, <<"GET">>, <<"/">>,
            [{<<"X-Custom">>, <<"benign\r\nX-Injected: yes">>}]),
     {ok, Wire} = gen_tcp:recv(SSock, 0, 1000),
-    catch hackney_conn:stop(Pid),
+    _ = (try hackney_conn:stop(Pid) catch _:_ -> ok end),
     gen_tcp:close(SSock),
     gen_tcp:close(LSock),
     %% No injected header line, and the CR/LF collapsed within the value.

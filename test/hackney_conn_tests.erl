@@ -1025,7 +1025,7 @@ test_truncated_body_unpooled_stops() ->
         ?assertEqual(1024 * 64, byte_size(Body)),
         ?assertEqual(normal, wait_down_reason(Pid, MRef))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 %% Same, draining through stream_body/1 rather than body/1.
@@ -1037,7 +1037,7 @@ test_truncated_stream_body_unpooled_stops() ->
         ?assertEqual({error, closed}, stream_until_error(Pid)),
         ?assertEqual(normal, wait_down_reason(Pid, MRef))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 %% A pooled connection must still park in `closed' so the #836 grace window
@@ -1052,7 +1052,7 @@ test_truncated_body_pooled_keeps_grace() ->
         ?assert(is_process_alive(Pid))
     after
         Pool ! stop,
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 %% A chunked body cut short before its last chunk is an error, not a short
@@ -1064,7 +1064,7 @@ test_truncated_chunked_body() ->
         Pid = truncating_conn(Port),
         ?assertEqual({error, {closed, <<"hello">>}}, hackney_conn:body(Pid))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 test_truncated_chunked_stream_body() ->
@@ -1075,7 +1075,7 @@ test_truncated_chunked_stream_body() ->
         ?assertEqual({ok, <<"hello">>}, hackney_conn:stream_body(Pid)),
         ?assertEqual({error, closed}, hackney_conn:stream_body(Pid))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 test_truncated_chunked_async() ->
@@ -1090,7 +1090,7 @@ test_truncated_chunked_async() ->
         ?assertMatch([{status, 200, _}, {headers, _}, <<"hello">>, {error, closed}],
                      receive_all_async(Ref, []))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 %% No Content-Length and not chunked: the close is the end of the body.
@@ -1100,7 +1100,7 @@ test_close_delimited_body() ->
         Pid = truncating_conn(Port),
         ?assertEqual({ok, <<"hello">>}, hackney_conn:body(Pid))
     after
-        catch gen_tcp:close(LSock)
+        _ = (try gen_tcp:close(LSock) catch _:_ -> ok end)
     end.
 
 stream_until_error(Pid) ->

@@ -109,7 +109,7 @@ handshake(_Parent, TSock, Knobs) ->
         {error, _} -> ok
     end.
 
-recv_preface(Sock, Acc) when byte_size(Acc) >= 24 ->
+recv_preface(_Sock, Acc) when byte_size(Acc) >= 24 ->
     <<Pre:24/binary, Rest/binary>> = Acc,
     case Pre of
         ?PREFACE -> {ok, Rest};

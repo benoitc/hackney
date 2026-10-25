@@ -31,5 +31,5 @@ pooled_tls_upgrade_times_out() ->
     ?assertMatch({error, _}, Result),
     %% 500ms bound with generous slack; a regression hangs instead.
     ?assert(Elapsed < 4000),
-    catch hackney_conn:stop(Pid),
+    _ = (try hackney_conn:stop(Pid) catch _:_ -> ok end),
     gen_tcp:close(LSock).
