@@ -186,7 +186,7 @@ normalize(#hackney_url{}=Url, Fun) when is_function(Fun, 1) ->
                        %% written with them normalises to the same literal.
                        %% Reject the differential on the dot-canonicalised host.
                        %% IDN / pct-encoded UTF-8 hosts still flow through.
-                       case inet_parse:address(dot_canonical(DecodedBin)) of
+                       case inet_parse:address(ip_candidate(dot_canonical(DecodedBin))) of
                          {ok, _} -> error({invalid_url_host, Host0});
                          _ -> ok
                        end,
@@ -236,6 +236,22 @@ dot_canonical(Bin) when is_binary(Bin) ->
   case unicode:characters_to_list(Bin) of
     Cps when is_list(Cps) -> [fold_dot(C) || C <- Cps];
     _ -> binary_to_list(Bin)
+  end.
+
+%% @private Strip what the connect path ignores before it reads a host as an
+%% address: one `[...]' pair (hackney_happy:parse_address/1 drops it) and one
+%% trailing dot (the resolver reads it as the root label). Without this,
+%% `%5B%3A%3A1%5D' and `127.0.0.1.' pass the IP gate yet still reach the
+%% literal address (GHSA-5643).
+ip_candidate("[" ++ Rest) ->
+  case lists:reverse(Rest) of
+    "]" ++ Inner -> ip_candidate(lists:reverse(Inner));
+    _ -> "[" ++ Rest
+  end;
+ip_candidate(Host) ->
+  case lists:reverse(Host) of
+    "." ++ Inner when Inner =/= [] -> lists:reverse(Inner);
+    _ -> Host
   end.
 
 fold_dot(16#3002) -> $.;
