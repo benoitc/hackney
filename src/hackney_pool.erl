@@ -800,8 +800,12 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private A connection process died: remove it from every map that holds
-%% it. A conn still dialing only leaves dialing: its requester sees the dial
-%% fail and releases the slot itself.
+%% it. The pool monitors every conn from spawn_connection on, so this runs
+%% whatever stage the conn died in. Only the slot depends on the stage: an
+%% in_use conn releases it here; a dialing conn does not, its requester sees
+%% the dial fail and releases it. A conn whose requester died mid-dial has
+%% already left dialing (its slot released then) and stops on its own once
+%% it sees its owner gone; that DOWN only clears pid_monitors.
 conn_down(Pid, Reason, State) ->
     #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
            h2_connections=H2Conns, h3_connections=H3Conns, dialing=Dialing} = State,
