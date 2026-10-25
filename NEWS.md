@@ -27,6 +27,10 @@ Unreleased
   cap you get `{error, body_too_large}`. Set `max_body_size` (or the 1.x
   `max_body`) to change it, `infinity` to remove it, and stream larger
   downloads (#980).
+- URLs that hide a loopback or private IP inside a percent-encoded
+  bracketed IPv6 address, or behind a trailing dot, are now refused like
+  other IP literals. The earlier fix for CVE-2026-47076 missed these two
+  spellings, so such a URL still reached the address it denotes (#987).
 
 ### Changed
 

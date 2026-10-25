@@ -628,6 +628,35 @@ normalize_rejects_idna_dot_ip_host_test_() ->
                      hackney_url:normalize(Url))
      end} || Url <- Cases].
 
+%% GHSA-5643: the connect path drops a bracket pair and the resolver ignores a
+%% trailing dot, so these spellings reached the literal address while passing
+%% the IP gate.
+normalize_rejects_bracketed_and_trailing_dot_ip_host_test_() ->
+    Cases = [
+        <<"http://%5B%3A%3A1%5D/">>,                                %% [::1]
+        <<"http://%5B%3A%3Affff%3A127%2E0%2E0%2E1%5D/">>,           %% [::ffff:127.0.0.1]
+        <<"http://%5B%3A%3Affff%3A7f00%3A1%5D/">>,                  %% hex-word form
+        <<"http://%5b%3A%3AFFFF%3A127.0.0.1%5d/">>,                 %% mixed case
+        <<"http://%31%32%37%2E%30%2E%30%2E%31%2E/">>,               %% 127.0.0.1.
+        <<"http://127.0.0.1./">>,                                   %% unencoded
+        <<"http://127", 16#3002/utf8, "0", 16#3002/utf8, "0",
+          16#3002/utf8, "1", 16#3002/utf8, "/">>                    %% Unicode dots + trailing
+    ],
+    [{binary_to_list(Url), fun() ->
+        ?assertError({invalid_url_host, _},
+                     hackney_url:normalize(Url))
+     end} || Url <- Cases].
+
+%% Ordinary hosts keep normalising: a trailing-dot domain name is still a
+%% domain name, and an unencoded IPv6 literal is a visible literal.
+normalize_keeps_trailing_dot_names_and_ipv6_literals_test_() ->
+    [?_assertEqual("example.com.",
+                   (hackney_url:normalize(<<"http://example.com./">>))#hackney_url.host),
+     ?_assertEqual("::1",
+                   (hackney_url:normalize(<<"http://[::1]:8080/">>))#hackney_url.host),
+     ?_assertEqual("xn--bcher-kva.example",
+                   (hackney_url:normalize(<<"http://b", 16#FC/utf8, "cher.example/">>))#hackney_url.host)].
+
 %% GHSA-9653: parse_url must not mint a fresh atom for every attacker-supplied
 %% scheme. binary_to_existing_atom keeps the atom table bounded; unknown
 %% schemes are returned as the lowercased binary instead.
