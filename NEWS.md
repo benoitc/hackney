@@ -36,6 +36,10 @@ Unreleased
   proxy. The connection to the proxy only set the server name, so on
   OTP 27 and later it failed unless `proxy_ssl_options` set `cacerts` or
   `verify_none`. An explicit `{verify, verify_none}` is still honoured (#988).
+- A `proxy_auth_fun` that returns a value containing CR, LF or NUL is now
+  refused with `{error, {proxy_auth_error, invalid_header}}`. The value was
+  written as is into the CONNECT request, so those bytes added header lines
+  of their own (#989).
 
 ### Changed
 

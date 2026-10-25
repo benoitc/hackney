@@ -971,6 +971,21 @@ proxy_auth_fun_test_() ->
                   error(auth_callback_not_called)
               end
           end}},
+          {"proxy_auth_fun result with CR/LF is refused", {timeout, 10, fun() ->
+              %% The value is written as one header line; CR/LF in it would
+              %% add header lines of its own to the CONNECT request.
+              AuthFun = fun(407, _Headers) ->
+                  {ok, <<"Basic abc\r\nX-Injected: 1">>}
+              end,
+              Options = [
+                  {proxy, {connect, "127.0.0.1", ProxyPort}},
+                  {recv_timeout, 5000},
+                  {connect_options, [{proxy_auth_fun, AuthFun}]}
+              ],
+              Url = <<"http://example.com:80/test">>,
+              ?assertEqual({error, {proxy_auth_error, invalid_header}},
+                           hackney:request(get, Url, [], <<>>, Options))
+          end}},
           {"proxy_auth_required error when no callback", {timeout, 10, fun() ->
               Options = [
                   {proxy, {connect, "127.0.0.1", ProxyPort}},
