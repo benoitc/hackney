@@ -1,5 +1,15 @@
 # NEWS
 
+4.8.7 - 2026-10-25
+------------------
+
+### Changed
+
+- Update `quic` to 2.1.2, a security release for HTTP/3 and WebTransport.
+  Session tickets now resume only on the listener that issued them, and a
+  hostile peer can no longer stall a listener or grow a slow owner's
+  mailbox without bound (#982).
+
 4.8.6 - 2026-10-24
 ------------------
 
