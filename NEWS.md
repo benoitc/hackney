@@ -21,9 +21,17 @@ Unreleased
   another port on the same host, or over plain HTTP after HTTPS. Only a
   redirect to the same scheme, host and port keeps them, unless you set
   `location_trusted` (#979).
+- A buffered response body is now capped at 512 MiB on HTTP/1.1, HTTP/2
+  and HTTP/3, including after `auto_decompress`, so a server sending an
+  endless or highly compressed body can no longer exhaust memory. Past the
+  cap you get `{error, body_too_large}`. Set `max_body_size` (or the 1.x
+  `max_body`) to change it, `infinity` to remove it, and stream larger
+  downloads (#980).
 
 ### Changed
 
+- Buffered downloads over 512 MiB now fail with `{error, body_too_large}`
+  unless you raise `max_body_size` (#980).
 - If you pin `cacerts` that include the bundled public roots, hackney no
   longer falls back to trusting a cross-signed root it finds in the
   server's chain. Add the root you need to your list, or pass your own

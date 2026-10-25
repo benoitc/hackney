@@ -1,5 +1,10 @@
 -define(RECV_TIMEOUT, 5000).
 
+%% Cap on a response body buffered whole for the caller, after
+%% auto_decompress (GHSA-jq4m, #980). Per request via `max_body_size';
+%% `infinity' disables it. Larger downloads should stream.
+-define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
+
 -record(connection, {transport,
                      host,
                      port,
