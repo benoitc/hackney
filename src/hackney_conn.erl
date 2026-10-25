@@ -153,14 +153,6 @@
 %% stranded prefix is small. Past this, treat the peer as misbehaving (flooding
 %% an idle connection) and drop it rather than buffer unboundedly.
 -define(MAX_IDLE_BUFFER, 65536).
-%% Cap on a response body buffered whole for the caller (hackney:request/5
-%% with a body, hackney:body/1), after decompression when auto_decompress is
-%% on. Without it any server could make the client hold an arbitrarily large
-%% body in memory. Same default and option as the standalone HTTP/3 API
-%% (hackney_h3, GHSA-jq4m): max_body_size, `infinity' disables it, and the
-%% read fails with {error, body_too_large}. Larger downloads should use the
-%% streaming API.
--define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
 
 %% State data record
 -record(conn_data, {
@@ -3160,9 +3152,16 @@ maybe_handle_async_redirect(_, _, _, _) ->
     no_redirect.
 
 %% @private Skip the response body
+%% Chunks are dropped as they arrive, so a large body costs no memory and is
+%% not subject to max_body_size.
+skip_response_body(#conn_data{method = <<"HEAD">>} = Data) ->
+    Data;
+skip_response_body(#conn_data{status = Status} = Data) when Status =:= 204; Status =:= 304 ->
+    Data;
 skip_response_body(Data) ->
-    case read_full_body(Data, <<>>) of
-        {ok, _, NewData} -> NewData;
+    case stream_body_chunk(Data) of
+        {ok, _Chunk, NewData} -> skip_response_body(NewData);
+        {done, NewData} -> NewData;
         {error, _} -> Data
     end.
 
