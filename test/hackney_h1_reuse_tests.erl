@@ -26,7 +26,7 @@ h1_reuse_test_() ->
 reuse_no_hang() ->
     {Server, Port} = start_server(),
     Pool = h1_reuse_pool,
-    catch hackney_pool:stop_pool(Pool),
+    _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
     ok = hackney_pool:start_pool(Pool, [{pool_size, 1}]),
     Url = iolist_to_binary([<<"https://localhost:">>, integer_to_list(Port), <<"/">>]),
     try
@@ -34,7 +34,7 @@ reuse_no_hang() ->
         [ run_one(Url, [{pool, false}]) || _ <- lists:seq(1, 50) ],
         ok
     after
-        catch hackney_pool:stop_pool(Pool),
+        _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
         stop_server(Server)
     end.
 
@@ -80,7 +80,7 @@ stranded_bytes_consumed() ->
         ?assert(Ms < 3000),
         ?assertEqual(<<"STRANDED">>, Body2)
     after
-        catch hackney_conn:close(ConnPid),
+        _ = (try hackney_conn:close(ConnPid) catch _:_ -> ok end),
         stop_server(Server)
     end.
 

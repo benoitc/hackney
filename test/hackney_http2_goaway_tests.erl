@@ -28,7 +28,7 @@ goaway_does_not_hang_pooled_reuse() ->
     _ = application:ensure_all_started(h2),
     {ServerPid, Port} = start_server(),
     Pool = goaway_test_pool,
-    catch hackney_pool:stop_pool(Pool),
+    _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
     ok = hackney_pool:start_pool(Pool, [{max_connections, 5}]),
     Opts = [{pool, Pool}, {protocols, [http2]}, {recv_timeout, 2000},
             {ssl_options, [{insecure, true}, {verify, verify_none}]}],
@@ -50,7 +50,7 @@ goaway_does_not_hang_pooled_reuse() ->
         Ok = [ R || {ok, 200, _} = R <- Results ],
         ?assert(length(Ok) >= 11)
     after
-        catch hackney_pool:stop_pool(Pool),
+        _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
         unlink(ServerPid),
         exit(ServerPid, shutdown)
     end.

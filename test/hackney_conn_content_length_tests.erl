@@ -58,7 +58,7 @@ capture(Method, Headers, Body) ->
                                           connect_timeout => 1000}),
     ok = hackney_conn:connect(Pid, 1000),
     {ok, 200, _} = hackney_conn:request(Pid, Method, <<"/">>, Headers, Body),
-    catch hackney_conn:stop(Pid),
+    _ = (try hackney_conn:stop(Pid) catch _:_ -> ok end),
     receive {captured, Req} -> Req after 3000 -> error(no_capture) end.
 
 recv_headers(S, Acc) ->

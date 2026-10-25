@@ -76,6 +76,6 @@ run_concurrent_tight_loop() ->
         ?assert(N1 > 0),
         ?assert(N2 > 0)
     after
-        catch hackney_pool:stop_pool(Pool),
-        catch h2:stop_server(Server)
+        _ = (try hackney_pool:stop_pool(Pool) catch _:_ -> ok end),
+        _ = (try h2:stop_server(Server) catch _:_ -> ok end)
     end.

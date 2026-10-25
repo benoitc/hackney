@@ -70,9 +70,8 @@ setcookie_max_age_test() ->
      <<" Max-Age=111">>,
      <<" Secure">>] = F(<<"Customer">>, <<"WILE_E_COYOTE">>,
                         [{max_age, 111}, {secure, true}]),
-    case catch F(<<"Customer">>, <<"WILE_E_COYOTE">>, [{max_age, -111}]) of
-        {'EXIT', {{case_clause, {max_age, -111}}, _}} -> ok
-    end,
+    ?assertError({case_clause, {max_age, -111}},
+                 F(<<"Customer">>, <<"WILE_E_COYOTE">>, [{max_age, -111}])),
     [<<"Customer=WILE_E_COYOTE">>,
      <<" Version=1">>,
      <<" Expires=", _/binary>>,

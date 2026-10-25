@@ -75,7 +75,7 @@ enable_disable_test_() ->
      fun() -> ok end,
      fun(_) ->
          %% Ensure tracing is disabled after tests
-         catch hackney_trace:disable(),
+         _ = (try hackney_trace:disable() catch _:_ -> ok end),
          ok
      end,
      [
@@ -119,7 +119,7 @@ set_level_test_() ->
          hackney_trace:enable(max, io)
      end,
      fun(_) ->
-         catch hackney_trace:disable()
+         _ = (try hackney_trace:disable() catch _:_ -> ok end)
      end,
      [
         {"set_level to max returns ok",

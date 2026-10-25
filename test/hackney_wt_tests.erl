@@ -224,7 +224,7 @@ start_wt_server() ->
     end.
 
 stop_wt_server(#{started := true}) ->
-    catch webtransport:stop_listener(?LISTENER),
+    _ = (try webtransport:stop_listener(?LISTENER) catch _:_ -> ok end),
     ok;
 stop_wt_server(_) ->
     ok.

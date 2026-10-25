@@ -40,7 +40,7 @@ cleanup(Ctx) ->
 %% and the drained connection closes once stream 0 is done.
 accepted_stream_completes(Ctx) ->
     Conn = connect(Ctx),
-    P1 = spawn_request(Conn, get),
+    P1 = async_get(Conn),
     {Handler, ServerConn, 0} = await_held(),
     ok = quic_h3:goaway(ServerConn),
     ok = await_state(Conn, draining),
@@ -55,9 +55,9 @@ accepted_stream_completes(Ctx) ->
 %% reset, stream 0 still completes.
 refused_stream_fails_and_is_reset(Ctx) ->
     Conn = connect(Ctx),
-    P1 = spawn_request(Conn, get),
+    P1 = async_get(Conn),
     {Handler0, _, 0} = await_held(),
-    P2 = spawn_request(Conn, get),
+    P2 = async_get(Conn),
     {_Handler4, _, 4} = await_held(),
     ok = goaway(Conn, 4),
     ?assertEqual({error, {goaway, no_error}}, await(P2)),
@@ -71,7 +71,7 @@ refused_stream_fails_and_is_reset(Ctx) ->
 %% upload was refused and its next send says so, stream 0 still completes.
 refused_upload_fails_on_next_call(Ctx) ->
     Conn = connect(Ctx),
-    P1 = spawn_request(Conn, get),
+    P1 = async_get(Conn),
     {Handler0, _, 0} = await_held(),
     ok = hackney_conn:send_request_headers(Conn, <<"POST">>, <<"/hold">>, []),
     {_Handler4, _, 4} = await_held(),
@@ -95,7 +95,7 @@ connect(Ctx) ->
                                  hackney_h3_test_server:port(Ctx), opts()),
     Conn.
 
-spawn_request(Conn, get) ->
+async_get(Conn) ->
     Self = self(),
     spawn_link(fun() ->
         R = case hackney:send_request(Conn, {get, <<"/hold">>, [], <<>>}) of
