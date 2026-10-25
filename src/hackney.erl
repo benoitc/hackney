@@ -1420,9 +1420,11 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
       %% For streaming body, send headers and return immediately. Forward
       %% send_timeout so the body chunks use the caller's deadline even on a
       %% reused pooled connection.
+      ReqOpts0 = [{max_body_size, proplists:get_value(max_body_size, Options,
+                                                      ?DEFAULT_MAX_BODY_SIZE)}],
       ReqOpts = case proplists:get_value(send_timeout, Options) of
-        undefined -> [];
-        SendTimeout -> [{send_timeout, SendTimeout}]
+        undefined -> ReqOpts0;
+        SendTimeout -> [{send_timeout, SendTimeout} | ReqOpts0]
       end,
       case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList, ReqOpts) of
         ok -> {ok, ConnPid};
@@ -1445,10 +1447,14 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     false -> ReqOpts0
   end,
   %% Pass recv_timeout through to the connection so it's applied per-request
-  ReqOpts2 = case proplists:get_value(recv_timeout, Options) of
+  ReqOpts2a = case proplists:get_value(recv_timeout, Options) of
     undefined -> ReqOpts1;
     RecvTimeout -> [{recv_timeout, RecvTimeout} | ReqOpts1]
   end,
+  %% Always set: a pooled connection must not keep a previous request's cap.
+  ReqOpts2 = [{max_body_size, proplists:get_value(max_body_size, Options,
+                                                  ?DEFAULT_MAX_BODY_SIZE)}
+              | ReqOpts2a],
   %% Pass send_timeout through so HTTP/2 body sends blocked on flow control
   %% use the caller's deadline
   ReqOpts = case proplists:get_value(send_timeout, Options) of

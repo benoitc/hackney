@@ -21,6 +21,12 @@ Unreleased
   another port on the same host, or over plain HTTP after HTTPS. Only a
   redirect to the same scheme, host and port keeps them, unless you set
   `location_trusted` (#979).
+- A buffered response body (the default, or `body/1`) is now capped at
+  512 MiB on HTTP/1.1, HTTP/2 and HTTP/3. A server that sent an endless
+  body could exhaust the node's memory; only the direct `hackney_h3` API
+  had a cap. Past it you get `{error, body_too_large}`. Set `max_body_size`
+  to change the cap, or `infinity` to remove it, and stream larger
+  downloads.
 
 ### Changed
 

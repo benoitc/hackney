@@ -1,5 +1,11 @@
 -define(RECV_TIMEOUT, 5000).
 
+%% Default ceiling on a buffered response body (with_body, body/1). A peer
+%% that sends a body forever would otherwise drive the node out of memory
+%% (GHSA-jq4m, GHSA-pph4). Per request via `max_body_size'; `infinity'
+%% disables it. Large downloads should stream instead.
+-define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
+
 -record(connection, {transport,
                      host,
                      port,

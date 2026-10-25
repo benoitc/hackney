@@ -146,6 +146,13 @@ with QUERY.
 {ok, 200, Headers, Body} = hackney:get(URL).
 ```
 
+A buffered body is capped at 512 MiB. Past the cap you get `{error, body_too_large}`. On HTTP/2 and HTTP/3 only that stream is cancelled; on HTTP/1.1 the connection is closed. Change the cap per request with `max_body_size`, or turn it off with `infinity`. For larger downloads, stream the body instead.
+
+```erlang
+{ok, 200, _, Body} = hackney:get(URL, [], <<>>, [{max_body_size, 2 * 1024 * 1024 * 1024}]),
+{error, body_too_large} = hackney:get(URL, [], <<>>, [{max_body_size, 1024}]).
+```
+
 ### Automatic Decompression
 
 Hackney can automatically decompress gzip and deflate encoded responses:

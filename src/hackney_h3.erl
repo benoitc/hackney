@@ -27,6 +27,7 @@
 
 -behaviour(gen_server).
 
+-include("hackney.hrl").
 -include("hackney_lib.hrl").
 
 -export([
@@ -88,12 +89,9 @@
 
 -define(CONN_TABLE, hackney_h3_conns).
 
-%% GHSA-jq4m: default ceiling on a buffered HTTP/3 response body. The
-%% non-streaming await path holds the whole body in memory, so without a cap
-%% a peer that trickles data forever drives the node to OOM. Configurable via
-%% the `max_body_size' option (`infinity' disables it); very large downloads
-%% should use the streaming API instead.
--define(DEFAULT_MAX_BODY_SIZE, 16#20000000).  %% 512 MiB
+%% GHSA-jq4m: the non-streaming await path holds the whole body in memory,
+%% so it is capped at ?DEFAULT_MAX_BODY_SIZE (hackney.hrl) unless the
+%% `max_body_size' option says otherwise.
 
 -type h3_conn() :: reference().
 -type stream_id() :: non_neg_integer().
