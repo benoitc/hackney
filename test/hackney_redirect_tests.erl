@@ -209,7 +209,9 @@ redirect_integration_test_() ->
          {"same-origin redirect keeps basic_auth and cookie",
           fun test_same_origin_redirect_keeps_auth/0},
          {"same-host other-port redirect strips basic_auth and cookie",
-          fun test_other_port_redirect_strips_auth/0}
+          fun test_other_port_redirect_strips_auth/0},
+         {"location_trusted keeps basic_auth and cookie on another origin",
+          fun test_location_trusted_redirect_keeps_auth/0}
      ]}.
 
 test_absolute_redirect_follow() ->
@@ -269,8 +271,11 @@ auth_opts() ->
 
 %% /get echoes the request headers as JSON.
 redirected_request_headers(Target) ->
+    redirected_request_headers(Target, []).
+
+redirected_request_headers(Target, Extra) ->
     URL = url(<<"/redirect-to?url=", (hackney_url:urlencode(Target))/binary>>),
-    {ok, 200, _Headers, Body} = hackney:request(get, URL, [], <<>>, auth_opts()),
+    {ok, 200, _Headers, Body} = hackney:request(get, URL, [], <<>>, Extra ++ auth_opts()),
     #{<<"headers">> := Seen} = jsx:decode(Body, [return_maps]),
     Seen.
 
@@ -286,72 +291,12 @@ test_other_port_redirect_strips_auth() ->
     ?assertNot(maps:is_key(<<"authorization">>, Seen)),
     ?assertNot(maps:is_key(<<"cookie">>, Seen)).
 
-%% =============================================================================
-%% Tests for CVE-2018-1000007 - auth stripping on cross-origin redirects
-%% =============================================================================
-
-%% Test that auth options are stripped on cross-origin redirects by default
-auth_strip_on_cross_host_redirect_test_() ->
-    BaseURL = hackney_url:parse_url(<<"https://api.example.com/resource">>),
-    SameHostURL = hackney_url:parse_url(<<"https://api.example.com/other">>),
-    SameOriginCaseURL = hackney_url:parse_url(<<"https://API.Example.com:443/other">>),
-    DiffHostURL = hackney_url:parse_url(<<"https://s3.amazonaws.com/bucket/file">>),
-    DowngradeURL = hackney_url:parse_url(<<"http://api.example.com/resource">>),
-    DiffPortURL = hackney_url:parse_url(<<"https://api.example.com:8443/resource">>),
-    OptionsWithAuth = [{basic_auth, {"user", "pass"}}, {cookie, "session=abc"}, {timeout, 5000}],
-    Strip = fun hackney:maybe_strip_auth_on_redirect/3,
-
-    [
-        {"same host keeps auth options",
-         fun() ->
-             Result = Strip(BaseURL, SameHostURL, OptionsWithAuth),
-             ?assert(proplists:is_defined(basic_auth, Result)),
-             ?assert(proplists:is_defined(cookie, Result)),
-             ?assert(proplists:is_defined(timeout, Result))
-         end},
-        {"host case and explicit default port are the same origin",
-         fun() ->
-             Result = Strip(BaseURL, SameOriginCaseURL, OptionsWithAuth),
-             ?assert(proplists:is_defined(basic_auth, Result)),
-             ?assert(proplists:is_defined(cookie, Result))
-         end},
-        {"different host strips auth options",
-         fun() ->
-             Result = Strip(BaseURL, DiffHostURL, OptionsWithAuth),
-             ?assertNot(proplists:is_defined(basic_auth, Result)),
-             ?assertNot(proplists:is_defined(cookie, Result)),
-             %% Non-auth options should be kept
-             ?assert(proplists:is_defined(timeout, Result))
-         end},
-        {"https -> http on the same host strips auth options",
-         fun() ->
-             Result = Strip(BaseURL, DowngradeURL, OptionsWithAuth),
-             ?assertNot(proplists:is_defined(basic_auth, Result)),
-             ?assertNot(proplists:is_defined(cookie, Result)),
-             ?assert(proplists:is_defined(timeout, Result))
-         end},
-        {"different port on the same host strips auth options",
-         fun() ->
-             Result = Strip(BaseURL, DiffPortURL, OptionsWithAuth),
-             ?assertNot(proplists:is_defined(basic_auth, Result)),
-             ?assertNot(proplists:is_defined(cookie, Result)),
-             ?assert(proplists:is_defined(timeout, Result))
-         end},
-        {"location_trusted keeps auth on different host",
-         fun() ->
-             OptionsWithTrusted = [{location_trusted, true} | OptionsWithAuth],
-             Result = Strip(BaseURL, DiffHostURL, OptionsWithTrusted),
-             ?assert(proplists:is_defined(basic_auth, Result)),
-             ?assert(proplists:is_defined(cookie, Result))
-         end},
-        {"location_trusted keeps auth on https -> http",
-         fun() ->
-             OptionsWithTrusted = [{location_trusted, true} | OptionsWithAuth],
-             Result = Strip(BaseURL, DowngradeURL, OptionsWithTrusted),
-             ?assert(proplists:is_defined(basic_auth, Result)),
-             ?assert(proplists:is_defined(cookie, Result))
-         end}
-    ].
+%% location_trusted opts back into forwarding credentials to another origin,
+%% like curl's --location-trusted.
+test_location_trusted_redirect_keeps_auth() ->
+    Seen = redirected_request_headers(other_url(<<"/get">>), [{location_trusted, true}]),
+    ?assertMatch(#{<<"authorization">> := <<"Basic ", _/binary>>}, Seen),
+    ?assertEqual(<<"sid=abc">>, maps:get(<<"cookie">>, Seen)).
 
 %% =============================================================================
 %% Tests for HTTP 1xx Informational Responses (issue #631)

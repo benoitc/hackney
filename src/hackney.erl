@@ -69,7 +69,6 @@
 -export([get_proxy_config/3]).
 -export([check_no_proxy/2]).
 -export([start_conn_with_socket/5]).
--export([maybe_strip_auth_on_redirect/3]).
 -endif.
 
 -define(METHOD_TPL(Method),
@@ -1633,7 +1632,7 @@ find_last_slash(Bin, Pos) ->
 
 %% @private Strip sensitive auth options when redirecting to a different origin.
 %% This prevents credential leakage per CVE-2018-1000007. The origin is the
-%% {scheme, host, port} triple (as in hackney_h3:same_origin/2, GHSA-h73q):
+%% {scheme, host, port} triple (hackney_url:same_origin/2, GHSA-h73q):
 %% comparing the host alone let an https -> http redirect resend basic_auth
 %% and cookie in cleartext, and a redirect to another port hand them to a
 %% different service on the same host.
@@ -1645,7 +1644,7 @@ maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
       %% User explicitly allows forwarding auth to different origins
       Options;
     false ->
-      case same_origin(CurrentURL, NewURL) of
+      case hackney_url:same_origin(CurrentURL, NewURL) of
         true ->
           %% Same origin - keep auth options
           Options;
@@ -1658,12 +1657,6 @@ maybe_strip_auth_on_redirect(CurrentURL, NewURL, Options) ->
           end, Options)
       end
   end.
-
-%% @private Same scheme, host (case-insensitive) and port.
-same_origin(#hackney_url{scheme = SchemeA, host = HostA, port = PortA},
-            #hackney_url{scheme = SchemeB, host = HostB, port = PortB}) ->
-  {SchemeA, string:to_lower(HostA), PortA} =:=
-    {SchemeB, string:to_lower(HostB), PortB}.
 
 async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Options) ->
   %% Handle body encoding

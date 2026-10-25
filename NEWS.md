@@ -12,7 +12,22 @@ Unreleased
   as in hackney 1.x (#973).
 - A failed TLS handshake on a pooled connection no longer frees a
   `max_per_host` slot held by another request. The slot was released twice,
-  so the host could get one more concurrent connection than allowed.
+  so the host could get one more concurrent connection than allowed (#984).
+- Pinning your own CA with `cacerts` or `cacertfile` now actually limits
+  which servers are trusted. hackney still accepted any certificate chain
+  that included a publicly trusted root, so a pinned connection could reach
+  a server its CA never vouched for (#978).
+- Following a redirect no longer resends `basic_auth` and `cookie` to
+  another port on the same host, or over plain HTTP after HTTPS. Only a
+  redirect to the same scheme, host and port keeps them, unless you set
+  `location_trusted` (#979).
+
+### Changed
+
+- If you pin `cacerts` that include the bundled public roots, hackney no
+  longer falls back to trusting a cross-signed root it finds in the
+  server's chain. Add the root you need to your list, or pass your own
+  `partial_chain` (#978).
 
 4.8.7 - 2026-10-25
 ------------------

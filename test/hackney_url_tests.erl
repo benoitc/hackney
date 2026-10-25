@@ -646,3 +646,22 @@ parse_url_does_not_intern_attacker_schemes_test() ->
     %% Allow a small slack for any unrelated atoms minted during the loop;
     %% a regression would mint ~200 (one per unique scheme).
     ?assert(Delta < 20).
+
+%% Redirects keep credentials only within one origin (CVE-2018-1000007,
+%% GHSA-h73q): same scheme, host and port.
+same_origin_test_() ->
+    Base = <<"https://api.example.com/resource">>,
+    [{"same scheme, host and port",
+      ?_assert(hackney_url:same_origin(Base, <<"https://api.example.com/other">>))},
+     {"host case and explicit default port are the same origin",
+      ?_assert(hackney_url:same_origin(Base, <<"https://API.Example.com:443/other">>))},
+     {"another host is another origin",
+      ?_assertNot(hackney_url:same_origin(Base, <<"https://s3.amazonaws.com/bucket">>))},
+     {"https -> http on the same host is another origin",
+      ?_assertNot(hackney_url:same_origin(Base, <<"http://api.example.com/resource">>))},
+     {"another port on the same host is another origin",
+      ?_assertNot(hackney_url:same_origin(Base, <<"https://api.example.com:8443/resource">>))},
+     {"parsed and unparsed URLs compare alike",
+      ?_assert(hackney_url:same_origin(hackney_url:parse_url(Base), Base))},
+     {"string URLs are accepted",
+      ?_assert(hackney_url:same_origin("https://api.example.com/a", Base))}].
