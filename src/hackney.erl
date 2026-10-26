@@ -488,7 +488,6 @@ maybe_upgrade_ssl(_, _ConnPid, _FinalSslOpts) ->
   %% Not SSL, no upgrade needed
   ok.
 
-%% @private Stop a connection, tolerating an already-dead process.
 %% @private Drop a checked-out conn whose TLS upgrade failed: the pool
 %% forgets it first, so its DOWN does not release the slot released here a
 %% second time. A pool handler without discard/2 keeps the old behaviour.
@@ -500,6 +499,7 @@ discard_conn(PoolHandler, PoolRef, ConnPid, Host, Port) ->
   hackney_load_regulation:release(Host, Port),
   stop_conn(ConnPid).
 
+%% @private Stop a connection, tolerating an already-dead process.
 stop_conn(ConnPid) ->
   %% Bounded: a conn wedged in a dial past its deadline is killed rather
   %% than holding the caller.
