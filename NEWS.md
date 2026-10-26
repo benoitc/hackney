@@ -1,5 +1,13 @@
 # NEWS
 
+4.9.1 - 2026-10-26
+------------------
+
+### Fixed
+
+- The documentation builds again. A misplaced doc comment in 4.9.0 made
+  edoc fail, which also blocked publishing that release to Hex.
+
 4.9.0 - 2026-10-25
 ------------------
 
