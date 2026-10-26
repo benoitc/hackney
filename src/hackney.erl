@@ -1345,7 +1345,9 @@ cookies(Headers) ->
                       case hackney_cookie:parse_cookie(V) of
                         {error, _} -> Acc;
                         [{Name, _} | _]=Cookie ->
-                          [{Name, Cookie} | Acc]
+                          [{Name, Cookie} | Acc];
+                        %% An empty Set-Cookie value holds no cookie.
+                        [] -> Acc
                       end;
                     _ ->
                       Acc
