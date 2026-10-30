@@ -79,6 +79,9 @@
 -include("hackney_lib.hrl").
 -include_lib("hackney_internal.hrl").
 
+%% HTTP/3 H3_REQUEST_REJECTED (RFC 9114 8.1): the server did not process the
+%% request.
+-define(H3_REQUEST_REJECTED, 16#10b).
 
 -type url() :: #hackney_url{} | binary().
 -type conn() :: pid().
@@ -725,22 +728,29 @@ request_with_transport(Method, URL, Headers0, Body, Options0,
            do_request(ConnPid, Method, ReqPath, ReqHeaders, Body, Options, URL, Host)
          end,
   case dial_and_send(Dial, Send, FinalPath, Headers0) of
-    {{error, {goaway, _}} = Refused, ConnPid} ->
-      %% The server refused the stream with a GOAWAY, so it never processed the
-      %% request (RFC 9113 6.8) and the request can go again on a fresh
-      %% connection whatever its method, as long as the body can be sent twice.
-      %% Once only: a refusal from the fresh connection is the caller's.
-      case replayable_body(Body) of
+    {{error, Reason} = Error, ConnPid} ->
+      %% A request the server turned away unprocessed can go again whatever
+      %% its method, as long as the body can be sent twice. Once only: a
+      %% second refusal is the caller's.
+      case refused(Reason) andalso replayable_body(Body) of
         true ->
           maybe_stop_unpooled(ConnPid, Options),
           {Result, _} = dial_and_send(Dial, Send, FinalPath, Headers0),
           Result;
         false ->
-          Refused
+          Error
       end;
     {Result, _} ->
       Result
   end.
+
+%% @private The server guarantees it did not process the request: a GOAWAY
+%% below its stream (RFC 9113 6.8, RFC 9114 5.2), RST_STREAM(REFUSED_STREAM)
+%% (RFC 9113 8.7) or H3_REQUEST_REJECTED (RFC 9114 4.1.1).
+refused({goaway, _}) -> true;
+refused({stream_error, refused_stream}) -> true;
+refused({stream_reset, ?H3_REQUEST_REJECTED}) -> true;
+refused(_Reason) -> false.
 
 %% @private Dial (possibly through a proxy) and send, returning the connection
 %% alongside the result so a refused request can be retried elsewhere.
@@ -765,9 +775,10 @@ replayable_body(Body) when is_function(Body) -> false;
 replayable_body({Fun, _State}) when is_function(Fun, 1) -> false;
 replayable_body(_Body) -> true.
 
-%% @private A pooled connection a GOAWAY refused has already left its pool and
-%% closes on its own. An unpooled one belongs to this caller, who is about to
-%% replace it.
+%% @private A pooled connection stays the pool's: one a GOAWAY refused has
+%% already left it and closes on its own, one that refused a single stream
+%% still serves the others. An unpooled one belongs to this caller, who is
+%% about to replace it.
 maybe_stop_unpooled(ConnPid, Options) ->
   case use_pool(Options) of
     false -> stop_conn(ConnPid);

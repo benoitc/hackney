@@ -375,6 +375,25 @@ The option applies to whole-body requests and to streamed bodies sent with `hack
 
 ## Error Handling
 
+A request the server turns away before processing it is sent again, once.
+That is a stream above the `last_stream_id` of a GOAWAY (RFC 9113 §6.8), or
+one reset with `REFUSED_STREAM` (§8.7): the server guarantees it did nothing
+with the request, so hackney repeats it whatever the method: on a fresh
+connection, or on the same pooled connection when a `REFUSED_STREAM` left it
+serving. The streams a GOAWAY accepted still complete on the draining
+connection.
+
+The refusal still reaches the caller, as `{error, {goaway, ErrorCode}}` or
+`{error, {stream_error, refused_stream}}`, when:
+
+- the second attempt is refused too;
+- the body is a function (`fun/0` or `{fun/1, State}`), which the first
+  attempt may already have consumed;
+- the refusal arrives after `request/5` has returned: a streamed request body
+  (`stream`) gets it from `send_body/2` or `start_response/1`, an `async`
+  request as a `{hackney_response, Ref, {error, _}}` message;
+- the request was made on an explicit connection with `send_request/2`.
+
 HTTP/2 specific errors:
 
 ```erlang
@@ -382,7 +401,7 @@ case hackney:get(URL) of
     {ok, Status, Headers, Body} ->
         ok;
     {error, {goaway, ErrorCode}} ->
-        %% Peer sent GOAWAY
+        %% Refused twice, or refused after request/5 had returned
         io:format("HTTP/2 GOAWAY: ~p~n", [ErrorCode]);
     {error, {stream_error, ErrorCode}} ->
         %% Peer sent RST_STREAM for this request

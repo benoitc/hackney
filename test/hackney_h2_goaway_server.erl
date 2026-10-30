@@ -6,15 +6,17 @@
 %%% streamed body once that body is complete. Later connections answer every
 %%% request as soon as it is complete. Each response body is the stream id.
 %%%
-%%% The GOAWAY is sent on a trigger:
-%%%   {second_stream, Pick}  when the second stream opens, with
+%%% The refusal is sent on a trigger:
+%%%   {second_stream, Pick}  GOAWAY when the second stream opens, with
 %%%                          Pick(FirstStreamId, SecondStreamId) as last_stream_id
-%%%   first_data             when a stream's first body chunk arrives, with that
-%%%                          stream as last_stream_id
-%%%   first_stream           when the first stream opens, refusing it
+%%%   first_data             GOAWAY when a stream's first body chunk arrives,
+%%%                          with that stream as last_stream_id
+%%%   first_stream           GOAWAY when the first stream opens, refusing it
+%%%   refused_stream         RST_STREAM(REFUSED_STREAM) on the first stream; the
+%%%                          connection goes on answering the others
 %%% and shaped by options:
-%%%   trigger_on => first | all     only the first connection gets the GOAWAY,
-%%%                                 or every connection does (default first)
+%%%   trigger_on => first | all     only the first connection refuses, or every
+%%%                                 connection does (default first)
 %%%   goaway => direct | two_step   two_step first sends GOAWAY(2^31-1), the
 %%%                                 graceful shutdown of RFC 9113 6.8 (default direct)
 %%%   answer => boolean()           false answers nothing after the GOAWAY, not
@@ -135,20 +137,29 @@ on_request_frame(Sock, Kind, Sid, EndStream, #{seen := Seen, complete := Complet
     Seen2 = case lists:member(Sid, Seen) of true -> Seen; false -> Seen ++ [Sid] end,
     Complete2 = case EndStream of true -> [Sid | Complete]; false -> Complete end,
     St1 = St#{seen := Seen2, complete := Complete2},
-    St2 = case goaway_for(Kind, Sid, EndStream, St1) of
+    St2 = case refusal_for(Kind, Sid, EndStream, St1) of
         none -> St1;
-        LastStreamId -> send_goaway(Sock, LastStreamId, St1)
+        {goaway, LastStreamId} -> send_goaway(Sock, LastStreamId, St1);
+        {rst_stream, Sid} -> send_rst_stream(Sock, Sid, St1)
     end,
     answer_ready(Sock, St2).
 
-goaway_for(headers, _Sid, _EndStream, #{trigger := {second_stream, Pick}, seen := [First, Second]}) ->
-    Pick(First, Second);
-goaway_for(data, Sid, false, #{trigger := first_data}) ->
-    Sid;
-goaway_for(headers, Sid, _EndStream, #{trigger := first_stream, seen := [Sid]}) ->
-    max(Sid - 2, 0);
-goaway_for(_Kind, _Sid, _EndStream, _St) ->
+refusal_for(headers, _Sid, _EndStream, #{trigger := {second_stream, Pick}, seen := [First, Second]}) ->
+    {goaway, Pick(First, Second)};
+refusal_for(data, Sid, false, #{trigger := first_data}) ->
+    {goaway, Sid};
+refusal_for(headers, Sid, _EndStream, #{trigger := first_stream, seen := [Sid]}) ->
+    {goaway, max(Sid - 2, 0)};
+refusal_for(headers, Sid, _EndStream, #{trigger := refused_stream, seen := [Sid]}) ->
+    {rst_stream, Sid};
+refusal_for(_Kind, _Sid, _EndStream, _St) ->
     none.
+
+%% RFC 9113 8.7: the stream was not processed; the connection stays up and
+%% answers every other stream.
+send_rst_stream(Sock, Sid, #{complete := Complete} = St) ->
+    send(Sock, h2_frame:rst_stream(Sid, refused_stream)),
+    St#{trigger := none, complete := Complete -- [Sid]}.
 
 %% One GOAWAY per connection, then a short drain before anything is answered.
 send_goaway(Sock, LastStreamId, #{seen := Seen, goaway := Shape, answer := Answer} = St) ->
