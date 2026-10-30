@@ -53,7 +53,7 @@ test_h3_checkout_none() ->
 
 test_h3_register_checkout() ->
     %% Start a dummy process to act as a connection
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
 
     %% Register it as an H3 connection
     ok = hackney_pool:register_h3("h3test.example.com", 443, hackney_ssl, DummyConn, []),
@@ -70,7 +70,7 @@ test_h3_register_checkout() ->
 
 test_h3_unregister() ->
     %% Start a dummy process
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
 
     %% Register it
     ok = hackney_pool:register_h3("h3unreg.example.com", 443, hackney_ssl, DummyConn, []),
@@ -91,7 +91,7 @@ test_h3_unregister() ->
 
 test_h3_connection_death() ->
     %% Start a dummy process
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
 
     %% Register it
     ok = hackney_pool:register_h3("h3death.example.com", 443, hackney_ssl, DummyConn, []),
@@ -110,7 +110,7 @@ test_h3_connection_death() ->
 test_h3_tls_key_isolation() ->
     %% A connection registered under one trust key must not be handed out
     %% for a request carrying a different trust key.
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
     K1 = hackney_ssl:h3_options_key([{insecure, true}], []),
     K2 = hackney_ssl:h3_options_key([], []),
     ok = hackney_pool:register_h3("h3key.example.com", 443, hackney_ssl, DummyConn,
@@ -129,7 +129,7 @@ test_h3_tls_key_isolation() ->
 test_h3_tls_key_default_bucket() ->
     %% Callers without an h3_tls_key land in the default bucket, isolated
     %% from explicitly keyed connections.
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
     K1 = hackney_ssl:h3_options_key([{insecure, true}], []),
     ok = hackney_pool:register_h3("h3default.example.com", 443, hackney_ssl, DummyConn, []),
     timer:sleep(50),
@@ -161,7 +161,7 @@ h3_multiplexing_test_() ->
 
 test_h3_multiplexing() ->
     %% Start a dummy connection process
-    DummyConn = spawn(fun() -> receive stop -> ok end end),
+    DummyConn = dummy_conn(),
 
     %% Register it
     ok = hackney_pool:register_h3("h3mux.example.com", 443, hackney_ssl, DummyConn, []),
@@ -184,8 +184,8 @@ test_h3_multiplexing() ->
 
 test_h3_different_hosts() ->
     %% Start two dummy connections
-    Conn1 = spawn(fun() -> receive stop -> ok end end),
-    Conn2 = spawn(fun() -> receive stop -> ok end end),
+    Conn1 = dummy_conn(),
+    Conn2 = dummy_conn(),
 
     %% Register them for different hosts
     ok = hackney_pool:register_h3("host1.example.com", 443, hackney_ssl, Conn1, []),
@@ -204,3 +204,16 @@ test_h3_different_hosts() ->
     %% Cleanup
     Conn1 ! stop,
     Conn2 ! stop.
+
+%% A stand-in connection: answers the pool's get_state probe as a connected
+%% hackney_conn would, until told to stop.
+dummy_conn() ->
+    spawn(fun Loop() ->
+        receive
+            {'$gen_call', From, get_state} ->
+                gen:reply(From, {ok, connected}),
+                Loop();
+            stop ->
+                ok
+        end
+    end).

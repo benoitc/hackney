@@ -680,7 +680,7 @@ handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State)
         undefined ->
             {reply, none, State};
         Pid ->
-            case h2_conn_usable(Pid) of
+            case shared_conn_usable(Pid) of
                 true ->
                     {reply, {ok, Pid}, State};
                 false ->
@@ -690,17 +690,17 @@ handle_call({checkout_h2, Key}, _From, #state{h2_connections = H2Conns} = State)
     end;
 
 handle_call({checkout_h3, Key}, _From, #state{h3_connections = H3Conns} = State) ->
-    %% HTTP/3 checkout - return existing connection if available
+    %% HTTP/3 checkout - return existing connection if available. The same
+    %% check as HTTP/2: a connection draining after a GOAWAY leaves the pool
+    %% with a cast that can lose the race against this checkout.
     case maps:get(Key, H3Conns, undefined) of
         undefined ->
             {reply, none, State};
         Pid ->
-            %% Verify connection is still alive
-            case erlang:is_process_alive(Pid) of
+            case shared_conn_usable(Pid) of
                 true ->
                     {reply, {ok, Pid}, State};
                 false ->
-                    %% Connection died, remove from pool
                     H3Conns2 = maps:remove(Key, H3Conns),
                     {reply, none, State#state{h3_connections = H3Conns2}}
             end
@@ -1360,9 +1360,10 @@ pool_has_idle_room(#state{available=Available, max_connections=MaxConn}) ->
 idle_count(Available) ->
     maps:fold(fun(_, Pids, Acc) -> Acc + length(Pids) end, 0, Available).
 
-%% @private Check that a pooled HTTP/2 conn is alive and in `connected` state.
-%% Short timeout so a stuck conn doesn't wedge the pool; any failure → unusable.
-h2_conn_usable(Pid) ->
+%% @private Check that a shared HTTP/2 or HTTP/3 conn is alive and in
+%% `connected` state. Short timeout so a stuck conn doesn't wedge the pool;
+%% any failure → unusable.
+shared_conn_usable(Pid) ->
     case erlang:is_process_alive(Pid) of
         false -> false;
         true ->

@@ -23,8 +23,9 @@
 %%%   GET|POST /hold         holds the request: sends {held, Handler, Conn,
 %%%                          StreamId} to the process registered as
 %%%                          hackney_h3_test_hold, then answers 200 with the
-%%%                          stream id as body on `release', or sends
-%%%                          {held_reset, StreamId} there if the client
+%%%                          stream id as body on `release', resets the
+%%%                          stream with H3_REQUEST_REJECTED on `reject', or
+%%%                          sends {held_reset, StreamId} there if the client
 %%%                          resets the stream
 %%%   POST any path          200, echoes the request body
 %%%   anything else          404
@@ -181,6 +182,8 @@ hold(Conn, StreamId) ->
     receive
         release ->
             respond(Conn, StreamId, 200, [], integer_to_binary(StreamId));
+        reject ->
+            quic_h3:cancel(Conn, StreamId, 16#10b);
         {quic_h3, Conn, {stream_reset, StreamId, _Code}} ->
             hackney_h3_test_hold ! {held_reset, StreamId};
         {quic_h3, Conn, _Other} ->

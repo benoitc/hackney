@@ -404,6 +404,15 @@ Both HTTP/2 and HTTP/3 use lowercase header names:
 
 ## Error Handling
 
+A request the server turns away before processing it is sent again, once: a
+stream at or above the identifier of a GOAWAY (RFC 9114 §5.2) goes again on a
+fresh connection, one reset with `H3_REQUEST_REJECTED` (§4.1.1) on the same
+one. The refusal still reaches the caller, as `{error, {goaway, no_error}}`
+or `{error, {stream_reset, 16#10b}}`, in the same cases as for HTTP/2 (see
+the [HTTP/2 guide](http2_guide.md#error-handling)): a second refusal, a body
+function, a refusal after `request/5` has returned, or a request made with
+`send_request/2`.
+
 ```erlang
 case hackney:get(URL, [], <<>>, [{protocols, [http3]}]) of
     {ok, Status, Headers, Body} ->

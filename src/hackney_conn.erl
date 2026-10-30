@@ -4776,8 +4776,9 @@ h3_body_too_large(StreamId, From, Streams, #conn_data{h3_conn = ConnRef} = Data)
 %% @private Handle HTTP/3 stream reset
 handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
     case maps:get(StreamId, Streams, undefined) of
-        {From, _State} when is_pid(From) ->
-            %% Sync stream - reply with error
+        {From, StreamState} when StreamState =:= waiting_headers;
+                                 element(1, StreamState) =:= waiting_headers_streaming ->
+            %% Sync request awaiting headers - reply via the state machine.
             UpdatedStreams = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
              [{reply, From, {error, {stream_reset, ErrorCode}}}]};
