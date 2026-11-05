@@ -98,17 +98,63 @@ parse_chunked_bad_chunk_terminator_test() ->
 	?assertEqual({error, poorly_formatted_chunked_size},
 	             run_chunked([<<"5\r\nHELLOXX0\r\n\r\n">>])).
 
+parse_chunked_large_chunk_small_reads_test() ->
+	Chunk = binary:copy(<<"abcdefgh">>, 65536),
+	Size = integer_to_binary(byte_size(Chunk), 16),
+	Body = <<Size/binary, "\r\n", Chunk/binary, "\r\n5;ext=1\r\nHELLO\r\n0\r\n\r\n">>,
+	?assertEqual({done, <<Chunk/binary, "HELLO">>},
+	             run_chunked(split_every(Body, 1460))).
+
+parse_chunked_small_reads_sweep_test() ->
+	Body = <<"1a\r\nabcdefghijklmnopqrstuvwxyz\r\n3;x=y\r\nabc\r\n"
+	         "4\r\nWXYZ\r\n0\r\nX-Trail: 1\r\n\r\n">>,
+	[?assertEqual({done, <<"abcdefghijklmnopqrstuvwxyzabcWXYZ">>},
+	              run_chunked(split_every(Body, N)))
+	 || N <- lists:seq(1, byte_size(Body))].
+
+parse_chunked_partial_chunk_state_test() ->
+	P0 = chunked_parser(),
+	{more, P1, _} = hackney_http:execute(P0, <<"a\r\nhello">>),
+	?assertMatch(#hparser{body_state={stream, _, {need, 15}, _}}, P1),
+	{more, P2, _} = hackney_http:execute(P1, <<"wor">>),
+	?assertMatch(#hparser{body_state={stream, _, {need, 15}, _}}, P2),
+	{ok, <<"helloworld">>, P3} = hackney_http:execute(P2, <<"ld\r\n3\r\nab">>),
+	?assertMatch(#hparser{body_state={stream, _, {0, 0}, _}}, P3),
+	{more, P4, _} = hackney_http:execute(P3),
+	?assertMatch(#hparser{body_state={stream, _, {need, 8}, _}}, P4),
+	{ok, <<"abc">>, P5} = hackney_http:execute(P4, <<"c\r\n0\r\n\r\n">>),
+	?assertEqual({done, <<>>}, hackney_http:execute(P5)).
+
+parse_chunked_chunk_ends_on_last_byte_test() ->
+	Chunk = <<"hello world">>,
+	[?assertMatch({ok, Chunk, _},
+	              feed_until_chunk(chunked_parser(),
+	                               [binary:part(Wire, 0, I),
+	                                binary:part(Wire, I, byte_size(Wire) - I)]))
+	 || Line <- [<<"b\r\n">>, <<"b\n">>, <<"b;x=y\r\n">>, <<"0b \r\n">>],
+	    Wire <- [<<Line/binary, Chunk/binary, "\r\n">>],
+	    I <- lists:seq(1, byte_size(Wire) - 1)].
+
+parse_chunked_bad_terminator_small_reads_test() ->
+	Body = <<"1a\r\nabcdefghijklmnopqrstuvwxyzXX0\r\n\r\n">>,
+	[?assertEqual({error, poorly_formatted_chunked_size},
+	              run_chunked(split_every(Body, N)))
+	 || N <- lists:seq(1, byte_size(Body))].
+
 %% Drive a chunked response body through the parser, feeding Segments as
 %% separate socket reads. Contract: after {ok, Chunk, P}, drain buffered data
 %% with execute/1 until the parser asks for more, only then feed the next
 %% segment. Returns {done, Body} when the response completed with no
 %% leftover bytes.
 run_chunked(Segments) ->
+	feed_chunked(chunked_parser(), Segments, <<>>).
+
+chunked_parser() ->
 	P0 = hackney_http:parser([response]),
 	{_, _, _, _, P1} = hackney_http:execute(P0, <<"HTTP/1.1 200 OK\r\n">>),
 	{_, _, P2} = hackney_http:execute(P1, <<"Transfer-Encoding: chunked\r\n">>),
 	{headers_complete, P3} = hackney_http:execute(P2, <<"\r\n">>),
-	feed_chunked(P3, Segments, <<>>).
+	P3.
 
 feed_chunked(_Parser, [], Acc) ->
 	{incomplete, Acc};
@@ -129,6 +175,21 @@ chunked_step(done, _Segments, Acc) ->
 	{done, Acc};
 chunked_step({error, Reason}, _Segments, _Acc) ->
 	{error, Reason}.
+
+feed_until_chunk(_Parser, []) ->
+	incomplete;
+feed_until_chunk(Parser, [Seg | Rest]) ->
+	case hackney_http:execute(Parser, Seg) of
+		{more, Parser1} -> feed_until_chunk(Parser1, Rest);
+		{more, Parser1, _} -> feed_until_chunk(Parser1, Rest);
+		Other -> Other
+	end.
+
+split_every(Bin, N) when byte_size(Bin) =< N ->
+	[Bin];
+split_every(Bin, N) ->
+	<<Head:N/binary, Tail/binary>> = Bin,
+	[Head | split_every(Tail, N)].
 
 %% Issue #697: Handle non-standard decimal status codes (e.g., 401.1 from IIS)
 parse_response_decimal_status_code_test() ->
