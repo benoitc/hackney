@@ -42,6 +42,15 @@ parse_cookie_test_() ->
             ],
     [{V, ?_assertEqual(R, hackney_cookie:parse_cookie(V))} || {V, R} <- Tests].
 
+cookies_test_() ->
+    %% Set-Cookie headers that hold no cookie are skipped.
+    Headers = [{<<"Set-Cookie">>, <<>>},
+               {<<"Set-Cookie">>, <<" ; ">>},
+               {<<"Set-Cookie">>, <<"$Version=1">>},
+               {<<"Set-Cookie">>, <<"k1=v1; Path=/">>}],
+    ?_assertEqual([{<<"k1">>, [{<<"k1">>, <<"v1">>}, {<<"Path">>, <<"/">>}]}],
+                  hackney:cookies(Headers)).
+
 setcookie_test_() ->
     %% {Name, Value, Opts, Result}
     Tests = [
