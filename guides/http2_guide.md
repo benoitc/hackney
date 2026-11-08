@@ -212,6 +212,28 @@ end) || Path <- Paths].
 [receive {Path, {ok, Status, _, _}} -> {Path, Status} end || _ <- Paths].
 ```
 
+### At the Server's Stream Limit
+
+A server caps how many requests it serves at once on one connection
+(SETTINGS_MAX_CONCURRENT_STREAMS, often 100 or 128). When the connection is
+at that cap, a new request waits for a stream instead of failing. It goes
+out as soon as one of the other requests finishes, or as soon as the server
+raises its cap. Waiting requests go out in the order they arrived.
+
+A request waits as long as a pool checkout would: `checkout_timeout`, or
+`connect_timeout` (8 seconds by default) when you don't set it. When that
+runs out it fails with `{error, checkout_timeout}`:
+
+```erlang
+case hackney:get(URL, [], <<>>, [{checkout_timeout, 2000}]) of
+    {ok, Status, Headers, Body} -> ok;
+    {error, checkout_timeout} -> busy   %% no stream became free in 2 s
+end.
+```
+
+A waiting request was never sent, so if the server sends GOAWAY meanwhile
+it fails with `{error, {goaway, Code}}` and is safe to send again.
+
 ### How It Works (Architecture)
 
 ```

@@ -1451,7 +1451,8 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
         undefined -> ReqOpts0;
         MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts0]
       end,
-      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList, ReqOpts) of
+      case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList,
+                                             with_checkout_timeout(ReqOpts, Options)) of
         ok -> {ok, ConnPid};
         {error, Reason} -> {error, Reason}
       end;
@@ -1488,7 +1489,8 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     undefined -> ReqOpts3;
     MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts3]
   end,
-  case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity, ReqOpts) of
+  case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity,
+                            with_checkout_timeout(ReqOpts, Options)) of
     %% HTTP/2 returns body directly - handle 4-tuple first
     {ok, Status, RespHeaders, RespBody} when Status >= 301, Status =< 303; Status =:= 307; Status =:= 308 ->
       %% HTTP/2 redirect status
@@ -1706,7 +1708,9 @@ async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
   end,
   %% Note: Issue #646 - ownership transfer to StreamTo (when different from caller)
   %% is handled atomically inside hackney_conn:do_request_async
-  case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode, StreamTo, FollowRedirect, ReqOpts) of
+  case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode,
+                                  StreamTo, FollowRedirect,
+                                  with_checkout_timeout(ReqOpts, Options)) of
     {ok, Ref} ->
       {ok, Ref};
     {error, Reason} ->
@@ -2233,4 +2237,13 @@ parse_proxy_url(Url) when is_binary(Url) ->
     }}
   catch
     _:_ -> {error, invalid_proxy_url}
+  end.
+
+%% @private An HTTP/2 or HTTP/3 request refused at the server's limit on
+%% concurrent streams waits on the connection as long as a pool checkout
+%% would (hackney_conn:stream_call/3).
+with_checkout_timeout(ReqOpts, Options) ->
+  case proplists:get_value(checkout_timeout, Options) of
+    undefined -> ReqOpts;
+    Timeout -> [{checkout_timeout, Timeout} | ReqOpts]
   end.

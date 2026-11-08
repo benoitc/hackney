@@ -154,6 +154,13 @@
 %% an idle connection) and drop it rather than buffer unboundedly.
 -define(MAX_IDLE_BUFFER, 65536).
 
+%% Call events that open an HTTP/2 or HTTP/3 stream (see stream_call/3).
+-define(IS_STREAM_CALL(E),
+        (is_tuple(E) andalso tuple_size(E) >= 5 andalso
+         (element(1, E) =:= request orelse element(1, E) =:= request_async orelse
+          element(1, E) =:= request_streaming orelse element(1, E) =:= send_headers orelse
+          element(1, E) =:= open_h2_stream))).
+
 %% State data record
 -record(conn_data, {
     %% Connection owner
@@ -276,6 +283,17 @@
     %% new requests are refused and the connection closes when the last
     %% stream ends.
     h3_goaway :: non_neg_integer() | undefined,
+    %% HTTP/2 and HTTP/3: requests refused at the peer's limit on concurrent
+    %% streams, oldest first, each parked as the call it came in as until the
+    %% h2/quic layer says a stream fits again: [{MonRef, From, CallEvent}].
+    %% MonRef monitors the caller and names its wait timer.
+    stream_waiters = [] :: [{reference(), gen_statem:from(), tuple()}],
+    %% A stream_available notice arrived outside `connected'; the waiters
+    %% get their turn when the connection is back there.
+    stream_slot_pending = false :: boolean(),
+    %% Set while a request call runs under stream_call/3, so the call is not
+    %% intercepted a second time.
+    stream_dispatch = false :: boolean(),
     %% Whether to try HTTP/3 (requires UDP)
     try_http3 = false :: boolean(),
     %% Pool name + handler module, so the connection can cache the H3
@@ -956,13 +974,29 @@ connected(enter, OldState, #conn_data{transport = Transport, socket = Socket,
             %% Transfer ownership back to pool and notify it
             auto_release_to_pool(Data)
     end,
+    SlotActions = stream_slot_enter_actions(Data2),
     case {Timeout, Data2#conn_data.protocol} of
-        {infinity, _} -> {keep_state, Data2};
+        {infinity, _} -> {keep_state, Data2, SlotActions};
         %% HTTP/2 multiplexes: the connection idles when its last stream ends,
         %% not when it enters `connected' (#836).
-        {_, http2} -> {keep_state, Data2, h2_idle_actions(Data2)};
-        _ -> {keep_state, Data2, [{state_timeout, Timeout, idle_timeout}]}
+        {_, http2} -> {keep_state, Data2, h2_idle_actions(Data2) ++ SlotActions};
+        _ -> {keep_state, Data2, [{state_timeout, Timeout, idle_timeout} | SlotActions]}
     end;
+
+%% HTTP/2 and HTTP/3: a request that opens a stream goes through
+%% stream_call/3, which parks it when the peer's limit on concurrent streams
+%% is reached instead of failing it.
+connected({call, From}, Event, #conn_data{protocol = Protocol, stream_dispatch = false} = Data)
+  when (Protocol =:= http2 orelse Protocol =:= http3), ?IS_STREAM_CALL(Event) ->
+    stream_call(From, Event, Data);
+
+%% A stream fits again: the request that has waited longest is made again.
+connected(internal, stream_slot, #conn_data{stream_waiters = [Waiter | Rest]} = Data) ->
+    {_MonRef, From, Event} = Waiter,
+    try_stream_call(From, Event, {reissue, Waiter},
+                    Data#conn_data{stream_waiters = Rest, stream_slot_pending = false});
+connected(internal, stream_slot, Data) ->
+    {keep_state, Data#conn_data{stream_slot_pending = false}};
 
 connected({call, From}, share_h2, #conn_data{h2_shared = true}) ->
     {keep_state_and_data, [{reply, From, ok}]};
@@ -2060,13 +2094,15 @@ closed(enter, _OldState, #conn_data{socket = Socket, transport = Transport, pool
     %% alive briefly so those late calls get a proper `{error, closed}`
     %% reply via handle_common's closed-state fallback, then stop.
     %% A GOAWAY drain ends here, whichever way the connection closed.
-    Data2 = Data#conn_data{socket = undefined, h2_goaway = undefined},
+    %% Requests still waiting for a stream were never sent.
+    {WaiterReplies, Data1} = fail_stream_waiters(closed, Data),
+    Data2 = Data1#conn_data{socket = undefined, h2_goaway = undefined},
     case PoolPid of
         undefined ->
-            {keep_state, Data2};
+            {keep_state, Data2, WaiterReplies};
         _ ->
             {keep_state, Data2,
-             [{state_timeout, ?CLOSED_GRACE_MS, closed_grace_expired}]}
+             [{state_timeout, ?CLOSED_GRACE_MS, closed_grace_expired} | WaiterReplies]}
     end;
 
 closed(state_timeout, closed_grace_expired, Data) ->
@@ -2130,8 +2166,43 @@ handle_common(cast, stop, _State, Data) ->
     %% Async stop - used by pool to avoid deadlock during sync checkin
     {stop, normal, Data};
 
-handle_common(info, {'DOWN', Ref, process, _Pid, _Reason}, State, Data) ->
-    handle_h2_stream_owner_down(Ref, State, Data);
+%% A request waiting for a stream gave up: its caller exited, or its wait
+%% ran out.
+handle_common(info, {'DOWN', Ref, process, _Pid, _Reason}, State,
+              #conn_data{stream_waiters = Waiters} = Data) ->
+    case lists:keytake(Ref, 1, Waiters) of
+        {value, _Waiter, Rest} ->
+            {keep_state, Data#conn_data{stream_waiters = Rest},
+             [{{timeout, {stream_wait, Ref}}, cancel}]};
+        false ->
+            handle_h2_stream_owner_down(Ref, State, Data)
+    end;
+
+handle_common({timeout, {stream_wait, Ref}}, Ref, _State,
+              #conn_data{stream_waiters = Waiters} = Data) ->
+    case lists:keytake(Ref, 1, Waiters) of
+        {value, {Ref, From, _Event}, Rest} ->
+            erlang:demonitor(Ref, [flush]),
+            {keep_state, Data#conn_data{stream_waiters = Rest},
+             [{reply, From, {error, checkout_timeout}}]};
+        false ->
+            keep_state_and_data
+    end;
+
+%% A stream fits again while the connection is not in `connected' (a body
+%% upload is under way): the waiters get their turn once it is back.
+handle_common(info, {h2, H2Conn, stream_available}, _State,
+              #conn_data{h2_conn = H2Conn} = Data) when H2Conn =/= undefined ->
+    stream_slot_notice(Data);
+handle_common(info, {h3, ConnRef, streams_available}, _State,
+              #conn_data{h3_conn = ConnRef} = Data) when ConnRef =/= undefined ->
+    stream_slot_notice(Data);
+handle_common(internal, stream_slot, _State, _Data) ->
+    keep_state_and_data;
+handle_common({timeout, stream_slot}, stream_slot, connected, _Data) ->
+    {keep_state_and_data, [{next_event, internal, stream_slot}]};
+handle_common({timeout, stream_slot}, stream_slot, _State, _Data) ->
+    keep_state_and_data;
 
 handle_common({timeout, h2_idle}, h2_idle, connected,
               #conn_data{h2_shared = true, h2_streams = Streams,
@@ -3332,7 +3403,10 @@ init_h2_after_upgrade(SslSocket, Data, From) ->
 start_h2_connection(Socket, Data, From, Origin) ->
     #conn_data{transport = Transport} = Data,
     H2Opts = #{settings => #{initial_window_size => ?H2_STREAM_WINDOW},
-               connection_window_size => ?H2_CONN_WINDOW},
+               connection_window_size => ?H2_CONN_WINDOW,
+               %% Tell us once a request fits again after the peer's
+               %% max_concurrent_streams refused one (see stream_call/3).
+               notify_stream_available => true},
     case h2_connection:start_link(client, Socket, self(), H2Opts) of
         {ok, H2Conn} ->
             %% Transfer socket ownership then activate handshake.
@@ -3846,9 +3920,13 @@ handle_h2_event({trailers, StreamId, _Headers}, Data) ->
 handle_h2_event({stream_reset, StreamId, ErrorCode}, Data) ->
     h2_on_stream_reset(StreamId, ErrorCode, Data);
 handle_h2_event({goaway, LastStreamId, ErrorCode}, Data) ->
-    h2_on_goaway(LastStreamId, ErrorCode, Data);
+    %% No new stream will open: nothing of the waiting requests was sent.
+    {WaiterReplies, Data1} = fail_stream_waiters({goaway, ErrorCode}, Data),
+    add_actions(h2_on_goaway(LastStreamId, ErrorCode, Data1), WaiterReplies);
 handle_h2_event({closed, Reason}, Data) ->
     h2_on_closed(Reason, Data);
+handle_h2_event(stream_available, Data) ->
+    stream_slot_notice(Data);
 handle_h2_event(_Other, Data) ->
     {keep_state, Data}.
 
@@ -4109,6 +4187,129 @@ h2_stream_parked_from({stream, waiting_headers, From}) -> From;
 h2_stream_parked_from({stream, headers, _, _, _, From}) -> From;
 h2_stream_parked_from({stream, body_full, _, _, _, From}) -> From;
 h2_stream_parked_from(_) -> undefined.
+
+%%====================================================================
+%% Waiting for a stream slot (HTTP/2 and HTTP/3)
+%%====================================================================
+%%
+%% RFC 9113 §5.1.2 and RFC 9000 §4.6: a client must not open more streams
+%% than the peer allows at once. The h2 and quic layers refuse such a request
+%% (`max_streams_exceeded', `stream_limit') and, with notify_stream_available
+%% / notify_streams_available on, tell us once one fits again, whether a
+%% stream ended or the peer raised its limit. A refused request is parked as
+%% the call it came in as and made again on that notice, so it goes back
+%% through the same clause with its own options. It waits as long as a pool
+%% checkout may, and fails with the same error when that runs out.
+
+%% @private Run a stream-opening call, or park it behind requests already
+%% waiting so a newcomer cannot take the slot they were promised.
+stream_call(From, Event, #conn_data{stream_waiters = [_ | _]} = Data) ->
+    park_stream_call(From, Event, Data);
+stream_call(From, Event, Data) ->
+    try_stream_call(From, Event, new, Data).
+
+%% @private Make the call. Refused for want of a stream: a new call is
+%% parked, a waiter goes back to the head of the queue with its deadline. A
+%% waiter that went out lets the next one try, as long as the connection
+%% stays in `connected'; otherwise the rest wait until it is back.
+try_stream_call(From, Event, Origin, Data) ->
+    Result = connected({call, From}, Event, Data#conn_data{stream_dispatch = true}),
+    case {stream_refused(Result, From), Origin} of
+        {true, new} ->
+            park_stream_call(From, Event, Data);
+        {true, {reissue, Waiter}} ->
+            {keep_state, Data#conn_data{stream_waiters = [Waiter | Data#conn_data.stream_waiters]}};
+        {false, new} ->
+            stream_call_result(Result, Data, []);
+        {false, {reissue, {MonRef, _From, _Event}}} ->
+            erlang:demonitor(MonRef, [flush]),
+            stream_call_next(stream_call_result(Result, Data,
+                                                [{{timeout, {stream_wait, MonRef}}, cancel}]))
+    end.
+
+%% A refusal leaves the connection untouched and only answers the caller.
+stream_refused({keep_state_and_data, [{reply, From, {error, Reason}}]}, From) ->
+    Reason =:= max_streams_exceeded orelse Reason =:= stream_limit;
+stream_refused(_Result, _From) ->
+    false.
+
+park_stream_call({Pid, _Tag} = From, Event,
+                 #conn_data{stream_waiters = Waiters, connect_timeout = Default} = Data) ->
+    MonRef = erlang:monitor(process, Pid),
+    Timeout = proplists:get_value(checkout_timeout, stream_call_opts(Event), Default),
+    {keep_state, Data#conn_data{stream_waiters = Waiters ++ [{MonRef, From, Event}]},
+     [{{timeout, {stream_wait, MonRef}}, Timeout, MonRef}]}.
+
+%% Per-request options carried by the call, if any.
+stream_call_opts({request, _M, _P, _H, _B, ReqOpts}) -> ReqOpts;
+stream_call_opts({request_async, _M, _P, _H, _B, _A, _S, _F, ReqOpts}) -> ReqOpts;
+stream_call_opts({send_headers, _M, _P, _H, ReqOpts}) -> ReqOpts;
+stream_call_opts(_Event) -> [].
+
+%% @private Give a call's result explicit data without the dispatch flag,
+%% plus Extra actions. A keep_state_and_data result keeps Data, the data the
+%% call was made with.
+stream_call_result(keep_state_and_data, Data, Extra) ->
+    {keep_state, Data, Extra};
+stream_call_result({keep_state_and_data, Actions}, Data, Extra) ->
+    {keep_state, Data, as_list(Actions) ++ Extra};
+stream_call_result({keep_state, D}, _Data, Extra) ->
+    {keep_state, D#conn_data{stream_dispatch = false}, Extra};
+stream_call_result({keep_state, D, Actions}, _Data, Extra) ->
+    {keep_state, D#conn_data{stream_dispatch = false}, as_list(Actions) ++ Extra};
+stream_call_result({next_state, S, D}, _Data, Extra) ->
+    {next_state, S, D#conn_data{stream_dispatch = false}, Extra};
+stream_call_result({next_state, S, D, Actions}, _Data, Extra) ->
+    {next_state, S, D#conn_data{stream_dispatch = false}, as_list(Actions) ++ Extra};
+stream_call_result(Other, _Data, _Extra) ->
+    Other.
+
+%% @private After a waiter went out, the next one tries at once while the
+%% connection stays in `connected'. One that moved it elsewhere (a body
+%% upload) leaves the rest for connected(enter).
+stream_call_next({keep_state, #conn_data{stream_waiters = [_ | _]} = D, Actions}) ->
+    {keep_state, D, Actions ++ [{next_event, internal, stream_slot}]};
+stream_call_next({next_state, S, #conn_data{stream_waiters = [_ | _]} = D, Actions}) ->
+    {next_state, S, D#conn_data{stream_slot_pending = true}, Actions};
+stream_call_next(Result) ->
+    Result.
+
+%% @private The h2/quic layer says a stream fits again.
+stream_slot_notice(Data) ->
+    {keep_state, Data#conn_data{stream_slot_pending = true},
+     [{next_event, internal, stream_slot}]}.
+
+%% A state enter call cannot queue an event, so a zero timeout stands in.
+stream_slot_enter_actions(#conn_data{stream_slot_pending = true, stream_waiters = [_ | _]}) ->
+    [{{timeout, stream_slot}, 0, stream_slot}];
+stream_slot_enter_actions(_Data) ->
+    [].
+
+%% @private Answer every waiting request with Err. Nothing of theirs was sent.
+fail_stream_waiters(_Err, #conn_data{stream_waiters = []} = Data) ->
+    {[], Data};
+fail_stream_waiters(Err, #conn_data{stream_waiters = Waiters} = Data) ->
+    Actions = lists:flatmap(fun({MonRef, From, _Event}) ->
+                                erlang:demonitor(MonRef, [flush]),
+                                [{{timeout, {stream_wait, MonRef}}, cancel},
+                                 {reply, From, {error, Err}}]
+                            end, Waiters),
+    {Actions, Data#conn_data{stream_waiters = [], stream_slot_pending = false}}.
+
+%% @private Append actions to the result of a GOAWAY handler.
+add_actions(Result, []) ->
+    Result;
+add_actions({keep_state_and_data, Actions}, Extra) ->
+    {keep_state_and_data, as_list(Actions) ++ Extra};
+add_actions({keep_state, D}, Extra) ->
+    {keep_state, D, Extra};
+add_actions({keep_state, D, Actions}, Extra) ->
+    {keep_state, D, as_list(Actions) ++ Extra};
+add_actions({next_state, S, D, Actions}, Extra) ->
+    {next_state, S, D, as_list(Actions) ++ Extra}.
+
+as_list(Actions) when is_list(Actions) -> Actions;
+as_list(Action) -> [Action].
 
 %% @private Result for a handler that just removed an HTTP/2 stream: a shared
 %% connection left with no stream arms its idle timer, and one draining after
@@ -4863,8 +5064,13 @@ maybe_delete_h3_session(#conn_data{pool_handler = PoolHandler, host = Host,
 %% refused streams, leave the pool so no new request lands here, and close
 %% once the accepted streams end. An upload refused while its caller is
 %% between calls is marked `refused' until that caller's next call.
-h3_on_goaway(GoawayId, State, #conn_data{h3_streams = Streams, h3_conn = ConnRef,
-                                         pool_pid = PoolPid} = Data) ->
+h3_on_goaway(GoawayId, State, Data0) ->
+    %% No new stream will open: nothing of the waiting requests was sent.
+    {WaiterReplies, Data} = fail_stream_waiters({goaway, no_error}, Data0),
+    add_actions(h3_on_goaway_streams(GoawayId, State, Data), WaiterReplies).
+
+h3_on_goaway_streams(GoawayId, State, #conn_data{h3_streams = Streams, h3_conn = ConnRef,
+                                                 pool_pid = PoolPid} = Data) ->
     Refused = [S || {S, Entry} <- maps:to_list(Streams), S >= GoawayId,
                     element(2, Entry) =/= refused],
     {Streams1, Actions, RequestFrom} =

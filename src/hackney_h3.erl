@@ -883,6 +883,11 @@ handle_info({quic_h3, Conn, {session_ticket, Ticket}},
     Owner ! {h3, Ref, {session_ticket, Ticket}},
     {noreply, State#state{session_ticket = Ticket}};
 
+handle_info({quic_h3, Conn, {streams_available, bidi}},
+            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
+    Owner ! {h3, Ref, streams_available},
+    {noreply, State};
+
 handle_info({quic_h3, Conn, {early_data_rejected, StreamIds}},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
     Owner ! {h3, Ref, {early_data_rejected, StreamIds}},
@@ -978,7 +983,10 @@ build_h3_opts(Host, Opts) ->
         undefined -> QuicOpts3;
         Ticket -> QuicOpts3#{session_ticket => Ticket}
     end,
-    Base = #{verify => Verify, quic_opts => QuicOpts},
+    %% Tell us once a request fits again after the server's limit on
+    %% concurrent streams refused one (hackney_conn parks it until then).
+    Base = #{verify => Verify, quic_opts => QuicOpts,
+             notify_streams_available => true},
     case maps:get(settings, Opts, undefined) of
         undefined -> Base;
         Settings -> Base#{settings => Settings}
