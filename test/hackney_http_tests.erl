@@ -112,28 +112,66 @@ parse_chunked_small_reads_sweep_test() ->
 	              run_chunked(split_every(Body, N)))
 	 || N <- lists:seq(1, byte_size(Body))].
 
+%% Chunk data is handed out as it arrives, without waiting for the rest of
+%% the chunk, and the parser keeps only what it has not handed out yet.
 parse_chunked_partial_chunk_state_test() ->
 	P0 = chunked_parser(),
-	{more, P1, _} = hackney_http:execute(P0, <<"a\r\nhello">>),
-	?assertMatch(#hparser{body_state={stream, _, {need, 15}, _}}, P1),
-	{more, P2, _} = hackney_http:execute(P1, <<"wor">>),
-	?assertMatch(#hparser{body_state={stream, _, {need, 15}, _}}, P2),
-	{ok, <<"helloworld">>, P3} = hackney_http:execute(P2, <<"ld\r\n3\r\nab">>),
-	?assertMatch(#hparser{body_state={stream, _, {0, 0}, _}}, P3),
-	{more, P4, _} = hackney_http:execute(P3),
-	?assertMatch(#hparser{body_state={stream, _, {need, 8}, _}}, P4),
-	{ok, <<"abc">>, P5} = hackney_http:execute(P4, <<"c\r\n0\r\n\r\n">>),
+	{ok, <<"hello">>, P1} = hackney_http:execute(P0, <<"a\r\nhello">>),
+	?assertMatch(#hparser{body_state={stream, _, {remaining, 5}, _}, buffer= <<>>}, P1),
+	{more, P1b, _} = hackney_http:execute(P1),
+	{ok, <<"wor">>, P2} = hackney_http:execute(P1b, <<"wor">>),
+	?assertMatch(#hparser{body_state={stream, _, {remaining, 2}, _}}, P2),
+	{more, P2b, _} = hackney_http:execute(P2),
+	{ok, <<"ld">>, P3} = hackney_http:execute(P2b, <<"ld\r\n3\r\nab">>),
+	?assertMatch(#hparser{body_state={stream, _, {0, 0}, _}, buffer= <<"3\r\nab">>}, P3),
+	{ok, <<"ab">>, P4} = hackney_http:execute(P3),
+	?assertMatch(#hparser{body_state={stream, _, {remaining, 1}, _}}, P4),
+	{more, P4b, _} = hackney_http:execute(P4),
+	{ok, <<"c">>, P5} = hackney_http:execute(P4b, <<"c\r\n0\r\n\r\n">>),
 	?assertEqual({done, <<>>}, hackney_http:execute(P5)).
 
+%% A chunk that ends on the last byte of a read is complete without waiting
+%% for the next read.
 parse_chunked_chunk_ends_on_last_byte_test() ->
 	Chunk = <<"hello world">>,
-	[?assertMatch({ok, Chunk, _},
-	              feed_until_chunk(chunked_parser(),
-	                               [binary:part(Wire, 0, I),
-	                                binary:part(Wire, I, byte_size(Wire) - I)]))
+	[?assertEqual({incomplete, Chunk},
+	              feed_chunked(chunked_parser(),
+	                           [binary:part(Wire, 0, I),
+	                            binary:part(Wire, I, byte_size(Wire) - I)], <<>>))
 	 || Line <- [<<"b\r\n">>, <<"b\n">>, <<"b;x=y\r\n">>, <<"0b \r\n">>],
 	    Wire <- [<<Line/binary, Chunk/binary, "\r\n">>],
 	    I <- lists:seq(1, byte_size(Wire) - 1)].
+
+%% A peer declaring one huge chunk must not make the parser buffer it: each
+%% read comes out at once, so a body cap is checked as the body grows.
+parse_chunked_huge_declared_chunk_test() ->
+	Piece = binary:copy(<<"x">>, 1024 * 1024),
+	{more, P1, _} = hackney_http:execute(chunked_parser(), <<"10000000\r\n">>),
+	lists:foldl(fun(N, P) ->
+		{ok, Out, P2} = hackney_http:execute(P, Piece),
+		?assertEqual(Piece, Out),
+		?assertMatch(#hparser{buffer= <<>>}, P2),
+		Remaining = 16#10000000 - N * byte_size(Piece),
+		?assertMatch(#hparser{body_state={stream, _, {remaining, Remaining}, _}}, P2),
+		{more, P3, _} = hackney_http:execute(P2),
+		P3
+	end, P1, lists:seq(1, 4)).
+
+%% The CRLF after a chunk may arrive one byte at a time.
+parse_chunked_split_crlf_after_data_test() ->
+	?assertEqual({done, <<"abc">>},
+	             run_chunked([<<"3\r\nabc">>, <<"\r">>, <<"\n">>, <<"0\r\n\r\n">>])).
+
+%% The size line is bounded: 16 hex digits at most, and 4096 bytes with its
+%% extensions, so an endless line is refused instead of buffered.
+parse_chunked_size_line_bounds_test() ->
+	?assertEqual({done, <<"x">>},
+	             run_chunked([<<"0000000000000001\r\nx\r\n0\r\n\r\n">>])),
+	?assertEqual({error, invalid_chunk_size},
+	             run_chunked([<<"00000000000000001\r\nx\r\n0\r\n\r\n">>])),
+	LongExt = <<"5;", (binary:copy(<<"x">>, 5000))/binary>>,
+	?assertEqual({error, invalid_chunk_size}, run_chunked([LongExt])),
+	?assertEqual({error, invalid_chunk_size}, run_chunked(split_every(LongExt, 100))).
 
 parse_chunked_bad_terminator_small_reads_test() ->
 	Body = <<"1a\r\nabcdefghijklmnopqrstuvwxyzXX0\r\n\r\n">>,
@@ -175,15 +213,6 @@ chunked_step(done, _Segments, Acc) ->
 	{done, Acc};
 chunked_step({error, Reason}, _Segments, _Acc) ->
 	{error, Reason}.
-
-feed_until_chunk(_Parser, []) ->
-	incomplete;
-feed_until_chunk(Parser, [Seg | Rest]) ->
-	case hackney_http:execute(Parser, Seg) of
-		{more, Parser1} -> feed_until_chunk(Parser1, Rest);
-		{more, Parser1, _} -> feed_until_chunk(Parser1, Rest);
-		Other -> Other
-	end.
 
 split_every(Bin, N) when byte_size(Bin) =< N ->
 	[Bin];
