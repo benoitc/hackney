@@ -898,13 +898,6 @@ handle_info({quic_h3, Conn, {closed, Reason}},
     Owner ! {h3, Ref, {closed, Reason}},
     {stop, normal, State};
 
-handle_info({quic_h3, Conn, closed},
-            #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
-    %% quic =< 1.10.0 closes without a reason on the local-close and
-    %% QUIC-down paths.
-    Owner ! {h3, Ref, {closed, normal}},
-    {stop, normal, State};
-
 handle_info({quic_h3, Conn, {error, Code, Reason}},
             #state{h3_conn = Conn, conn_ref = Ref, owner = Owner} = State) ->
     Owner ! {h3, Ref, {transport_error, Code, Reason}},

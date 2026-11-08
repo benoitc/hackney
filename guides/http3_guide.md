@@ -363,7 +363,7 @@ hackney_h3:close(ConnRef, normal).
 | `{stream_data, StreamId, Bin, Fin}`                | Response body chunk; `Fin = true` ends the stream       |
 | `{stream_reset, StreamId, ErrorCode}`              | Peer reset the stream                                   |
 | `{goaway, LastStreamId}`                           | Peer is shutting down; finish in-flight streams         |
-| `{closed, Reason}`                                 | Connection closed                                       |
+| `{closed, Reason}`                                 | Connection closed; `{peer_closed, application, Code, Phrase}` when the server closed with an HTTP/3 error code |
 | `{transport_error, Code, Reason}`                  | QUIC transport error                                    |
 
 ## UDP Blocking and Fallback

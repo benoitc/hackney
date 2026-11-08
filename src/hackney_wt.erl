@@ -105,7 +105,9 @@
                 | {datagram, binary()}
                 | {stream, non_neg_integer(), binary()}
                 | {stream_fin, non_neg_integer(), binary()}
-                | {stream_closed, non_neg_integer(), term()}.
+                | {stream_closed, non_neg_integer(), term()}
+                %% active mode only
+                | {stream_credit, bidi | uni}.
 
 %% Accepted by send/2.
 -type wt_frame() :: {text, iodata()}
@@ -233,9 +235,19 @@ setopts(Pid, Opts) ->
 close(Pid) ->
     close(Pid, {0, <<>>}).
 
--spec close(pid(), {non_neg_integer(), binary()}) -> ok.
+%% The code must fit in 32 bits and the reason be valid UTF-8 of at most
+%% 1024 bytes; otherwise the session stays open and an error is returned.
+-spec close(pid(), {non_neg_integer(), binary()}) ->
+    ok | {error, reason_too_long | invalid_reason | invalid_error_code}.
+close(_Pid, {_Code, Reason}) when byte_size(Reason) > 1024 ->
+    {error, reason_too_long};
+close(_Pid, {Code, _Reason}) when Code > 16#ffffffff ->
+    {error, invalid_error_code};
 close(Pid, {Code, Reason}) ->
-    gen_statem:cast(Pid, {close, Code, Reason}).
+    case unicode:characters_to_binary(Reason, utf8, utf8) of
+        Reason -> gen_statem:cast(Pid, {close, Code, Reason});
+        _ -> {error, invalid_reason}
+    end.
 
 %% @doc Assign a new controlling process.
 -spec controlling_process(pid(), pid()) -> ok | {error, term()}.
@@ -627,6 +639,10 @@ active_msg({datagram, D}, _Data) ->
     {datagram, D};
 active_msg({stream_closed, Sid, Reason}, _Data) ->
     {stream_closed, Sid, Reason};
+active_msg({stream_credit, Type}, _Data) ->
+    %% The peer raised its stream limit: an open_stream/2 that failed on
+    %% the limit can be retried.
+    {stream_credit, Type};
 active_msg(_Other, _Data) ->
     ignore.
 

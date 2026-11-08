@@ -69,6 +69,30 @@ wt_header_injection_test_() ->
       end}
     ].
 
+%% A close the peer would refuse is rejected before reaching the session.
+wt_close_validation_test_() ->
+    Pid = spawn(fun() -> receive stop -> ok end end),
+    {setup,
+     fun() -> Pid end,
+     fun(P) -> P ! stop end,
+     [
+      {"Reason over 1024 bytes rejected",
+       fun() ->
+           ?assertEqual({error, reason_too_long},
+                        hackney:wt_close(Pid, {0, binary:copy(<<"a">>, 1025)}))
+       end},
+      {"Error code over 32 bits rejected",
+       fun() ->
+           ?assertEqual({error, invalid_error_code},
+                        hackney:wt_close(Pid, {16#100000000, <<>>}))
+       end},
+      {"Reason that is not UTF-8 rejected",
+       fun() ->
+           ?assertEqual({error, invalid_reason},
+                        hackney:wt_close(Pid, {0, <<16#ff, 16#fe>>}))
+       end}
+     ]}.
+
 %%====================================================================
 %% Integration tests (local HTTP/3 WebTransport echo server)
 %%====================================================================
@@ -157,8 +181,58 @@ integration_tests(#{ok := true, url := URL}) ->
           ?assertEqual(h3, maps:get(transport, Info)),
           ?assert(maps:is_key(stream_count, Info)),
           ok = hackney:wt_close(C)
+      end}},
+     {"Rejected close keeps the session open",
+      {timeout, 30, fun() ->
+          {ok, C} = connect(URL),
+          ?assertEqual({error, invalid_reason},
+                       hackney:wt_close(C, {0, <<16#ff>>})),
+          ok = hackney:wt_send(C, {binary, <<"still open">>}),
+          ?assertEqual({ok, {binary, <<"still open">>}}, hackney:wt_recv(C, 10000)),
+          ok = hackney:wt_close(C, {7, <<"bye">>})
+      end}},
+     {"Subprotocol negotiated",
+      {timeout, 30, fun() ->
+          {ok, C} = connect(URL, [{protocols, [<<"chat-v2">>, <<"echo-v1">>]}]),
+          {ok, Info} = hackney:wt_session_info(C),
+          ?assertEqual(<<"echo-v1">>, maps:get(protocol, Info)),
+          ok = hackney:wt_close(C)
+      end}},
+     {"require_protocol fails when the server picks none",
+      {timeout, 30, fun() ->
+          ?assertEqual({error, {alpn_error, no_protocol}},
+                       connect(URL, [{protocols, [<<"chat-v2">>]},
+                                     {require_protocol, true}]))
       end}}
     ].
+
+%% The server allows two bidi streams: the default stream and one more. A
+%% third open fails on the limit; once the extra stream is finished on both
+%% sides the server grants more and an active client is told.
+wt_stream_credit_test_() ->
+    {setup,
+     fun() -> start_wt_server(hackney_wt_credit_listener, #{max_streams_bidi => 2}) end,
+     fun stop_wt_server/1,
+     fun stream_credit_tests/1}.
+
+stream_credit_tests(#{ok := false, reason := Reason}) ->
+    [{"WebTransport stream credit skipped",
+      fun() -> ?debugFmt("WebTransport stream credit skipped: ~p", [Reason]) end}];
+stream_credit_tests(#{ok := true, url := URL}) ->
+    [{"stream_credit is delivered in active mode",
+      {timeout, 30, fun() ->
+          {ok, C} = connect(URL, [{active, true}]),
+          {ok, Sid} = hackney:wt_open_stream(C, bidi),
+          ?assertEqual({error, stream_limit_reached}, hackney:wt_open_stream(C, bidi)),
+          ok = hackney:wt_close_stream(C, Sid),
+          receive
+              {hackney_wt, C, {stream_credit, bidi}} -> ok
+          after 10000 ->
+              ?assert(false)
+          end,
+          ?assertMatch({ok, _}, hackney:wt_open_stream(C, bidi)),
+          ok = hackney:wt_close(C)
+      end}}].
 
 %%====================================================================
 %% Helpers
@@ -197,22 +271,25 @@ stream_bytes({ok, {fin, Data}}) -> Data;
 stream_bytes(Other) -> Other.
 
 start_wt_server() ->
+    start_wt_server(?LISTENER, #{}).
+
+start_wt_server(Name, Extra) ->
     {ok, _} = application:ensure_all_started(hackney),
     case make_cert() of
         {ok, CertFile, KeyFile} ->
             Port = free_port(),
-            Opts = #{
+            Opts = Extra#{
                 transport => h3,
                 port => Port,
                 certfile => CertFile,
                 keyfile => KeyFile,
                 handler => mock_wt_handler
             },
-            try webtransport:start_listener(?LISTENER, Opts) of
+            try webtransport:start_listener(Name, Opts) of
                 {ok, _Pid} ->
                     timer:sleep(200),
                     URL = "https://localhost:" ++ integer_to_list(Port) ++ "/wt",
-                    #{ok => true, url => URL, started => true};
+                    #{ok => true, url => URL, started => true, name => Name};
                 {error, Reason} ->
                     #{ok => false, reason => {listener, Reason}}
             catch
@@ -223,8 +300,8 @@ start_wt_server() ->
             #{ok => false, reason => {cert, Reason}}
     end.
 
-stop_wt_server(#{started := true}) ->
-    _ = (try webtransport:stop_listener(?LISTENER) catch _:_ -> ok end),
+stop_wt_server(#{started := true, name := Name}) ->
+    _ = (try webtransport:stop_listener(Name) catch _:_ -> ok end),
     ok;
 stop_wt_server(_) ->
     ok.
