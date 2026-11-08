@@ -1,10 +1,14 @@
-%%% GOAWAY must only fail the streams the peer did not accept.
+%%% GOAWAY must only fail the streams the peer did not accept, and those go
+%%% again on a fresh connection, as does a stream reset with REFUSED_STREAM.
 %%%
 %%% RFC 9113 6.8: streams up to and including the GOAWAY's last_stream_id may
 %%% still be processed, and the peer keeps the connection open to finish them.
 %%% hackney used to abort every in-flight stream with {error, {goaway, _}}, so a
 %%% request the server went on to complete came back as an error: for a payment
-%%% API that is a charge that succeeded and was reported as failed.
+%%% API that is a charge that succeeded and was reported as failed. A stream
+%%% above last_stream_id, like one reset with REFUSED_STREAM (8.7), was never
+%%% processed, so request/5 sends it once more instead of handing the caller
+%%% the refusal.
 %%%
 %%% The server (hackney_h2_goaway_server) holds the first two streams of its
 %%% first connection, sends GOAWAY with a chosen last_stream_id, then answers
@@ -18,7 +22,11 @@
 goaway_drain_test_() ->
     {foreach, fun setup/0, fun cleanup/1,
      [{timeout, 30, fun accepted_streams_complete/0},
-      {timeout, 30, fun unaccepted_stream_fails_fast/0},
+      {timeout, 30, fun refused_stream_is_sent_again/0},
+      {timeout, 30, fun refused_unpooled_request_is_sent_again/0},
+      {timeout, 30, fun refusal_from_the_fresh_connection_is_returned/0},
+      {timeout, 30, fun rst_stream_refused_request_is_sent_again/0},
+      {timeout, 30, fun rst_stream_refusal_from_the_fresh_connection_is_returned/0},
       {timeout, 30, fun two_step_shutdown/0},
       {timeout, 30, fun stalled_drain_ends_with_the_stream/0}]}.
 
@@ -53,31 +61,73 @@ accepted_streams_complete() ->
         hackney_h2_goaway_server:stop(Server)
     end.
 
-%% GOAWAY(last_stream_id = 1) after streams 1 and 3: stream 3 was not accepted
-%% and fails at once with the goaway reason, stream 1 still completes. Only
-%% the refused stream is reset.
-unaccepted_stream_fails_fast() ->
+%% GOAWAY(last_stream_id = 1) after streams 1 and 3: stream 3 was not accepted,
+%% so it is reset and sent again on a fresh connection, where it is that
+%% connection's stream 1. Stream 1 on the first connection still completes.
+refused_stream_is_sent_again() ->
     {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
                                                    #{notify => self()}),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
-        ?assertEqual({error, {goaway, no_error}}, R2),
+        ?assertEqual({ok, 200, <<"1">>}, R2),
         ?assertEqual([3], hackney_h2_goaway_server:rst_streams())
+    after
+        hackney_h2_goaway_server:stop(Server)
+    end.
+
+%% Without a pool the refused connection is the caller's own; it is stopped and
+%% the request goes again on a new one.
+refused_unpooled_request_is_sent_again() ->
+    {Server, Url} = hackney_h2_goaway_server:start(first_stream),
+    try
+        ?assertEqual({ok, 200, <<"1">>}, fetch(Url, [{pool, false}]))
+    after
+        hackney_h2_goaway_server:stop(Server)
+    end.
+
+%% The request is sent again once. When the fresh connection refuses it too,
+%% the caller gets that refusal.
+refusal_from_the_fresh_connection_is_returned() ->
+    {Server, Url} = hackney_h2_goaway_server:start(first_stream, #{trigger_on => all}),
+    try
+        ?assertEqual({error, {goaway, no_error}}, fetch(Url, []))
+    after
+        hackney_h2_goaway_server:stop(Server)
+    end.
+
+%% RST_STREAM(REFUSED_STREAM) turns away one stream and leaves the connection
+%% serving (RFC 9113 8.7), so the request goes again on the same pooled
+%% connection, as its next stream.
+rst_stream_refused_request_is_sent_again() ->
+    {Server, Url} = hackney_h2_goaway_server:start(refused_stream),
+    try
+        ?assertEqual({ok, 200, <<"3">>}, fetch(Url, []))
+    after
+        hackney_h2_goaway_server:stop(Server)
+    end.
+
+%% Without a pool the refused connection is replaced. When the fresh one
+%% refuses the stream too, the caller gets that refusal.
+rst_stream_refusal_from_the_fresh_connection_is_returned() ->
+    {Server, Url} = hackney_h2_goaway_server:start(refused_stream, #{trigger_on => all}),
+    try
+        ?assertEqual({error, {stream_error, refused_stream}}, fetch(Url, [{pool, false}]))
     after
         hackney_h2_goaway_server:stop(Server)
     end.
 
 %% The graceful shutdown of RFC 9113 6.8: GOAWAY(2^31-1) stops new streams
 %% without refusing any, then a second GOAWAY gives the real last_stream_id.
-%% The first frame alone must not fail anything.
+%% The first frame alone must not fail anything, and the stream the second
+%% one refuses goes again on a fresh connection.
 two_step_shutdown() ->
     {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
                                                    #{goaway => two_step, notify => self()}),
     try
         [R1, R2] = concurrent_requests(Url, 2),
         ?assertEqual({ok, 200, <<"1">>}, R1),
-        ?assertEqual({error, {goaway, no_error}}, R2),
+        ?assertEqual({ok, 200, <<"1">>}, R2),
         ?assertEqual([3], hackney_h2_goaway_server:rst_streams())
     after
         hackney_h2_goaway_server:stop(Server)
@@ -85,15 +135,16 @@ two_step_shutdown() ->
 
 %% A server that accepts a stream and then never answers it must not keep the
 %% draining connection around: the stream's own recv_timeout ends it, and with
-%% it the connection, so the next request gets a fresh one.
+%% it the connection. The refused request went again on a fresh connection,
+%% which the request after then shares.
 stalled_drain_ends_with_the_stream() ->
     {Server, Url} = hackney_h2_goaway_server:start({second_stream, fun(First, _Second) -> First end},
                                                    #{answer => false}),
     try
         [R1, R2] = concurrent_requests(Url, 2, [{recv_timeout, 1000}]),
         ?assertEqual({error, timeout}, R1),
-        ?assertEqual({error, {goaway, no_error}}, R2),
-        ?assertEqual({ok, 200, <<"1">>}, fetch(Url, []))
+        ?assertEqual({ok, 200, <<"1">>}, R2),
+        ?assertMatch({ok, 200, _}, fetch(Url, []))
     after
         hackney_h2_goaway_server:stop(Server)
     end.
