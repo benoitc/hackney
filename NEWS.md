@@ -5,7 +5,7 @@ Unreleased
 
 ### Changed
 
-- quic 2.5.0, h2 0.14.0 and webtransport 0.5.1. These bring fixes for an
+- quic 2.6.1, h2 0.15.0 and webtransport 0.5.3. These bring fixes for an
   HTTP/3 header block that could keep a CPU busy for minutes, and for two
   HTTP/2 denial-of-service attacks (MadeYouReset and SETTINGS flood), plus
   many protocol conformance and reliability fixes.
