@@ -1,5 +1,38 @@
 # NEWS
 
+4.10.0 - 2026-11-08
+-------------------
+
+### Changed
+
+- quic 2.5.0, h2 0.14.0 and webtransport 0.5.1. These bring fixes for an
+  HTTP/3 header block that could keep a CPU busy for minutes, and for two
+  HTTP/2 denial-of-service attacks (MadeYouReset and SETTINGS flood), plus
+  many protocol conformance and reliability fixes.
+- WebTransport now speaks draft-17 over HTTP/3 and draft-16 over HTTP/2.
+  Servers on older drafts may no longer connect; a `draft07` compat mode
+  is available for draft-07 servers. WebTransport over HTTP/2 now needs
+  TLS 1.3.
+- When an HTTP/3 server closes the connection with an error code, the
+  error you get now carries that code and phrase instead of reporting a
+  normal close.
+
+### Added
+
+- WebTransport subprotocol negotiation with the `protocols` and
+  `require_protocol` options of `wt_connect`. The server's choice is in
+  `wt_session_info/1`.
+- In active mode, WebTransport sends `{stream_credit, bidi | uni}` once the
+  server allows more streams after `wt_open_stream/2` hit its limit.
+
+### Fixed
+
+- `wt_close/2` with a reason longer than 1024 bytes returned `ok` but
+  never closed the session. It now returns an error and the session stays
+  open. The same now applies to an error code over 32 bits or a reason
+  that is not valid UTF-8, which the drafts forbid.
+
+
 4.9.1 - 2026-10-26
 ------------------
 

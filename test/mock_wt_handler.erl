@@ -9,7 +9,8 @@
 -behaviour(webtransport_handler).
 
 -export([init/3, handle_stream/4, handle_stream_fin/4,
-         handle_datagram/2, handle_stream_closed/3, terminate/2]).
+         handle_datagram/2, handle_stream_closed/3, terminate/2,
+         select_protocol/2]).
 
 -record(state, {
     session :: pid(),
@@ -48,3 +49,10 @@ handle_stream_closed(_StreamId, _Reason, State) ->
 
 terminate(_Reason, _State) ->
     ok.
+
+%% Speaks only the "echo-v1" subprotocol.
+select_protocol(Offered, _Opts) ->
+    case lists:member(<<"echo-v1">>, Offered) of
+        true -> {ok, <<"echo-v1">>};
+        false -> none
+    end.

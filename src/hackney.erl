@@ -968,7 +968,11 @@ ws_close(WsPid, {Code, Reason}) when is_pid(WsPid) ->
 %%   <li>ssl_options: TLS options (verify, cacerts/cacertfile, cert/certfile,
 %%       key/keyfile)</li>
 %%   <li>verify: verify_peer (default) | verify_none</li>
-%%   <li>compat_mode: latest (default) | legacy_browser_compat</li>
+%%   <li>compat_mode: latest (default) | legacy_browser_compat | draft07</li>
+%%   <li>protocols: subprotocols offered to the server, in order of
+%%       preference; the one it picks is in wt_session_info/1</li>
+%%   <li>require_protocol: fail the connect when the server picks none
+%%       (default false)</li>
 %%   <li>max_recv_buffer: passive buffer cap in bytes (default 64 MiB)</li>
 %% </ul>
 %%
@@ -1064,7 +1068,11 @@ wt_setopts(WtPid, Opts) when is_pid(WtPid) ->
 wt_close(WtPid) when is_pid(WtPid) ->
   hackney_wt:close(WtPid).
 
--spec wt_close(pid(), {non_neg_integer(), binary()}) -> ok.
+%% @doc Close a WebTransport session with an error code and reason.
+%% The code must fit in 32 bits and the reason be valid UTF-8 of at most
+%% 1024 bytes; otherwise the session stays open and an error is returned.
+-spec wt_close(pid(), {non_neg_integer(), binary()}) ->
+    ok | {error, reason_too_long | invalid_reason | invalid_error_code}.
 wt_close(WtPid, {Code, Reason}) when is_pid(WtPid) ->
   hackney_wt:close(WtPid, {Code, Reason}).
 
@@ -1271,10 +1279,14 @@ build_wt_connect_opts(Options, Headers) ->
   Verify = proplists:get_value(verify, Options,
                                proplists:get_value(verify, SslOpts, verify_peer)),
   Base = #{headers => Headers, verify => Verify},
-  Base1 = case proplists:get_value(compat_mode, Options) of
-    undefined -> Base;
-    CompatMode -> Base#{compat_mode => CompatMode}
-  end,
+  %% Forward the session options webtransport:connect/4 understands as is.
+  Base1 = lists:foldl(
+            fun(Key, Acc) ->
+                case proplists:get_value(Key, Options) of
+                  undefined -> Acc;
+                  Value -> Acc#{Key => Value}
+                end
+            end, Base, [compat_mode, protocols, require_protocol]),
   Base2 = wt_ca_opts(Base1, SslOpts, Verify),
   wt_cert_opts(Base2, SslOpts).
 

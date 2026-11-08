@@ -57,11 +57,34 @@ accepted as an alias so a URL can carry over unchanged.
 | `headers` | `[]` | Extra headers for the CONNECT request |
 | `ssl_options` | `[]` | TLS options: `verify`, `cacerts`/`cacertfile`, `cert`/`certfile`, `key`/`keyfile` |
 | `verify` | `verify_peer` | `verify_peer` or `verify_none` |
-| `compat_mode` | `latest` | `latest` or `legacy_browser_compat` |
+| `compat_mode` | `latest` | `latest`, `legacy_browser_compat` or `draft07` |
+| `protocols` | `[]` | Subprotocols offered to the server, in order of preference |
+| `require_protocol` | `false` | Fail the connect if the server picks no subprotocol |
 | `max_recv_buffer` | 67108864 | Cap (bytes) on buffered, unread data |
 
 When verifying with no CA configured, hackney uses the bundled `certifi`
 trust store, the same as for HTTPS requests.
+
+### Draft versions and TLS
+
+Over HTTP/3, hackney speaks WebTransport draft-17. Over HTTP/2 it speaks
+draft-16, which needs TLS 1.3: connecting with `{transport, h2}` to a
+server that only offers TLS 1.2 fails. Use `{compat_mode, draft07}` for a
+server that only speaks draft-07.
+
+### Subprotocols
+
+Offer subprotocols with `protocols`; the one the server picks is in the
+session info:
+
+```erlang
+{ok, Conn} = hackney:wt_connect(URL, [{protocols, [<<"chat-v2">>, <<"chat-v1">>]}]),
+{ok, #{protocol := Protocol}} = hackney:wt_session_info(Conn).
+```
+
+`Protocol` is `undefined` when the server picks none. With
+`{require_protocol, true}` the connect fails instead, with
+`{error, {alpn_error, no_protocol}}`.
 
 ## The Default Message Channel
 
@@ -118,6 +141,11 @@ hackney:wt_stop_sending(Conn, StreamId, ErrorCode).  %% ask peer to stop
 Data on streams the server opens (rather than ones you opened) is surfaced
 on the default channel as `{stream, Id, Data}` / `{stream_fin, Id, Data}`.
 
+The server caps how many streams you can open. Past the cap,
+`wt_open_stream/2` returns `{error, stream_limit_reached}`. In active mode
+you get `{hackney_wt, Conn, {stream_credit, bidi | uni}}` once the server
+allows more, and can open again.
+
 ## Active Mode
 
 In active mode every event is forwarded to the owner process, uniformly
@@ -130,6 +158,7 @@ receive
     {hackney_wt, Conn, {datagram, Data}}       -> handle_dgram(Data);
     {hackney_wt, Conn, {stream, Id, Data}}     -> handle_stream(Id, Data);
     {hackney_wt, Conn, {stream_fin, Id, Data}} -> handle_fin(Id, Data);
+    {hackney_wt, Conn, {stream_credit, Type}}  -> retry_open(Type);
     {hackney_wt, Conn, closed}                 -> done;
     {hackney_wt_error, Conn, Reason}           -> error
 end.
@@ -149,6 +178,11 @@ hackney:wt_setopts(Conn, [{active, once}]).  %% arm for the next one
 hackney:wt_close(Conn).
 hackney:wt_close(Conn, {0, <<"bye">>}).  %% {ErrorCode, Reason}
 ```
+
+The error code must fit in 32 bits and the reason must be valid UTF-8 of
+at most 1024 bytes. Otherwise `wt_close/2` returns
+`{error, invalid_error_code}`, `{error, invalid_reason}` or
+`{error, reason_too_long}` and the session stays open.
 
 ## Server Side
 
