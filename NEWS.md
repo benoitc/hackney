@@ -43,6 +43,10 @@ Unreleased
 
 ### Fixed
 
+- A request body given as a function crashed the connection on HTTP/2
+  and HTTP/3; it worked only on HTTP/1.1. It is now sent as the function
+  yields it, on all three. If the function fails part way, you get its
+  error and the half-sent request is cancelled (#1001).
 - `wt_close/2` with a reason longer than 1024 bytes returned `ok` but
   never closed the session. It now returns an error and the session stays
   open. The same now applies to an error code over 32 bits or a reason

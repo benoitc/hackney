@@ -126,10 +126,15 @@ handle(Conn, StreamId, _Method, <<"/hold">>, _Headers) ->
     hackney_h3_test_hold ! {held, self(), Conn, StreamId},
     hold(Conn, StreamId);
 handle(Conn, StreamId, <<"POST">>, _Path, Headers) ->
-    Body = read_body(Conn, StreamId),
-    ContentType = proplists:get_value(<<"content-type">>, Headers,
-                                      <<"application/octet-stream">>),
-    respond(Conn, StreamId, 200, [{<<"content-type">>, ContentType}], Body);
+    case read_body(Conn, StreamId) of
+        reset ->
+            %% The client reset the stream before its body was complete.
+            ok;
+        Body ->
+            ContentType = proplists:get_value(<<"content-type">>, Headers,
+                                              <<"application/octet-stream">>),
+            respond(Conn, StreamId, 200, [{<<"content-type">>, ContentType}], Body)
+    end;
 handle(Conn, StreamId, <<"HEAD">>, <<"/">>, _Headers) ->
     quic_h3:send_response(Conn, StreamId, 200,
                           [{<<"content-type">>, <<"text/html">>},
@@ -213,7 +218,9 @@ read_body(Conn, StreamId) ->
             case drain_buffered(Buffered, <<>>) of
                 {fin, Acc} -> Acc;
                 {more, Acc} -> recv_body(Conn, StreamId, Acc)
-            end
+            end;
+        {error, unknown_stream} ->
+            reset
     end.
 
 drain_buffered([], Acc) ->
@@ -228,7 +235,9 @@ recv_body(Conn, StreamId, Acc) ->
         {quic_h3, Conn, {data, StreamId, Data, true}} ->
             <<Acc/binary, Data/binary>>;
         {quic_h3, Conn, {data, StreamId, Data, false}} ->
-            recv_body(Conn, StreamId, <<Acc/binary, Data/binary>>)
+            recv_body(Conn, StreamId, <<Acc/binary, Data/binary>>);
+        {quic_h3, Conn, {stream_reset, StreamId, _Code}} ->
+            reset
     after 5000 ->
         Acc
     end.
