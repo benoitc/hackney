@@ -60,6 +60,11 @@
 
 -include("hackney_lib.hrl").
 
+%% Local bounds on a chunk-size line (RFC 9112 7.1 sets none): its length
+%% with extensions, and the hex digits of the size (16 is 2^64 - 1).
+-define(MAX_CHUNK_LINE, 4096).
+-define(MAX_CHUNK_SIZE_DIGITS, 16).
+
 
 -type parser() :: #hparser{}.
 -export_type([parser/0]).
@@ -464,10 +469,13 @@ transfer_decode(Data, St=#hparser{
     {chunk_ok, Chunk, Rest} ->
       {ok, Chunk, St#hparser{buffer=Rest,
         body_state={stream, TransferDecode, {0, 0}, ContentDecode}}};
+    {chunk_part, Part, TransferState2, Rest} ->
+      {ok, Part, St#hparser{buffer=Rest,
+        body_state={stream, TransferDecode, TransferState2, ContentDecode}}};
     more ->
       {more, St#hparser{buffer=Data}, Buf};
-    {more, TransferState2} ->
-      {more, St#hparser{buffer=Data, body_state={stream, TransferDecode, TransferState2, ContentDecode}}, Buf};
+    {more, TransferState2, Rest} ->
+      {more, St#hparser{buffer=Rest, body_state={stream, TransferDecode, TransferState2, ContentDecode}}, Buf};
     {done, Rest} ->
       {done, Rest};
     {done, Data2, _Rest} ->
@@ -493,35 +501,67 @@ content_decode(ContentDecode, Data, St) ->
 
 
 %% @doc Decode a stream of chunks.
+%%
+%% Chunk data is handed out as it arrives rather than once the whole chunk
+%% is buffered, so memory stays bounded by one read and a body cap such as
+%% max_body_size is checked as the body grows: a peer declaring one huge
+%% chunk can no longer make us buffer all of it. `{remaining, R}' means R
+%% data bytes of the current chunk are still to come, then its CRLF; any
+%% other state is at a chunk-size line.
 -spec te_chunked(binary(), any())
     -> done
   | {chunk_done, binary()}
   | {chunk_ok, binary(), binary()}
+  | {chunk_part, binary(), {remaining, non_neg_integer()}, binary()}
   | more
-  | {more, {need, pos_integer()}}
+  | {more, {remaining, non_neg_integer()} | {0, 0}, binary()}
   | {error, invalid_chunk_size | poorly_formatted_chunked_size}.
+te_chunked(Data, {remaining, R}) ->
+  te_chunk_data(Data, R);
 te_chunked(<<>>, _) ->
   done;
-te_chunked(Data, {need, Need} = State) when byte_size(Data) < Need ->
-  {more, State};
 te_chunked(Data, _) ->
   case read_size(Data) of
     {ok, 0, Rest} ->
       {chunk_done, Rest};
+    {ok, Size, <<>>} ->
+      {more, {remaining, Size}, <<>>};
     {ok, Size, Rest} ->
-      case read_chunk(Rest, Size) of
-        {ok, Chunk, Rest1} ->
-          {chunk_ok, Chunk, Rest1};
-        eof ->
-          {more, {need, byte_size(Data) - byte_size(Rest) + Size + 2}};
-        {error, _} = Error ->
-          Error
-      end;
+      te_chunk_data(Rest, Size);
+    eof when byte_size(Data) > ?MAX_CHUNK_LINE ->
+      %% RFC 9112 7.1 puts no bound on the size line or its extensions; we
+      %% do, so an endless line is not buffered (and rescanned) forever.
+      {error, invalid_chunk_size};
     eof ->
       more;
     {error, _} = Error ->
       Error
   end.
+
+%% R data bytes of the current chunk are still to come, then its CRLF.
+te_chunk_data(Data, R) when byte_size(Data) >= R + 2 ->
+  case Data of
+    <<Chunk:R/binary, "\r\n", Rest/binary>> when R > 0 ->
+      {chunk_ok, Chunk, Rest};
+    <<"\r\n">> ->
+      %% The chunk ended with the last read: wait for the next size line.
+      {more, {0, 0}, <<>>};
+    <<"\r\n", Rest/binary>> ->
+      te_chunked(Rest, {0, 0});
+    _ ->
+      {error, poorly_formatted_chunked_size}
+  end;
+te_chunk_data(Data, R) when byte_size(Data) =:= R + 1 ->
+  %% All the data and the first byte of the CRLF.
+  case Data of
+    <<Chunk:R/binary, "\r">> when R > 0 -> {chunk_part, Chunk, {remaining, 0}, <<"\r">>};
+    <<"\r">> -> {more, {remaining, 0}, <<"\r">>};
+    _ -> {error, poorly_formatted_chunked_size}
+  end;
+te_chunk_data(<<>>, R) ->
+  {more, {remaining, R}, <<>>};
+te_chunk_data(Data, R) ->
+  {chunk_part, Data, {remaining, R - byte_size(Data)}, <<>>}.
 
 %% @doc Decode an identity stream.
 -spec te_identity(binary(), {non_neg_integer(), non_neg_integer()})
@@ -568,11 +608,11 @@ read_size(<<$\s, Rest/binary>>, Size, Len) ->
   skip_to_eol(Rest, Size, Len);
 
 %% Parse hex digits directly
-read_size(<<C, Rest/binary>>, Size, Len) when C >= $0, C =< $9 ->
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $0, C =< $9, Len < ?MAX_CHUNK_SIZE_DIGITS ->
   read_size(Rest, (Size bsl 4) bor (C - $0), Len + 1);
-read_size(<<C, Rest/binary>>, Size, Len) when C >= $a, C =< $f ->
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $a, C =< $f, Len < ?MAX_CHUNK_SIZE_DIGITS ->
   read_size(Rest, (Size bsl 4) bor (C - $a + 10), Len + 1);
-read_size(<<C, Rest/binary>>, Size, Len) when C >= $A, C =< $F ->
+read_size(<<C, Rest/binary>>, Size, Len) when C >= $A, C =< $F, Len < ?MAX_CHUNK_SIZE_DIGITS ->
   read_size(Rest, (Size bsl 4) bor (C - $A + 10), Len + 1);
 
 read_size(_, _, _) ->
@@ -587,16 +627,6 @@ skip_to_eol(<<_, Rest/binary>>, Size, Len) ->
   skip_to_eol(Rest, Size, Len);
 skip_to_eol(<<>>, _, _) ->
   eof.
-
-read_chunk(Data, Size) ->
-  case Data of
-    <<Chunk:Size/binary, "\r\n", Rest/binary>> ->
-      {ok, Chunk, Rest};
-    <<_Chunk:Size/binary, Rest/binary>> when byte_size(Rest) >= 2 ->
-      {error, poorly_formatted_chunked_size};
-    _ ->
-      eof
-  end.
 
 %% @private
 

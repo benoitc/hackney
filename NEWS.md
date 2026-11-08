@@ -3,6 +3,16 @@
 Unreleased
 ----------
 
+### Security
+
+- A server could make hackney buffer an unlimited amount of data despite
+  `max_body_size`, by sending an HTTP/1.1 chunked body made of one very
+  large chunk: the limit was only checked once a whole chunk had arrived.
+  Chunk data is now handed on as it arrives, so the limit holds and
+  streamed reads no longer wait for the end of a chunk. A chunk-size line
+  longer than 4096 bytes or a size of more than 16 hex digits is now
+  refused.
+
 ### Changed
 
 - An HTTP/2 or HTTP/3 request made when the connection is at the server's
