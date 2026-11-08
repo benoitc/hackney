@@ -2636,30 +2636,8 @@ stream_body_fun(Transport, Socket, {Fun, State}) when is_function(Fun, 1) ->
     end.
 
 %% @private Stream body from function for HTTP/3
-stream_body_fun_h3(ConnRef, StreamId, Fun) when is_function(Fun, 0) ->
-    case Fun() of
-        {ok, Data} ->
-            case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h3(ConnRef, StreamId, Fun);
-                Error -> Error
-            end;
-        eof ->
-            ok;
-        {error, _} = Error ->
-            Error
-    end;
-stream_body_fun_h3(ConnRef, StreamId, {Fun, State}) when is_function(Fun, 1) ->
-    case Fun(State) of
-        {ok, Data, NewState} ->
-            case hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(Data), false) of
-                ok -> stream_body_fun_h3(ConnRef, StreamId, {Fun, NewState});
-                Error -> Error
-            end;
-        eof ->
-            ok;
-        {error, _} = Error ->
-            Error
-    end.
+stream_body_fun_h3(ConnRef, StreamId, Fun) ->
+    hackney_h3:send_body_fun(ConnRef, StreamId, Fun).
 
 %% @private Get default User-Agent
 default_ua() ->
@@ -3615,6 +3593,8 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
         build_h2_request_headers(Method, Path, Headers, Data),
     BodyBin = case Body of
         B when is_binary(B) -> B;
+        F when is_function(F, 0) -> F;
+        {F, _State} = FS when is_function(F, 1) -> FS;
         L -> iolist_to_binary(L)
     end,
     %% once-mode async pulls response chunks via stream_next/1: open the
@@ -3637,7 +3617,7 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
                         %% Block on flow control so bodies larger than the
                         %% peer's window wait for WINDOW_UPDATE instead of
                         %% failing with send_buffer_full.
-                        case h2_send_data(H2Conn, SId, BodyBin, true, SendTimeout) of
+                        case h2_send_body(H2Conn, SId, BodyBin, SendTimeout) of
                             ok -> {ok, SId};
                             {error, _} = E1 -> E1
                         end;
@@ -3758,6 +3738,21 @@ do_h2_send_data(H2Conn, StreamId, Bin, EndStream, nonblock) ->
     h2_connection:send_data(H2Conn, StreamId, Bin, EndStream);
 do_h2_send_data(H2Conn, StreamId, Bin, EndStream, Timeout) ->
     h2_connection:send_data(H2Conn, StreamId, Bin, EndStream, #{block => Timeout}).
+
+%% @private Send a one-shot request body, ending the stream. A fun body is
+%% sent as it yields, then END_STREAM; if it fails part way the stream is
+%% reset, so the server does not wait for the rest.
+h2_send_body(H2Conn, StreamId, Body, SendTimeout) when is_binary(Body) ->
+    h2_send_data(H2Conn, StreamId, Body, true, SendTimeout);
+h2_send_body(H2Conn, StreamId, Fun, SendTimeout) ->
+    Result = case stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout) of
+        ok -> h2_send_data(H2Conn, StreamId, <<>>, true, SendTimeout);
+        {error, _} = Error -> Error
+    end,
+    case Result of
+        ok -> ok;
+        {error, _} -> _ = cancel_h2_stream(H2Conn, StreamId), Result
+    end.
 
 %% @private Drain a body-producer fun, sending each chunk as a non-final h2 DATA
 %% frame. Mirrors stream_body_fun/3 (HTTP/1.1) and stream_body_fun_h3/3.
