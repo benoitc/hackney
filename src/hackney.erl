@@ -400,10 +400,9 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
           %% an exact match of the TLS options hash (tls_key in Options)
           connect_pool_ssl(Transport, Host, Port, Options, FinalSslOpts, PoolHandler);
         false ->
-          %% Always checkout as TCP - pool only stores TCP connections
-          case PoolHandler:checkout(Host, Port, hackney_tcp, Options) of
+          case PoolHandler:checkout(Host, Port, pool_transport(Transport), Options) of
             {ok, PoolRef, ConnPid} ->
-              %% Got TCP connection - upgrade to SSL if needed
+              %% Upgrade to SSL if this is an HTTPS request
               case maybe_upgrade_ssl(Transport, ConnPid, FinalSslOpts) of
                 ok ->
                   %% Check if HTTP/2 was negotiated, register for multiplexing
@@ -423,6 +422,12 @@ connect_pool_new(Transport, Host, Port, Options, FinalSslOpts, PoolHandler) ->
     {error, timeout} ->
       {error, checkout_timeout}
   end.
+
+%% @private Transport the pool dials for a request. The pool does not store
+%% TLS sockets: HTTPS dials TCP and is upgraded in place. Every other
+%% transport, such as a unix domain socket, is dialled as itself.
+pool_transport(hackney_ssl) -> hackney_tcp;
+pool_transport(Transport) -> Transport.
 
 %% @private SSL-pooling checkout. A `ready' conn is an already-upgraded
 %% HTTPS/1.1 connection reused on an exact tls_key match; it was registered
@@ -1357,7 +1362,9 @@ cookies(Headers) ->
                       case hackney_cookie:parse_cookie(V) of
                         {error, _} -> Acc;
                         [{Name, _} | _]=Cookie ->
-                          [{Name, Cookie} | Acc]
+                          [{Name, Cookie} | Acc];
+                        %% An empty Set-Cookie value holds no cookie.
+                        [] -> Acc
                       end;
                     _ ->
                       Acc

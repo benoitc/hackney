@@ -2734,12 +2734,16 @@ read_full_body(#conn_data{status = Status} = Data, Acc) when Status =:= 204; Sta
     %% Force connection close to avoid corrupting subsequent requests if
     %% a misbehaving server sent Content-Length or body data
     {ok, Acc, Data#conn_data{socket = undefined}};
-read_full_body(#conn_data{max_body_size = Max} = Data, Acc) ->
+read_full_body(Data, Acc) ->
+    read_full_body(Data, [Acc], byte_size(Acc)).
+
+read_full_body(#conn_data{max_body_size = Max} = Data, Acc, Size) ->
     case stream_body_chunk(Data) of
         {ok, Chunk, NewData} ->
-            case body_within_limit(byte_size(Acc) + byte_size(Chunk), Max) of
+            Size1 = Size + byte_size(Chunk),
+            case body_within_limit(Size1, Max) of
                 true ->
-                    read_full_body(NewData, <<Acc/binary, Chunk/binary>>);
+                    read_full_body(NewData, [Chunk | Acc], Size1);
                 false ->
                     %% The rest of the body stays unread on the socket; the
                     %% caller's error path drops the connection.
@@ -2747,13 +2751,16 @@ read_full_body(#conn_data{max_body_size = Max} = Data, Acc) ->
             end;
         {done, NewData} ->
             %% Body complete - apply decompression if needed
-            maybe_decompress_body(Acc, NewData);
+            maybe_decompress_body(acc_to_binary(Acc), NewData);
         {error, closed} ->
             %% Cut short: hand back what did arrive.
-            {error, {closed, Acc}};
+            {error, {closed, acc_to_binary(Acc)}};
         {error, Reason} ->
             {error, Reason}
     end.
+
+acc_to_binary(Acc) ->
+    iolist_to_binary(lists:reverse(Acc)).
 
 %% @private Per-request body cap: max_body_size, with max_body (the 1.x
 %% option name) accepted as an alias.

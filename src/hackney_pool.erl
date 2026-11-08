@@ -729,11 +729,11 @@ handle_cast({set_timeout, NewTimeout}, State) ->
     {noreply, State#state{keepalive_timeout=Capped}};
 
 handle_cast({prewarm, Host, Port}, #state{prewarm_count=Count}=State) ->
-    State2 = do_prewarm(Host, Port, Count, State),
+    State2 = do_prewarm(connection_key(Host, Port, hackney_tcp), Count, State),
     {noreply, State2};
 
 handle_cast({prewarm, Host, Port, Count}, State) ->
-    State2 = do_prewarm(Host, Port, Count, State),
+    State2 = do_prewarm(connection_key(Host, Port, hackney_tcp), Count, State),
     {noreply, State2};
 
 handle_cast({prewarm_checkin, Pid, Key}, State) ->
@@ -950,8 +950,12 @@ connection_key(Host, Port, Transport) ->
     connection_key(Host, Port, Transport, default).
 
 connection_key(Host0, Port, Transport, TlsKey) ->
-    Host = string:lowercase(Host0),
-    {Host, Port, Transport, TlsKey}.
+    {normalize_host(Host0, Transport), Port, Transport, TlsKey}.
+
+%% @private The pool dials the host stored in the key. Hostnames are
+%% case-insensitive; a unix domain socket path is not.
+normalize_host(Path, hackney_local_tcp) -> Path;
+normalize_host(Host, _Transport) -> string:lowercase(Host).
 
 %% @private Host and port of a pool connection key.
 key_host_port({Host, Port, _Transport, _TlsKey}) ->
@@ -1265,10 +1269,11 @@ keepalive_ready(Info) ->
         maps:get(ready, Info, false) =:= true.
 
 %% @private Close branch of a checkin: drop the monitor and keep the host's
-%% TCP prewarm warm (the replacement for a closed conn is a TCP conn that
-%% gets upgraded on its next SSL checkout). The conn itself is stopped by
-%% the caller: stop_conn for async checkin, a stop cast for sync checkin
-%% where the conn is blocked waiting on the pool's reply.
+%% prewarm warm on the transport the conn was dialled with (the replacement
+%% for a closed HTTPS conn is a TCP conn that gets upgraded on its next SSL
+%% checkout). The conn itself is stopped by the caller: stop_conn for async
+%% checkin, a stop cast for sync checkin where the conn is blocked waiting on
+%% the pool's reply.
 checkin_close(Pid, Key, InUse2, State) ->
     #state{pid_monitors=PidMonitors} = State,
     PidMonitors2 = case maps:take(Pid, PidMonitors) of
@@ -1278,9 +1283,15 @@ checkin_close(Pid, Key, InUse2, State) ->
         error -> PidMonitors
     end,
     State2 = State#state{in_use=InUse2, pid_monitors=PidMonitors2},
-    {Host, Port} = key_host_port(Key),
-    TcpKey = connection_key(Host, Port, hackney_tcp),
-    maybe_maintain_prewarm(TcpKey, activate_host(TcpKey, State2)).
+    DialKey = dial_key(Key),
+    maybe_maintain_prewarm(DialKey, activate_host(DialKey, State2)).
+
+%% @private Key of the plain bucket a conn under Key was dialled into: an
+%% HTTPS conn was dialled as TCP, any other conn as its own transport.
+dial_key({Host, Port, hackney_ssl, _TlsKey}) ->
+    connection_key(Host, Port, hackney_tcp);
+dial_key({Host, Port, Transport, _TlsKey}) ->
+    connection_key(Host, Port, Transport).
 
 %% @private Pool branch of a checkin: hand ownership to the pool and store
 %% the conn under its checkout key (TCP or SSL bucket).
@@ -1429,11 +1440,12 @@ do_unregister_h3(Pid, State) ->
     State#state{h3_connections = H3Conns2, pid_monitors = PidMonitors2}.
 
 %% @private Prewarm connections to a host
-%% Creates connections up to Count if there are fewer available.
-%% Only creates TCP connections (prewarm doesn't apply to SSL).
-do_prewarm(Host, Port, Count, State) ->
+%% Creates connections up to Count if there are fewer available, dialled
+%% with the transport of Key. Key is a plain bucket key: an HTTPS host is
+%% prewarmed through its TCP key (prewarm doesn't apply to SSL).
+do_prewarm(Key, Count, State) ->
     #state{name=PoolName, available=Available, keepalive_timeout=IdleTimeout} = State,
-    Key = connection_key(Host, Port, hackney_tcp),
+    {Host, Port} = key_host_port(Key),
     CurrentCount = case maps:find(Key, Available) of
         {ok, Pids} -> length(Pids);
         error -> 0
@@ -1448,7 +1460,7 @@ do_prewarm(Host, Port, Count, State) ->
             %% Create connections in background to not block the pool
             PoolPid = self(),
             spawn(fun() ->
-                prewarm_connections(PoolPid, Host, Port, Needed, IdleTimeout)
+                prewarm_connections(PoolPid, Key, Needed, IdleTimeout)
             end),
             State2;
         false ->
@@ -1474,8 +1486,7 @@ maybe_maintain_prewarm(Key, State) ->
             end,
             case CurrentCount < PrewarmCount of
                 true ->
-                    {Host, Port} = key_host_port(Key),
-                    do_prewarm(Host, Port, PrewarmCount, State);
+                    do_prewarm(Key, PrewarmCount, State);
                 false ->
                     State
             end;
@@ -1484,13 +1495,14 @@ maybe_maintain_prewarm(Key, State) ->
     end.
 
 %% @private Create prewarm connections (runs in separate process)
-prewarm_connections(_PoolPid, _Host, _Port, 0, _IdleTimeout) ->
+prewarm_connections(_PoolPid, _Key, 0, _IdleTimeout) ->
     ok;
-prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
+prewarm_connections(PoolPid, Key, Count, IdleTimeout) ->
+    {Host, Port, Transport, _TlsKey} = Key,
     ConnOpts = #{
         host => Host,
         port => Port,
-        transport => hackney_tcp,
+        transport => Transport,
         connect_timeout => 5000,
         recv_timeout => 5000,
         idle_timeout => IdleTimeout,
@@ -1504,15 +1516,14 @@ prewarm_connections(PoolPid, Host, Port, Count, IdleTimeout) ->
             case connect_connection(Pid, ?PREWARM_CONNECT_TIMEOUT) of
                 ok ->
                     %% Checkin the new connection to the pool
-                    gen_server:cast(PoolPid, {prewarm_checkin, Pid,
-                                              connection_key(Host, Port, hackney_tcp)});
+                    gen_server:cast(PoolPid, {prewarm_checkin, Pid, Key});
                 {error, _Reason} ->
                     stop_conn(Pid)
             end;
         {error, _Reason} ->
             ok
     end,
-    prewarm_connections(PoolPid, Host, Port, Count - 1, IdleTimeout).
+    prewarm_connections(PoolPid, Key, Count - 1, IdleTimeout).
 
 handle_stats(State) ->
     #state{name=PoolName, max_connections=Max, available=Available,
