@@ -92,7 +92,9 @@ h3_send_body_test_() ->
         {"stream_body after an upload", fun test_h3_upload_stream_body/1},
         {"upload through hackney:request", fun test_h3_upload_public_api/1},
         {"start_response after the response arrived", fun test_h3_upload_response_first/1},
-        {"body/1 on a reset stream returns an error", fun test_h3_body_stream_reset/1}
+        {"body/1 on a reset stream returns an error", fun test_h3_body_stream_reset/1},
+        {"a request reset after its headers returns an error",
+         fun test_h3_request_reset_mid_body/1}
     ]).
 
 test_h3_send_body_chunks(Server) ->
@@ -153,6 +155,29 @@ test_h3_body_stream_reset(Server) ->
             {body, Result} -> ?assertMatch({error, {stream_reset, _}}, Result)
         after 15000 ->
             error(body_not_answered)
+        end,
+        hackney:close(ConnPid)
+    after
+        unregister(hackney_h3_test_reset)
+    end.
+
+%% A plain request whose stream the server resets after sending headers and
+%% part of the body gets an error at once, not after recv_timeout.
+test_h3_request_reset_mid_body(Server) ->
+    true = register(hackney_h3_test_reset, self()),
+    try
+        {ok, ConnPid} = connect(Server),
+        Parent = self(),
+        spawn_link(fun() ->
+            Parent ! {request, hackney_conn:request(ConnPid, <<"GET">>, <<"/reset">>,
+                                                    [], <<>>, 30000, [])}
+        end),
+        Handler = receive {reset_ready, H} -> H after 15000 -> error(no_reset_handler) end,
+        Handler ! reset,
+        receive
+            {request, Result} -> ?assertEqual({error, {stream_reset, 16#010c}}, Result)
+        after 5000 ->
+            error(request_not_answered)
         end,
         hackney:close(ConnPid)
     after

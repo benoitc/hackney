@@ -33,6 +33,14 @@ Unreleased
 
 ### Fixed
 
+- A request the server refused without processing it, because of a
+  GOAWAY, an HTTP/2 refused stream or an HTTP/3 rejected request, is now
+  sent once more on a fresh connection, whatever its method. It used to
+  fail, and most callers did not know that error was safe to retry. A body
+  given as a function is not sent twice. Based on work by Lennart Schoch
+  (#971).
+- An HTTP/3 request whose stream the server reset after sending headers
+  waited until its timeout. It now fails at once with the reset reason.
 - `wt_close/2` with a reason longer than 1024 bytes returned `ok` but
   never closed the session. It now returns an error and the session stays
   open. The same now applies to an error code over 32 bits or a reason

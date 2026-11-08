@@ -4990,6 +4990,11 @@ handle_h3_stream_reset(StreamId, ErrorCode, Streams, Data) ->
             UpdatedStreams = maps:remove(StreamId, Streams),
             {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
              [{reply, From, {error, {stream_reset, ErrorCode}}}]};
+        {From, {receiving_body, _Status, _Headers, _Body}} ->
+            %% Sync request whose headers came and whose body was cut short.
+            UpdatedStreams = maps:remove(StreamId, Streams),
+            {keep_state, Data#conn_data{h3_streams = UpdatedStreams, request_from = undefined},
+             [{reply, From, {error, {stream_reset, ErrorCode}}}]};
         {_, {streaming_body_async, _AsyncMode, StreamTo, Ref, _Status, _Headers}} ->
             %% Async stream - send error to StreamTo
             StreamTo ! {hackney_response, Ref, {error, {stream_reset, ErrorCode}}},
