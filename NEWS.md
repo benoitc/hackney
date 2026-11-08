@@ -43,6 +43,14 @@ Unreleased
 
 ### Fixed
 
+- A request the server refused without processing it, because of a
+  GOAWAY, an HTTP/2 refused stream or an HTTP/3 rejected request, is now
+  sent once more on a fresh connection, whatever its method. It used to
+  fail, and most callers did not know that error was safe to retry. A body
+  given as a function is not sent twice. Based on work by Lennart Schoch
+  (#971).
+- An HTTP/3 request whose stream the server reset after sending headers
+  waited until its timeout. It now fails at once with the reset reason.
 - A request body given as a function crashed the connection on HTTP/2
   and HTTP/3; it worked only on HTTP/1.1. It is now sent as the function
   yields it, on all three. If the function fails part way, you get its

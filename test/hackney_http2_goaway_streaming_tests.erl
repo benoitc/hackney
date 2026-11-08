@@ -96,7 +96,8 @@ accepted_streamed_response_completes() ->
                             Self ! {self(), R}
                         end),
         timer:sleep(300),
-        ?assertEqual({error, {goaway, no_error}}, fetch(Url)),
+        %% The plain request is refused and goes again on a fresh connection.
+        ?assertEqual({ok, 200, <<"1">>}, fetch(Url)),
         ?assertEqual({ok, <<"1">>}, await(P1))
     after
         hackney_h2_goaway_server:stop(Server)
