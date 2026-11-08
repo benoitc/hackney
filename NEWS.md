@@ -31,6 +31,16 @@ Unreleased
   never closed the session. It now returns an error and the session stays
   open. The same now applies to an error code over 32 bits or a reason
   that is not valid UTF-8, which the drafts forbid.
+- Reading a chunked HTTP/1.1 body no longer slows down with large chunks.
+  The time grew with the square of the chunk size: a 16 MB body sent as
+  one chunk took about 10 seconds on loopback, and now takes about 25 ms
+  (#998, #378).
+- Pooled requests to `http+unix` URLs now work. They always failed with
+  `nxdomain`, so only unpooled requests could reach a unix socket. Socket
+  paths with capital letters also work now (#997).
+- `hackney:cookies/1` no longer crashes when a response has an empty
+  `Set-Cookie` header; that header is skipped and the other cookies are
+  returned (#994).
 
 
 4.9.1 - 2026-10-26
