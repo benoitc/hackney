@@ -4,11 +4,15 @@
 %%% It advertises SETTINGS_MAX_CONCURRENT_STREAMS and answers nothing on its
 %%% own: each complete request is reported to the test process as
 %%%   {limit_server, ConnPid, request, StreamId}
+%%% then, with the request body it received, as
+%%%   {limit_server, ConnPid, body, StreamId, Body}
 %%% and answered (200, body = the stream id) when the test sends ConnPid
 %%%   {release, StreamId}
 %%% The test can also send ConnPid
 %%%   {max_streams, N}   a new SETTINGS frame with that limit
 %%%   goaway             GOAWAY(last stream seen, NO_ERROR)
+%%% A stream the client resets is reported as
+%%%   {limit_server, ConnPid, rst_stream, StreamId}
 %%% Every connection reports to the process that called start/1.
 -module(hackney_h2_limit_server).
 
@@ -64,7 +68,7 @@ serve(TSock, Test, MaxStreams) ->
                     send(Sock, h2_frame:settings([{max_concurrent_streams, MaxStreams}])),
                     ok = ssl:setopts(Sock, [{active, once}]),
                     loop(Sock, Rest, #{test => Test, enc => h2_hpack:new_context(),
-                                       last => 0});
+                                       last => 0, bodies => #{}});
                 _ -> ok
             end;
         _ -> ok
@@ -114,13 +118,19 @@ handle(_Sock, {goaway, _, _, _}, _St) -> stop;
 handle(_Sock, {headers, Sid, _Block, EndStream, _EndHeaders}, St) ->
     {continue, on_request_frame(Sid, EndStream, St#{last := max(Sid, maps:get(last, St))})};
 %% decode/1 adds the flow-controlled size as a fifth element.
-handle(_Sock, {data, Sid, _Bin, EndStream, _FlowControlled}, St) ->
-    {continue, on_request_frame(Sid, EndStream, St)};
+handle(_Sock, {data, Sid, Bin, EndStream, _FlowControlled}, #{bodies := Bodies} = St) ->
+    Body = maps:get(Sid, Bodies, <<>>),
+    {continue, on_request_frame(Sid, EndStream,
+                                St#{bodies := Bodies#{Sid => <<Body/binary, Bin/binary>>}})};
+handle(_Sock, {rst_stream, Sid, _Code}, #{test := Test} = St) ->
+    Test ! {limit_server, self(), rst_stream, Sid},
+    {continue, St};
 handle(_Sock, _Other, St) -> {continue, St}.
 
-on_request_frame(Sid, true, #{test := Test} = St) ->
+on_request_frame(Sid, true, #{test := Test, bodies := Bodies} = St) ->
     Test ! {limit_server, self(), request, Sid},
-    St;
+    Test ! {limit_server, self(), body, Sid, maps:get(Sid, Bodies, <<>>)},
+    St#{bodies := maps:remove(Sid, Bodies)};
 on_request_frame(_Sid, false, St) ->
     St.
 

@@ -42,6 +42,7 @@
     send_request/6,
     send_request_headers/5,
     send_body_chunk/4,
+    send_body_fun/3,
     finish_send_body/3,
     %% Stream management
     get_stream_state/2,
@@ -330,6 +331,24 @@ await_response(ConnRef, StreamId) ->
 %% Returns {ok, StreamId, UpdatedStreams} or {error, Reason}.
 -spec send_request(h3_conn(), method(), binary(), binary(), headers(), binary()) ->
     {ok, stream_id(), streams_map()} | {error, term()}.
+send_request(ConnRef, Method, Host, Path, Headers, Body)
+  when is_function(Body, 0); is_tuple(Body), is_function(element(1, Body), 1) ->
+    %% A fun body: open the stream, send what the fun yields, then FIN.
+    AllHeaders = build_request_headers(Method, Host, Path, Headers),
+    case send_request(ConnRef, AllHeaders, false) of
+        {ok, StreamId} ->
+            case send_body_fun(ConnRef, StreamId, Body) of
+                ok ->
+                    case send_data(ConnRef, StreamId, <<>>, true) of
+                        ok -> {ok, StreamId, #{StreamId => {undefined, waiting_headers}}};
+                        {error, _} = Error -> abort_stream(ConnRef, StreamId, Error)
+                    end;
+                {error, _} = Error ->
+                    abort_stream(ConnRef, StreamId, Error)
+            end;
+        {error, _} = Error ->
+            Error
+    end;
 send_request(ConnRef, Method, Host, Path, Headers, Body) ->
     AllHeaders = build_request_headers(Method, Host, Path, Headers),
     HasBody = Body =/= <<>> andalso Body =/= [],
@@ -366,6 +385,42 @@ send_request_headers(ConnRef, Method, Host, Path, Headers) ->
     ok | {error, term()}.
 send_body_chunk(ConnRef, StreamId, Data, Fin) ->
     send_data(ConnRef, StreamId, Data, Fin).
+
+%% @doc Send the body a fun yields on an open stream, without FIN: a
+%% `fun() -> {ok, Data} | eof | {error, Reason}' or a
+%% `{fun(State) -> {ok, Data, NewState} | eof | {error, Reason}, State}'.
+-spec send_body_fun(h3_conn(), stream_id(), function() | {function(), term()}) ->
+    ok | {error, term()}.
+send_body_fun(ConnRef, StreamId, Fun) when is_function(Fun, 0) ->
+    case Fun() of
+        {ok, Data} ->
+            case send_data(ConnRef, StreamId, iolist_to_binary(Data), false) of
+                ok -> send_body_fun(ConnRef, StreamId, Fun);
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end;
+send_body_fun(ConnRef, StreamId, {Fun, State}) when is_function(Fun, 1) ->
+    case Fun(State) of
+        {ok, Data, NewState} ->
+            case send_data(ConnRef, StreamId, iolist_to_binary(Data), false) of
+                ok -> send_body_fun(ConnRef, StreamId, {Fun, NewState});
+                Error -> Error
+            end;
+        eof ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% The body could not be sent in full: reset the stream so the server does
+%% not wait for the rest (H3_REQUEST_CANCELLED).
+abort_stream(ConnRef, StreamId, Error) ->
+    _ = reset_stream(ConnRef, StreamId, 16#10c),
+    Error.
 
 %% @doc Finish sending body (close stream for writing).
 -spec finish_send_body(h3_conn(), stream_id(), streams_map()) ->

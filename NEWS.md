@@ -3,6 +3,16 @@
 Unreleased
 ----------
 
+### Security
+
+- A server could make hackney buffer an unlimited amount of data despite
+  `max_body_size`, by sending an HTTP/1.1 chunked body made of one very
+  large chunk: the limit was only checked once a whole chunk had arrived.
+  Chunk data is now handed on as it arrives, so the limit holds and
+  streamed reads no longer wait for the end of a chunk. A chunk-size line
+  longer than 4096 bytes or a size of more than 16 hex digits is now
+  refused.
+
 ### Changed
 
 - An HTTP/2 or HTTP/3 request made when the connection is at the server's
@@ -41,6 +51,10 @@ Unreleased
   (#971).
 - An HTTP/3 request whose stream the server reset after sending headers
   waited until its timeout. It now fails at once with the reset reason.
+- A request body given as a function crashed the connection on HTTP/2
+  and HTTP/3; it worked only on HTTP/1.1. It is now sent as the function
+  yields it, on all three. If the function fails part way, you get its
+  error and the half-sent request is cancelled (#1001).
 - `wt_close/2` with a reason longer than 1024 bytes returned `ok` but
   never closed the session. It now returns an error and the session stays
   open. The same now applies to an error code over 32 bits or a reason
