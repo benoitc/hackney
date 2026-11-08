@@ -142,6 +142,15 @@ Like HTTP/2, HTTP/3 multiplexes requests as streams on a single QUIC connection:
                             [], <<>>, [{protocols, [http3]}]).
 ```
 
+### At the Server's Stream Limit
+
+A QUIC server caps how many requests it serves at once on one connection.
+When the connection is at that cap, a new request waits for a stream
+instead of failing, and goes out as soon as one is free, in the order the
+requests arrived. The wait and its errors are the same as for HTTP/2: up to
+`checkout_timeout` (or `connect_timeout`), then `{error, checkout_timeout}`;
+`{error, {goaway, no_error}}` if the server sends GOAWAY while it waits.
+
 ### Architecture
 
 ```

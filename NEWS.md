@@ -5,6 +5,12 @@ Unreleased
 
 ### Changed
 
+- An HTTP/2 or HTTP/3 request made when the connection is at the server's
+  limit on concurrent streams now waits for a free stream instead of
+  failing at once. Many servers allow 100 or 128 at a time, so a
+  burst of requests used to fail where HTTP/1.1 would have queued them. A
+  request waits up to `checkout_timeout`, then fails with
+  `checkout_timeout`. Based on work by Lennart Schoch (#972).
 - quic 2.6.1, h2 0.15.0 and webtransport 0.5.3. These bring fixes for an
   HTTP/3 header block that could keep a CPU busy for minutes, and for two
   HTTP/2 denial-of-service attacks (MadeYouReset and SETTINGS flood), plus

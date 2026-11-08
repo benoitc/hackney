@@ -30,7 +30,7 @@
 %%%   anything else          404
 -module(hackney_h3_test_server).
 
--export([start/0, stop/1]).
+-export([start/0, start/1, stop/1]).
 -export([port/1, url/2, host/0]).
 -export([hackney_opts/0, h3_opts/0, conn_opts/1]).
 -export([cert_file/0, ca_file/0, ca_cacerts/0, unused_port/0]).
@@ -41,14 +41,19 @@
 %% @doc Start a server on a free UDP port. Returns the context the other
 %% functions take.
 start() ->
+    start(#{}).
+
+%% @doc Start a server with extra quic_h3:start_server/3 options, such as
+%% `#{quic_opts => #{max_streams_bidi => 1}}'.
+start(Extra) ->
     {ok, _} = application:ensure_all_started(hackney),
     {ok, CertPem} = file:read_file(cert_file()),
     {ok, KeyPem} = file:read_file(filename:join(cert_dir(), "server.key")),
     [{'Certificate', CertDer, _} | _] = public_key:pem_decode(CertPem),
     Name = list_to_atom("hackney_h3_test_server_" ++
                         integer_to_list(erlang:unique_integer([positive]))),
-    Opts = #{cert => CertDer, key => decode_key(KeyPem),
-             handler => fun handle/5},
+    Opts = maps:merge(#{cert => CertDer, key => decode_key(KeyPem),
+                        handler => fun handle/5}, Extra),
     {ok, _Pid} = quic_h3:start_server(Name, 0, Opts),
     {ok, Port} = quic:get_server_port(Name),
     #{name => Name, port => Port}.
