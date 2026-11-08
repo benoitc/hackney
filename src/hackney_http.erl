@@ -462,7 +462,8 @@ transfer_decode(Data, St=#hparser{
     {chunk_done, Rest} ->
       parse_trailers(St#hparser{buffer=Rest, state=on_trailers, body_state=done});
     {chunk_ok, Chunk, Rest} ->
-      {ok, Chunk, St#hparser{buffer=Rest}};
+      {ok, Chunk, St#hparser{buffer=Rest,
+        body_state={stream, TransferDecode, {0, 0}, ContentDecode}}};
     more ->
       {more, St#hparser{buffer=Data}, Buf};
     {more, TransferState2} ->
@@ -497,10 +498,12 @@ content_decode(ContentDecode, Data, St) ->
   | {chunk_done, binary()}
   | {chunk_ok, binary(), binary()}
   | more
-  | {more, {non_neg_integer(), non_neg_integer()}}
+  | {more, {need, pos_integer()}}
   | {error, invalid_chunk_size | poorly_formatted_chunked_size}.
 te_chunked(<<>>, _) ->
   done;
+te_chunked(Data, {need, Need} = State) when byte_size(Data) < Need ->
+  {more, State};
 te_chunked(Data, _) ->
   case read_size(Data) of
     {ok, 0, Rest} ->
@@ -510,7 +513,7 @@ te_chunked(Data, _) ->
         {ok, Chunk, Rest1} ->
           {chunk_ok, Chunk, Rest1};
         eof ->
-          {more, {byte_size(Rest), Size}};
+          {more, {need, byte_size(Data) - byte_size(Rest) + Size + 2}};
         {error, _} = Error ->
           Error
       end;
