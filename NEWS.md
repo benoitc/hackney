@@ -1,7 +1,7 @@
 # NEWS
 
-Unreleased
-----------
+4.10.0 - 2026-11-09
+-------------------
 
 ### Security
 
@@ -21,6 +21,12 @@ Unreleased
   burst of requests used to fail where HTTP/1.1 would have queued them. A
   request waits up to `checkout_timeout`, then fails with
   `checkout_timeout`. Based on work by Lennart Schoch (#972).
+- A request the server refused without processing it, because of a
+  GOAWAY, an HTTP/2 refused stream or an HTTP/3 rejected request, is now
+  sent once more on a fresh connection, whatever its method. It used to
+  fail, and most callers did not know that error was safe to retry. A body
+  given as a function is not sent twice. Based on work by Lennart Schoch
+  (#971).
 - quic 2.6.1, h2 0.15.0 and webtransport 0.5.3. These bring fixes for an
   HTTP/3 header block that could keep a CPU busy for minutes, and for two
   HTTP/2 denial-of-service attacks (MadeYouReset and SETTINGS flood), plus
@@ -43,12 +49,6 @@ Unreleased
 
 ### Fixed
 
-- A request the server refused without processing it, because of a
-  GOAWAY, an HTTP/2 refused stream or an HTTP/3 rejected request, is now
-  sent once more on a fresh connection, whatever its method. It used to
-  fail, and most callers did not know that error was safe to retry. A body
-  given as a function is not sent twice. Based on work by Lennart Schoch
-  (#971).
 - An HTTP/3 request whose stream the server reset after sending headers
   waited until its timeout. It now fails at once with the reset reason.
 - A request body given as a function crashed the connection on HTTP/2
