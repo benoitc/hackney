@@ -77,8 +77,12 @@ merge_ssl_opts(Host, OverrideOpts, Options) ->
     SNI -> SNI
   end,
   %% Check insecure from top-level Options first, then fall back to ssl_options (fixes #786)
+  %% An explicit {verify, verify_none} also skips the default hostname
+  %% verify_fun: OTP still runs a verify_fun under verify_none, so keeping it
+  %% would reject the peer the caller asked not to verify.
   Insecure = proplists:get_value(insecure, Options,
-               proplists:get_value(insecure, OverrideOpts, false)),
+               proplists:get_value(insecure, OverrideOpts, false))
+    orelse proplists:get_value(verify, OverrideOpts) =:= verify_none,
   DefaultOpts = case Insecure of
     true ->
       [{verify, verify_none} | cipher_opts()];

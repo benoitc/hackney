@@ -1,5 +1,18 @@
 # NEWS
 
+Unreleased
+----------
+
+### Fixed
+
+- The `insecure` request option was ignored on HTTPS connections, pooled
+  or not: certificates were still verified, so a server with a self-signed
+  certificate was refused. It now disables verification as documented,
+  for HTTP/1.1, HTTP/2 and HTTP/3.
+- `{verify, verify_none}` in `ssl_options` did not turn off verification:
+  the default hostname check still ran and refused self-signed
+  certificates. It now skips that check.
+
 4.10.0 - 2026-11-09
 -------------------
 
