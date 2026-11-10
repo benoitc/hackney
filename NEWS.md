@@ -14,6 +14,11 @@ Unreleased
   deaths (50 by default) every later request to that host failed with
   `checkout_timeout` until the node restarted. The slot is now released
   (#974).
+- A request that gave up waiting for a pooled connection
+  (`checkout_timeout`) could still be served later by the pool: it opened
+  or reserved a connection nobody used, and freed a per-host slot twice,
+  which let more requests than `max_per_host` run against that host. The
+  pool now skips requests whose caller has stopped waiting.
 
 4.10.1 - 2026-11-10
 -------------------

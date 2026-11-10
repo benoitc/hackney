@@ -137,7 +137,9 @@ do_checkout(Requester, Host, Port, Transport, Opts) ->
     Key = connection_key(Host, Port, Transport),
 
     PoolInfo = {PoolName, Key, Pool, Transport},
-    case gen_server:call(Pool, {checkout, Key, Requester, Opts}, CheckoutTimeout) of
+    case gen_server:call(Pool, {checkout, Key, Requester,
+                                with_deadline(Opts, CheckoutTimeout)},
+                         CheckoutTimeout) of
         {ok, Pid} ->
             {ok, PoolInfo, Pid};
         {new, Pid} ->
@@ -181,7 +183,9 @@ do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
     SslKey = connection_key(Host, Port, Transport, TlsKey),
 
     PoolInfo = {PoolName, SslKey, Pool, Transport},
-    case gen_server:call(Pool, {checkout_ssl, SslKey, Requester, Opts}, CheckoutTimeout) of
+    case gen_server:call(Pool, {checkout_ssl, SslKey, Requester,
+                                with_deadline(Opts, CheckoutTimeout)},
+                         CheckoutTimeout) of
         {ok, Pid, ConnState} ->
             {ok, PoolInfo, Pid, ConnState};
         {new, Pid, needs_upgrade} ->
@@ -194,6 +198,13 @@ do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
         {'EXIT', {timeout, _}} ->
             {error, checkout_timeout}
     end.
+
+%% @private Tag a checkout with the moment its caller stops waiting, as the
+%% head of its options so the pool can match it (see handle_call/3).
+with_deadline(Opts, Timeout) when is_integer(Timeout) ->
+    [{checkout_deadline, erlang:monotonic_time(millisecond) + Timeout} | Opts];
+with_deadline(Opts, _Infinity) ->
+    Opts.
 
 %% @doc Return a connection process to the pool.
 -spec checkin(PoolInfo :: term(), Pid :: pid()) -> ok.
@@ -561,6 +572,18 @@ handle_call({host_stats, Host, Port}, _From, #state{available=Available, in_use=
            (_, _, Acc) -> Acc
         end, 0, Available),
     {reply, {InUseCount, FreeCount}, State};
+
+%% A checkout the pool reaches after its caller's call timed out: that caller
+%% has already released its slot and moved on. Serving it would start or hand
+%% out a conn nobody uses, and release the caller's slot a second time when
+%% the caller dies. Nobody reads this reply. A checkout without a deadline
+%% (any other pool handler) is always served.
+handle_call({Checkout, Key, Requester, [{checkout_deadline, Deadline} | Opts]}, From, State)
+  when Checkout =:= checkout; Checkout =:= checkout_ssl ->
+    case erlang:monotonic_time(millisecond) >= Deadline of
+        true -> {reply, {error, checkout_timeout}, State};
+        false -> handle_call({Checkout, Key, Requester, Opts}, From, State)
+    end;
 
 handle_call({checkout, Key, Requester, Opts}, _From, State) ->
     #state{name=PoolName, max_connections=MaxConn,
