@@ -58,6 +58,10 @@ pool_fault_test_() ->
                fun t_dial_during_slow_dial/1),
       scenario("a requester dying mid-dial releases its slot",
                fun t_requester_dies_while_dialing/1),
+      scenario("a checkout whose caller timed out starts no conn",
+               fun t_stale_checkout_spawns_nothing/1),
+      scenario("a checkout whose caller timed out takes no idle conn",
+               fun t_stale_checkout_takes_no_idle_conn/1),
       scenario("a failed TLS upgrade releases its slot once",
                fun t_upgrade_failure_releases_once/1),
       scenario("a failed TLS upgrade releases its slot once (ssl_pooling)",
@@ -209,6 +213,62 @@ t_requester_dies_while_dialing(Baseline) ->
     ?assertEqual(1, hackney_load_regulation:current(?HOST, ?PORT)),
     exit(Requester, kill),
     wait_until(fun() -> hackney_load_regulation:current(?HOST, ?PORT) =:= 0 end, 2000),
+    assert_pool_healthy(Baseline).
+
+%% A caller whose checkout call timed out has released its slot and moved on,
+%% but its request still sits in the pool's mailbox. When the pool reaches it,
+%% it must not start a conn for it (a conn nobody dials, whose slot the pool
+%% would release a second time when the caller dies).
+t_stale_checkout_spawns_nothing(Baseline) ->
+    stale_checkout(Baseline),
+    ?assertEqual(0, proplists:get_value(free_count, hackney_pool:get_stats(?POOL))).
+
+%% Same, with an idle conn available: the pool must not hand it to a caller
+%% that is no longer waiting, which would keep it checked out until the
+%% caller dies.
+t_stale_checkout_takes_no_idle_conn(Baseline) ->
+    {ok, Info, Idle} = tcp_checkout(),
+    ok = hackney_pool:checkin(Info, Idle),
+    wait_until(fun() ->
+                       proplists:get_value(free_count,
+                                           hackney_pool:get_stats(?POOL)) >= 1
+               end, 2000),
+    stale_checkout(Baseline),
+    ?assertEqual(1, proplists:get_value(free_count, hackney_pool:get_stats(?POOL))).
+
+%% Queue a checkout behind a suspended pool, let its caller time out and
+%% release its slot like hackney:connect_pool_new/6 does, then let the pool
+%% reach it while the caller is still alive. The test holds a second slot on
+%% the host, standing in for another request: it must survive the caller's
+%% death, which a stale checkout served anyway would release a second time.
+stale_checkout(Baseline) ->
+    ok = hackney_load_regulation:reset(?HOST, ?PORT),
+    ok = hackney_load_regulation:acquire(?HOST, ?PORT, 10, 1000),
+    Pool = hackney_pool:find_pool(?POOL),
+    ok = sys:suspend(Pool),
+    Self = self(),
+    Caller = spawn(fun() ->
+                           ok = hackney_load_regulation:acquire(?HOST, ?PORT, 10, 1000),
+                           Opts = [{pool, ?POOL}, {connect_timeout, 2000},
+                                   {checkout_timeout, 100}],
+                           R = hackney_pool:checkout(?HOST, ?PORT, hackney_tcp, Opts),
+                           ok = hackney_load_regulation:release(?HOST, ?PORT),
+                           Self ! {checkout, self(), R},
+                           receive stop -> ok end
+                   end),
+    receive {checkout, Caller, R} -> ?assertEqual({error, checkout_timeout}, R)
+    after 2000 -> erlang:error(checkout_never_timed_out)
+    end,
+    ok = sys:resume(Pool),
+    %% A synchronous call returns once the pool has handled the stale checkout.
+    Stats = hackney_pool:get_stats(?POOL),
+    ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
+    %% No conn was started for the caller: only the idle ones remain.
+    ?assertEqual(Baseline + proplists:get_value(free_count, Stats), conn_count()),
+    exit(Caller, kill),
+    _ = sys:get_state(Pool),
+    ?assertEqual(1, hackney_load_regulation:current(?HOST, ?PORT)),
+    ok = hackney_load_regulation:release(?HOST, ?PORT),
     assert_pool_healthy(Baseline).
 
 %% The listener speaks plain HTTP, so an https request through the pool dials
