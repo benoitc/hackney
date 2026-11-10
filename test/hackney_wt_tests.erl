@@ -97,6 +97,47 @@ wt_close_validation_test_() ->
 %% Integration tests (local HTTP/3 WebTransport echo server)
 %%====================================================================
 
+%% #970: connect_options reach webtransport:connect/4 as `socket_opts' and
+%% `family'; webtransport keeps the UDP options for HTTP/3 and the TCP ones
+%% for HTTP/2. Traced on a dial to a closed port, so no server is needed.
+wt_socket_options_test_() ->
+    [{"socket options and family are passed to webtransport",
+      {timeout, 30, fun() ->
+          Opts = traced_wt_opts([{connect_options, [{ip, {127,0,0,1}}, {nodelay, true},
+                                                    {protocols, [http3]}, {family, inet}]}]),
+          ?assertEqual([{ip, {127,0,0,1}}, {nodelay, true}], maps:get(socket_opts, Opts)),
+          ?assertEqual(inet, maps:get(family, Opts))
+      end}},
+     {"without connect_options nothing is added",
+      {timeout, 30, fun() ->
+          Opts = traced_wt_opts([]),
+          ?assertNot(maps:is_key(socket_opts, Opts)),
+          ?assertNot(maps:is_key(family, Opts))
+      end}}].
+
+%% The options map hackney hands to webtransport:connect/4.
+traced_wt_opts(Extra) ->
+    {ok, _} = application:ensure_all_started(hackney),
+    Self = self(),
+    Tracer = spawn(fun() -> receive {trace, _, call, {webtransport, connect, Args}} ->
+                                Self ! {wt_args, Args}
+                            after 10000 -> ok
+                            end
+                   end),
+    {module, webtransport} = code:ensure_loaded(webtransport),
+    1 = erlang:trace_pattern({webtransport, connect, 4}, true, [global]),
+    _ = erlang:trace(new_processes, true, [call, {tracer, Tracer}]),
+    try
+        _ = hackney:wt_connect("https://localhost:1/wt",
+                               [{verify, verify_none}, {connect_timeout, 500} | Extra]),
+        receive {wt_args, [_Host, _Port, _Path, Opts]} -> Opts
+        after 10000 -> erlang:error(webtransport_connect_not_called)
+        end
+    after
+        _ = erlang:trace(new_processes, false, [call]),
+        _ = erlang:trace_pattern({webtransport, connect, 4}, false, [global])
+    end.
+
 wt_integration_test_() ->
     {setup,
      fun start_wt_server/0,
@@ -112,6 +153,14 @@ integration_tests(#{ok := true, url := URL}) ->
       {timeout, 30, fun() ->
           {ok, C} = connect(URL),
           ?assert(is_process_alive(C)),
+          ok = hackney:wt_close(C)
+      end}},
+     {"Echo with socket options in connect_options (#970)",
+      {timeout, 30, fun() ->
+          {ok, C} = connect(URL, [{connect_options, [{ip, {127,0,0,1}}, {nodelay, true},
+                                                     {family, inet}]}]),
+          ok = hackney:wt_send(C, {binary, <<"opts">>}),
+          ?assertEqual({ok, {binary, <<"opts">>}}, hackney:wt_recv(C, 10000)),
           ok = hackney:wt_close(C)
       end}},
      {"Default-stream echo (binary)",

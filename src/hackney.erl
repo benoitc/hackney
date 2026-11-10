@@ -1348,7 +1348,21 @@ build_wt_connect_opts(Options, Headers) ->
                 end
             end, Base, [compat_mode, protocols, require_protocol]),
   Base2 = wt_ca_opts(Base1, SslOpts, Verify),
-  wt_cert_opts(Base2, SslOpts).
+  wt_socket_opts(wt_cert_opts(Base2, SslOpts), Options).
+
+%% @private The caller's socket options and address family from
+%% connect_options (#970). webtransport keeps the UDP ones for HTTP/3 and the
+%% TCP ones for HTTP/2; without any the options are as before.
+wt_socket_opts(Base, Options) ->
+  ConnectOpts = proplists:get_value(connect_options, Options, []),
+  Base1 = case hackney_util:dial_socket_opts(ConnectOpts) of
+    [] -> Base;
+    SockOpts -> Base#{socket_opts => SockOpts}
+  end,
+  case proplists:get_value(family, ConnectOpts) of
+    undefined -> Base1;
+    Family -> Base1#{family => Family}
+  end.
 
 %% @private CA trust store selection.
 wt_ca_opts(Base, SslOpts, Verify) ->
