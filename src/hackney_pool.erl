@@ -1091,9 +1091,7 @@ spawn_connection(Key, Owner, Opts, State) ->
 %% before reporting the dial.
 spawn_connection(Host, Port, Transport, Key, Owner, Opts, State) ->
     ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
-    %% Same default as a direct connection and the docs: with infinity a
-    %% pooled request to a server that never answers waited forever (#996).
-    RecvTimeout = proplists:get_value(recv_timeout, Opts, ?RECV_TIMEOUT),
+    RecvTimeout = proplists:get_value(recv_timeout, Opts, infinity),
     IdleTimeout = State#state.keepalive_timeout,
     SslOpts = proplists:get_value(ssl_options, Opts, []),
     ConnectOpts = proplists:get_value(connect_options, Opts, []),

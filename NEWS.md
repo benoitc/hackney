@@ -6,10 +6,9 @@ Unreleased
 ### Fixed
 
 - Closing a connection whose server accepted the request but never
-  answered could hang forever. Connections from the pool had no receive
-  timeout by default, and `close` waited for the pending read to finish.
-  Pooled requests now default to the documented 5 second `recv_timeout`,
-  and `close` interrupts a pending read within about a second (#996).
+  answered could hang: `close` waited for the pending read to end, which
+  on a pooled connection was never. `close` now returns within about a
+  second (#996).
 
 4.10.1 - 2026-11-10
 -------------------

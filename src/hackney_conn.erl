@@ -2996,10 +2996,11 @@ recv_data(#conn_data{socket = Socket} = Data) ->
 %% The read runs in slices of at most ?OWNER_CHECK_INTERVAL. Between them it
 %% looks for the owner's 'DOWN', which is put back in the mailbox so the
 %% state's owner-'DOWN' clause stops the conn once the error unwinds the
-%% current callback, and for an abort_read/1 notice from hackney:close/1,
-%% which ends the read with {error, aborted} so the close is handled at once
-%% instead of after recv_timeout (#996). The whole read still honours
-%% recv_timeout.
+%% current callback, and for an abort_read/1 notice from hackney:close/1.
+%% The caller is closing the conn, so the conn stops right there, as the
+%% stop that close/1 sends next would, rather than after recv_timeout or
+%% never (#996): terminate/3 runs, the exit is normal and no response
+%% message is sent. The whole read still honours recv_timeout.
 owner_recv(#conn_data{transport = Transport, socket = Socket,
                       recv_timeout = Timeout, owner_mon = OwnerMon}) ->
     owner_recv(Transport, Socket, OwnerMon, recv_deadline(Timeout)).
@@ -3010,7 +3011,7 @@ owner_recv(Transport, Socket, OwnerMon, Deadline) ->
         {error, timeout} when Remaining > ?OWNER_CHECK_INTERVAL ->
             receive
                 {?MODULE, abort_read} ->
-                    {error, aborted};
+                    exit(normal);
                 {'DOWN', OwnerMon, process, _, _} = Down when is_reference(OwnerMon) ->
                     self() ! Down,
                     {error, owner_down}

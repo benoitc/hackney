@@ -1,7 +1,7 @@
 %%% #996: closing a connection whose server accepted the request but never
-%%% answers must not hang. The pool used to start connections with an
-%%% infinite recv_timeout, and close/1 had to wait for the passive read in
-%%% progress to end.
+%%% answers must not hang. close/1 used to wait for the passive read in
+%%% progress to end, which on a pooled connection (no recv_timeout by
+%%% default) was never.
 -module(hackney_close_hang_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -18,8 +18,8 @@ close_hang_test_() ->
            {timeout, 30, fun() -> close_async(Url, [{pool, ?POOL}]) end}},
           {"close of an unpooled async request returns before recv_timeout",
            {timeout, 30, fun() -> close_async(Url, [{pool, false}]) end}},
-          {"pooled request without recv_timeout times out",
-           {timeout, 30, fun() -> pooled_default_timeout(Url) end}}]
+          {"close of a pooled sync request returns promptly",
+           {timeout, 30, fun() -> close_sync(Url) end}}]
      end}.
 
 setup() ->
@@ -48,20 +48,34 @@ close_async(Url, PoolOpt) ->
     Ms = erlang:monotonic_time(millisecond) - T0,
     %% recv_timeout is 5000 by default: close must not wait for it.
     ?assert(Ms < 3000),
-    receive {'DOWN', MRef, process, Conn, _} -> ok
+    receive {'DOWN', MRef, process, Conn, Reason} -> ?assertEqual(normal, Reason)
     after 1000 -> ?assert(false)
-    end.
+    end,
+    no_stray_messages(Conn).
 
-pooled_default_timeout(Url) ->
+%% A sync request blocked on the same server, closed from another process:
+%% close returns promptly and the request fails the way a stopped conn
+%% always made it fail.
+close_sync(Url) ->
     ok = listen(),
+    {ok, Conn} = hackney:connect(Url, opts([{pool, ?POOL}])),
     Self = self(),
-    Pid = spawn(fun() -> Self ! {result, self(), hackney:get(Url, [], <<>>, opts([{pool, ?POOL}]))} end),
+    Req = spawn(fun() ->
+                    Self ! {result, hackney:send_request(Conn, {get, <<"/">>, [], <<>>})}
+                end),
     ok = await_request(),
-    receive
-        {result, Pid, R} -> ?assertEqual({error, timeout}, R)
-    after 15000 ->
-        exit(Pid, kill),
-        ?assert(false)
+    T0 = erlang:monotonic_time(millisecond),
+    ok = hackney:close(Conn),
+    ?assert(erlang:monotonic_time(millisecond) - T0 < 3000),
+    receive {result, R} -> ?assertMatch({error, _}, R)
+    after 3000 -> exit(Req, kill), ?assert(false)
+    end,
+    ?assertNot(is_process_alive(Conn)).
+
+%% No message for a closed request reaches the caller.
+no_stray_messages(Conn) ->
+    receive {hackney_response, Conn, _} = M -> ?assertEqual(none, M)
+    after 200 -> ok
     end.
 
 %% The server reports to whichever test is running: setup runs in another
