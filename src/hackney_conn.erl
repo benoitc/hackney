@@ -205,6 +205,11 @@
     %% the server to close). Folded into the keepalive decision at checkin so a
     %% requested close is never reused. Reset on every request send.
     request_close = false :: boolean(),
+    %% How a streamed HTTP/1.1 request body is framed: chunked, or raw bytes
+    %% against the caller's Content-Length with the bytes still owed. Set when
+    %% the headers go out, reset on every request so a reused connection does
+    %% not inherit it.
+    body_framing = chunked :: chunked | {length, non_neg_integer(), non_neg_integer()},
 
     %% Response state
     version :: {integer(), integer()} | undefined,
@@ -1309,6 +1314,7 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         stream_to = undefined,
         inform_fun = InformFun,
         auto_decompress = AutoDecompress,
+        body_framing = chunked,
         max_body_size = max_body_size(ReqOpts),
         recv_timeout = RecvTimeout
     },
@@ -1388,7 +1394,8 @@ connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, Data) ->
         async = false,
         async_ref = undefined,
         stream_to = undefined,
-        max_body_size = max_body_size(ReqOpts)
+        max_body_size = max_body_size(ReqOpts),
+        body_framing = chunked
     },
     %% Transition to streaming_body state
     {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
@@ -1567,34 +1574,17 @@ streaming_body(enter, connected, #conn_data{transport = Transport, socket = Sock
     end;
 
 streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
-    %% Send only headers, then return ok and wait for body chunks
-    #conn_data{host = _Host, port = _Port, transport = Transport, socket = Socket} = Data,
-    %% Build request line and headers (with Transfer-Encoding: chunked for streaming)
+    %% Send only headers, then return ok and wait for body chunks. The
+    %% caller's Content-Length decides the body framing (stream_body_framing/1).
     HeadersObj = hackney_headers:from_list(Headers),
-    %% Add Transfer-Encoding: chunked if not present
-    HeadersWithTE = case hackney_headers:get_value(<<"transfer-encoding">>, HeadersObj) of
-        undefined -> hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
-        _ -> HeadersObj
-    end,
-    RequestLine = build_request_line(Method, Path),
-    %% Serialize through to_iolist/1 so header values are CR/LF sanitized like
-    %% the buffered path; the raw to_list/1 concatenation used before let a
-    %% header value carry its own CRLF and inject extra lines. to_iolist/1
-    %% already appends the terminating blank line.
-    HeaderBlock = hackney_headers:to_iolist(HeadersWithTE),
-    HeadersData = [RequestLine, HeaderBlock],
-    %% Record whether the caller asked the server to close (the request line is
-    %% built here, not via do_send_request/5), for the keepalive decision.
-    RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
-    case Transport:send(Socket, HeadersData) of
-        ok ->
-            From = Data#conn_data.request_from,
-            {keep_state, Data#conn_data{request_from = undefined,
-                                        request_close = RequestClose},
-             [{reply, From, ok}]};
+    case stream_body_framing(HeadersObj) of
+        {ok, HeadersWithTE, Framing} ->
+            send_stream_headers(Method, Path, HeadersWithTE,
+                                Data#conn_data{body_framing = Framing});
         {error, Reason} ->
             From = Data#conn_data.request_from,
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            {next_state, closed, Data#conn_data{request_from = undefined},
+             [{reply, From, {error, Reason}}]}
     end;
 
 %% A GOAWAY refused this upload between two of its caller's calls (see
@@ -1665,19 +1655,19 @@ streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = 
     end;
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
-    #conn_data{transport = Transport, socket = Socket} = Data,
-    %% Send as chunked encoding (HTTP/1.1)
+    #conn_data{transport = Transport, socket = Socket, body_framing = Framing} = Data,
+    %% HTTP/1.1: chunk-framed, or raw against the caller's Content-Length.
     Result = case BodyData of
         Fun when is_function(Fun, 0) ->
-            stream_body_fun(Transport, Socket, Fun);
+            stream_body_fun(Transport, Socket, Fun, Framing);
         {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun(Transport, Socket, {Fun, State});
+            stream_body_fun(Transport, Socket, {Fun, State}, Framing);
         _ ->
-            Transport:send(Socket, encode_chunk(BodyData))
+            send_body_framed(Transport, Socket, BodyData, Framing)
     end,
     case Result of
-        ok ->
-            {keep_state_and_data, [{reply, From, ok}]};
+        {ok, Framing1} ->
+            {keep_state, Data#conn_data{body_framing = Framing1}, [{reply, From, ok}]};
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1702,6 +1692,17 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Da
         {error, Reason} ->
             h2_upload_failed(From, Reason, Data)
     end;
+
+%% HTTP/1.1 raw body against the caller's Content-Length: nothing to send
+%% at the end, but every declared byte must have been sent. A short body
+%% would leave the server waiting for the rest, so the connection closes.
+streaming_body({call, From}, finish_send_body,
+               #conn_data{body_framing = {length, _Declared, 0}} = Data) ->
+    {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
+streaming_body({call, From}, finish_send_body,
+               #conn_data{body_framing = {length, Declared, Remaining}} = Data) ->
+    {next_state, closed, Data,
+     [{reply, From, {error, {content_length_mismatch, Declared, Declared - Remaining}}}]};
 
 streaming_body({call, From}, finish_send_body, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
@@ -2607,6 +2608,67 @@ body_method(Method) ->
 headers_to_binary(Headers) ->
     hackney_headers:to_binary(Headers).
 
+%% @private Send the request line and headers of a streamed HTTP/1.1 request.
+send_stream_headers(Method, Path, HeadersWithTE,
+                    #conn_data{transport = Transport, socket = Socket} = Data) ->
+    RequestLine = build_request_line(Method, Path),
+    %% Serialize through to_iolist/1 so header values are CR/LF sanitized like
+    %% the buffered path; the raw to_list/1 concatenation used before let a
+    %% header value carry its own CRLF and inject extra lines. to_iolist/1
+    %% already appends the terminating blank line.
+    HeaderBlock = hackney_headers:to_iolist(HeadersWithTE),
+    HeadersData = [RequestLine, HeaderBlock],
+    %% Record whether the caller asked the server to close (the request line is
+    %% built here, not via do_send_request/5), for the keepalive decision.
+    RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
+    case Transport:send(Socket, HeadersData) of
+        ok ->
+            From = Data#conn_data.request_from,
+            {keep_state, Data#conn_data{request_from = undefined,
+                                        request_close = RequestClose},
+             [{reply, From, ok}]};
+        {error, Reason} ->
+            From = Data#conn_data.request_from,
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Body framing of a streamed HTTP/1.1 request, from the caller's
+%% headers (RFC 9112 6.1 to 6.3):
+%% - no Transfer-Encoding and no Content-Length: chunked, adding the header;
+%% - a Content-Length alone: the body is written raw and must match it;
+%% - both: Transfer-Encoding wins and Content-Length is dropped. A sender
+%%   must not send both (6.2), a server may reject such a request (6.1),
+%%   Transfer-Encoding overrides Content-Length (6.3), and the body was
+%%   always chunk-framed;
+%% - a Transfer-Encoding alone: chunked, headers as given.
+stream_body_framing(Headers) ->
+    TE = hackney_headers:get_value(<<"transfer-encoding">>, Headers),
+    CL = hackney_headers:get_value(<<"content-length">>, Headers),
+    case {TE, CL} of
+        {undefined, undefined} ->
+            {ok, hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, Headers),
+             chunked};
+        {undefined, _} ->
+            case parse_content_length(CL) of
+                {ok, Len} -> {ok, Headers, {length, Len, Len}};
+                error -> {error, invalid_content_length}
+            end;
+        {_, undefined} ->
+            {ok, Headers, chunked};
+        {_, _} ->
+            {ok, hackney_headers:delete(<<"content-length">>, Headers), chunked}
+    end.
+
+%% @private Content-Length = 1*DIGIT (RFC 9110 8.6); anything else, a sign
+%% or a list of values included, is refused rather than guessed at.
+parse_content_length(Value) ->
+    Bin = string:trim(iolist_to_binary(Value)),
+    case Bin =/= <<>> andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end,
+                                        binary_to_list(Bin)) of
+        true -> {ok, binary_to_integer(Bin)};
+        false -> error
+    end.
+
 %% @private Build request line
 build_request_line(Method, Path) ->
     [Method, <<" ">>, Path, <<" HTTP/1.1\r\n">>].
@@ -2621,31 +2683,52 @@ encode_chunk(Data) when is_list(Data) ->
     SizeHex = integer_to_binary(Size, 16),
     [SizeHex, <<"\r\n">>, Data, <<"\r\n">>].
 
+%% @private Write one piece of a streamed HTTP/1.1 body. Chunked: frame it
+%% as a chunk. Raw against a Content-Length: write it as is, unless it would
+%% go past the declared length, in which case nothing is sent.
+send_body_framed(Transport, Socket, Data, chunked) ->
+    case Transport:send(Socket, encode_chunk(Data)) of
+        ok -> {ok, chunked};
+        Error -> Error
+    end;
+send_body_framed(Transport, Socket, Data, {length, Declared, Remaining}) ->
+    case iolist_size(Data) of
+        0 ->
+            {ok, {length, Declared, Remaining}};
+        Size when Size =< Remaining ->
+            case Transport:send(Socket, Data) of
+                ok -> {ok, {length, Declared, Remaining - Size}};
+                Error -> Error
+            end;
+        Size ->
+            {error, {content_length_mismatch, Declared, Declared - Remaining + Size}}
+    end.
+
 %% @private Stream body from stateless function
 %% fun() -> {ok, Data} | eof | {error, Reason}
-stream_body_fun(Transport, Socket, Fun) when is_function(Fun, 0) ->
+stream_body_fun(Transport, Socket, Fun, Framing) when is_function(Fun, 0) ->
     case Fun() of
         {ok, Data} ->
-            case Transport:send(Socket, encode_chunk(Data)) of
-                ok -> stream_body_fun(Transport, Socket, Fun);
+            case send_body_framed(Transport, Socket, Data, Framing) of
+                {ok, Framing1} -> stream_body_fun(Transport, Socket, Fun, Framing1);
                 Error -> Error
             end;
         eof ->
-            ok;
+            {ok, Framing};
         {error, _} = Error ->
             Error
     end;
 %% @private Stream body from stateful function
 %% fun(State) -> {ok, Data, NewState} | eof | {error, Reason}
-stream_body_fun(Transport, Socket, {Fun, State}) when is_function(Fun, 1) ->
+stream_body_fun(Transport, Socket, {Fun, State}, Framing) when is_function(Fun, 1) ->
     case Fun(State) of
         {ok, Data, NewState} ->
-            case Transport:send(Socket, encode_chunk(Data)) of
-                ok -> stream_body_fun(Transport, Socket, {Fun, NewState});
+            case send_body_framed(Transport, Socket, Data, Framing) of
+                {ok, Framing1} -> stream_body_fun(Transport, Socket, {Fun, NewState}, Framing1);
                 Error -> Error
             end;
         eof ->
-            ok;
+            {ok, Framing};
         {error, _} = Error ->
             Error
     end.
