@@ -1031,7 +1031,19 @@ h2_connection_key(Host0, Port, Transport, Options) ->
 %% preserving the previous behavior.
 h3_connection_key(Host0, Port, Transport, Options) ->
     Host = string:lowercase(Host0),
-    {Host, Port, Transport, proplists:get_value(h3_tls_key, Options, default)}.
+    {Host, Port, Transport,
+     ssl_bucket(proplists:get_value(h3_tls_key, Options, default), h3_sock_key(Options))}.
+
+%% @private Hash of what reaches the QUIC socket from connect_options: the
+%% UDP socket options and the address family. `default' without any, so
+%% requests without them keep their keys (#970).
+h3_sock_key(Options) ->
+    ConnectOpts = proplists:get_value(connect_options, Options, []),
+    case hackney_util:quic_socket_opts(ConnectOpts) ++
+         [F || {family, _} = F <- ConnectOpts] of
+        [] -> default;
+        KeyOpts -> crypto:hash(sha256, term_to_binary(lists:usort(KeyOpts)))
+    end.
 
 %% @private Stop a connection, tolerating an already-dead process. Bounded on
 %% purpose: this runs inside the pool gen_server, and a conn wedged in a

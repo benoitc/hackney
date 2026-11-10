@@ -6,7 +6,17 @@
 -module(hackney_util).
 
 -export([filter_options/3]).
--export([socket_opts/1, dial_socket_opts/1]).
+-export([socket_opts/1, dial_socket_opts/1, quic_socket_opts/1]).
+
+%% gen_udp/inet options a caller may set on a QUIC (HTTP/3) socket. The
+%% address family is left out: quic picks it from the remote address (and
+%% hackney forwards `family' separately). TCP-only options are left out too,
+%% so a connect_options list written for TCP never breaks an HTTP/3 dial.
+-define(QUIC_SOCKET_OPTS,
+        [ip, ifaddr, recbuf, sndbuf, buffer, tos, tclass, priority, raw,
+         reuseaddr, reuseport, reuseport_lb, exclusiveaddruse, dontroute,
+         bind_to_device, netns, ipv6_v6only, high_msgq_watermark,
+         low_msgq_watermark]).
 
 %% gen_tcp/inet options a caller may set on a dialled socket.
 -define(DIAL_SOCKET_OPTS,
@@ -66,6 +76,12 @@ socket_opts(ConnectOpts) ->
 -spec dial_socket_opts(list()) -> list().
 dial_socket_opts(ConnectOpts) ->
   lists:reverse(filter_options(ConnectOpts, ?DIAL_SOCKET_OPTS, [])).
+
+%% @doc The caller's socket options that apply to the UDP socket of an
+%% HTTP/3 connection, forwarded to quic as `extra_socket_opts'.
+-spec quic_socket_opts(list()) -> list().
+quic_socket_opts(ConnectOpts) ->
+  lists:reverse(filter_options(ConnectOpts, ?QUIC_SOCKET_OPTS, [])).
 
 hackney_opt({Key, _}) ->
   lists:member(Key, [protocols, insecure, session_ticket, happy_eyeballs]);

@@ -1034,9 +1034,15 @@ build_h3_opts(Host, Opts) ->
         Happy -> QuicOpts2#{happy_eyeballs => Happy}
     end,
     %% 0-RTT / resumption: forward an opaque session ticket when supplied.
-    QuicOpts = case maps:get(session_ticket, Opts, undefined) of
+    QuicOpts4 = case maps:get(session_ticket, Opts, undefined) of
         undefined -> QuicOpts3;
         Ticket -> QuicOpts3#{session_ticket => Ticket}
+    end,
+    %% Socket options for quic's UDP socket, such as a source address
+    %% to bind ({ip, Addr}) or buffer sizes (#970).
+    QuicOpts = case maps:get(extra_socket_opts, Opts, []) of
+        [] -> QuicOpts4;
+        SockOpts -> QuicOpts4#{extra_socket_opts => SockOpts}
     end,
     %% Tell us once a request fits again after the server's limit on
     %% concurrent streams refused one (hackney_conn parks it until then).

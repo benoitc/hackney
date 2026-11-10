@@ -3276,10 +3276,15 @@ h3_tls_opts(ConnectOpts, SslOpts) ->
         undefined -> Base1;
         Ticket -> Base1#{session_ticket => Ticket}
     end,
+    %% Forward the caller's UDP socket options (#970).
+    Base3 = case hackney_util:quic_socket_opts(ConnectOpts) of
+        [] -> Base2;
+        SockOpts -> Base2#{extra_socket_opts => SockOpts}
+    end,
     %% Forward a user SNI so build_h3_opts can honor it (hostname or `disable').
     case proplists:get_value(server_name_indication, SslOpts, undefined) of
-        undefined -> Base2;
-        Sni -> Base2#{server_name_indication => Sni}
+        undefined -> Base3;
+        Sni -> Base3#{server_name_indication => Sni}
     end.
 
 %% @private Use an explicitly configured CA as the H3 trust store. quic only
