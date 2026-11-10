@@ -37,6 +37,9 @@ Unreleased
   socket, and a WebSocket through a proxy used none of them. All socket
   options now apply. Options hackney needs to read the socket itself, such
   as `active` or `packet`, are still ignored (#970).
+- Closing an HTTP/2 connection over TLS could take about five seconds, and
+  the other side learned it was gone only after that delay. hackney now
+  uses h2 0.15.1, which closes without waiting for the peer.
 
 4.10.1 - 2026-11-10
 -------------------
