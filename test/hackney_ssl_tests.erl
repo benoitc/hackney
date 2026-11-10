@@ -492,6 +492,84 @@ cert_dir() ->
     Root = filename:join([BeamDir, "..", "..", "..", "..", ".."]),
     filename:join([filename:absname(Root), "test", "certs"]).
 
+%%====================================================================
+%% One resumed handshake per host (#995)
+%%====================================================================
+
+-define(AUTO, [{session_tickets, auto}, {verify, verify_none}]).
+
+claim_resumption_test_() ->
+    {setup,
+     fun() -> ok = hackney_ssl:init_key_cache() end,
+     fun(_) -> ok end,
+     [{"options without auto tickets are left alone", fun claim_no_auto/0},
+      {"the first handshake keeps its ticket", fun claim_first/0},
+      {"a concurrent handshake to the same host drops its ticket", fun claim_concurrent/0},
+      {"a released claim can be taken again", fun claim_release/0},
+      {"a claim left by a dead process is taken over", fun claim_dead_owner/0},
+      {"hosts are compared case-insensitively", fun claim_case/0},
+      {"different hosts do not block each other", fun claim_other_host/0}]}.
+
+claim_no_auto() ->
+    Opts = [{verify, verify_none}],
+    ?assertEqual({Opts, false}, hackney_ssl:claim_resumption("a.example", Opts)).
+
+claim_first() ->
+    {Opts, true} = hackney_ssl:claim_resumption("first.example", ?AUTO),
+    ?assert(hackney_ssl:auto_tickets(Opts)),
+    ok = hackney_ssl:release_resumption("first.example", true).
+
+claim_concurrent() ->
+    {_, true} = hackney_ssl:claim_resumption("busy.example", ?AUTO),
+    {Opts, Claimed} = in_other_process(fun() ->
+                                           hackney_ssl:claim_resumption("busy.example", ?AUTO)
+                                       end),
+    ?assertNot(Claimed),
+    ?assertNot(lists:keymember(session_tickets, 1, Opts)),
+    ?assertEqual(verify_none, proplists:get_value(verify, Opts)),
+    ok = hackney_ssl:release_resumption("busy.example", true).
+
+claim_release() ->
+    {_, true} = hackney_ssl:claim_resumption("again.example", ?AUTO),
+    ok = hackney_ssl:release_resumption("again.example", true),
+    ?assertMatch({_, true},
+                 in_other_process(fun() ->
+                                      hackney_ssl:claim_resumption("again.example", ?AUTO)
+                                  end)).
+
+claim_dead_owner() ->
+    %% The other process takes the claim and exits without releasing it.
+    {_, true} = in_other_process(fun() ->
+                                     hackney_ssl:claim_resumption("dead.example", ?AUTO)
+                                 end),
+    ?assertMatch({_, true}, hackney_ssl:claim_resumption("dead.example", ?AUTO)),
+    ok = hackney_ssl:release_resumption("dead.example", true).
+
+claim_case() ->
+    {_, true} = hackney_ssl:claim_resumption("Case.Example", ?AUTO),
+    ?assertMatch({_, false},
+                 in_other_process(fun() ->
+                                      hackney_ssl:claim_resumption("case.example", ?AUTO)
+                                  end)),
+    ok = hackney_ssl:release_resumption("Case.Example", true).
+
+claim_other_host() ->
+    {_, true} = hackney_ssl:claim_resumption("one.example", ?AUTO),
+    ?assertMatch({_, true},
+                 in_other_process(fun() ->
+                                      R = hackney_ssl:claim_resumption("two.example", ?AUTO),
+                                      ok = hackney_ssl:release_resumption("two.example", true),
+                                      R
+                                  end)),
+    ok = hackney_ssl:release_resumption("one.example", true).
+
+%% Run Fun in a process that has exited by the time the result is returned.
+in_other_process(Fun) ->
+    {Pid, MRef} = spawn_monitor(fun() -> exit({result, Fun()}) end),
+    receive {'DOWN', MRef, process, Pid, {result, R}} -> R
+    after 5000 -> erlang:error(no_result)
+    end.
+
 tls13_session_resumption_integration_test_() ->
     {timeout, 15, fun run_tls13_session_resumption/0}.
 

@@ -19,6 +19,11 @@ Unreleased
   or reserved a connection nobody used, and freed a per-host slot twice,
   which let more requests than `max_per_host` run against that host. The
   pool now skips requests whose caller has stopped waiting.
+- Opening several HTTPS connections to the same host at once could make a
+  few of them fail with `bad_record_mac` when TLS 1.3 session resumption
+  was on (the default). Erlang's TLS client could offer the same session
+  ticket on two connections at once. Only one new connection per host now
+  resumes a session at a time; the others do a full handshake (#995).
 
 4.10.1 - 2026-11-10
 -------------------
