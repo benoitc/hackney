@@ -43,6 +43,10 @@ Unreleased
   a shared HTTP/3 connection is reused only by requests with the same
   options. TCP-only options such as `nodelay` are ignored there, as before
   (#970).
+- WebTransport sessions ignored the socket options and `family` in
+  `connect_options`. They now reach the socket: the UDP options over
+  HTTP/3, the TCP options over HTTP/2. hackney now uses webtransport 0.5.4
+  (#970).
 - Closing an HTTP/2 connection over TLS could take about five seconds, and
   the other side learned it was gone only after that delay. hackney now
   uses h2 0.15.1, which closes without waiting for the peer.
