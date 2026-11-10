@@ -102,10 +102,16 @@ t_chaos() ->
     ?assertEqual(Pool, hackney_pool:find_pool(?POOL)),
     ?assert(is_process_alive(Pool)),
     hackney_crash_sentinel:assert_no_crash_from(Pool),
-    Stats = wait_until(fun() ->
-                              S = hackney_pool:get_stats(?POOL),
-                              settled(S, Baseline) andalso S
-                      end, 10000),
+    Stats = try wait_until(fun() ->
+                                  S = hackney_pool:get_stats(?POOL),
+                                  settled(S, Baseline) andalso S
+                          end, 10000)
+            catch Class:Reason:Stack ->
+                %% This fails rarely on CI and never locally so far: print
+                %% what is left behind so the next failure shows why.
+                _ = (try report_unsettled(Baseline) catch _:_ -> ok end),
+                erlang:raise(Class, Reason, Stack)
+            end,
     ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
     ?assertEqual(0, proplists:get_value(queue_count, Stats)),
 
@@ -234,6 +240,32 @@ await(Pids, Tally, Deadline) ->
             await(Pids -- [Pid], merge(Tally, WorkerTally), Deadline)
     after Left ->
         erlang:error({chaos_workers_stuck, length(Pids)})
+    end.
+
+%% What kept the pool from settling: its stats and non-empty maps, and the
+%% state and stack of every connection still alive, then whether it settles
+%% given more time (slow teardown) or not at all (a leak).
+report_unsettled(Baseline) ->
+    Pool = hackney_pool:find_pool(?POOL),
+    io:format(user, "~nchaos: not settled: stats ~p, baseline ~p, conns ~p~n",
+              [hackney_pool:get_stats(?POOL), Baseline, conn_count()]),
+    io:format(user, "chaos: pool maps ~P~n",
+              [[F || F <- tuple_to_list(sys:get_state(Pool)), is_map(F), map_size(F) > 0], 60]),
+    Conns = [P || {_, P, _, _} <- supervisor:which_children(hackney_conn_sup), is_pid(P)],
+    [io:format(user, "chaos: conn ~p in ~p: ~P~n",
+               [P, state_name(P),
+                process_info(P, [current_stacktrace, message_queue_len, monitors, links]), 40])
+     || P <- lists:sublist(Conns, 30)],
+    T0 = erlang:monotonic_time(millisecond),
+    Later = try wait_until(fun() -> settled(hackney_pool:get_stats(?POOL), Baseline) end, 30000)
+            catch _:_ -> false
+            end,
+    io:format(user, "chaos: settled ~p ms later: ~p~n",
+              [erlang:monotonic_time(millisecond) - T0, Later]).
+
+state_name(Pid) ->
+    try element(1, sys:get_state(Pid, 500))
+    catch _:_ -> unknown
     end.
 
 settled(Stats, Baseline) ->
