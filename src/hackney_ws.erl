@@ -270,7 +270,11 @@ idle({call, From}, connect, Data) ->
     %% Build connection options
     BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive, true}, {nodelay, true}],
     AcceptedOpts = [linger, nodelay, send_timeout, send_timeout_close, raw, inet6],
-    ConnectOpts = hackney_util:filter_options(ConnectOpts0, AcceptedOpts, BaseOpts),
+    %% The caller's socket options, all of them, over the base ones: the
+    %% list above only lets a few through (#970).
+    ConnectOpts = hackney_util:merge_opts(
+                    hackney_util:filter_options(ConnectOpts0, AcceptedOpts, BaseOpts),
+                    hackney_util:dial_socket_opts(ConnectOpts0)),
 
     %% Convert host to list if binary
     Host1 = case is_binary(Host) of
@@ -522,9 +526,11 @@ do_connect(hackney_ssl, Host, Port, Opts, SSLOpts, Timeout) ->
 %% @private Connect through HTTP CONNECT proxy
 %% ProxyTransport: tcp for HTTP proxy, ssl for HTTPS proxy
 do_connect_via_http_proxy(Transport, Host, Port, ProxyHost, ProxyPort,
-                          ProxyAuth, ProxyTransport, _ConnectOpts, SSLOpts, Timeout) ->
-    %% Build options for hackney_http_connect
+                          ProxyAuth, ProxyTransport, SockOpts, SSLOpts, Timeout) ->
+    %% Build options for hackney_http_connect, with the caller's socket
+    %% options for the dial to the proxy (#970)
     ConnectOpts0 = [
+        {connect_options, SockOpts},
         {connect_host, Host},
         {connect_port, Port},
         {connect_transport, Transport},
@@ -551,9 +557,11 @@ do_connect_via_http_proxy(Transport, Host, Port, ProxyHost, ProxyPort,
 %% @private Connect through SOCKS5 proxy
 %% ProxyTransport: tcp for plain SOCKS5, ssl for SOCKS5 over TLS
 do_connect_via_socks5(Transport, Host, Port, ProxyHost, ProxyPort,
-                      ProxyAuth, ProxyTransport, _ConnectOpts, SSLOpts, Timeout) ->
-    %% Build options for hackney_socks5
+                      ProxyAuth, ProxyTransport, SockOpts, SSLOpts, Timeout) ->
+    %% Build options for hackney_socks5, with the caller's socket options
+    %% for the dial to the proxy (#970)
     Socks5Opts0 = [
+        {connect_options, SockOpts},
         {socks5_host, ProxyHost},
         {socks5_port, ProxyPort},
         {socks5_transport, Transport},

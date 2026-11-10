@@ -51,7 +51,12 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
     send_timeout_close, raw, inet6],
   BaseOpts = [binary, {active, false}, {packet, 0}, {keepalive,  true},
     {nodelay, true}],
-  ConnectOpts = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+  ConnectOpts0 = hackney_util:filter_options(Opts, AcceptedOpts, BaseOpts),
+  %% The caller's socket options (connect_options), all of them, over the
+  %% base ones: the list above only lets a few through (#970).
+  ConnectOpts = hackney_util:merge_opts(
+                  ConnectOpts0,
+                  hackney_util:dial_socket_opts(proplists:get_value(connect_options, Opts, []))),
 
   %% connect to the socks 5 proxy
   case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of

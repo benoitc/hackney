@@ -1996,8 +1996,10 @@ connect_via_connect_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth
   %% Add recv_timeout for proxy handshake (issue #569)
   RecvTimeout = proplists:get_value(recv_timeout, Options, infinity),
   ConnectOpts4 = [{recv_timeout, RecvTimeout} | ConnectOpts3],
-  %% Add other connection options
-  ConnectOpts = ConnectOpts4 ++ proplists:get_value(connect_options, Options, []),
+  %% Add other connection options, and the caller's socket options as a
+  %% whole for the dial to the proxy (#970)
+  UserConnectOpts = proplists:get_value(connect_options, Options, []),
+  ConnectOpts = [{connect_options, UserConnectOpts} | ConnectOpts4 ++ UserConnectOpts],
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_http_connect:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
@@ -2044,8 +2046,10 @@ connect_via_socks5_proxy(Transport, Host, Port, ProxyHost, ProxyPort, ProxyAuth,
     undefined -> Socks5Opts3;
     Resolve -> [{socks5_resolve, Resolve} | Socks5Opts3]
   end,
-  %% Add other connection options
-  Socks5Opts = Socks5Opts4 ++ proplists:get_value(connect_options, Options, []),
+  %% Add other connection options, and the caller's socket options as a
+  %% whole for the dial to the proxy (#970)
+  UserConnectOpts = proplists:get_value(connect_options, Options, []),
+  Socks5Opts = [{connect_options, UserConnectOpts} | Socks5Opts4 ++ UserConnectOpts],
   Timeout = proplists:get_value(connect_timeout, Options, 8000),
 
   case hackney_socks5:connect(Host, Port, Socks5Opts, Timeout) of
