@@ -1934,13 +1934,24 @@ maybe_proxy(Transport, Scheme, Host, Port, Options0) ->
       connect_via_http_proxy(Scheme, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options)
   end.
 
-%% @private The documented top-level `insecure' option sits outside
-%% ssl_options, where every TLS builder (TCP TLS, the pooled h2 key and QUIC)
-%% reads it. Copy it into ssl_options once at the entry. The top-level value
-%% wins over ssl_options, as before (#786).
-fold_insecure(Options) ->
+%% @private The documented top-level `insecure' option, or one set in
+%% connect_options, sits outside ssl_options, where every TLS builder (TCP
+%% TLS, the pooled h2 key and QUIC) reads it. Copy it into ssl_options once
+%% at the entry, and drop it from connect_options, which go to the socket
+%% as is. Precedence: top-level, then connect_options, then ssl_options
+%% (#786).
+fold_insecure(Options0) ->
+  ConnectOpts = proplists:get_value(connect_options, Options0, []),
+  Options = case proplists:is_defined(insecure, ConnectOpts) of
+    true ->
+      lists:keystore(connect_options, 1, Options0,
+                     {connect_options, proplists:delete(insecure, ConnectOpts)});
+    false ->
+      Options0
+  end,
   SslOpts = proplists:get_value(ssl_options, Options, []),
-  case proplists:get_value(insecure, Options) of
+  case proplists:get_value(insecure, Options,
+                           proplists:get_value(insecure, ConnectOpts)) of
     Insecure when Insecure =:= true;
                   is_boolean(Insecure), SslOpts =/= [] ->
       SslOpts1 = [{insecure, Insecure} | proplists:delete(insecure, SslOpts)],

@@ -3238,15 +3238,13 @@ try_h3_connect(Host, Port, Timeout, ConnectOpts, SslOpts) ->
     end.
 
 %% @private Map hackney's TLS options to the QUIC client verification.
-%% quic >= 1.4.4 verifies the server certificate. An insecure connection opts
-%% out; an explicitly configured CA (cacerts/cacertfile) is used as the trust
+%% quic >= 1.4.4 verifies the server certificate. An insecure connection
+%% (`insecure' or `{verify, verify_none}') opts out; an explicitly configured CA (cacerts/cacertfile) is used as the trust
 %% store; otherwise quic verifies against its own default (OS) trust store.
 %% `family' (inet|inet6) and a `session_ticket' (for resumption) are forwarded
 %% when present in either the connect options or the ssl options.
 h3_tls_opts(ConnectOpts, SslOpts) ->
-    Insecure = proplists:get_value(insecure, ConnectOpts,
-                 proplists:get_value(insecure, SslOpts, false)),
-    Base = case Insecure of
+    Base = case hackney_ssl:quic_insecure(ConnectOpts, SslOpts) of
         true -> #{verify => verify_none};
         false -> h3_ca_opts(SslOpts)
     end,
