@@ -47,6 +47,23 @@ Unreleased
   `connect_options`. They now reach the socket: the UDP options over
   HTTP/3, the TCP options over HTTP/2. hackney now uses webtransport 0.5.4
   (#970).
+- A streamed request body (`stream`, then `send_body` and
+  `finish_send_body`) ignored a `Content-Length` set by the caller. Over
+  HTTP/1.1 hackney added `Transfer-Encoding: chunked` and chunk-framed the
+  body anyway, so the request carried both headers and a server reading
+  `Content-Length` saw the framing as body bytes: uploads of known size to
+  stores that require it, such as S3, failed. Over HTTP/2 and HTTP/3 the
+  header was sent but never checked, so a body of another size was reset by
+  the server with an unclear error. The body now goes out as declared, and
+  a body that does not match is an error: the HTTP/1.1 connection is
+  closed, the HTTP/2 or HTTP/3 stream is reset and the connection stays
+  usable. Over HTTP/1.1, when both headers are set, `Content-Length` is
+  dropped.
+- Over HTTP/1.1, an empty write on a chunked request body ended the body
+  early, and the next write went out as a stray request on the
+  connection. It now sends nothing. A `Transfer-Encoding` such as `gzip`
+  without `chunked` now gets `chunked` added, matching how hackney frames
+  the body.
 - Closing an HTTP/2 connection over TLS could take about five seconds, and
   the other side learned it was gone only after that delay. hackney now
   uses h2 0.15.1, which closes without waiting for the peer.

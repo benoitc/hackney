@@ -205,6 +205,11 @@
     %% the server to close). Folded into the keepalive decision at checkin so a
     %% requested close is never reused. Reset on every request send.
     request_close = false :: boolean(),
+    %% The Content-Length a streamed request body declared and the bytes it
+    %% still owes, or undefined (HTTP/1.1 then frames the body as chunked).
+    %% Set when the headers go out, reset on every request so a reused
+    %% connection does not inherit it.
+    body_length :: undefined | {non_neg_integer(), non_neg_integer()},
 
     %% Response state
     version :: {integer(), integer()} | undefined,
@@ -1309,6 +1314,7 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         stream_to = undefined,
         inform_fun = InformFun,
         auto_decompress = AutoDecompress,
+        body_length = undefined,
         max_body_size = max_body_size(ReqOpts),
         recv_timeout = RecvTimeout
     },
@@ -1388,7 +1394,8 @@ connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, Data) ->
         async = false,
         async_ref = undefined,
         stream_to = undefined,
-        max_body_size = max_body_size(ReqOpts)
+        max_body_size = max_body_size(ReqOpts),
+        body_length = undefined
     },
     %% Transition to streaming_body state
     {next_state, streaming_body, NewData, [{next_event, internal, {send_headers_only, Method, Path, Headers}}]};
@@ -1567,34 +1574,17 @@ streaming_body(enter, connected, #conn_data{transport = Transport, socket = Sock
     end;
 
 streaming_body(internal, {send_headers_only, Method, Path, Headers}, Data) ->
-    %% Send only headers, then return ok and wait for body chunks
-    #conn_data{host = _Host, port = _Port, transport = Transport, socket = Socket} = Data,
-    %% Build request line and headers (with Transfer-Encoding: chunked for streaming)
+    %% Send only headers, then return ok and wait for body chunks. The
+    %% caller's Content-Length decides the body framing (stream_body_framing/1).
     HeadersObj = hackney_headers:from_list(Headers),
-    %% Add Transfer-Encoding: chunked if not present
-    HeadersWithTE = case hackney_headers:get_value(<<"transfer-encoding">>, HeadersObj) of
-        undefined -> hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, HeadersObj);
-        _ -> HeadersObj
-    end,
-    RequestLine = build_request_line(Method, Path),
-    %% Serialize through to_iolist/1 so header values are CR/LF sanitized like
-    %% the buffered path; the raw to_list/1 concatenation used before let a
-    %% header value carry its own CRLF and inject extra lines. to_iolist/1
-    %% already appends the terminating blank line.
-    HeaderBlock = hackney_headers:to_iolist(HeadersWithTE),
-    HeadersData = [RequestLine, HeaderBlock],
-    %% Record whether the caller asked the server to close (the request line is
-    %% built here, not via do_send_request/5), for the keepalive decision.
-    RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
-    case Transport:send(Socket, HeadersData) of
-        ok ->
-            From = Data#conn_data.request_from,
-            {keep_state, Data#conn_data{request_from = undefined,
-                                        request_close = RequestClose},
-             [{reply, From, ok}]};
+    case stream_body_framing(HeadersObj) of
+        {ok, HeadersWithTE, Framing} ->
+            send_stream_headers(Method, Path, HeadersWithTE,
+                                Data#conn_data{body_length = Framing});
         {error, Reason} ->
             From = Data#conn_data.request_from,
-            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+            {next_state, closed, Data#conn_data{request_from = undefined},
+             [{reply, From, {error, Reason}}]}
     end;
 
 %% A GOAWAY refused this upload between two of its caller's calls (see
@@ -1614,19 +1604,15 @@ streaming_body({call, From}, Req, #conn_data{protocol = http3, h3_stream_id = St
     end;
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http3} = Data) ->
-    %% HTTP/3 - send body chunk via QUIC
-    #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId} = Data,
-    Result = case BodyData of
-        Fun when is_function(Fun, 0) ->
-            stream_body_fun_h3(ConnRef, StreamId, Fun);
-        {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun_h3(ConnRef, StreamId, {Fun, State});
-        _ ->
-            hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(BodyData), false)
-    end,
-    case Result of
-        ok ->
-            {keep_state_and_data, [{reply, From, ok}]};
+    %% HTTP/3 - send body chunk via QUIC, counted against a declared
+    %% Content-Length (RFC 9114 4.1.2).
+    #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId, body_length = Length} = Data,
+    Send = fun(D) -> hackney_h3:send_body_chunk(ConnRef, StreamId, iolist_to_binary(D), false) end,
+    case send_body_piece(fun(D, L) -> length_checked_send(Send, D, L) end, BodyData, Length) of
+        {ok, Length1} ->
+            {keep_state, Data#conn_data{body_length = Length1}, [{reply, From, ok}]};
+        {error, {content_length_mismatch, _, _} = Mismatch} ->
+            h3_length_mismatch(From, Mismatch, Data);
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
@@ -1645,42 +1631,41 @@ streaming_body({call, From}, Req, #conn_data{protocol = http2, h2_stream_id = St
                    [{reply, From, {error, {goaway, ErrorCode}}}]);
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, #conn_data{protocol = http2} = Data) ->
-    %% HTTP/2 - send a DATA frame without END_STREAM.
+    %% HTTP/2 - send a DATA frame without END_STREAM, counted against a
+    %% declared Content-Length (RFC 9113 8.1.1).
     #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId,
-               req_send_timeout = SendTimeout} = Data,
-    Result = case BodyData of
-        Fun when is_function(Fun, 0) ->
-            stream_body_fun_h2(H2Conn, StreamId, Fun, SendTimeout);
-        {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun_h2(H2Conn, StreamId, {Fun, State}, SendTimeout);
-        _ ->
-            h2_send_data(H2Conn, StreamId, iolist_to_binary(BodyData), false,
-                         SendTimeout)
-    end,
-    case Result of
-        ok ->
-            {keep_state_and_data, [{reply, From, ok}]};
+               req_send_timeout = SendTimeout, body_length = Length} = Data,
+    Send = fun(D) -> h2_send_data(H2Conn, StreamId, iolist_to_binary(D), false, SendTimeout) end,
+    case send_body_piece(fun(D, L) -> length_checked_send(Send, D, L) end, BodyData, Length) of
+        {ok, Length1} ->
+            {keep_state, Data#conn_data{body_length = Length1}, [{reply, From, ok}]};
+        {error, {content_length_mismatch, _, _} = Mismatch} ->
+            h2_length_mismatch(From, Mismatch, Data);
         {error, Reason} ->
             h2_upload_failed(From, Reason, Data)
     end;
 
 streaming_body({call, From}, {send_body_chunk, BodyData}, Data) ->
-    #conn_data{transport = Transport, socket = Socket} = Data,
-    %% Send as chunked encoding (HTTP/1.1)
-    Result = case BodyData of
-        Fun when is_function(Fun, 0) ->
-            stream_body_fun(Transport, Socket, Fun);
-        {Fun, State} when is_function(Fun, 1) ->
-            stream_body_fun(Transport, Socket, {Fun, State});
-        _ ->
-            Transport:send(Socket, encode_chunk(BodyData))
-    end,
-    case Result of
-        ok ->
-            {keep_state_and_data, [{reply, From, ok}]};
+    #conn_data{transport = Transport, socket = Socket, body_length = Framing} = Data,
+    %% HTTP/1.1: chunk-framed, or raw against the caller's Content-Length.
+    SendPiece = fun(D, L) -> send_body_framed(Transport, Socket, D, L) end,
+    case send_body_piece(SendPiece, BodyData, Framing) of
+        {ok, Framing1} ->
+            {keep_state, Data#conn_data{body_length = Framing1}, [{reply, From, ok}]};
         {error, Reason} ->
             {next_state, closed, Data, [{reply, From, {error, Reason}}]}
     end;
+
+%% HTTP/2 and HTTP/3 with a declared Content-Length: a short body must not
+%% end the stream (RFC 9113 8.1.1, RFC 9114 4.1.2), so it is reset instead.
+streaming_body({call, From}, finish_send_body,
+               #conn_data{protocol = http2, body_length = {Declared, Remaining}} = Data)
+  when Remaining > 0 ->
+    h2_length_mismatch(From, {content_length_mismatch, Declared, Declared - Remaining}, Data);
+streaming_body({call, From}, finish_send_body,
+               #conn_data{protocol = http3, body_length = {Declared, Remaining}} = Data)
+  when Remaining > 0 ->
+    h3_length_mismatch(From, {content_length_mismatch, Declared, Declared - Remaining}, Data);
 
 streaming_body({call, From}, finish_send_body, #conn_data{protocol = http3} = Data) ->
     %% HTTP/3 - finish sending body (send empty data with Fin=true)
@@ -1702,6 +1687,17 @@ streaming_body({call, From}, finish_send_body, #conn_data{protocol = http2} = Da
         {error, Reason} ->
             h2_upload_failed(From, Reason, Data)
     end;
+
+%% HTTP/1.1 raw body against the caller's Content-Length: nothing to send
+%% at the end, but every declared byte must have been sent. A short body
+%% would leave the server waiting for the rest, so the connection closes.
+streaming_body({call, From}, finish_send_body,
+               #conn_data{protocol = http1, body_length = {_Declared, 0}} = Data) ->
+    {keep_state, Data#conn_data{request_from = From}, [{reply, From, ok}]};
+streaming_body({call, From}, finish_send_body,
+               #conn_data{protocol = http1, body_length = {Declared, Remaining}} = Data) ->
+    {next_state, closed, Data,
+     [{reply, From, {error, {content_length_mismatch, Declared, Declared - Remaining}}}]};
 
 streaming_body({call, From}, finish_send_body, Data) ->
     #conn_data{transport = Transport, socket = Socket} = Data,
@@ -2607,6 +2603,129 @@ body_method(Method) ->
 headers_to_binary(Headers) ->
     hackney_headers:to_binary(Headers).
 
+%% @private Send the request line and headers of a streamed HTTP/1.1 request.
+send_stream_headers(Method, Path, HeadersWithTE,
+                    #conn_data{transport = Transport, socket = Socket} = Data) ->
+    RequestLine = build_request_line(Method, Path),
+    %% Serialize through to_iolist/1 so header values are CR/LF sanitized like
+    %% the buffered path; the raw to_list/1 concatenation used before let a
+    %% header value carry its own CRLF and inject extra lines. to_iolist/1
+    %% already appends the terminating blank line.
+    HeaderBlock = hackney_headers:to_iolist(HeadersWithTE),
+    HeadersData = [RequestLine, HeaderBlock],
+    %% Record whether the caller asked the server to close (the request line is
+    %% built here, not via do_send_request/5), for the keepalive decision.
+    RequestClose = hackney_keepalive:request_closes(HeadersWithTE),
+    case Transport:send(Socket, HeadersData) of
+        ok ->
+            From = Data#conn_data.request_from,
+            {keep_state, Data#conn_data{request_from = undefined,
+                                        request_close = RequestClose},
+             [{reply, From, ok}]};
+        {error, Reason} ->
+            From = Data#conn_data.request_from,
+            {next_state, closed, Data, [{reply, From, {error, Reason}}]}
+    end.
+
+%% @private Body framing of a streamed HTTP/1.1 request, from the caller's
+%% headers (RFC 9112 6.1 to 6.3). Returns the headers to send and the
+%% declared length to enforce, undefined for a chunked body.
+%% - no Transfer-Encoding and no Content-Length: chunked, adding the header;
+%% - a Content-Length alone: the body is written raw and must match it;
+%% - a Transfer-Encoding: chunked, and Content-Length, if any, is dropped. A
+%%   sender must not send both (6.2), a server may reject such a request
+%%   (6.1), Transfer-Encoding overrides Content-Length (6.3), and the body was
+%%   always chunk-framed. hackney frames the body as chunked, so chunked
+%%   must be the final coding (6.1): it is appended when missing.
+stream_body_framing(Headers) ->
+    case hackney_headers:get_value(<<"transfer-encoding">>, Headers) of
+        undefined ->
+            case declared_length(Headers) of
+                {ok, undefined, _} ->
+                    {ok, hackney_headers:store(<<"Transfer-Encoding">>, <<"chunked">>, Headers),
+                     undefined};
+                {ok, Len, Headers1} ->
+                    {ok, Headers1, {Len, Len}};
+                {error, _} = Error ->
+                    Error
+            end;
+        TE ->
+            case final_chunked(TE) of
+                {ok, TE1} ->
+                    Headers1 = hackney_headers:delete(<<"content-length">>, Headers),
+                    {ok, hackney_headers:store(<<"Transfer-Encoding">>, TE1,
+                                               hackney_headers:delete(<<"transfer-encoding">>,
+                                                                      Headers1)),
+                     undefined};
+                {error, _} = Error ->
+                    Error
+            end
+    end.
+
+%% @private A request's transfer codings with chunked as the final one
+%% (RFC 9112 6.1): kept as given when it already is, appended when chunked
+%% is missing. chunked anywhere else would be applied twice, so it is refused.
+final_chunked(TE) ->
+    Codings = [string:lowercase(string:trim(C))
+               || C <- binary:split(iolist_to_binary(TE), <<",">>, [global])],
+    case lists:reverse(Codings) of
+        [<<"chunked">> | Rest] ->
+            case lists:member(<<"chunked">>, Rest) of
+                false -> {ok, TE};
+                true -> {error, invalid_transfer_encoding}
+            end;
+        _ ->
+            case lists:member(<<"chunked">>, Codings) of
+                false -> {ok, iolist_to_binary([TE, <<", chunked">>])};
+                true -> {error, invalid_transfer_encoding}
+            end
+    end.
+
+%% @private The body length a request declares through Content-Length
+%% (RFC 9110 8.6), for every protocol: undefined without the field. Several
+%% fields with one value are sent as a single field; different values, or a
+%% value that is not 1*DIGIT, are refused rather than guessed at.
+declared_length(Headers) ->
+    case hackney_headers:lookup(<<"content-length">>, Headers) of
+        [] ->
+            {ok, undefined, Headers};
+        [{_Name, Value}] ->
+            case parse_content_length(Value) of
+                {ok, Len} -> {ok, Len, Headers};
+                error -> {error, invalid_content_length}
+            end;
+        [{Name, _} | _] = Fields ->
+            case lists:usort([parse_content_length(V) || {_, V} <- Fields]) of
+                [{ok, Len}] ->
+                    {ok, Len, hackney_headers:store(Name, integer_to_binary(Len),
+                                                    hackney_headers:delete(Name, Headers))};
+                _ ->
+                    {error, invalid_content_length}
+            end
+    end.
+
+%% @private declared_length/1 over a header list, for HTTP/2 and HTTP/3:
+%% the headers to send (unchanged unless duplicate fields were merged) and
+%% the length to enforce, undefined without a Content-Length.
+stream_declared_length(Headers) ->
+    HeadersObj = hackney_headers:from_list(Headers),
+    case declared_length(HeadersObj) of
+        {ok, undefined, _} -> {ok, Headers, undefined};
+        {ok, Len, HeadersObj} -> {ok, Headers, {Len, Len}};
+        {ok, Len, Merged} -> {ok, hackney_headers:to_list(Merged), {Len, Len}};
+        {error, _} = Error -> Error
+    end.
+
+%% @private Content-Length = 1*DIGIT (RFC 9110 8.6); anything else, a sign
+%% or a list of values included, is refused rather than guessed at.
+parse_content_length(Value) ->
+    Bin = string:trim(iolist_to_binary(Value)),
+    case Bin =/= <<>> andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end,
+                                        binary_to_list(Bin)) of
+        true -> {ok, binary_to_integer(Bin)};
+        false -> error
+    end.
+
 %% @private Build request line
 build_request_line(Method, Path) ->
     [Method, <<" ">>, Path, <<" HTTP/1.1\r\n">>].
@@ -2621,38 +2740,86 @@ encode_chunk(Data) when is_list(Data) ->
     SizeHex = integer_to_binary(Size, 16),
     [SizeHex, <<"\r\n">>, Data, <<"\r\n">>].
 
-%% @private Stream body from stateless function
-%% fun() -> {ok, Data} | eof | {error, Reason}
-stream_body_fun(Transport, Socket, Fun) when is_function(Fun, 0) ->
+%% @private Write one piece of a streamed HTTP/1.1 body. Chunked: frame it
+%% as a chunk; an empty piece sends nothing, since a chunk of size 0 is the
+%% last chunk and would end the body (RFC 9112 7.1). Raw against a
+%% Content-Length: write it as is, unless it would go past the declared
+%% length, in which case nothing is sent.
+send_body_framed(Transport, Socket, Data, undefined) ->
+    case iolist_size(Data) of
+        0 ->
+            {ok, undefined};
+        _ ->
+            case Transport:send(Socket, encode_chunk(Data)) of
+                ok -> {ok, undefined};
+                Error -> Error
+            end
+    end;
+send_body_framed(Transport, Socket, Data, Length) ->
+    counted_send(fun(D) -> Transport:send(Socket, D) end, Data, Length).
+
+%% @private Send Data through Send unless it would go past the declared
+%% length; count it otherwise. Shared by every protocol.
+counted_send(Send, Data, {Declared, Remaining}) ->
+    case iolist_size(Data) of
+        0 ->
+            {ok, {Declared, Remaining}};
+        Size when Size =< Remaining ->
+            case Send(Data) of
+                ok -> {ok, {Declared, Remaining - Size}};
+                Error -> Error
+            end;
+        Size ->
+            {error, {content_length_mismatch, Declared, Declared - Remaining + Size}}
+    end.
+
+%% @private One write of a streamed body, on any protocol: a binary or
+%% iolist, or a producer fun drained to its end. SendPiece(Data, Length)
+%% sends one piece and returns the updated declared length.
+send_body_piece(SendPiece, Fun, Length) when is_function(Fun, 0) ->
+    produce_body(SendPiece, Fun, Length);
+send_body_piece(SendPiece, {Fun, _State} = Producer, Length) when is_function(Fun, 1) ->
+    produce_body(SendPiece, Producer, Length);
+send_body_piece(SendPiece, Data, Length) ->
+    SendPiece(Data, Length).
+
+%% @private Drain a body producer:
+%% fun() -> {ok, Data} | eof | {error, Reason}, or
+%% {fun(State) -> {ok, Data, NewState} | eof | {error, Reason}, State}.
+produce_body(SendPiece, Fun, Length) when is_function(Fun, 0) ->
     case Fun() of
         {ok, Data} ->
-            case Transport:send(Socket, encode_chunk(Data)) of
-                ok -> stream_body_fun(Transport, Socket, Fun);
+            case SendPiece(Data, Length) of
+                {ok, Length1} -> produce_body(SendPiece, Fun, Length1);
                 Error -> Error
             end;
         eof ->
-            ok;
+            {ok, Length};
         {error, _} = Error ->
             Error
     end;
-%% @private Stream body from stateful function
-%% fun(State) -> {ok, Data, NewState} | eof | {error, Reason}
-stream_body_fun(Transport, Socket, {Fun, State}) when is_function(Fun, 1) ->
+produce_body(SendPiece, {Fun, State}, Length) when is_function(Fun, 1) ->
     case Fun(State) of
         {ok, Data, NewState} ->
-            case Transport:send(Socket, encode_chunk(Data)) of
-                ok -> stream_body_fun(Transport, Socket, {Fun, NewState});
+            case SendPiece(Data, Length) of
+                {ok, Length1} -> produce_body(SendPiece, {Fun, NewState}, Length1);
                 Error -> Error
             end;
         eof ->
-            ok;
+            {ok, Length};
         {error, _} = Error ->
             Error
     end.
 
-%% @private Stream body from function for HTTP/3
-stream_body_fun_h3(ConnRef, StreamId, Fun) ->
-    hackney_h3:send_body_fun(ConnRef, StreamId, Fun).
+%% @private HTTP/2 and HTTP/3 send one piece through Send: as today without
+%% a declared Content-Length, counted against it otherwise.
+length_checked_send(Send, Data, undefined) ->
+    case Send(Data) of
+        ok -> {ok, undefined};
+        Error -> Error
+    end;
+length_checked_send(Send, Data, Length) ->
+    counted_send(Send, Data, Length).
 
 %% @private Get default User-Agent
 default_ua() ->
@@ -3702,7 +3869,18 @@ do_h2_send(From, Method, Path, Headers, Body, StreamState, Mode, SendTimeout, Da
 do_h2_send_headers(From, _Method, _Path, _Headers, _ReqOpts,
                    #conn_data{h2_goaway = ErrorCode}) when ErrorCode =/= undefined ->
     {keep_state_and_data, [{reply, From, {error, {goaway, ErrorCode}}}]};
-do_h2_send_headers(From, Method, Path, Headers, ReqOpts, Data) ->
+do_h2_send_headers(From, Method, Path, Headers0, ReqOpts, Data0) ->
+    %% A declared Content-Length is sent and enforced on the body (RFC 9113
+    %% 8.1.1); an invalid one is refused before any frame is sent.
+    case stream_declared_length(Headers0) of
+        {ok, Headers, Length} ->
+            do_h2_send_headers_1(From, Method, Path, Headers, ReqOpts,
+                                 Data0#conn_data{body_length = Length});
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+do_h2_send_headers_1(From, Method, Path, Headers, ReqOpts, Data) ->
     #conn_data{h2_conn = H2Conn} = Data,
     {MethodBin, PathBin, H2Headers} =
         build_h2_request_headers(Method, Path, Headers, Data),
@@ -4388,6 +4566,34 @@ h2_upload_done(Data, Replies) ->
 
 %% @private A body send failed and the connection is unusable: fail the other
 %% streams on it too instead of leaving their callers waiting.
+%% @private A streamed body that did not match its declared Content-Length.
+%% Only this stream is reset, so the server stops waiting for it; the
+%% connection and its other streams stay up.
+h2_length_mismatch(From, Mismatch, #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data) ->
+    _ = cancel_h2_stream(H2Conn, StreamId),
+    Data1 = drop_h2_stream(StreamId, Data#conn_data{body_length = undefined,
+                                                    request_from = undefined}),
+    case h2_stream_result(Data1, [{reply, From, {error, Mismatch}}]) of
+        {keep_state, Data2, Actions} ->
+            %% As start_response/1: h2 conns stay in connected and keep the
+            %% pool keepalive timer off (#836).
+            {next_state, connected, Data2, [{state_timeout, infinity, idle_timeout} | Actions]};
+        Closed ->
+            Closed
+    end.
+
+%% @private HTTP/3 counterpart of h2_length_mismatch/3.
+h3_length_mismatch(From, Mismatch, #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId,
+                                              h3_streams = Streams} = Data) ->
+    _ = hackney_h3:reset_stream(ConnRef, StreamId, ?H3_REQUEST_CANCELLED),
+    Data1 = Data#conn_data{h3_streams = maps:remove(StreamId, Streams),
+                           h3_stream_id = undefined, request_from = undefined,
+                           body_length = undefined},
+    case h3_drain_result({keep_state, Data1, [{reply, From, {error, Mismatch}}]}) of
+        {keep_state, Data2, Actions} -> {next_state, connected, Data2, Actions};
+        Closed -> Closed
+    end.
+
 h2_upload_failed(From, Reason, Data) ->
     {next_state, closed, Data1, Replies} = h2_teardown({closed, Reason}, Data),
     {next_state, closed, Data1, [{reply, From, {error, Reason}} | Replies]}.
@@ -4611,7 +4817,18 @@ do_h3_send_headers(From, _Method, _Path, _Headers, #conn_data{h3_goaway = Goaway
   when GoawayId =/= undefined ->
     %% Draining after a GOAWAY: the peer would refuse a new stream.
     {keep_state_and_data, [{reply, From, {error, {goaway, no_error}}}]};
-do_h3_send_headers(From, Method, Path, Headers, Data) ->
+do_h3_send_headers(From, Method, Path, Headers0, Data0) ->
+    %% A declared Content-Length is sent and enforced on the body (RFC 9114
+    %% 4.1.2); an invalid one is refused before the stream is opened.
+    case stream_declared_length(Headers0) of
+        {ok, Headers, Length} ->
+            do_h3_send_headers_1(From, Method, Path, Headers,
+                                 Data0#conn_data{body_length = Length});
+        {error, Reason} ->
+            {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end.
+
+do_h3_send_headers_1(From, Method, Path, Headers, Data) ->
     #conn_data{
         host = Host,
         h3_conn = ConnRef,
