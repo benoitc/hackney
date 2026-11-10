@@ -58,6 +58,8 @@ pool_fault_test_() ->
                fun t_dial_during_slow_dial/1),
       scenario("a requester dying mid-dial releases its slot",
                fun t_requester_dies_while_dialing/1),
+      scenario("requesters dying while their checkout is queued release their slots (#974)",
+               fun t_requesters_die_while_queued/1),
       scenario("a failed TLS upgrade releases its slot once",
                fun t_upgrade_failure_releases_once/1),
       scenario("a failed TLS upgrade releases its slot once (ssl_pooling)",
@@ -209,6 +211,34 @@ t_requester_dies_while_dialing(Baseline) ->
     ?assertEqual(1, hackney_load_regulation:current(?HOST, ?PORT)),
     exit(Requester, kill),
     wait_until(fun() -> hackney_load_regulation:current(?HOST, ?PORT) =:= 0 end, 2000),
+    assert_pool_healthy(Baseline).
+
+%% #974: callers queue behind a busy pool and are killed before it serves
+%% them. The pool then starts a conn for a requester that is already dead; the
+%% conn stops at once, and its DOWN used to reach the pool first and flush the
+%% requester's, so nobody released the slot. A suspended pool queues the
+%% checkouts deterministically.
+t_requesters_die_while_queued(Baseline) ->
+    N = 10,
+    ok = hackney_load_regulation:reset(?HOST, ?PORT),
+    Pool = hackney_pool:find_pool(?POOL),
+    ok = sys:suspend(Pool),
+    Requesters = [spawn(fun() ->
+                                ok = hackney_load_regulation:acquire(?HOST, ?PORT, 50, 1000),
+                                tcp_checkout()
+                        end) || _ <- lists:seq(1, N)],
+    %% Every requester holds its slot and waits in the pool's mailbox.
+    wait_until(fun() ->
+                       hackney_load_regulation:current(?HOST, ?PORT) =:= N andalso
+                           element(2, process_info(Pool, message_queue_len)) >= N
+               end, 2000),
+    [exit(R, kill) || R <- Requesters],
+    ok = sys:resume(Pool),
+    wait_until(fun() -> hackney_load_regulation:current(?HOST, ?PORT) =:= 0 end, 2000),
+    assert_pool_healthy(Baseline),
+    %% The host is still reachable.
+    {ok, Info, Pid} = tcp_checkout(),
+    ok = hackney_pool:checkin(Info, Pid),
     assert_pool_healthy(Baseline).
 
 %% The listener speaks plain HTTP, so an https request through the pool dials
