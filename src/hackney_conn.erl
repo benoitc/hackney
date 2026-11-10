@@ -4564,23 +4564,13 @@ h2_upload_done(Data, Replies) ->
             Closed
     end.
 
-%% @private A body send failed and the connection is unusable: fail the other
-%% streams on it too instead of leaving their callers waiting.
 %% @private A streamed body that did not match its declared Content-Length.
 %% Only this stream is reset, so the server stops waiting for it; the
 %% connection and its other streams stay up.
 h2_length_mismatch(From, Mismatch, #conn_data{h2_conn = H2Conn, h2_stream_id = StreamId} = Data) ->
     _ = cancel_h2_stream(H2Conn, StreamId),
-    Data1 = drop_h2_stream(StreamId, Data#conn_data{body_length = undefined,
-                                                    request_from = undefined}),
-    case h2_stream_result(Data1, [{reply, From, {error, Mismatch}}]) of
-        {keep_state, Data2, Actions} ->
-            %% As start_response/1: h2 conns stay in connected and keep the
-            %% pool keepalive timer off (#836).
-            {next_state, connected, Data2, [{state_timeout, infinity, idle_timeout} | Actions]};
-        Closed ->
-            Closed
-    end.
+    Data1 = drop_h2_stream(StreamId, Data#conn_data{body_length = undefined}),
+    h2_upload_done(Data1, [{reply, From, {error, Mismatch}}]).
 
 %% @private HTTP/3 counterpart of h2_length_mismatch/3.
 h3_length_mismatch(From, Mismatch, #conn_data{h3_conn = ConnRef, h3_stream_id = StreamId,
@@ -4594,6 +4584,8 @@ h3_length_mismatch(From, Mismatch, #conn_data{h3_conn = ConnRef, h3_stream_id = 
         Closed -> Closed
     end.
 
+%% @private A body send failed and the connection is unusable: fail the other
+%% streams on it too instead of leaving their callers waiting.
 h2_upload_failed(From, Reason, Data) ->
     {next_state, closed, Data1, Replies} = h2_teardown({closed, Reason}, Data),
     {next_state, closed, Data1, [{reply, From, {error, Reason}} | Replies]}.
