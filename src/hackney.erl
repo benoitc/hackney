@@ -523,7 +523,9 @@ shutdown_ws(WsPid) ->
 close(ConnPid) when is_pid(ConnPid) ->
   %% A pooled connection held by a connect/* caller goes back to its pool,
   %% and a shared HTTP/2 one only drops this caller's streams; any other one
-  %% is stopped.
+  %% is stopped. A conn blocked reading a response that never comes is told
+  %% to give up the read first, so the close does not wait for it (#996).
+  ok = hackney_conn:abort_read(ConnPid),
   case hackney_conn:release_held(ConnPid) of
     ok -> ok;
     {error, _} -> hackney_conn:stop(ConnPid)
