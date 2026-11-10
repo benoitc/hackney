@@ -1186,12 +1186,17 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
     AlpnProtos = alpn_advertised(FinalSslOpts),
     Resumable = hackney_ssl:auto_tickets(FinalSslOpts),
     Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
-    GatedSslOpts = gate_resumption(FinalSslOpts, Cached),
+    %% One resumed handshake per host at a time (#995).
+    {GatedSslOpts, Claimed} =
+        hackney_ssl:claim_resumption(Host, gate_resumption(FinalSslOpts, Cached)),
     %% Bound the pooled TLS upgrade handshake with the connection's
     %% connect_timeout. ssl:connect/2 has no handshake deadline, so a server
     %% that stalls after TCP accept would pin this process and its pool slot
     %% indefinitely, past connect_timeout/recv_timeout.
-    case ssl:connect(Socket, GatedSslOpts, HandshakeTimeout) of
+    Handshake = try ssl:connect(Socket, GatedSslOpts, HandshakeTimeout)
+                after hackney_ssl:release_resumption(Host, Claimed)
+                end,
+    case Handshake of
         {ok, SslSocket} ->
             %% Detect negotiated protocol, carrying ALPN across resumption
             Protocol = hackney_ssl:negotiated_protocol(SslSocket, Host, AlpnProtos, Cached, Resumable),
@@ -3340,9 +3345,14 @@ do_tcp_connect(From, Data) ->
             AlpnProtos = alpn_advertised(FinalSslOpts0),
             Resumable = hackney_ssl:auto_tickets(FinalSslOpts0),
             Cached = hackney_ssl:recall_alpn(Host, AlpnProtos),
-            FinalSslOpts = gate_resumption(FinalSslOpts0, Cached),
+            %% One resumed handshake per host at a time (#995).
+            {FinalSslOpts, Claimed} =
+                hackney_ssl:claim_resumption(Host, gate_resumption(FinalSslOpts0, Cached)),
             Opts = TransportOpts ++ [{ssl_options, FinalSslOpts}],
-            case Transport:connect(Host, Port, Opts, Timeout) of
+            Connected = try Transport:connect(Host, Port, Opts, Timeout)
+                        after hackney_ssl:release_resumption(Host, Claimed)
+                        end,
+            case Connected of
                 {ok, Socket} ->
                     case hackney_ssl:negotiated_protocol(Socket, Host, AlpnProtos, Cached, Resumable) of
                         http2 ->

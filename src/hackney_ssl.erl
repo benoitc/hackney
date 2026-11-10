@@ -39,10 +39,15 @@
 -define(ALPN_CACHE, hackney_alpn_protocols).
 -define(ALPN_CACHE_MAX, 4096).
 
+%% Hosts with a handshake currently offering a TLS 1.3 session ticket:
+%% #{Host => Pid}. See claim_resumption/2.
+-define(RESUME_CLAIMS, hackney_tls_resume_claims).
+
 %% ALPN (Application-Layer Protocol Negotiation) for HTTP/2
 -export([alpn_opts/1]).
 -export([get_negotiated_protocol/1]).
 -export([negotiated_protocol/5, resolve_alpn/6, recall_alpn/2, auto_tickets/1]).
+-export([claim_resumption/2, release_resumption/2]).
 
 %% @doc Atoms used to identify messages in {active, once | true} mode.
 messages(_) -> {ssl, ssl_closed, ssl_error}.
@@ -184,6 +189,7 @@ tlsv13_allowed() ->
 init_key_cache() ->
   ok = ensure_table(?TLS_KEY_CACHE),
   ok = ensure_table(?ALPN_CACHE),
+  ok = ensure_table(?RESUME_CLAIMS),
   ok.
 
 ensure_table(Name) ->
@@ -574,6 +580,71 @@ resolve_alpn(_Other, _Resumed, _Cached, _Host, _AlpnProtos, _Resumable) ->
   %% Defensive: resumed without a snapshot (gate should prevent this) or an
   %% unexpected ssl:negotiated_protocol/1 result.
   http1.
+
+%% @doc Let at most one handshake per host offer a TLS 1.3 session ticket at a
+%% time (#995). OTP's client ticket store picks a ticket and locks it in two
+%% separate steps, and a lock overwrites another, so concurrent handshakes to
+%% one host can offer the same single-use ticket. The server may accept it on
+%% both; the first to finish removes it, and the other then derives its keys
+%% without it and fails with `bad_record_mac'. A handshake that cannot claim
+%% the host drops `session_tickets' and does a full handshake instead, as on a
+%% cold ALPN memo. Returns the options to use and whether the claim was taken;
+%% pass that to release_resumption/2 once the handshake returns. Options
+%% without hackney's automatic resumption are returned as is.
+-spec claim_resumption(string(), list()) -> {list(), boolean()}.
+claim_resumption(Host, SslOpts) ->
+  case auto_tickets(SslOpts) of
+    false ->
+      {SslOpts, false};
+    true ->
+      case try_claim(resume_key(Host)) of
+        true -> {SslOpts, true};
+        false -> {proplists:delete(session_tickets, SslOpts), false}
+      end
+  end.
+
+%% @doc Release a claim taken by claim_resumption/2.
+-spec release_resumption(string(), boolean()) -> ok.
+release_resumption(_Host, false) ->
+  ok;
+release_resumption(Host, true) ->
+  try ets:delete_object(?RESUME_CLAIMS, {resume_key(Host), self()}) of
+    _ -> ok
+  catch
+    error:badarg -> ok
+  end.
+
+%% @private OTP keys its ticket store by SNI, which for hackney's default
+%% config is the host itself.
+resume_key(Host) ->
+  string:lowercase(Host).
+
+%% @private Take the claim on Key for this process. A claim left by a process
+%% that died mid-handshake is taken over. Without the table (hackney used as a
+%% library without the app started) every handshake may resume, as before.
+try_claim(Key) ->
+  Self = self(),
+  try ets:insert_new(?RESUME_CLAIMS, {Key, Self}) of
+    true ->
+      true;
+    false ->
+      case ets:lookup(?RESUME_CLAIMS, Key) of
+        [{_, Self}] ->
+          true;
+        [{_, Owner}] ->
+          case is_process_alive(Owner) of
+            true ->
+              false;
+            false ->
+              _ = ets:delete_object(?RESUME_CLAIMS, {Key, Owner}),
+              ets:insert_new(?RESUME_CLAIMS, {Key, Self})
+          end;
+        [] ->
+          ets:insert_new(?RESUME_CLAIMS, {Key, Self})
+      end
+  catch
+    error:badarg -> true
+  end.
 
 %% @private Write the ALPN memo only for handshakes tied to the resumable ticket
 %% source (hackney's default-config resumption). A non-resumable handshake
