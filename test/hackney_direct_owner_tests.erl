@@ -407,8 +407,12 @@ kill_and_wait(Pid, Mon) ->
     receive {'DOWN', Mon, process, Pid, _} -> ok end.
 
 wait_down(ConnMon) ->
+    T0 = erlang:monotonic_time(millisecond),
     receive
-        {'DOWN', ConnMon, process, _, _} -> ok
+        {'DOWN', ConnMon, process, _, _} ->
+            Ms = erlang:monotonic_time(millisecond) - T0,
+            Ms > 1000 andalso io:format(user, "~n=== DIAG slow conn DOWN after ~p ms~n", [Ms]),
+            ok
     after ?WAIT ->
         error(connection_outlived_owner)
     end.
@@ -429,10 +433,19 @@ wait_server(#{tag := Tag}, Event) ->
     end.
 
 wait_closed(#{tag := Tag}, H) ->
+    T0 = erlang:monotonic_time(millisecond),
     receive
-        {Tag, closed, H} -> ok
+        {Tag, closed, H} ->
+            Ms = erlang:monotonic_time(millisecond) - T0,
+            Ms > 1000 andalso io:format(user, "~n=== DIAG slow close seen after ~p ms~n", [Ms]),
+            ok
     after ?WAIT ->
         diag(H),
+        receive {Tag, closed, H} ->
+            io:format(user, "=== DIAG close seen late, after ~p ms~n",
+                      [erlang:monotonic_time(millisecond) - T0])
+        after 15000 -> io:format(user, "=== DIAG close never seen~n", [])
+        end,
         error(socket_left_open)
     end.
 
