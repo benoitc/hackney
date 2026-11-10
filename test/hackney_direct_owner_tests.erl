@@ -44,6 +44,7 @@ direct_owner_test_() ->
       {"SOCKS5 tunnel", {timeout, 30, fun t_socks5_proxy/0}},
       {"HTTP/2 request without a pool", {timeout, 30, fun t_h2_request/0}},
       {"h2_open stream process killed", {timeout, 30, fun t_h2_open/0}},
+      {"DIAG repeat h2", {timeout, 300, fun() -> [begin t_h2_request(), t_h2_open() end || _ <- lists:seq(1, 20)], ok end}},
       {"HTTP/3 connect without a pool", {timeout, 60, fun t_h3_connect/0}},
       {"async body read blocked on a silent server", {timeout, 30, fun t_async_blocked/0}},
       {"pooled conn blocked on a silent server", {timeout, 30, fun t_pooled_blocked/0}},
@@ -431,8 +432,37 @@ wait_closed(#{tag := Tag}, H) ->
     receive
         {Tag, closed, H} -> ok
     after ?WAIT ->
+        diag(H),
         error(socket_left_open)
     end.
+
+%% DIAGNOSTIC (temporary): dump the server side when the close is not seen.
+diag(H) ->
+    io:format(user, "~n=== DIAG handler ~p ~p~n",
+              [H, catch process_info(H, [current_stacktrace, messages, status])]),
+    Conns = [P || P <- processes(),
+                  case catch process_info(P, dictionary) of
+                      {dictionary, D} ->
+                          case proplists:get_value('$initial_call', D) of
+                              {h2_connection, _, _} -> true;
+                              _ -> false
+                          end;
+                      _ -> false
+                  end],
+    [begin
+         Info = catch process_info(P, [current_stacktrace, messages, status, links, monitors]),
+         St = catch sys:get_state(P, 1000),
+         io:format(user, "=== DIAG h2_connection ~p~n info ~p~n state ~P~n",
+                   [P, Info, St, 40])
+     end || P <- Conns],
+    io:format(user, "=== DIAG ssl conns ~p~n",
+              [length([P || P <- processes(),
+                            case catch process_info(P, dictionary) of
+                                {dictionary, D} -> proplists:get_value('$initial_call', D) =:= {tls_connection, init, 1}
+                                                   orelse proplists:get_value('$initial_call', D) =:= {ssl_gen_statem, init, 1};
+                                _ -> false
+                            end])]),
+    ok.
 
 port(#{port := Port}) -> Port.
 
