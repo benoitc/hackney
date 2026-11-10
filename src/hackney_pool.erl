@@ -84,6 +84,10 @@
     pid_monitors = #{},
     %% Hosts that have been activated (prewarm triggered): sets:set(Key)
     activated_hosts = sets:new(),
+    %% connect_options behind each socket options hash in a key (sock_key/1),
+    %% so prewarm dials a bucket with the options its requests asked for:
+    %% #{SockKey => ConnectOpts}
+    sock_opts = #{},
     %% HTTP/2 connections: #{Key => Pid} - one multiplexed connection per host
     %% These connections are shared across callers (not checked out exclusively)
     h2_connections = #{},
@@ -134,7 +138,7 @@ do_checkout(Requester, Host, Port, Transport, Opts) ->
     CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
     PoolName = proplists:get_value(pool, Opts, default),
     Pool = find_pool(PoolName, Opts),
-    Key = connection_key(Host, Port, Transport),
+    Key = connection_key(Host, Port, Transport, sock_key(Opts)),
 
     PoolInfo = {PoolName, Key, Pool, Transport},
     case gen_server:call(Pool, {checkout, Key, Requester,
@@ -180,7 +184,7 @@ do_checkout_ssl(Requester, Host, Port, Transport, Opts) ->
     PoolName = proplists:get_value(pool, Opts, default),
     Pool = find_pool(PoolName, Opts),
     TlsKey = proplists:get_value(tls_key, Opts, default),
-    SslKey = connection_key(Host, Port, Transport, TlsKey),
+    SslKey = connection_key(Host, Port, Transport, ssl_bucket(TlsKey, sock_key(Opts))),
 
     PoolInfo = {PoolName, SslKey, Pool, Transport},
     case gen_server:call(Pool, {checkout_ssl, SslKey, Requester,
@@ -974,9 +978,27 @@ terminate(_Reason, #state{available=Available, in_use=InUse,
 %% Internal functions
 %%====================================================================
 
+%% @private Hash of the socket options a request asks for (connect_options
+%% minus hackney's own keys), so a pooled, shared or prewarmed connection is
+%% only handed to requests that asked for the same socket options (#970).
+%% `default' when there are none: requests without connect_options keep the
+%% keys they always had.
+sock_key(Opts) ->
+    case hackney_util:socket_opts(proplists:get_value(connect_options, Opts, [])) of
+        [] -> default;
+        SockOpts -> crypto:hash(sha256, term_to_binary(lists:usort(SockOpts)))
+    end.
+
+%% @private 4th key element of a TLS bucket: the TLS options hash alone for
+%% default socket options (unchanged keys), else paired with the socket
+%% options hash.
+ssl_bucket(TlsKey, default) -> TlsKey;
+ssl_bucket(TlsKey, SockKey) -> {TlsKey, SockKey}.
+
 %% @private Key for pooled connections. The 4th element buckets pooled SSL
-%% connections by the hash of their effective TLS options (ssl_pooling);
-%% plain TCP connections all use the `default' bucket.
+%% connections by the hash of their effective TLS options (ssl_pooling) and,
+%% when set, of their socket options; plain connections are bucketed by the
+%% hash of their socket options, `default' without any.
 connection_key(Host, Port, Transport) ->
     connection_key(Host, Port, Transport, default).
 
@@ -998,7 +1020,8 @@ key_host_port({Host, Port, _Transport, _TlsKey}) ->
 %% `default' bucket, preserving the previous behavior.
 h2_connection_key(Host0, Port, Transport, Options) ->
     Host = string:lowercase(Host0),
-    {Host, Port, Transport, proplists:get_value(tls_key, Options, default)}.
+    {Host, Port, Transport,
+     ssl_bucket(proplists:get_value(tls_key, Options, default), sock_key(Options))}.
 
 %% @private Key for shared HTTP/3 connections and cached 0-RTT session
 %% tickets. Includes the hash of the QUIC trust projection (h3_tls_key) so
@@ -1071,8 +1094,8 @@ find_available_ssl(Key, Available) ->
 checkout_ssl_fallback(SslKey, Requester, Opts, State) ->
     #state{name=PoolName, max_connections=MaxConn,
            available=Available, in_use=InUse} = State,
-    {Host, Port} = key_host_port(SslKey),
-    TcpKey = connection_key(Host, Port, hackney_tcp),
+    %% The TCP bucket with the same socket options as the request.
+    TcpKey = dial_key(SslKey),
     TotalInUse = maps:size(InUse),
 
     case find_available(TcpKey, Available) of
@@ -1146,10 +1169,25 @@ spawn_connection(Host, Port, Transport, Key, Owner, Opts, State) ->
             ReqMon = erlang:monitor(process, Owner),
             PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
             Dialing = maps:put(Pid, {Key, ReqMon, alive}, State#state.dialing),
-            {ok, Pid, State#state{pid_monitors=PidMonitors, dialing=Dialing}};
+            {ok, Pid, remember_sock_opts(Opts, State#state{pid_monitors=PidMonitors,
+                                                           dialing=Dialing})};
         {error, Reason} ->
             {error, Reason}
     end.
+
+%% @private Remember the connect_options behind a non-default socket options
+%% hash for prewarm. Bounded by the number of distinct option sets in use.
+remember_sock_opts(Opts, #state{sock_opts=SockOpts}=State) ->
+    case sock_key(Opts) of
+        default -> State;
+        SockKey ->
+            ConnectOpts = proplists:get_value(connect_options, Opts, []),
+            State#state{sock_opts=maps:put(SockKey, ConnectOpts, SockOpts)}
+    end.
+
+%% @private connect_options to prewarm a plain bucket with.
+prewarm_connect_opts({_Host, _Port, _Transport, SockKey}, #state{sock_opts=SockOpts}) ->
+    maps:get(SockKey, SockOpts, []).
 
 %% @private Dial a conn the pool handed out undialed, in the requester's
 %% process, then report the outcome to the pool. A pool that went away in
@@ -1319,10 +1357,12 @@ checkin_close(Pid, Key, InUse2, State) ->
 
 %% @private Key of the plain bucket a conn under Key was dialled into: an
 %% HTTPS conn was dialled as TCP, any other conn as its own transport.
+dial_key({Host, Port, hackney_ssl, {_TlsKey, SockKey}}) ->
+    connection_key(Host, Port, hackney_tcp, SockKey);
 dial_key({Host, Port, hackney_ssl, _TlsKey}) ->
     connection_key(Host, Port, hackney_tcp);
-dial_key({Host, Port, Transport, _TlsKey}) ->
-    connection_key(Host, Port, Transport).
+dial_key({_Host, _Port, _Transport, _SockKey} = Key) ->
+    Key.
 
 %% @private Pool branch of a checkin: hand ownership to the pool and store
 %% the conn under its checkout key (TCP or SSL bucket).
@@ -1492,7 +1532,8 @@ do_prewarm(Key, Count, State) ->
             %% Create connections in background to not block the pool
             PoolPid = self(),
             spawn(fun() ->
-                prewarm_connections(PoolPid, Key, Needed, IdleTimeout)
+                prewarm_connections(PoolPid, Key, Needed, IdleTimeout,
+                                    prewarm_connect_opts(Key, State))
             end),
             State2;
         false ->
@@ -1526,10 +1567,11 @@ maybe_maintain_prewarm(Key, State) ->
             State
     end.
 
-%% @private Create prewarm connections (runs in separate process)
-prewarm_connections(_PoolPid, _Key, 0, _IdleTimeout) ->
+%% @private Create prewarm connections (runs in separate process), dialled
+%% with the connect_options the bucket's requests asked for.
+prewarm_connections(_PoolPid, _Key, 0, _IdleTimeout, _ConnectOpts) ->
     ok;
-prewarm_connections(PoolPid, Key, Count, IdleTimeout) ->
+prewarm_connections(PoolPid, Key, Count, IdleTimeout, ConnectOpts) ->
     {Host, Port, Transport, _TlsKey} = Key,
     ConnOpts = #{
         host => Host,
@@ -1539,7 +1581,7 @@ prewarm_connections(PoolPid, Key, Count, IdleTimeout) ->
         recv_timeout => 5000,
         idle_timeout => IdleTimeout,
         ssl_options => [],
-        connect_options => [],
+        connect_options => ConnectOpts,
         pool_pid => PoolPid,
         owner => PoolPid
     },
@@ -1555,7 +1597,7 @@ prewarm_connections(PoolPid, Key, Count, IdleTimeout) ->
         {error, _Reason} ->
             ok
     end,
-    prewarm_connections(PoolPid, Key, Count - 1, IdleTimeout).
+    prewarm_connections(PoolPid, Key, Count - 1, IdleTimeout, ConnectOpts).
 
 handle_stats(State) ->
     #state{name=PoolName, max_connections=Max, available=Available,

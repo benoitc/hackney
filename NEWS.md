@@ -24,6 +24,13 @@ Unreleased
   was on (the default). Erlang's TLS client could offer the same session
   ticket on two connections at once. Only one new connection per host now
   resumes a session at a time; the others do a full handshake (#995).
+- Socket options set in `connect_options`, such as `{nodelay, true}`, were
+  lost on pooled connections: a request could be served a connection
+  opened without them, including the ones the pool opens ahead of time.
+  Pooled HTTP/1.1 and shared HTTP/2 connections are now only reused by
+  requests with the same socket options, and the pool opens connections
+  ahead of time with them. Requests without `connect_options` share
+  connections as before (#970).
 
 4.10.1 - 2026-11-10
 -------------------
