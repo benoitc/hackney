@@ -31,6 +31,12 @@ Unreleased
   requests with the same socket options, and the pool opens connections
   ahead of time with them. Requests without `connect_options` share
   connections as before (#970).
+- Through an HTTP CONNECT or SOCKS5 proxy, and on WebSocket connections,
+  most socket options set in `connect_options` were dropped: only a few
+  (`nodelay`, `linger`, `send_timeout`, `raw`, `inet6`) reached the
+  socket, and a WebSocket through a proxy used none of them. All socket
+  options now apply. Options hackney needs to read the socket itself, such
+  as `active` or `packet`, are still ignored (#970).
 - Closing an HTTP/2 connection over TLS could take about five seconds, and
   the other side learned it was gone only after that delay. hackney now
   uses h2 0.15.1, which closes without waiting for the peer.

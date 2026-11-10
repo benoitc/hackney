@@ -219,3 +219,13 @@ socket_opts_test_() ->
                                               {insecure, true}, {session_ticket, t},
                                               {happy_eyeballs, false}, {recbuf, 1024}]))},
      {"empty stays empty", ?_assertEqual([], hackney_util:socket_opts([]))}].
+
+dial_socket_opts_test_() ->
+    [{"keeps socket options, drops hackney keys and framing options",
+      ?_assertEqual([{keepalive, false}, inet6, {ip, {127,0,0,1}}],
+                    hackney_util:dial_socket_opts([{keepalive, false}, binary, list,
+                                                   {active, true}, {packet, line},
+                                                   {mode, list}, {header, 2},
+                                                   {protocols, [http1]},
+                                                   {on_connect_response, fun erlang:display/1},
+                                                   inet6, {ip, {127,0,0,1}}]))}].

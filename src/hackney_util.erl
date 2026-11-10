@@ -6,7 +6,16 @@
 -module(hackney_util).
 
 -export([filter_options/3]).
--export([socket_opts/1]).
+-export([socket_opts/1, dial_socket_opts/1]).
+
+%% gen_tcp/inet options a caller may set on a dialled socket.
+-define(DIAL_SOCKET_OPTS,
+        [keepalive, nodelay, linger, send_timeout, send_timeout_close, raw,
+         inet, inet6, ip, ifaddr, recbuf, sndbuf, buffer, tos, tclass,
+         priority, reuseaddr, reuseport, reuseport_lb, exclusiveaddruse,
+         dontroute, bind_to_device, netns, ipv6_v6only, delay_send,
+         high_watermark, low_watermark, high_msgq_watermark,
+         low_msgq_watermark, exit_on_close, show_econnreset, nopush]).
 -export([set_option_default/3]).
 -export([require/1]).
 -export([maybe_apply_defaults/2]).
@@ -47,6 +56,16 @@ filter_options([Opt|Tail], AllowedKeys, Acc) when is_atom(Opt) ->
 -spec socket_opts(list()) -> list().
 socket_opts(ConnectOpts) ->
   [Opt || Opt <- ConnectOpts, not hackney_opt(Opt)].
+
+%% @doc The caller's socket options to merge over a transport's own base
+%% options when it dials. Only gen_tcp/inet socket options are kept:
+%% connect_options also carries hackney's own entries for the proxy
+%% transports (on_connect_response, proxy_auth_fun, ...), and the framing
+%% options the transport reads its socket with (binary, active, packet,
+%% mode) stay the transport's.
+-spec dial_socket_opts(list()) -> list().
+dial_socket_opts(ConnectOpts) ->
+  lists:reverse(filter_options(ConnectOpts, ?DIAL_SOCKET_OPTS, [])).
 
 hackney_opt({Key, _}) ->
   lists:member(Key, [protocols, insecure, session_ticket, happy_eyeballs]);
