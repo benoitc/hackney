@@ -45,8 +45,7 @@
   (#970).
 - WebTransport sessions ignored the socket options and `family` in
   `connect_options`. They now reach the socket: the UDP options over
-  HTTP/3, the TCP options over HTTP/2. hackney now uses webtransport 0.5.4
-  (#970).
+  HTTP/3, the TCP options over HTTP/2 (#970).
 - A streamed request body (`stream`, then `send_body` and
   `finish_send_body`) ignored a `Content-Length` set by the caller. Over
   HTTP/1.1 hackney added `Transfer-Encoding: chunked` and chunk-framed the
@@ -66,7 +65,9 @@
   the body.
 - Closing an HTTP/2 connection over TLS could take about five seconds, and
   the other side learned it was gone only after that delay. hackney now
-  uses h2 0.15.1, which closes without waiting for the peer.
+  uses h2 0.15.1, which closes without waiting for the peer, and
+  webtransport 0.5.5, so a WebTransport session over HTTP/2 also learns at
+  once that the peer closed.
 
 4.10.1 - 2026-11-10
 -------------------
