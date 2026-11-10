@@ -52,13 +52,13 @@ no_failed_handshakes(Port) ->
     {ok, C0} = upgrade(Port),
     timer:sleep(200),
     ok = hackney_conn:stop(C0),
-    Results = lists:append([round(Port) || _ <- lists:seq(1, ?ROUNDS)]),
+    Results = lists:append([burst(Port) || _ <- lists:seq(1, ?ROUNDS)]),
     Errors = [E || {error, E} <- Results],
     ?assertEqual([], Errors).
 
 %% One burst of concurrent upgrades. Each finished conn is kept open long
 %% enough to receive the server's tickets for the next round.
-round(Port) ->
+burst(Port) ->
     Self = self(),
     Pids = [spawn(fun() -> Self ! {done, self(), upgrade(Port)} end)
             || _ <- lists:seq(1, ?CONCURRENCY)],
