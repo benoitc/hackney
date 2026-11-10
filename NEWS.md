@@ -31,6 +31,9 @@ Unreleased
   requests with the same socket options, and the pool opens connections
   ahead of time with them. Requests without `connect_options` share
   connections as before (#970).
+- Closing an HTTP/2 connection over TLS could take about five seconds, and
+  the other side learned it was gone only after that delay. hackney now
+  uses h2 0.15.1, which closes without waiting for the peer.
 
 4.10.1 - 2026-11-10
 -------------------
