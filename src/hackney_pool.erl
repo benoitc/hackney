@@ -76,7 +76,9 @@
     %% In-use connections: #{Pid => Key}
     in_use = #{},
     %% Connections handed out undialed, while their requester dials them:
-    %% #{Pid => {Key, RequesterMonitorRef}}. They move to in_use on dial_ok.
+    %% #{Pid => {Key, RequesterMonitorRef, alive | down}}. They move to in_use
+    %% on dial_ok. A conn that died is kept as `down' until its requester
+    %% reports the failed dial or dies, so the slot always has a releaser.
     dialing = #{},
     %% Pid to monitor ref mapping: #{Pid => MonitorRef}
     pid_monitors = #{},
@@ -656,14 +658,17 @@ handle_call({checkout_ssl, SslKey, Requester, Opts}, _From, State) ->
     end;
 
 %% The requester finished dialing a conn handed out by a checkout miss. A conn
-%% that died in between is no longer in dialing: the caller gets an error and
-%% releases its slot itself.
+%% that died in between (`down', or already gone) is not put in use: the
+%% caller gets an error and releases its slot itself.
 handle_call({dial_ok, Pid}, _From, #state{dialing=Dialing, in_use=InUse}=State) ->
     case maps:take(Pid, Dialing) of
-        {{Key, ReqMon}, Dialing2} ->
+        {{Key, ReqMon, alive}, Dialing2} ->
             erlang:demonitor(ReqMon, [flush]),
             {reply, ok, State#state{dialing=Dialing2,
                                     in_use=maps:put(Pid, Key, InUse)}};
+        {{_Key, ReqMon, down}, Dialing2} ->
+            erlang:demonitor(ReqMon, [flush]),
+            {reply, {error, closed}, State#state{dialing=Dialing2}};
         error ->
             {reply, {error, closed}, State}
     end;
@@ -672,7 +677,7 @@ handle_call({dial_ok, Pid}, _From, #state{dialing=Dialing, in_use=InUse}=State) 
 %% the caller releases it on the checkout error, as for any failed checkout.
 handle_call({dial_failed, Pid}, _From, #state{dialing=Dialing}=State) ->
     case maps:take(Pid, Dialing) of
-        {{_Key, ReqMon}, Dialing2} ->
+        {{_Key, ReqMon, _ConnState}, Dialing2} ->
             erlang:demonitor(ReqMon, [flush]),
             {reply, ok, forget_monitor(Pid, State#state{dialing=Dialing2})};
         error ->
@@ -838,17 +843,20 @@ handle_info(_Info, State) ->
 %% @private A connection process died: remove it from every map that holds
 %% it. The pool monitors every conn from spawn_connection on, so this runs
 %% whatever stage the conn died in. Only the slot depends on the stage: an
-%% in_use conn releases it here; a dialing conn does not, its requester sees
-%% the dial fail and releases it. A conn whose requester died mid-dial has
-%% already left dialing (its slot released then) and stops on its own once
-%% it sees its owner gone; that DOWN only clears pid_monitors.
+%% in_use conn releases it here. A dialing conn does not: its entry is kept
+%% as `down' with the requester still monitored, so whoever is left releases
+%% the slot. A live requester sees the dial fail, reports dial_failed and
+%% releases it itself; a dead one is released by its 'DOWN' (#974: a conn
+%% started for a requester that died while its checkout was queued stops at
+%% once, and its DOWN used to flush the requester's, leaking the slot). A
+%% conn whose requester died mid-dial has already left dialing (its slot
+%% released then); that DOWN only clears pid_monitors.
 conn_down(Pid, Reason, State) ->
     #state{name=PoolName, available=Available, in_use=InUse, pid_monitors=PidMonitors,
            h2_connections=H2Conns, h3_connections=H3Conns, dialing=Dialing} = State,
-    Dialing2 = case maps:take(Pid, Dialing) of
-        {{_Key, ReqMon}, D} ->
-            erlang:demonitor(ReqMon, [flush]),
-            D;
+    Dialing2 = case maps:find(Pid, Dialing) of
+        {ok, {DialKey, ReqMon, _ConnState}} ->
+            maps:put(Pid, {DialKey, ReqMon, down}, Dialing);
         error ->
             Dialing
     end,
@@ -1137,7 +1145,7 @@ spawn_connection(Host, Port, Transport, Key, Owner, Opts, State) ->
             MonRef = erlang:monitor(process, Pid),
             ReqMon = erlang:monitor(process, Owner),
             PidMonitors = maps:put(Pid, MonRef, State#state.pid_monitors),
-            Dialing = maps:put(Pid, {Key, ReqMon}, State#state.dialing),
+            Dialing = maps:put(Pid, {Key, ReqMon, alive}, State#state.dialing),
             {ok, Pid, State#state{pid_monitors=PidMonitors, dialing=Dialing}};
         {error, Reason} ->
             {error, Reason}
@@ -1181,7 +1189,7 @@ forget_monitor(Pid, #state{pid_monitors=PidMonitors}=State) ->
 
 %% @private Find the dialing entry whose requester monitor is `MonRef'.
 take_dialing_requester(MonRef, Dialing) ->
-    Found = maps:fold(fun(Pid, {Key, Ref}, none) when Ref =:= MonRef -> {Pid, Key};
+    Found = maps:fold(fun(Pid, {Key, Ref, _}, none) when Ref =:= MonRef -> {Pid, Key};
                          (_, _, Acc) -> Acc
                       end, none, Dialing),
     case Found of

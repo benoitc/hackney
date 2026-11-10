@@ -9,6 +9,11 @@ Unreleased
   answered could hang: `close` waited for the pending read to end, which
   on a pooled connection was never. `close` now returns within about a
   second (#996).
+- A request whose caller was killed while it waited for a pooled
+  connection could keep its per-host slot forever. After enough such
+  deaths (50 by default) every later request to that host failed with
+  `checkout_timeout` until the node restarted. The slot is now released
+  (#974).
 - A request that gave up waiting for a pooled connection
   (`checkout_timeout`) could still be served later by the pool: it opened
   or reserved a connection nobody used, and freed a per-host slot twice,
