@@ -29,7 +29,15 @@ stream_content_length_test_() ->
        {timeout, 30, fun short_body/0}},
       {"a long body is an error and the conn is not reused",
        {timeout, 30, fun long_body/0}},
-      {"an invalid Content-Length is refused", fun invalid_content_length/0}]}.
+      {"an invalid Content-Length is refused", fun invalid_content_length/0},
+      {"an empty write does not end a chunked body", fun empty_write_chunked/0},
+      {"an empty write is nothing on a raw body", fun empty_write_raw/0},
+      {"a Transfer-Encoding without chunked last gets chunked appended",
+       fun te_without_chunked/0},
+      {"chunked not last in Transfer-Encoding is refused", fun te_chunked_not_last/0},
+      {"equal duplicate Content-Length values are sent once", fun duplicate_equal/0},
+      {"different duplicate Content-Length values are refused",
+       fun duplicate_different/0}]}.
 
 %%====================================================================
 %% Tests
@@ -90,7 +98,7 @@ keepalive_reuse() ->
         C1 = stream(Server, Pool, [{<<"content-length">>, <<"5">>}], [<<"hello">>]),
         C2 = stream(Server, Pool, [], [<<"world">>]),
         ?assertEqual(C1, C2),
-        [{1, R1}, {1, R2}] = requests(2),
+        [{1, R1}, {1, R2}] = requests(Server, 2),
         assert_raw(R1, <<"hello">>),
         {_, Body2} = split(R2),
         ?assertEqual(<<"5\r\nworld\r\n0\r\n\r\n">>, Body2)
@@ -120,6 +128,47 @@ invalid_content_length() ->
      || V <- [<<"abc">>, <<"-1">>, <<"+5">>, <<"5, 5">>, <<>>]],
     stop_server(Server).
 
+%% A chunk of size 0 is the last chunk (RFC 9112 7.1): an empty write used
+%% to end the body, and the next write became a stray request.
+empty_write_chunked() ->
+    Raw = upload([], [<<"he">>, <<>>, [], <<"llo">>]),
+    {_, Body} = split(Raw),
+    ?assertEqual(<<"2\r\nhe\r\n3\r\nllo\r\n0\r\n\r\n">>, Body).
+
+empty_write_raw() ->
+    Raw = upload([{<<"content-length">>, <<"5">>}], [<<"he">>, <<>>, <<"llo">>]),
+    assert_raw(Raw, <<"hello">>).
+
+%% hackney frames the body as chunked, so chunked must be the final coding
+%% of the request (RFC 9112 6.1).
+te_without_chunked() ->
+    Raw = upload([{<<"Transfer-Encoding">>, <<"gzip">>}], [<<"hello">>]),
+    {Head, Body} = split(Raw),
+    ?assertMatch({_, _}, binary:match(Head, <<"\r\nTransfer-Encoding: gzip, chunked">>)),
+    ?assertEqual(<<"5\r\nhello\r\n0\r\n\r\n">>, Body).
+
+te_chunked_not_last() ->
+    Server = start_server(),
+    ?assertEqual({error, invalid_transfer_encoding},
+                 hackney:request(put, url(Server), [{<<"transfer-encoding">>, <<"chunked, gzip">>}],
+                                 stream, [{pool, false}])),
+    stop_server(Server).
+
+duplicate_equal() ->
+    Raw = upload([{<<"content-length">>, <<"5">>}, {<<"Content-Length">>, <<"5">>}],
+                 [<<"hello">>]),
+    {Head, _} = split(Raw),
+    ?assertEqual(1, length(binary:matches(lower(Head), <<"content-length">>))),
+    assert_raw(Raw, <<"hello">>).
+
+duplicate_different() ->
+    Server = start_server(),
+    ?assertEqual({error, invalid_content_length},
+                 hackney:request(put, url(Server), [{<<"content-length">>, <<"5">>},
+                                                    {<<"content-length">>, <<"6">>}],
+                                 stream, [{pool, false}])),
+    stop_server(Server).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -131,7 +180,7 @@ upload(Headers, Writes) ->
     [ok = hackney:send_body(C, W) || W <- Writes],
     ok = hackney:finish_send_body(C),
     {ok, 200, _, C} = hackney:start_response(C),
-    [{1, Raw}] = requests(1),
+    [{1, Raw}] = requests(Server, 1),
     hackney:close(C),
     stop_server(Server),
     Raw.
@@ -155,7 +204,7 @@ assert_not_reused(C, Server, Pool) ->
     C2 = stream(Server, Pool, [], [<<"x">>]),
     ?assertNotEqual(C, C2),
     %% The new request came in on the listener's second connection.
-    ?assertMatch([{2, _}], requests(1)).
+    ?assertMatch([{2, _}], requests(Server, 1)).
 
 assert_raw(Raw, Expected) ->
     {Head, Body} = split(Raw),
@@ -180,8 +229,9 @@ with_pool(Fun) ->
         stop_server(Server)
     end.
 
-requests(N) ->
-    [receive {request, Conn, Raw} -> {Conn, Raw} after 5000 -> erlang:error(no_request) end
+%% Requests seen by this server only: every message carries its reference.
+requests(#{ref := Ref}, N) ->
+    [receive {request, Ref, Conn, Raw} -> {Conn, Raw} after 5000 -> erlang:error(no_request) end
      || _ <- lists:seq(1, N)].
 
 url(#{port := Port}) ->
@@ -192,9 +242,9 @@ url(#{port := Port}) ->
 start_server() ->
     {ok, L} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
     {ok, Port} = inet:port(L),
-    Test = self(),
+    Test = {self(), make_ref()},
     Pid = spawn(fun() -> accept(L, Test, 1) end),
-    #{pid => Pid, port => Port}.
+    #{pid => Pid, port => Port, ref => element(2, Test)}.
 
 stop_server(#{pid := Pid}) ->
     exit(Pid, shutdown),
@@ -214,7 +264,8 @@ accept(L, Test, N) ->
 serve(S, Test, N, Acc) ->
     case complete(Acc) of
         {ok, Req, Rest} ->
-            Test ! {request, N, Req},
+            {TestPid, Ref} = Test,
+            TestPid ! {request, Ref, N, Req},
             ok = gen_tcp:send(S, ?OK),
             serve(S, Test, N, Rest);
         more ->
@@ -229,7 +280,7 @@ complete(Acc) ->
     case binary:split(Acc, <<"\r\n\r\n">>) of
         [Head, Body] ->
             HeadL = lower(Head),
-            case binary:match(HeadL, <<"transfer-encoding: chunked">>) of
+            case re:run(HeadL, <<"transfer-encoding:[^\\r]*chunked">>) of
                 nomatch ->
                     Len = case re:run(HeadL, <<"content-length: *([0-9]+)">>,
                                       [{capture, all_but_first, binary}]) of
