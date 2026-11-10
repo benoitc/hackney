@@ -74,6 +74,7 @@
     release_to_pool/1,
     hold/1,
     release_held/1,
+    abort_read/1,
     verify_socket/1,
     is_ready/1,
     is_ready/2,
@@ -667,6 +668,15 @@ hold(Pid) ->
     try gen_statem:call(Pid, hold, 5000)
     catch exit:_ -> {error, closed}
     end.
+
+%% @doc Tell the connection that its caller is closing it, so a passive
+%% read in progress (a server that never answers) ends within one
+%% ?OWNER_CHECK_INTERVAL slice instead of holding the close for the whole
+%% recv_timeout. A connection that is not reading ignores the notice.
+-spec abort_read(pid()) -> ok.
+abort_read(Pid) ->
+    Pid ! {?MODULE, abort_read},
+    ok.
 
 %% @doc Give up the caller's hold on a pooled connection. A held HTTP/1.1
 %% connection goes back to its pool. On a shared HTTP/2 connection only the
@@ -2982,14 +2992,15 @@ recv_data(#conn_data{socket = Socket} = Data) ->
             {ok, Bytes}
     end.
 
-%% @private Passive read that still notices the owner dying. The read runs
-%% in slices of at most ?OWNER_CHECK_INTERVAL, with a look for the owner's
-%% 'DOWN' between them. The 'DOWN' is put back in the mailbox, so once the
-%% error unwinds the current callback, the state's owner-'DOWN' clause stops
-%% the conn as it always did. The whole read still honours recv_timeout.
-owner_recv(#conn_data{transport = Transport, socket = Socket,
-                      recv_timeout = Timeout, owner_mon = undefined}) ->
-    Transport:recv(Socket, 0, Timeout);
+%% @private Passive read that still notices the owner dying or a close.
+%% The read runs in slices of at most ?OWNER_CHECK_INTERVAL. Between them it
+%% looks for the owner's 'DOWN', which is put back in the mailbox so the
+%% state's owner-'DOWN' clause stops the conn once the error unwinds the
+%% current callback, and for an abort_read/1 notice from hackney:close/1.
+%% The caller is closing the conn, so the conn stops right there, as the
+%% stop that close/1 sends next would, rather than after recv_timeout or
+%% never (#996): terminate/3 runs, the exit is normal and no response
+%% message is sent. The whole read still honours recv_timeout.
 owner_recv(#conn_data{transport = Transport, socket = Socket,
                       recv_timeout = Timeout, owner_mon = OwnerMon}) ->
     owner_recv(Transport, Socket, OwnerMon, recv_deadline(Timeout)).
@@ -2999,7 +3010,9 @@ owner_recv(Transport, Socket, OwnerMon, Deadline) ->
     case Transport:recv(Socket, 0, min(Remaining, ?OWNER_CHECK_INTERVAL)) of
         {error, timeout} when Remaining > ?OWNER_CHECK_INTERVAL ->
             receive
-                {'DOWN', OwnerMon, process, _, _} = Down ->
+                {?MODULE, abort_read} ->
+                    exit(normal);
+                {'DOWN', OwnerMon, process, _, _} = Down when is_reference(OwnerMon) ->
                     self() ! Down,
                     {error, owner_down}
             after 0 ->
