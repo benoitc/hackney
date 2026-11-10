@@ -6,6 +6,7 @@
 -module(hackney_util).
 
 -export([filter_options/3]).
+-export([socket_opts/1]).
 -export([set_option_default/3]).
 -export([require/1]).
 -export([maybe_apply_defaults/2]).
@@ -39,6 +40,20 @@ filter_options([Opt|Tail], AllowedKeys, Acc) when is_atom(Opt) ->
     true -> filter_options(Tail, AllowedKeys, [Opt|Acc]);
     false -> filter_options(Tail, AllowedKeys, Acc)
   end.
+
+%% @doc The socket options in a connect_options list: everything except the
+%% entries hackney reads itself. Used to key pooled and shared connections by
+%% the socket options they were opened with.
+-spec socket_opts(list()) -> list().
+socket_opts(ConnectOpts) ->
+  [Opt || Opt <- ConnectOpts, not hackney_opt(Opt)].
+
+hackney_opt({Key, _}) ->
+  lists:member(Key, [protocols, insecure, session_ticket, happy_eyeballs]);
+hackney_opt(insecure) ->
+  true;
+hackney_opt(_) ->
+  false.
 
 %% @doc set the default options in a proplists if not defined
 -spec set_option_default(Opts, atom(), any())

@@ -208,3 +208,14 @@ privdir_test_() ->
              ?assert(length(Dir) > 0)
          end}
     ].
+
+socket_opts_test_() ->
+    [{"keeps socket options",
+      ?_assertEqual([{nodelay, true}, {ip, {127,0,0,1}}, inet6],
+                    hackney_util:socket_opts([{nodelay, true}, {ip, {127,0,0,1}}, inet6]))},
+     {"drops hackney's own keys",
+      ?_assertEqual([{recbuf, 1024}],
+                    hackney_util:socket_opts([{protocols, [http1]}, insecure,
+                                              {insecure, true}, {session_ticket, t},
+                                              {happy_eyeballs, false}, {recbuf, 1024}]))},
+     {"empty stays empty", ?_assertEqual([], hackney_util:socket_opts([]))}].
