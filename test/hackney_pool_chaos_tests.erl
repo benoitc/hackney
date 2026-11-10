@@ -45,8 +45,8 @@ chaos_test_() ->
     {setup,
      fun setup/0,
      fun teardown/1,
-     [{"the pool survives a randomized fault storm and serves again",
-       {timeout, 300, fun t_chaos/0}}]}.
+     [{"DIAG chaos x5",
+       {timeout, 900, fun() -> [t_chaos() || _ <- lists:seq(1, 5)], ok end}}]}.
 
 setup() ->
     error_logger:tty(false),
@@ -102,10 +102,12 @@ t_chaos() ->
     ?assertEqual(Pool, hackney_pool:find_pool(?POOL)),
     ?assert(is_process_alive(Pool)),
     hackney_crash_sentinel:assert_no_crash_from(Pool),
-    Stats = wait_until(fun() ->
+    Stats = try wait_until(fun() ->
                               S = hackney_pool:get_stats(?POOL),
                               settled(S, Baseline) andalso S
-                      end, 10000),
+                      end, 10000)
+            catch C:E -> diag(Baseline), erlang:raise(C, E, [])
+            end,
     ?assertEqual(0, proplists:get_value(in_use_count, Stats)),
     ?assertEqual(0, proplists:get_value(queue_count, Stats)),
 
@@ -235,6 +237,26 @@ await(Pids, Tally, Deadline) ->
     after Left ->
         erlang:error({chaos_workers_stuck, length(Pids)})
     end.
+
+%% DIAG (temporary): why the pool did not settle.
+diag(Baseline) ->
+    Stats = hackney_pool:get_stats(?POOL),
+    io:format(user, "~n=== DIAG stats ~p baseline ~p conn_count ~p~n", [Stats, Baseline, conn_count()]),
+    PoolState = sys:get_state(hackney_pool:find_pool(?POOL)),
+    io:format(user, "=== DIAG pool maps ~P~n",
+              [[F || F <- tuple_to_list(PoolState), is_map(F), map_size(F) > 0], 60]),
+    Conns = [P || {_, P, _, _} <- supervisor:which_children(hackney_conn_sup), is_pid(P)],
+    [io:format(user, "=== DIAG conn ~p state ~P info ~P~n",
+               [P, (catch element(1, sys:get_state(P, 500))), 10,
+                (catch process_info(P, [current_stacktrace, message_queue_len, monitors, links, dictionary])), 40])
+     || P <- lists:sublist(Conns, 30)],
+    io:format(user, "=== DIAG total conns ~p~n", [length(Conns)]),
+    %% Does it settle later?
+    T0 = erlang:monotonic_time(millisecond),
+    Later = (catch wait_until(fun() -> S = hackney_pool:get_stats(?POOL), settled(S, Baseline) andalso S end, 30000)),
+    io:format(user, "=== DIAG after +~p ms: ~p conn_count ~p~n",
+              [erlang:monotonic_time(millisecond) - T0, Later, conn_count()]),
+    ok.
 
 settled(Stats, Baseline) ->
     proplists:get_value(in_use_count, Stats) =:= 0 andalso
