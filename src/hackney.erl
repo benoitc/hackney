@@ -116,7 +116,8 @@ connect(Transport, Host, Port) ->
         {ok, conn()} | {error, term()}.
 connect(Transport, Host, Port, Options) when is_binary(Host) ->
   connect(Transport, binary_to_list(Host), Port, Options);
-connect(Transport, Host, Port, Options) ->
+connect(Transport, Host, Port, Options0) ->
+  Options = fold_insecure(Options0),
   %% The caller keeps the connection for its own requests, so a pooled one
   %% must not go back to the pool after each response: close/1 does that.
   case open_conn(Transport, Host, Port, Options) of
@@ -1916,7 +1917,8 @@ use_pool(Options) ->
     PoolName -> PoolName
   end.
 
-maybe_proxy(Transport, Scheme, Host, Port, Options) ->
+maybe_proxy(Transport, Scheme, Host, Port, Options0) ->
+  Options = fold_insecure(Options0),
   case get_proxy_config(Scheme, Host, Options) of
     false ->
       %% No proxy configured, direct connection
@@ -1930,6 +1932,21 @@ maybe_proxy(Transport, Scheme, Host, Port, Options) ->
     {http, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport} ->
       %% Simple HTTP proxy - connect to proxy, use absolute URLs
       connect_via_http_proxy(Scheme, Host, Port, ProxyHost, ProxyPort, ProxyAuth, ProxyTransport, Options)
+  end.
+
+%% @private The documented top-level `insecure' option sits outside
+%% ssl_options, where every TLS builder (TCP TLS, the pooled h2 key and QUIC)
+%% reads it. Copy it into ssl_options once at the entry. The top-level value
+%% wins over ssl_options, as before (#786).
+fold_insecure(Options) ->
+  SslOpts = proplists:get_value(ssl_options, Options, []),
+  case proplists:get_value(insecure, Options) of
+    Insecure when Insecure =:= true;
+                  is_boolean(Insecure), SslOpts =/= [] ->
+      SslOpts1 = [{insecure, Insecure} | proplists:delete(insecure, SslOpts)],
+      lists:keystore(ssl_options, 1, Options, {ssl_options, SslOpts1});
+    _ ->
+      Options
   end.
 
 %% @doc Connect through HTTP CONNECT proxy (tunnel).

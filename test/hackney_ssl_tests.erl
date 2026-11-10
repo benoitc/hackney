@@ -110,6 +110,20 @@ partial_chain_dropped_with_cacerts_test() ->
     ?assertEqual([<<"der-a">>], proplists:get_value(cacerts, Opts)),
     ?assertNot(lists:keymember(partial_chain, 1, Opts)).
 
+verify_none_drops_hostname_verify_fun_test() ->
+    %% OTP runs a verify_fun even under verify_none, so the default hostname
+    %% check must not survive an explicit {verify, verify_none}.
+    Opts = hackney_ssl:effective_opts("example.com", [{verify, verify_none}], []),
+    ?assertEqual(verify_none, proplists:get_value(verify, Opts)),
+    ?assertNot(lists:keymember(verify_fun, 1, Opts)),
+    ?assertNot(lists:keymember(partial_chain, 1, Opts)).
+
+verify_none_keeps_user_verify_fun_test() ->
+    Fun = {fun(_, _, S) -> {valid, S} end, []},
+    Opts = hackney_ssl:effective_opts("example.com",
+                                      [{verify, verify_none}, {verify_fun, Fun}], []),
+    ?assertEqual(Fun, proplists:get_value(verify_fun, Opts)).
+
 partial_chain_dropped_with_cacertfile_test() ->
     Opts = hackney_ssl:ssl_opts("pinned.example",
                                 [{ssl_options, [{cacertfile, "/tmp/ca.pem"}]}]),
