@@ -22,6 +22,12 @@ insecure_test_() ->
            ?_assertMatch({ok, 200, _, ?BODY}, req(Url, [{pool, ?POOL}, insecure]))},
           {"top-level {insecure, true}, unpooled",
            ?_assertMatch({ok, 200, _, ?BODY}, req(Url, [{pool, false}, {insecure, true}]))},
+          {"insecure in connect_options, pooled",
+           ?_assertMatch({ok, 200, _, ?BODY},
+                         req(Url, [{pool, ?POOL}, {connect_options, [{insecure, true}]}]))},
+          {"insecure in connect_options, unpooled",
+           ?_assertMatch({ok, 200, _, ?BODY},
+                         req(Url, [{pool, false}, {connect_options, [{insecure, true}]}]))},
           {"top-level insecure next to other ssl_options",
            ?_assertMatch({ok, 200, _, ?BODY},
                          req(Url, [{pool, ?POOL}, {insecure, true},
@@ -114,3 +120,41 @@ cert_dir() ->
     BeamDir = filename:dirname(code:which(?MODULE)),
     Root = filename:join([BeamDir, "..", "..", "..", "..", ".."]),
     filename:join([filename:absname(Root), "test", "certs"]).
+
+%%====================================================================
+%% HTTP/3: the same options against the local QUIC server.
+%%====================================================================
+
+h3_insecure_test_() ->
+    {setup,
+     fun hackney_h3_test_server:start/0,
+     fun hackney_h3_test_server:stop/1,
+     fun(Ctx) ->
+         Url = hackney_h3_test_server:url(Ctx, <<"/">>),
+         [{timeout, 60,
+           {"h3: default options reject the self-signed cert",
+            ?_assertMatch({error, _}, h3_req(Url, []))}},
+          {timeout, 60,
+           {"h3: top-level insecure",
+            ?_assertMatch({ok, 200, _, _}, h3_req(Url, [{insecure, true}]))}},
+          {timeout, 60,
+           {"h3: insecure in connect_options",
+            ?_assertMatch({ok, 200, _, _},
+                          h3_req(Url, [{connect_options, [{insecure, true}]}]))}},
+          {timeout, 60,
+           {"h3: {verify, verify_none} in ssl_options",
+            ?_assertMatch({ok, 200, _, _},
+                          h3_req(Url, [{ssl_options, [{verify, verify_none}]}]))}}]
+     end}.
+
+h3_req(Url, Opts) ->
+    Base = proplists:delete(ssl_options, hackney_h3_test_server:hackney_opts()),
+    req(Url, [{pool, false} | Opts ++ Base]).
+
+h3_verify_none_unit_test() ->
+    ?assertEqual(verify_none,
+                 maps:get(verify, hackney_conn:h3_tls_opts([], [{verify, verify_none}]))),
+    ?assertEqual(hackney_ssl:h3_options_key([{insecure, true}], []),
+                 hackney_ssl:h3_options_key([], [{verify, verify_none}])),
+    ?assertNotEqual(hackney_ssl:h3_options_key([], []),
+                    hackney_ssl:h3_options_key([], [{verify, verify_none}])).

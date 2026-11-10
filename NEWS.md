@@ -11,7 +11,9 @@ Unreleased
   for HTTP/1.1, HTTP/2 and HTTP/3.
 - `{verify, verify_none}` in `ssl_options` did not turn off verification:
   the default hostname check still ran and refused self-signed
-  certificates. It now skips that check.
+  certificates. It now skips that check, and HTTP/3 honors it too.
+- `insecure` set in `connect_options` made HTTPS requests fail with
+  `badarg`. It now disables verification like the top-level option.
 
 4.10.0 - 2026-11-09
 -------------------

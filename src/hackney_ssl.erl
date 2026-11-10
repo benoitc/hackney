@@ -24,6 +24,7 @@
 -export([cipher_opts/0]).
 -export([ssl_opts/2]).
 -export([effective_opts/3]).
+-export([quic_insecure/2]).
 -export([effective_opts_and_key/3]).
 -export([init_key_cache/0]).
 -export([options_key/1]).
@@ -254,9 +255,9 @@ options_key(FinalSslOpts0) ->
 %% @doc Hash the QUIC trust projection of an HTTP/3 connection into a pool
 %% key component. Includes exactly what decides server trust on the QUIC
 %% handshake, mirroring hackney_conn's h3_tls_opts/2: the verify mode
-%% derived from the `insecure' flag (read from ConnectOpts first, then
-%% SslOpts) and the CA source from SslOpts (the `cacerts' list, else the
-%% `cacertfile' path, else the default trust store). The cacertfile path is
+%% derived by `quic_insecure/2' and the CA source from SslOpts (the
+%% `cacerts' list, else the `cacertfile' path, else the default trust
+%% store). The cacertfile path is
 %% hashed as given, without reading the file. Deliberately excluded:
 %% `session_ticket' (injected per resumption, so the conn-side store key
 %% must not depend on it), and `family' and `happy_eyeballs' (connectivity
@@ -266,9 +267,7 @@ options_key(FinalSslOpts0) ->
 %% itself, already part of the outer pool key.
 -spec h3_options_key(list(), list()) -> binary().
 h3_options_key(ConnectOpts, SslOpts) ->
-  Insecure = proplists:get_value(insecure, ConnectOpts,
-               proplists:get_value(insecure, SslOpts, false)),
-  VerifyMode = case Insecure of
+  VerifyMode = case quic_insecure(ConnectOpts, SslOpts) of
     true -> verify_none;
     false -> verify_peer
   end,
@@ -283,6 +282,17 @@ h3_options_key(ConnectOpts, SslOpts) ->
   end,
   Sni = proplists:get_value(server_name_indication, SslOpts, default),
   crypto:hash(sha256, term_to_binary({VerifyMode, CaSource, Sni})).
+
+%% @doc Whether an HTTP/3 connection skips server verification: the
+%% `insecure' flag (connect options first, then ssl_options) or an explicit
+%% `{verify, verify_none}' in ssl_options, as on TCP TLS. Shared by
+%% `h3_options_key/2' and hackney_conn's QUIC options so the pool key and
+%% the handshake agree.
+-spec quic_insecure(list(), list()) -> boolean().
+quic_insecure(ConnectOpts, SslOpts) ->
+  proplists:get_value(insecure, ConnectOpts,
+                      proplists:get_value(insecure, SslOpts, false)) =:= true
+    orelse proplists:get_value(verify, SslOpts) =:= verify_none.
 
 check_hostname_opts(Host0) ->
   Host1 = string:trim(Host0, trailing, "."),
