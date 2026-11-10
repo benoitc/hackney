@@ -229,3 +229,11 @@ dial_socket_opts_test_() ->
                                                    {protocols, [http1]},
                                                    {on_connect_response, fun erlang:display/1},
                                                    inet6, {ip, {127,0,0,1}}]))}].
+
+quic_socket_opts_test_() ->
+    [{"keeps UDP options, drops TCP-only options, family and hackney keys",
+      ?_assertEqual([{ip, {127,0,0,1}}, {recbuf, 65536}, {tos, 16}],
+                    hackney_util:quic_socket_opts([{ip, {127,0,0,1}}, {nodelay, true},
+                                                   {keepalive, false}, inet6, {family, inet6},
+                                                   {recbuf, 65536}, {protocols, [http3]},
+                                                   {tos, 16}, {active, true}]))}].

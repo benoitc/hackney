@@ -37,6 +37,12 @@ Unreleased
   socket, and a WebSocket through a proxy used none of them. All socket
   options now apply. Options hackney needs to read the socket itself, such
   as `active` or `packet`, are still ignored (#970).
+- HTTP/3 connections ignored the socket options in `connect_options`,
+  such as a source address to bind (`ip`) or buffer sizes; only `family`
+  was used. The options that apply to UDP now reach the HTTP/3 socket, and
+  a shared HTTP/3 connection is reused only by requests with the same
+  options. TCP-only options such as `nodelay` are ignored there, as before
+  (#970).
 - Closing an HTTP/2 connection over TLS could take about five seconds, and
   the other side learned it was gone only after that delay. hackney now
   uses h2 0.15.1, which closes without waiting for the peer.
