@@ -1,5 +1,29 @@
 # NEWS
 
+4.11.0 - 2026-11-13
+-------------------
+
+### Security
+
+- Over HTTP/3, hackney accepted some server certificates whose names do
+  not match the host: a wildcard covering only part of a label (such as
+  `f*o.example.com`), a certificate matched only by its common name on
+  OTP 27 and 28, and, when connecting to an IP address, any certificate
+  signed by a trusted CA. These are now rejected as a hostname mismatch.
+- A hostname with one very long label could keep the CPU busy for seconds
+  or more while it was converted to its ASCII form. It is now rejected
+  right away.
+- Crash reports of HTTP/3 connections could print TLS secrets and session
+  ticket keys. They no longer do.
+
+### Changed
+
+- idna 8.0.0, quic 2.7.0, h2 0.17.0 and webtransport 0.5.6.
+- Internationalized hostnames are checked more strictly: a name with an
+  empty label (such as `a..b`), an invalid `xn--` label, or more than 253
+  characters is now refused. Hostnames are normalized with Unicode 18,
+  the same on every OTP release.
+
 4.10.2 - 2026-11-10
 -------------------
 
