@@ -1,5 +1,32 @@
 # NEWS
 
+4.11.1 - 2026-11-13
+-------------------
+
+### Security
+
+- WebTransport: a `cacertfile` that could not be read or held no
+  certificate was silently skipped, and over HTTP/3 the server was then
+  checked against the system trust store instead of the CAs you chose.
+  Connecting now fails with `{error, {cacertfile, File, Reason}}`. An
+  unusable `certfile` or `keyfile` fails the same way over HTTP/3.
+- WebTransport: a server could make a session use memory without limit,
+  by sending datagrams faster than they were read, by never granting
+  flow-control credit, by holding large unfinished capsules, or simply
+  by keeping a stream open. Each of these is now bounded.
+
+### Fixed
+
+- WebTransport over HTTP/2: a session that ended, for example after the
+  server drained the connection, could kill the hackney WebTransport
+  process. Over HTTP/3, a session now ends when its connection closes.
+
+### Changed
+
+- webtransport 0.5.8. A WebTransport send that would exceed 4 MiB of
+  data waiting for the server's flow-control credit now returns
+  `{error, send_buffer_full}`.
+
 4.11.0 - 2026-11-13
 -------------------
 
