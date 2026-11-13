@@ -26,7 +26,8 @@
 %%%                          stream id as body on `release', resets the
 %%%                          stream with H3_REQUEST_REJECTED on `reject', or
 %%%                          sends {held_reset, StreamId} there if the client
-%%%                          resets the stream
+%%%                          cancels the stream (RESET_STREAM, or only
+%%%                          STOP_SENDING when its request was complete)
 %%%   POST any path          200, echoes the request body
 %%%   anything else          404
 -module(hackney_h3_test_server).
@@ -195,6 +196,10 @@ hold(Conn, StreamId) ->
         reject ->
             quic_h3:cancel(Conn, StreamId, 16#10b);
         {quic_h3, Conn, {stream_reset, StreamId, _Code}} ->
+            hackney_h3_test_hold ! {held_reset, StreamId};
+        %% A client that already sent its FIN cancels with STOP_SENDING
+        %% only: there is nothing left to reset (RFC 9000 Section 4.5).
+        {quic_h3, Conn, {stop_sending, StreamId, _Code}} ->
             hackney_h3_test_hold ! {held_reset, StreamId};
         {quic_h3, Conn, _Other} ->
             hold(Conn, StreamId)
