@@ -175,6 +175,19 @@ large downloads use the streaming API instead.
 hackney:get(URL, [], <<>>, [{max_body_size, 10 * 1024 * 1024}]).
 ```
 
+### Response Header Limits
+
+The header section of an HTTP/1.1 response, trailers included, is capped at
+1 MiB and 1000 header fields. Past the size cap the request fails with
+`{error, headers_too_large}`; past the count, with
+`{error, too_many_headers}`. Set `max_header_size` or `max_headers` to change
+them, or `infinity` to disable either.
+
+```erlang
+hackney:get(URL, [], <<>>, [{max_header_size, 4 * 1024 * 1024},
+                            {max_headers, 5000}]).
+```
+
 ### Stream Response Body (Async Mode)
 
 For incremental body streaming, use async mode:

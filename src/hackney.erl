@@ -663,6 +663,12 @@ request(Method, URL, Headers, Body) ->
 %% - max_body_size: Cap in bytes on a response body returned whole, after
 %%   decompression (default 512 MiB, `infinity' disables it). Past it the
 %%   request fails with {error, body_too_large}; stream larger bodies.
+%% - max_header_size: Cap in bytes on an HTTP/1.1 response header section,
+%%   trailers included (default 1 MiB, `infinity' disables it). Past it the
+%%   request fails with {error, headers_too_large}.
+%% - max_headers: Cap on the number of HTTP/1.1 response header fields,
+%%   trailers included (default 1000, `infinity' disables it). Past it the
+%%   request fails with {error, too_many_headers}.
 %%
 %% Returns:
 %% - {ok, Status, Headers, Body}: Success with response body
@@ -1521,7 +1527,9 @@ sync_request_with_redirect(ConnPid, Method, Path, Headers, Body, WithBody, Optio
         MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts0]
       end,
       case hackney_conn:send_request_headers(ConnPid, Method, Path, HeadersList,
-                                             with_checkout_timeout(ReqOpts, Options)) of
+                                             with_checkout_timeout(
+                                               with_header_limits(ReqOpts, Options),
+                                               Options)) of
         ok -> {ok, ConnPid};
         {error, Reason} -> {error, Reason}
       end;
@@ -1559,7 +1567,8 @@ sync_request_with_redirect_body(ConnPid, Method, Path, HeadersList, FinalBody,
     MaxBodySize -> [{max_body_size, MaxBodySize} | ReqOpts3]
   end,
   case hackney_conn:request(ConnPid, Method, Path, HeadersList, FinalBody, infinity,
-                            with_checkout_timeout(ReqOpts, Options)) of
+                            with_checkout_timeout(with_header_limits(ReqOpts, Options),
+                                                  Options)) of
     %% HTTP/2 returns body directly - handle 4-tuple first
     {ok, Status, RespHeaders, RespBody} when Status >= 301, Status =< 303; Status =:= 307; Status =:= 308 ->
       %% HTTP/2 redirect status
@@ -1779,7 +1788,8 @@ async_request(ConnPid, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowR
   %% is handled atomically inside hackney_conn:do_request_async
   case hackney_conn:request_async(ConnPid, Method, Path, HeadersList, FinalBody, AsyncMode,
                                   StreamTo, FollowRedirect,
-                                  with_checkout_timeout(ReqOpts, Options)) of
+                                  with_checkout_timeout(
+                                    with_header_limits(ReqOpts, Options), Options)) of
     {ok, Ref} ->
       {ok, Ref};
     {error, Reason} ->
@@ -2338,6 +2348,11 @@ parse_proxy_url(Url) when is_binary(Url) ->
   catch
     _:_ -> {error, invalid_proxy_url}
   end.
+
+%% @private Forward the HTTP/1.1 response header limits to the connection.
+with_header_limits(ReqOpts, Options) ->
+  [{K, V} || K <- [max_header_size, max_headers],
+             V <- [proplists:get_value(K, Options)], V =/= undefined] ++ ReqOpts.
 
 %% @private An HTTP/2 or HTTP/3 request refused at the server's limit on
 %% concurrent streams waits on the connection as long as a pool checkout
