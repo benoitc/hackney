@@ -1,5 +1,21 @@
 # NEWS
 
+4.12.1 - 2026-11-15
+-------------------
+
+### Fixed
+
+- WebTransport over HTTP/3: a server could send on a stream as fast as
+  the network allowed, and the data piled up in memory when your code
+  read it slowly. A server can now only send about one stream window
+  ahead of what you have read.
+
+### Changed
+
+- quic 3.1.0, webtransport 0.5.11 and certifi 2.19.0. certifi adds an
+  optional EU certificate bundle; the default bundle hackney uses is
+  unchanged.
+
 4.12.0 - 2026-11-15
 -------------------
 
