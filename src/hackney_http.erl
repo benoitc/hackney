@@ -92,7 +92,9 @@
 
 -type parser_option() :: request | response | auto
 | {max_empty_lines, integer()}
-| {max_line_length, integer()}.
+| {max_line_length, integer()}
+| {max_header_size, non_neg_integer() | infinity}
+| {max_headers, non_neg_integer() | infinity}.
 
 -type parser_options() :: [parser_option()].
 
@@ -116,6 +118,12 @@ parser() ->
 %%  before we give up.</li>
 %%  <li>`{max_lines_empty, Max}': the maximum number of empty line we
 %%  accept before the first line happen</li>
+%%  <li>`{max_header_size, Bytes}': the maximum size of the header section,
+%%  trailers included (default 1 MiB, or `infinity'). Past it the parser
+%%  returns `{error, headers_too_large}'.</li>
+%%  <li>`{max_headers, Count}': the maximum number of header fields,
+%%  trailers included (default 1000, or `infinity'). Past it the parser
+%%  returns `{error, too_many_headers}'.</li>
 %% </ul>
 -spec parser(parser_options()) -> parser().
 parser(Options) ->
@@ -298,8 +306,24 @@ parse_headers(#hparser{}=St) ->
   parse_header(St).
 
 
-parse_header(#hparser{}=St) ->
-  parse_header_sep([<<"\r\n">>, <<"\n">>], St).
+parse_header(#hparser{buffer=Buf, scan_from=From}=St) ->
+  %% Until a line ends, only scan the bytes that arrived since the last
+  %% call: rescanning the whole buffer on every read is quadratic in the
+  %% length of a header line.
+  Size = byte_size(Buf),
+  case binary:match(Buf, <<"\n">>, [{scope, {From, Size - From}}]) of
+    nomatch ->
+      header_more(St#hparser{scan_from=Size});
+    _ ->
+      parse_header_sep([<<"\r\n">>, <<"\n">>], St#hparser{scan_from=0})
+  end.
+
+%% A header line is still incomplete: wait for more, within max_header_size.
+header_more(#hparser{buffer=Buf, header_size=HSize, max_header_size=Max}=St) ->
+  case HSize + byte_size(Buf) > Max of
+    true -> {error, headers_too_large};
+    false -> {more, St}
+  end.
 
 parse_header_sep([], St) ->
   {more, St};
@@ -328,13 +352,24 @@ parse_header_(Sep, #hparser{buffer=Buf}=St) ->
       {more, St}
   end.
 
-parse_header(Line, St) ->
-  {Key, Value} = case binary:split(Line, <<":">>) of
-                   [K] -> {K, <<>>};
-                   [K, V] -> {K, hackney_bstr:trim(V)}
-                 end,
-  St1 = update_parser_header(Key, Value, St),
-  {header, {Key, Value}, St1}.
+parse_header(Line, #hparser{header_size=HSize, header_count=Count,
+                             max_header_size=MaxSize, max_headers=MaxCount}=St) ->
+  HSize1 = HSize + byte_size(Line) + 2,
+  Count1 = Count + 1,
+  if
+    HSize1 > MaxSize ->
+      {error, headers_too_large};
+    Count1 > MaxCount ->
+      {error, too_many_headers};
+    true ->
+      {Key, Value} = case binary:split(Line, <<":">>) of
+                       [K] -> {K, <<>>};
+                       [K, V] -> {K, hackney_bstr:trim(V)}
+                     end,
+      St1 = update_parser_header(Key, Value,
+                                 St#hparser{header_size=HSize1, header_count=Count1}),
+      {header, {Key, Value}, St1}
+  end.
 
 %% Fast path for common headers using case-insensitive pattern matching
 %% This avoids calling to_lower/trim for every header
@@ -410,14 +445,17 @@ parse_trailers(St) ->
     {ok, _Trailers, #hparser{buffer=Rest1}} ->
       {done, Rest1};
     {more, St2} ->
-      {more, St2}
+      {more, St2};
+    {error, _} = Error ->
+      Error
   end.
 
 parse_trailers(St, Acc) ->
   case parse_headers(St) of
     {header, Header, St2} -> parse_trailers(St2, [Header | Acc]);
     {headers_complete, St2} -> {ok, lists:reverse(Acc), St2};
-    {more, St2} -> {more, St2}
+    {more, St2} -> {more, St2};
+    {error, _} = Error -> Error
   end.
 
 parse_body(#hparser{body_state=waiting, method= <<"HEAD">>, buffer=Buffer}) ->
@@ -642,6 +680,10 @@ parse_options([{max_line_length, MaxLength} | Rest], St) ->
   parse_options(Rest, St#hparser{max_line_length=MaxLength});
 parse_options([{max_empty_lines, MaxEmptyLines} | Rest], St) ->
   parse_options(Rest, St#hparser{max_empty_lines=MaxEmptyLines});
+parse_options([{max_header_size, Max} | Rest], St) ->
+  parse_options(Rest, St#hparser{max_header_size=Max});
+parse_options([{max_headers, Max} | Rest], St) ->
+  parse_options(Rest, St#hparser{max_headers=Max});
 parse_options([_ | Rest], St) ->
   parse_options(Rest, St).
 

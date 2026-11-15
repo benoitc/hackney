@@ -193,6 +193,8 @@
     inform_fun :: fun((integer(), binary(), list()) -> any()) | undefined,
     auto_decompress = false :: boolean(),
     max_body_size = ?DEFAULT_MAX_BODY_SIZE :: non_neg_integer() | infinity,
+    %% Per-request max_header_size / max_headers, as parser options.
+    header_limits = [] :: list(),
 
     %% Pool integration
     pool_pid :: pid() | undefined,  %% If set, connection is from a pool
@@ -1316,17 +1318,20 @@ connected({call, From}, {request, Method, Path, Headers, Body, ReqOpts}, Data) -
         auto_decompress = AutoDecompress,
         body_length = undefined,
         max_body_size = max_body_size(ReqOpts),
+        header_limits = header_limits(ReqOpts),
         recv_timeout = RecvTimeout
     },
     {next_state, sending, NewData, [{next_event, internal, {send_request, Method, Path, Headers, Body}}]};
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo}, Data) ->
     %% Start a new async request (no redirect following)
-    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false, Data);
+    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, false,
+                     Data#conn_data{header_limits = []});
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect}, Data) ->
     %% Start a new async request with redirect option (HTTP/1.1)
-    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, Data);
+    do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect,
+                     Data#conn_data{header_limits = []});
 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, #conn_data{protocol = http2} = Data) ->
     %% HTTP/2 async request with ReqOpts (fix for issue #832)
@@ -1345,7 +1350,8 @@ connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, 
 connected({call, From}, {request_async, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, ReqOpts}, Data) ->
     %% HTTP/1.1 async request with ReqOpts (fix for issue #832)
     RecvTimeout = proplists:get_value(recv_timeout, ReqOpts, Data#conn_data.recv_timeout),
-    NewData = Data#conn_data{recv_timeout = RecvTimeout},
+    NewData = Data#conn_data{recv_timeout = RecvTimeout,
+                             header_limits = header_limits(ReqOpts)},
     do_request_async(From, Method, Path, Headers, Body, AsyncMode, StreamTo, FollowRedirect, NewData);
 
 connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, #conn_data{protocol = http3} = Data) ->
@@ -1395,6 +1401,7 @@ connected({call, From}, {send_headers, Method, Path, Headers, ReqOpts}, Data) ->
         async_ref = undefined,
         stream_to = undefined,
         max_body_size = max_body_size(ReqOpts),
+        header_limits = header_limits(ReqOpts),
         body_length = undefined
     },
     %% Transition to streaming_body state
@@ -1847,7 +1854,7 @@ receiving(internal, {do_recv_response, include_pid}, Data) ->
 
 receiving(internal, do_recv_response_async, Data) ->
     %% Receive and parse response status and headers (async mode)
-    Parser = hackney_http:parser([response]),
+    Parser = response_parser(Data),
     DataWithParser = Data#conn_data{parser = Parser},
     #conn_data{async_ref = Ref, stream_to = StreamTo, async = AsyncMode,
                follow_redirect = FollowRedirect, method = Method} = Data,
@@ -2478,7 +2485,7 @@ finish_async_streaming(#conn_data{transport = Transport, socket = Socket,
 %% @private Handle receiving response status and headers
 %% IncludePid determines whether to include pid in the response
 do_recv_response_impl(Data, IncludePid) ->
-    Parser = hackney_http:parser([response]),
+    Parser = response_parser(Data),
     DataWithParser = Data#conn_data{parser = Parser},
     case recv_status_and_headers(DataWithParser) of
         {ok, Status, Headers, NewData} ->
@@ -2870,7 +2877,7 @@ recv_status_and_headers_loop(Data) ->
             %% Reset parser for next response, preserving any buffered data
             %% The old parser's buffer may contain the start of the next response
             OldBuffer = hackney_http:get(OldParser, buffer),
-            NewParser = hackney_http:parser([response]),
+            NewParser = response_parser(Data),
             recv_status_and_headers_loop(NewData#conn_data{parser = NewParser, buffer = OldBuffer});
         Other ->
             Other
@@ -3000,6 +3007,16 @@ max_body_size(ReqOpts) ->
         undefined -> proplists:get_value(max_body, ReqOpts, ?DEFAULT_MAX_BODY_SIZE);
         Max -> Max
     end.
+
+%% @private Per-request limits on the response header section, passed to
+%% the parser. Unset options keep the parser defaults.
+header_limits(ReqOpts) ->
+    [{K, V} || K <- [max_header_size, max_headers],
+               V <- [proplists:get_value(K, ReqOpts)], V =/= undefined].
+
+%% @private A response parser with the request's header limits.
+response_parser(#conn_data{header_limits = Limits}) ->
+    hackney_http:parser([response | Limits]).
 
 body_within_limit(_Size, infinity) -> true;
 body_within_limit(Size, Max) -> Size =< Max.
