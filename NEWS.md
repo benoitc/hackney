@@ -1,5 +1,46 @@
 # NEWS
 
+4.12.0 - 2026-11-15
+-------------------
+
+### Security
+
+- Over HTTP/3 and WebTransport, a server certificate is now checked for
+  what it was issued for. One whose Extended Key Usage or Key Usage does
+  not allow TLS server authentication is rejected. Before, any
+  certificate from a trusted CA was accepted. A certificate you list
+  yourself in `cacerts` is still accepted as configured.
+
+### Fixed
+
+- A SOCKS5 proxy that accepted the connection and then stopped answering
+  blocked the request forever: `connect_timeout` only covered the TCP
+  connect. The SOCKS5 handshake now has to finish within
+  `connect_timeout`, or the request fails with `{error, timeout}`.
+- HTTP/3 requests ignored `recv_timeout`. A server that stopped sending,
+  before the response or in the middle of the body, blocked the request
+  forever. The request now fails with `{error, timeout}` and the
+  connection stays usable.
+- A server could send HTTP/1.1 response headers without end, or a header
+  line that never ends, and hackney kept reading them, using memory and
+  CPU without limit. A very long header line was also slow to read.
+
+### Added
+
+- `max_header_size` and `max_headers` options. They cap the headers of
+  an HTTP/1.1 response, trailers included, at 1 MiB and 1000 fields by
+  default. Past them the request fails with `{error, headers_too_large}`
+  or `{error, too_many_headers}`. Set them to `infinity` to remove a cap.
+
+### Changed
+
+- An HTTP/1.1 response with headers over the new defaults used to be
+  accepted and now fails. Raise `max_header_size` or `max_headers` if a
+  server you use needs more.
+- quic 3.0.0, webtransport 0.5.9 and h2 0.18.0. The largest WebTransport
+  datagram a session reports over HTTP/3 can now start smaller and grow
+  during the connection.
+
 4.11.1 - 2026-11-13
 -------------------
 
