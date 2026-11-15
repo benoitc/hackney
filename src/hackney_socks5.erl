@@ -19,8 +19,6 @@
   shutdown/2,
   sockname/1]).
 
--define(TIMEOUT, infinity).
-
 -type socks5_socket() :: {atom(), inet:socket()}.
 -export_type([socks5_socket/0]).
 
@@ -61,7 +59,11 @@ connect(Host, Port, Opts, Timeout) when is_list(Host), is_integer(Port),
   %% connect to the socks 5 proxy
   case hackney_happy:connect(ProxyHost, ProxyPort, ConnectOpts, Timeout) of
     {ok, Socket} ->
-      case do_handshake(Socket, Host, Port, Opts) of
+      %% The SOCKS5 replies are read under the same timeout, as one
+      %% deadline: a proxy that accepts the connection and then stops
+      %% answering would otherwise block the caller forever.
+      Deadline = deadline(Timeout),
+      case do_handshake(Socket, Host, Port, Opts, Deadline) of
         ok ->
           case Transport of
             hackney_ssl ->
@@ -146,33 +148,33 @@ sockname({Transport, Socket}) ->
   Transport:sockname(Socket).
 
 %% private functions
-do_handshake(Socket, Host, Port, Options) ->
+do_handshake(Socket, Host, Port, Options, Deadline) ->
   ProxyUser = proplists:get_value(socks5_user, Options),
   ProxyPass = proplists:get_value(socks5_pass, Options, <<>>),
   case ProxyUser of
     undefined ->
       %% no auth
       ok = gen_tcp:send(Socket, << 5, 1, 0 >>),
-      case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
+      case recv_reply(Socket, 2, Deadline) of
         {ok, << 5, 0 >>} ->
-          do_connection(Socket, Host, Port, Options);
+          do_connection(Socket, Host, Port, Options, Deadline);
         {ok, _Reply} ->
           {error, unknown_reply};
         Error ->
           Error
       end;
     _ ->
-      case do_authentication(Socket, ProxyUser, ProxyPass) of
+      case do_authentication(Socket, ProxyUser, ProxyPass, Deadline) of
         ok ->
-          do_connection(Socket, Host, Port, Options);
+          do_connection(Socket, Host, Port, Options, Deadline);
         Error ->
           Error
       end
   end.
 
-do_authentication(Socket, User, Pass) ->
+do_authentication(Socket, User, Pass, Deadline) ->
   ok = gen_tcp:send(Socket, << 5, 1, 2 >>),
-  case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
+  case recv_reply(Socket, 2, Deadline) of
     {ok, <<5, 0>>} ->
       ok;
     {ok, <<5, 2>>} ->
@@ -182,26 +184,34 @@ do_authentication(Socket, User, Pass) ->
         User, << PassLength >>,
         Pass]),
       ok = gen_tcp:send(Socket, Msg),
-      case gen_tcp:recv(Socket, 2, ?TIMEOUT) of
+      case recv_reply(Socket, 2, Deadline) of
         {ok, <<1, 0>>} ->
           ok;
+        {error, timeout} ->
+          {error, timeout};
         _ ->
           {error, not_authenticated}
       end;
+    {error, timeout} ->
+      {error, timeout};
     _ ->
       {error, not_authenticated}
   end.
 
 
-do_connection(Socket, Host, Port, Options) ->
+do_connection(Socket, Host, Port, Options, Deadline) ->
   Resolve = proplists:get_value(socks5_resolve, Options, remote),
   case addr(Host, Port, Resolve) of
     Addr when is_binary(Addr) ->
       ok = gen_tcp:send(Socket, << 5, 1, 0, Addr/binary >>),
-      case gen_tcp:recv(Socket, 4, ?TIMEOUT) of
+      case recv_reply(Socket, 4, Deadline) of
         {ok, << 5, 0, 0, AType>>} ->
-          BoundAddr = recv_addr_port(AType, gen_tcp, Socket),
-          check_connection(BoundAddr);
+          case recv_addr_port(AType, Socket, Deadline) of
+            {error, _} = Error ->
+              Error;
+            BoundAddr ->
+              check_connection(BoundAddr)
+          end;
         {ok, _} ->
           {error, badarg};
         Error ->
@@ -238,18 +248,39 @@ addr(Host, Port, Resolve) ->
       end
   end.
 
-recv_addr_port(1 = AType, Transport, Socket) -> % IPv4
-   {ok, Data} = Transport:recv(Socket, 6, ?TIMEOUT),
-   <<AType, Data/binary>>;
-recv_addr_port(4 = AType, Transport, Socket) -> % IPv6
-   {ok, Data} = Transport:recv(Socket, 18, ?TIMEOUT),
-   <<AType, Data/binary>>;
-recv_addr_port(3 = AType, Transport, Socket) -> % Domain
-   {ok, <<DLen/integer>>} = Transport:recv(Socket, 1, ?TIMEOUT),
-   {ok, AddrPort} = Transport:recv(Socket, DLen + 2, ?TIMEOUT),
-   <<AType, DLen, AddrPort/binary>>;
+recv_addr_port(1 = AType, Socket, Deadline) -> % IPv4
+  case recv_reply(Socket, 6, Deadline) of
+    {ok, Data} -> <<AType, Data/binary>>;
+    Error -> Error
+  end;
+recv_addr_port(4 = AType, Socket, Deadline) -> % IPv6
+  case recv_reply(Socket, 18, Deadline) of
+    {ok, Data} -> <<AType, Data/binary>>;
+    Error -> Error
+  end;
+recv_addr_port(3 = AType, Socket, Deadline) -> % Domain
+  case recv_reply(Socket, 1, Deadline) of
+    {ok, <<DLen/integer>>} ->
+      case recv_reply(Socket, DLen + 2, Deadline) of
+        {ok, AddrPort} -> <<AType, DLen, AddrPort/binary>>;
+        Error -> Error
+      end;
+    Error ->
+      Error
+  end;
 recv_addr_port(_, _, _) ->
-   error.
+  error.
+
+%% Deadline for the whole handshake, from the connect timeout.
+deadline(infinity) -> infinity;
+deadline(Timeout) -> erlang:monotonic_time(millisecond) + Timeout.
+
+%% Read a proxy reply within what is left of the deadline.
+recv_reply(Socket, Length, infinity) ->
+  gen_tcp:recv(Socket, Length, infinity);
+recv_reply(Socket, Length, Deadline) ->
+  Left = max(0, Deadline - erlang:monotonic_time(millisecond)),
+  gen_tcp:recv(Socket, Length, Left).
 
 check_connection(<< 3, _DomainLen:8, _Domain/binary >>) ->
   ok;
