@@ -287,6 +287,9 @@
     h3_streams = #{} :: #{non_neg_integer() => {gen_statem:from() | pid(), atom() | tuple()}},
     %% Current HTTP/3 stream ID for streaming body mode
     h3_stream_id :: non_neg_integer() | undefined,
+    %% Per-stream recv_timeout watchdog timers for sync HTTP/3 reads, as for
+    %% HTTP/2: StreamId => timer ref, fires {h3_recv_timeout, StreamId}.
+    h3_timers = #{} :: #{non_neg_integer() => reference()},
     %% Stream ID of a GOAWAY that left accepted streams to finish. While set,
     %% new requests are refused and the connection closes when the last
     %% stream ends.
@@ -1454,11 +1457,17 @@ connected(info, {ssl, Socket, Data}, #conn_data{socket = Socket} = D) ->
 %% HTTP/3 message handling
 connected(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams, Data));
+    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams,
+                                      rearm_h3_timer(StreamId, Data)));
 
 connected(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams, Data));
+    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams,
+                                   rearm_h3_timer(StreamId, Data)));
+
+%% HTTP/3 per-stream recv_timeout watchdog (see arm_h3_timer/2).
+connected(info, {timeout, TRef, {h3_recv_timeout, StreamId}}, Data) ->
+    handle_h3_recv_timeout(StreamId, TRef, Data);
 
 connected(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
           #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
@@ -1784,11 +1793,16 @@ streaming_body(info, {'DOWN', Mon, process, _Pid, Reason}, #conn_data{h2_mon = M
 streaming_body(info, {h3, ConnRef, {stream_headers, StreamId, Headers, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
     %% Early response headers while still sending body
-    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams, Data));
+    h3_drain_result(handle_h3_headers(StreamId, Headers, Fin, Streams,
+                                      rearm_h3_timer(StreamId, Data)));
 
 streaming_body(info, {h3, ConnRef, {stream_data, StreamId, RecvData, Fin}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
-    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams, Data));
+    h3_drain_result(handle_h3_data(StreamId, RecvData, Fin, Streams,
+                                   rearm_h3_timer(StreamId, Data)));
+
+streaming_body(info, {timeout, TRef, {h3_recv_timeout, StreamId}}, Data) ->
+    handle_h3_recv_timeout(StreamId, TRef, Data);
 
 streaming_body(info, {h3, ConnRef, {stream_reset, StreamId, ErrorCode}},
                #conn_data{h3_conn = ConnRef, h3_streams = Streams} = Data) ->
@@ -4732,8 +4746,9 @@ do_h3_request(From, Method, Path, Headers, Body, Data) ->
                 path = PathBin,
                 request_from = From
             },
-            %% Stay in connected state, wait for response via QUIC messages
-            {keep_state, NewData};
+            %% Stay in connected state, wait for response via QUIC messages,
+            %% within recv_timeout of the last byte received.
+            {keep_state, arm_h3_timer(StreamId, NewData)};
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end.
@@ -5208,6 +5223,52 @@ handle_h3_data(StreamId, RecvData, Fin, Streams, #conn_data{max_body_size = Max}
         _ ->
             %% Unknown stream
             {keep_state, Data}
+    end.
+
+%% @private Arm a per-stream recv_timeout watchdog for a sync HTTP/3 read, as
+%% arm_h2_timer/2 does for HTTP/2: a server that stops sending fails the
+%% request with {error, timeout}. No-op when recv_timeout is infinity.
+arm_h3_timer(_StreamId, #conn_data{recv_timeout = infinity} = Data) ->
+    Data;
+arm_h3_timer(StreamId, #conn_data{recv_timeout = Timeout, h3_timers = Timers} = Data) ->
+    TRef = erlang:start_timer(Timeout, self(), {h3_recv_timeout, StreamId}),
+    Data#conn_data{h3_timers = maps:put(StreamId, TRef, Timers)}.
+
+%% @private Restart a stream's watchdog after progress (headers or data), so
+%% the deadline counts from the last byte received. No-op for streams
+%% without one.
+rearm_h3_timer(StreamId, #conn_data{h3_timers = Timers} = Data) ->
+    case maps:take(StreamId, Timers) of
+        {TRef, Timers2} ->
+            _ = erlang:cancel_timer(TRef),
+            arm_h3_timer(StreamId, Data#conn_data{h3_timers = Timers2});
+        error ->
+            Data
+    end.
+
+%% @private A watchdog fired. If it is the stream's live timer and the sync
+%% reader is still waiting, reset the stream and fail the reader. A stale
+%% timer, or one for a stream that already ended, is dropped.
+handle_h3_recv_timeout(StreamId, TRef, #conn_data{h3_timers = Timers,
+                                                  h3_streams = Streams,
+                                                  h3_conn = ConnRef} = Data) ->
+    case maps:get(StreamId, Timers, undefined) of
+        TRef ->
+            Data1 = Data#conn_data{h3_timers = maps:remove(StreamId, Timers)},
+            case maps:get(StreamId, Streams, undefined) of
+                {From, StreamState} when is_tuple(From),
+                                         (StreamState =:= waiting_headers orelse
+                                          element(1, StreamState) =:= receiving_body) ->
+                    _ = hackney_h3:reset_stream(ConnRef, StreamId, ?H3_REQUEST_CANCELLED),
+                    Data2 = Data1#conn_data{
+                              h3_streams = maps:remove(StreamId, Streams),
+                              request_from = h3_clear_from(From, Data1#conn_data.request_from)},
+                    h3_drain_result({keep_state, Data2, [{reply, From, {error, timeout}}]});
+                _ ->
+                    {keep_state, Data1}
+            end;
+        _ ->
+            keep_state_and_data
     end.
 
 %% @private DATA for a sync HTTP/3 request whose body is buffered whole.
