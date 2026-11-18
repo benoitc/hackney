@@ -114,6 +114,8 @@ ws_integration_test_() ->
            fun() -> test_ping_pong(WsUrl) end},
           {"Active mode once",
            fun() -> test_active_once(WsUrl) end},
+          {"Active mode once with a frame split across reads",
+           fun() -> test_active_once_split_frame(WsUrl) end},
           {"Active mode true",
            fun() -> test_active_true(WsUrl) end}
          ]
@@ -207,6 +209,16 @@ test_ping_pong(WsUrl) ->
     %% We should receive the pong response
     Result = hackney:ws_recv(Ws, 5000),
     ?assertMatch({ok, pong}, Result),
+    hackney:ws_close(Ws).
+
+test_active_once_split_frame(WsUrl) ->
+    {ok, Ws} = hackney:ws_connect(WsUrl, [{active, once}]),
+    ok = hackney:ws_send(Ws, {text, <<"large:1048576">>}),
+    receive
+        {hackney_ws, Ws, {binary, Bin}} -> ?assertEqual(1048576, byte_size(Bin))
+    after 3000 ->
+        ?assert(false)
+    end,
     hackney:ws_close(Ws).
 
 test_active_once(WsUrl) ->
