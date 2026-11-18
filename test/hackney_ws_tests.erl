@@ -100,6 +100,8 @@ ws_integration_test_() ->
            fun() -> test_handshake_header_injection(Port) end},
           {"GHSA-q8jg: oversized frame rejected",
            fun() -> test_max_frame_size(Port) end},
+          {"ws_connect passes max_frame_size",
+           fun() -> test_ws_connect_max_frame_size(WsUrl) end},
           {"Send and receive text message",
            fun() -> test_text_message(WsUrl) end},
           {"Send and receive binary message",
@@ -145,6 +147,11 @@ test_max_frame_size(Port) ->
     ok = hackney_ws:connect(Ws, 5000),
     ok = hackney_ws:send(Ws, {text, <<"large:5000">>}),
     ?assertMatch({error, {frame_too_big, _}}, hackney_ws:recv(Ws, 5000)).
+
+test_ws_connect_max_frame_size(WsUrl) ->
+    {ok, Ws} = hackney:ws_connect(WsUrl, [{max_frame_size, 100}]),
+    ok = hackney:ws_send(Ws, {text, <<"large:5000">>}),
+    ?assertMatch({error, {frame_too_big, _}}, hackney:ws_recv(Ws, 5000)).
 
 test_connect_disconnect(WsUrl) ->
     {ok, Ws} = hackney:ws_connect(WsUrl),
