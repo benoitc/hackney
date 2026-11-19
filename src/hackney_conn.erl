@@ -13,10 +13,13 @@
 %%%
 %%% States:
 %%% - idle: Process started, not connected
-%%% - connecting: TCP/SSL handshake in progress
+%%% - connecting: TCP/SSL handshake in progress (not entered today)
 %%% - connected: Ready for requests
 %%% - sending: Sending request data
+%%% - streaming_body: Streaming request body
 %%% - receiving: Awaiting/streaming response
+%%% - streaming: Continuous async body streaming (async=true)
+%%% - streaming_once: On-demand async streaming (async=once)
 %%% - closed: Connection terminated
 
 -module(hackney_conn).

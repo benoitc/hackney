@@ -204,7 +204,7 @@ Types: `fix`, `feat`, `docs`, `test`, `refactor`, `ci`, `chore`
 ## Continuous Integration
 
 CI runs on:
-- Linux x86_64 (OTP 27.2, 28.0)
+- Linux x86_64 (OTP 27.2, 28.0, 29.0)
 - Linux ARM64 (OTP 27.2)
 - macOS ARM64 (OTP 27)
 - FreeBSD 14.2 (OTP 28)

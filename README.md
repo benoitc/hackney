@@ -60,7 +60,8 @@ Payload = <<"{\"key\": \"value\"}">>,
 | [WebSocket Guide](guides/websocket_guide.md) | Connect, send, receive, active mode |
 | [WebTransport Guide](guides/webtransport_guide.md) | Streams, datagrams, multiplexing, server handlers |
 | [Design Guide](guides/design.md) | Architecture, pooling, load regulation internals |
-| [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x |
+| [Where Things Live](guides/code_map.md) | Which modules and tests implement each concept |
+| [Migration Guide](guides/MIGRATION.md) | Upgrading from hackney 1.x and 2.x |
 | [API Reference](https://hexdocs.pm/hackney) | Full module documentation |
 | [Changelog](NEWS.md) | Version history |
 
@@ -307,15 +308,14 @@ This applies to HTTP/1.1, HTTP/2 and HTTP/3.
 
 ## Modules
 
-| Module | Purpose |
-|--------|---------|
-| `hackney` | Main API - requests, connections, WebSocket |
-| `hackney_pool` | Connection pool management |
-| `hackney_url` | URL parsing and encoding |
-| `hackney_headers` | Header manipulation |
-| `hackney_multipart` | Multipart encoding |
-| `hackney_cookie` | Cookie parsing |
-| `hackney_http` | HTTP protocol parser |
+You call `hackney` for requests, WebSocket (`ws_*`), WebTransport (`wt_*`) and
+HTTP/2 streams (`h2_*`), and `hackney_pool` to configure pools. `hackney_url`,
+`hackney_headers`, `hackney_multipart` and `hackney_cookie` are helpers you can
+use on their own.
+
+If you want to change hackney itself, start with
+[Where Things Live](guides/code_map.md): it maps each concept to its modules
+and tests.
 
 ## Requirements
 

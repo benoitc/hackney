@@ -213,8 +213,9 @@ hackney:get(<<"https://example.com/">>, [], <<>>,
 
 After the first HTTP/3 connection to a host, hackney caches the server's TLS
 session ticket in the pool, keyed by `{host, port, transport}`, and replays it on
-the next connection to resume the handshake. For a **bodyless** request this can
-also send the request as QUIC 0-RTT (in the first flight), saving a round trip.
+the next connection to resume the handshake. For a **bodyless** GET, HEAD,
+OPTIONS or TRACE request this can also send the request as QUIC 0-RTT (in the
+first flight), saving a round trip.
 
 This is enabled by default and controlled by the `zero_rtt` request option:
 
@@ -235,6 +236,9 @@ Scope:
   - **Request-in-0-RTT** (request bytes in the first flight) applies only to
     **bodyless** requests via the one-shot `hackney_h3` API. quic carries only
     the HEADERS as early data, so a request with a body resumes at 1-RTT.
+  - Only **GET, HEAD, OPTIONS and TRACE** are sent as 0-RTT. Early data can be
+    replayed by an attacker, so a request with any other method waits for the
+    handshake and is sent at 1-RTT (RFC 8470).
   - The **pooled/multiplexed path** uses the ticket for a resumed (abbreviated)
     handshake; requests are sent at 1-RTT since they arrive after connect.
   - On 0-RTT rejection, the one-shot path retries once at 1-RTT and the cached
