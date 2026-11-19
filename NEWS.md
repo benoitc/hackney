@@ -1,5 +1,29 @@
 # NEWS
 
+4.12.2 - 2026-11-20
+-------------------
+
+### Changed
+
+- quic 3.2.0, h2 0.18.3 and webtransport 0.5.12.
+- HTTP/3: on a resumed connection, only GET, HEAD, OPTIONS and TRACE
+  requests are sent as 0-RTT. A request with another method now waits
+  for the handshake, because 0-RTT data can be replayed. It still
+  succeeds, one round trip later.
+- Documentation: the Design Guide now describes the current connection
+  states, TLS pooling and HTTP/2 handling, and a new "Where Things Live"
+  page maps each part of hackney to its modules and tests.
+
+### Fixed
+
+- HTTP/3 and WebTransport: a small write or the end of a stream could
+  reach the server ahead of data still waiting to be sent on the same
+  stream. Writes now leave in the order they were made.
+- HTTP/3: sending on many streams of one connection no longer slows
+  down as the amount of queued data grows.
+- HTTP/2: a request answered with a malformed response now fails at
+  once instead of waiting for the timeout.
+
 4.12.1 - 2026-11-15
 -------------------
 

@@ -1,6 +1,6 @@
 # Hackney Architecture
 
-This document describes the internal architecture of hackney 3.x, including the process-per-connection model, connection pooling, load regulation, and SSL handling.
+This document describes the internal architecture of hackney: the process-per-connection model, connection pooling, load regulation, and TLS handling. Read it when you need to understand why a request behaves as it does, or before you change the connection or the pool. To find the module and the tests behind a concept, see [Where Things Live](code_map.md).
 
 ## Overview
 
@@ -13,16 +13,19 @@ Hackney uses a **process-per-connection** architecture where each HTTP connectio
 
 ```
 hackney_sup
-├── hackney_manager          (connection registry)
+├── hackney_manager          (kept for the get_state/1 and
+│                             async_response_pid/1 accessors)
 ├── hackney_conn_sup         (connection supervisor)
-│   └── hackney_conn [1..N]  (connection processes for HTTP/1.1, HTTP/2)
-├── hackney_pools_sup        (pool supervisor)
-│   └── hackney_pool [1..N]  (pool processes)
-└── hackney_altsvc           (Alt-Svc cache for HTTP/3 discovery)
-
-QUIC connections (HTTP/3):
-└── hackney_h3.erl           (HTTP/3 high-level + adapter over quic_h3)
+│   └── hackney_conn [1..N]  (one process per connection, any protocol)
+└── hackney_pool [1..N]      (one process per pool, started on demand)
 ```
+
+Three things are not processes of their own. The Alt-Svc cache
+(`hackney_altsvc`) and the per-host counters (`hackney_load_regulation`) are
+ETS tables. HTTP/2 and HTTP/3 are provided by the `h2` and `quic`
+dependencies: a `hackney_conn` process owns an `h2_connection` process, or a
+QUIC connection reached through `hackney_h3`, and translates their events for
+the caller.
 
 ## Connection Process (hackney_conn)
 
@@ -35,58 +38,32 @@ Each connection is a `gen_statem` process that manages:
 
 ### State Machine
 
+`hackney_conn` has nine states. Each is a function of the same name in
+`src/hackney_conn.erl`, under a `State:` banner comment.
+
+| State | Meaning | Leaves to |
+|-------|---------|-----------|
+| `idle` | Process started, not connected. `connect` dials from here and moves straight to `connected` | `connected`, `closed` |
+| `connecting` | Reserved for a handshake in progress. Nothing enters it today | |
+| `connected` | Ready for a request | `sending`, `streaming_body`, `closed` |
+| `sending` | Writing a request that has its whole body | `receiving`, `closed` |
+| `streaming_body` | The caller sends the request body in chunks | `receiving`, `connected`, `closed` |
+| `receiving` | Waiting for, or reading, the response | `connected`, `streaming`, `streaming_once`, `closed` |
+| `streaming` | Async response, chunks pushed to the caller (`async = true`) | `streaming_once`, `receiving`, `connected`, `closed` |
+| `streaming_once` | Async response, one chunk per `stream_next/1` (`async = once`) | `streaming`, `receiving`, `connected`, `closed` |
+| `closed` | Connection terminated | `connected` (reconnect), exit |
+
+An HTTP/1.1 request walks through these states one at a time:
+
 ```
-                    ┌─────────────┐
-                    │   created   │
-                    └──────┬──────┘
-                           │ connect
-                           ▼
-                    ┌─────────────┐
-              ┌─────│  connected  │─────┐
-              │     └─────────────┘     │
-              │            │            │
-        send_request       │      upgrade_to_ssl
-              │            │            │
-              ▼            │            ▼
-       ┌────────────┐      │     ┌────────────┐
-       │  on_body   │      │     │  connected │ (SSL)
-       └─────┬──────┘      │     └────────────┘
-             │             │
-      finish_send_body     │
-             │             │
-             ▼             │
-    ┌─────────────────┐    │
-    │ waiting_response│    │
-    └────────┬────────┘    │
-             │             │
-       start_response      │
-             │             │
-             ▼             │
-      ┌────────────┐       │
-      │ on_status  │       │
-      └─────┬──────┘       │
-            │              │
-            ▼              │
-      ┌────────────┐       │
-      │ on_headers │───────┤
-      └─────┬──────┘       │
-            │              │
-            ▼              │
-    ┌──────────────┐       │
-    │ on_resp_body │       │
-    └───────┬──────┘       │
-            │              │
-            │ body done    │
-            └──────────────┘
-                  │
-                  ▼
-           ┌────────────┐
-           │  closing   │
-           └─────┬──────┘
-                 │
-                 ▼
-              [exit]
+idle -> connected -> sending -> receiving -> connected
+                  \-> streaming_body -/        \-> streaming | streaming_once
 ```
+
+An HTTP/2 or HTTP/3 connection stays in `connected` while it serves requests.
+Each request is a stream, tracked in the `h2_streams` or `h3_streams` map, so
+several callers use the connection at the same time. This is why `connected`
+is by far the largest state in the module.
 
 ### Owner Monitoring
 
@@ -101,28 +78,48 @@ MonitorRef = monitor(process, Owner),
 
 ## Connection Pool (hackney_pool)
 
-The pool stores **TCP connections only** for reuse. SSL connections are never pooled for security reasons (they close after use).
+The pool keeps three kinds of connection, and treats them differently:
 
-### Why TCP-Only Pooling?
+| Kind | How it is used | Kept after a request |
+|------|----------------|----------------------|
+| HTTP/1.1 over TCP | Checked out by one caller at a time | Yes, as an idle connection |
+| HTTP/1.1 over TLS | Checked out by one caller at a time | Only with `ssl_pooling`, otherwise closed |
+| HTTP/2 and HTTP/3 | Shared: every caller for the host uses the same connection | Yes, until idle or closed by the server |
 
-1. **Security** - SSL session state should not be shared across requests
-2. **Simplicity** - No need to validate SSL session freshness
-3. **Flexibility** - TCP connections can be upgraded to SSL when needed
+### TLS Connections
+
+By default the pool stores TCP connections only. An HTTPS request takes a TCP
+connection, upgrades it to TLS, and closes it when the request is done, so
+every HTTPS/1.1 request does a fresh handshake.
+
+With `{ssl_pooling, true}` (request option or application env), an upgraded
+HTTPS/1.1 connection goes back to the pool. It is only handed to a later
+request whose effective TLS options hash to the same key, so a connection
+verified against one CA or SNI is never reused for another.
 
 ### Pool State
 
 ```erlang
 -record(state, {
     name,                    %% Pool name
-    max_connections,         %% Global max (legacy, per-host preferred)
+    max_connections,         %% Warm (idle) connections kept for reuse
     keepalive_timeout,       %% Max idle time (default 2000ms, max 2000ms)
     prewarm_count,           %% Connections to maintain per host (default 4)
-    available = #{},         %% #{Key => [Pid]} - idle TCP connections
+    available = #{},         %% #{Key => [Pid]} - idle connections
     in_use = #{},            %% #{Pid => Key} - checked out connections
+    dialing = #{},           %% Handed out undialed, the requester is dialing
     pid_monitors = #{},      %% #{Pid => MonitorRef}
-    activated_hosts          %% Hosts with prewarm enabled
+    activated_hosts,         %% Hosts with prewarm enabled
+    sock_opts = #{},         %% connect_options per socket options bucket
+    h2_connections = #{},    %% #{Key => Pid} - one shared connection per host
+    h3_connections = #{},    %% #{Key => Pid} - one shared connection per host
+    h3_sessions = #{}        %% HTTP/3 session tickets for resumption
 }).
 ```
+
+The pool process never dials. It starts the connection process and hands it
+out; the requester dials it and reports the result. A slow or failing connect
+therefore blocks one caller, not the pool.
 
 ### Pool Operations
 
@@ -135,7 +132,7 @@ hackney_pool:checkout(Host, Port, Transport, Opts)
 **Checkin**: Return a connection to the pool
 ```erlang
 hackney_pool:checkin(PoolInfo, Pid)
-%% TCP connections are stored, SSL connections are closed
+%% TCP connections are stored; TLS connections only with ssl_pooling
 ```
 
 ### Keepalive Timeout
@@ -195,36 +192,28 @@ HTTPS requests use **TCP connection upgrade** rather than direct SSL connections
 ```
 1. Get TCP connection (from pool or new)
 2. Upgrade to SSL in-place: ssl:connect(Socket, SslOpts)
-3. Use SSL connection for request
-4. Close connection (SSL connections not pooled)
-5. Trigger TCP prewarm for next HTTPS request
+3. If ALPN negotiated HTTP/2, register the connection as shared
+4. Use the connection for the request
+5. HTTP/1.1: close it at checkin, or return it to the pool with ssl_pooling
+6. Trigger TCP prewarm for the next HTTPS request
 ```
 
 ### Benefits
 
 - **Connection reuse** - Pooled TCP connections can serve HTTP or HTTPS
 - **Prewarm works for HTTPS** - TCP connections ready to upgrade
-- **Security** - SSL state never shared between requests
+- **One connect path** - Proxies, happy eyeballs and socket options apply the same way to HTTP and HTTPS
 
 ### Code Flow
 
-```erlang
-%% In hackney.erl
-connect_pool(Host, Port, Transport, Opts) ->
-    %% Always checkout as TCP
-    case hackney_pool:checkout(Host, Port, hackney_tcp, Opts) of
-        {ok, PoolInfo, Pid} ->
-            %% Upgrade if HTTPS
-            case Transport of
-                hackney_ssl ->
-                    ok = hackney_conn:upgrade_to_ssl(Pid, SslOpts),
-                    {ok, PoolInfo, Pid};
-                _ ->
-                    {ok, PoolInfo, Pid}
-            end;
-        ...
-    end.
-```
+The flow lives in `connect_pool_new/6` in `src/hackney.erl`:
+
+1. `hackney_load_regulation:acquire/4` takes a per-host slot.
+2. `hackney_pool:checkout/4` returns a TCP connection (`checkout_ssl/4` with
+   `ssl_pooling`, which may return an already upgraded one).
+3. `hackney_conn:upgrade_to_ssl/2,3` upgrades it for an HTTPS request.
+4. `hackney_conn:get_protocol/1` tells whether HTTP/2 was negotiated. If so,
+   the connection is shared and registered with `hackney_pool:register_h2/5`.
 
 ## Protocol Selection
 
@@ -459,54 +448,23 @@ hackney:get("https://api.example.com/data")
 
 ### Stream Multiplexing in hackney_conn
 
-Each `hackney_conn` process maintains a map of active HTTP/2 streams:
+HTTP/2 framing, HPACK and flow control come from the `h2` dependency. When
+ALPN selects HTTP/2, `hackney_conn` starts an `h2_connection` process on the
+socket and keeps its pid in `h2_conn`. From then on:
 
-```erlang
--record(conn_data, {
-    %% HTTP/2 state machine (from cowlib)
-    h2_machine :: tuple(),
+1. A request calls `h2_connection:send_request_headers`, which returns a
+   stream id.
+2. `hackney_conn` records the caller and the stream's progress in the
+   `h2_streams` map, keyed by stream id.
+3. The `h2` library sends its events as `{h2, H2Conn, Event}` messages.
+   `hackney_conn` looks up the stream id and replies to the right caller.
+4. When the stream ends, its entry is removed.
 
-    %% Active streams: #{StreamId => {Caller, State}}
-    h2_streams = #{} :: #{
-        pos_integer() => {gen_statem:from(), atom()}
-    }
-}).
-```
+A connection shared through the pool has no single owner. Each stream
+monitors its own caller, and the connection closes itself once it is idle.
 
-When a request arrives:
-
-```erlang
-%% In hackney_conn.erl
-do_h2_request(From, Method, Path, Headers, Body, Data) ->
-    %% 1. Get next stream ID from h2_machine
-    {ok, StreamId, H2Machine1} = hackney_cow_http2_machine:init_stream(...),
-
-    %% 2. Track caller for this stream
-    Streams = maps:put(StreamId, {From, waiting_response}, Data#conn_data.h2_streams),
-
-    %% 3. Send HEADERS frame (and DATA if body present)
-    HeadersFrame = hackney_cow_http2:headers(StreamId, ...),
-    Transport:send(Socket, HeadersFrame),
-
-    %% 4. Return updated state (caller will receive reply when response arrives)
-    {keep_state, Data#conn_data{h2_streams = Streams}}.
-```
-
-When a response arrives:
-
-```erlang
-%% Response for StreamId received
-handle_h2_frame({headers, StreamId, ...}, Data) ->
-    %% Lookup caller from h2_streams
-    {From, _State} = maps:get(StreamId, Data#conn_data.h2_streams),
-
-    %% Reply to the correct caller
-    gen_statem:reply(From, {ok, Status, Headers, Body}),
-
-    %% Remove completed stream
-    Streams = maps:remove(StreamId, Data#conn_data.h2_streams),
-    {ok, Data#conn_data{h2_streams = Streams}}.
-```
+The `h2_*` bidirectional API (`hackney_h2_stream`) is separate: it opens a
+dedicated connection and receives its stream's events directly from `h2`.
 
 ### Benefits of HTTP/2 Multiplexing
 
@@ -563,7 +521,7 @@ hackney_pool:prewarm(default, "api.example.com", 443, 10).
 
 ### Prewarm for HTTPS
 
-When an SSL connection is checked in (and closed), the pool still triggers TCP prewarm. This ensures TCP connections are ready for the next HTTPS request to upgrade.
+When an SSL connection is checked in and closed (the default, without `ssl_pooling`), the pool still triggers TCP prewarm. This ensures TCP connections are ready for the next HTTPS request to upgrade.
 
 ## Request Flow
 
@@ -616,7 +574,7 @@ hackney:get("https://api.example.com/data")
                   ▼
 ┌─────────────────────────────────────┐
 │ 5. Checkin (async)                  │
-│    Connection closed (SSL)          │
+│    Closed (or pooled: ssl_pooling)  │
 │    TCP prewarm triggered            │
 └─────────────────┬───────────────────┘
                   │
@@ -663,12 +621,12 @@ hackney_load_regulation:current(Host, Port).
 
 ### vs. hackney 1.x
 
-| Aspect | 1.x | 2.x |
+| Aspect | 1.x | 2.x and later |
 |--------|-----|-----|
 | State storage | ETS tables | Process state |
 | Socket ownership | Transferred between processes | Always connection process |
 | Error cleanup | Manual via manager | Automatic via process exit |
-| SSL pooling | Yes (security risk) | No (TCP only) |
+| SSL pooling | Yes, keyed by host and port only | Off by default; opt-in, keyed by TLS options |
 | Connection limits | Global pool size | Per-host limits |
 | Prewarm | No | Yes |
 
@@ -680,7 +638,7 @@ hackney_load_regulation:current(Host, Port).
 
 **Resource control**: Per-host limits prevent a single slow host from consuming all connections. Different hosts are isolated.
 
-**SSL security**: SSL connections are never reused, preventing session confusion attacks and ensuring fresh handshakes.
+**SSL security**: By default an HTTPS/1.1 connection is not reused, so each request does a fresh handshake. With `ssl_pooling`, a connection is only reused for requests with the same TLS options.
 
 **Prewarm efficiency**: Frequently-used hosts have warm connections ready, eliminating connection latency for subsequent requests.
 
