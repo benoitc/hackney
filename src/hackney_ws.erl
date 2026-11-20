@@ -930,6 +930,11 @@ handle_active_data(SocketData, #ws_data{buffer = Buffer, owner = Owner, active =
             end, Frames),
             %% Handle active mode
             case Active of
+                once when Frames =:= [] ->
+                    %% Only part of a frame has arrived: keep reading until
+                    %% a whole frame can be delivered.
+                    _ = set_socket_active(Data2, once),
+                    {keep_state, Data2};
                 once ->
                     _ = set_socket_active(Data2, false),
                     {keep_state, Data2#ws_data{active = false}};
