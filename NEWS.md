@@ -1,5 +1,22 @@
 # NEWS
 
+4.12.3 - 2026-11-21
+-------------------
+
+### Changed
+
+- quic 3.3.0 and webtransport 0.5.13.
+
+### Fixed
+
+- HTTP/3 and WebTransport: when a server closed the connection right
+  after the handshake, for example a server that requires a client
+  certificate and got none, the request could fail with an unrelated
+  error or only after the connect timeout. It now fails at once with
+  the reason the server gave.
+- HTTP/3: with a host name that resolves to several addresses, the same
+  case no longer waits for the full connect timeout.
+
 4.12.2 - 2026-11-20
 -------------------
 
