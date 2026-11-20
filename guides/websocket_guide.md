@@ -40,6 +40,8 @@ hackney:ws_close(Conn).
 | `protocols` | `[]` | Sec-WebSocket-Protocol values |
 | `active` | `false` | Active mode: false, true, once |
 | `ssl_options` | `[]` | SSL options for wss:// |
+| `max_frame_size` | 16 MiB | Maximum frame payload (bytes) |
+| `max_message_size` | 64 MiB | Maximum message size across fragments (bytes) |
 
 ## Sending Messages
 
