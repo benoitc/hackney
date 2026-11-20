@@ -1226,7 +1226,11 @@ connected({call, From}, {upgrade_to_ssl, SslOpts, UpgradeOpts}, #conn_data{socke
                 http2 ->
                     init_h2_after_upgrade(SslSocket, NewData, From);
                 http1 ->
-                    {keep_state, NewData, [{reply, From, ok}]}
+                    %% The handshake blocked this process, so the keepalive timer
+                    %% armed on entering `connected' may be spent or about to fire
+                    %% on a conn that has not carried a request yet (#938).
+                    {keep_state, NewData, [{state_timeout, infinity, idle_timeout},
+                                           {reply, From, ok}]}
             end;
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
