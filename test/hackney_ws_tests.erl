@@ -214,8 +214,20 @@ test_ping_pong(WsUrl) ->
 test_active_once_split_frame(WsUrl) ->
     {ok, Ws} = hackney:ws_connect(WsUrl, [{active, once}]),
     ok = hackney:ws_send(Ws, {text, <<"large:1048576">>}),
+    ok = hackney:ws_send(Ws, {text, <<"large:1048576">>}),
     receive
-        {hackney_ws, Ws, {binary, Bin}} -> ?assertEqual(1048576, byte_size(Bin))
+        {hackney_ws, Ws, {binary, First}} -> ?assertEqual(1048576, byte_size(First))
+    after 3000 ->
+        ?assert(false)
+    end,
+    receive
+        {hackney_ws, Ws, Unexpected} -> ?assertEqual(no_message, Unexpected)
+    after 500 ->
+        ok
+    end,
+    ok = hackney:ws_setopts(Ws, [{active, once}]),
+    receive
+        {hackney_ws, Ws, {binary, Second}} -> ?assertEqual(1048576, byte_size(Second))
     after 3000 ->
         ?assert(false)
     end,
