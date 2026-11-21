@@ -26,13 +26,11 @@ slow_handshake_keeps_conn_open() ->
                                                       peer => [{key, {rsa, 2048, 17}}]}}),
     {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {ip, {127, 0, 0, 1}}]),
     {ok, Port} = inet:port(LSock),
-    Parent = self(),
     Server = spawn_link(fun() ->
         {ok, Sock} = gen_tcp:accept(LSock, 5000),
         %% Hold the ClientHello unanswered for longer than the idle timeout.
         timer:sleep(?HANDSHAKE_DELAY_MS),
         {ok, SslSock} = ssl:handshake(Sock, ServerOpts, 5000),
-        Parent ! {server_ready, self()},
         receive stop -> ssl:close(SslSock) end
     end),
     Opts = #{host => "127.0.0.1", port => Port, transport => hackney_tcp,
