@@ -969,7 +969,8 @@ connecting(EventType, Event, Data) ->
 %%====================================================================
 
 connected(enter, OldState, #conn_data{transport = Transport, socket = Socket,
-                                       idle_timeout = Timeout, pool_pid = PoolPid} = Data) ->
+                                       idle_timeout = Timeout, pool_pid = PoolPid,
+                                       owner = Owner} = Data) ->
     %% Set socket to active mode to receive server close notifications (tcp_closed/ssl_closed)
     %% This fixes issue #544: stale connections not being detected when server closes idle connections
     %% Only enable active mode when returning from a completed request cycle (receiving, streaming states)
@@ -999,6 +1000,11 @@ connected(enter, OldState, #conn_data{transport = Transport, socket = Socket,
         %% HTTP/2 multiplexes: the connection idles when its last stream ends,
         %% not when it enters `connected' (#836).
         {_, http2} -> {keep_state, Data2, h2_idle_actions(Data2) ++ SlotActions};
+        %% A pooled conn its requester just dialed is on its way to a request,
+        %% like a reused one at checkout (#934): no keepalive timer until the
+        %% pool takes it back (#938).
+        {_, http1} when OldState =:= idle, is_pid(PoolPid), Owner =/= PoolPid ->
+            {keep_state, Data2, SlotActions};
         _ -> {keep_state, Data2, [{state_timeout, Timeout, idle_timeout} | SlotActions]}
     end;
 
@@ -1097,13 +1103,17 @@ connected(cast, {set_owner, NewOwner}, #conn_data{owner_mon = OldMon, pool_pid =
     NewMon = monitor(process, NewOwner),
     %% If new owner is the pool, connection is becoming idle - enable active mode for close detection
     %% This fixes issue #544: detect server-initiated closes while idle in pool
-    _ = case {NewOwner, PoolPid, Socket} of
+    Actions = case {NewOwner, PoolPid, Socket} of
         {PoolPid, PoolPid, Socket} when PoolPid =/= undefined, Socket =/= undefined ->
-            Transport:setopts(Socket, [{active, once}]);
+            _ = Transport:setopts(Socket, [{active, once}]),
+            %% Idle in the pool from now on, also when it was given back
+            %% without carrying a request: checkout cancelled its keepalive
+            %% timer (#934) and a fresh dial never armed it (#938).
+            pool_idle_actions(Data);
         _ ->
-            ok
+            []
     end,
-    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}};
+    {keep_state, Data#conn_data{owner = NewOwner, owner_mon = NewMon}, Actions};
 
 connected(state_timeout, idle_timeout, Data) ->
     %% Idle timeout - close connection
@@ -3267,6 +3277,13 @@ should_enable_active_mode(_) -> false.
 %% but NOT from streaming states (user is still actively streaming)
 should_auto_release(receiving) -> true;
 should_auto_release(_) -> false.
+
+%% @private Keepalive timer of an HTTP/1.1 conn idle in its pool.
+pool_idle_actions(#conn_data{protocol = http1, idle_timeout = Timeout})
+  when Timeout =/= infinity ->
+    [{state_timeout, Timeout, idle_timeout}];
+pool_idle_actions(_Data) ->
+    [].
 
 %% @private Auto-release connection back to pool
 %% Transfers ownership to pool and notifies it asynchronously

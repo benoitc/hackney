@@ -10,6 +10,16 @@ Unreleased
   The same delay applied when the process that owned the request died.
   Both now take effect at once: the server sees a cancelled request go
   away right away, and closing no longer blocks the caller.
+- HTTP/1.1 over TLS: a new pooled connection whose TLS handshake took
+  longer than the pool's keepalive timeout was closed before the request
+  was sent, and the request failed. It now stays open for the request
+  (#938).
+- HTTP/1.1: a new pooled connection taken with `hackney:connect` was
+  closed if no request was sent on it within the pool's keepalive timeout
+  (2 seconds by default), while a reused one stayed open. Both now stay
+  open until the first request. A connection given back to the pool
+  without carrying a request now closes after the keepalive timeout, like
+  any idle pooled connection, instead of staying in the pool (#938).
 
 4.12.3 - 2026-11-21
 -------------------
