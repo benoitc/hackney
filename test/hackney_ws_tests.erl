@@ -100,6 +100,10 @@ ws_integration_test_() ->
            fun() -> test_handshake_header_injection(Port) end},
           {"GHSA-q8jg: oversized frame rejected",
            fun() -> test_max_frame_size(Port) end},
+          {"ws_connect passes max_frame_size",
+           fun() -> test_ws_connect_max_frame_size(WsUrl) end},
+          {"ws_connect passes max_message_size",
+           fun() -> test_ws_connect_max_message_size() end},
           {"Send and receive text message",
            fun() -> test_text_message(WsUrl) end},
           {"Send and receive binary message",
@@ -145,6 +149,45 @@ test_max_frame_size(Port) ->
     ok = hackney_ws:connect(Ws, 5000),
     ok = hackney_ws:send(Ws, {text, <<"large:5000">>}),
     ?assertMatch({error, {frame_too_big, _}}, hackney_ws:recv(Ws, 5000)).
+
+test_ws_connect_max_frame_size(WsUrl) ->
+    {ok, Ws} = hackney:ws_connect(WsUrl, [{max_frame_size, 100}]),
+    ok = hackney:ws_send(Ws, {text, <<"large:5000">>}),
+    ?assertMatch({error, {frame_too_big, _}}, hackney:ws_recv(Ws, 5000)).
+
+test_ws_connect_max_message_size() ->
+    {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {ip, {127, 0, 0, 1}}]),
+    {ok, Port} = inet:port(LSock),
+    Fragment = binary:copy(<<"x">>, 80),
+    Server = spawn_link(fun() ->
+        {ok, Sock} = gen_tcp:accept(LSock, 5000),
+        Request = recv_request(Sock, <<>>),
+        {match, [Key]} = re:run(Request, <<"(?i)sec-websocket-key: *([^\\r]+)">>,
+                                [{capture, all_but_first, binary}]),
+        Accept = base64:encode(crypto:hash(sha, <<Key/binary, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11">>)),
+        ok = gen_tcp:send(Sock, [<<"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                   "Connection: Upgrade\r\nSec-WebSocket-Accept: ">>, Accept, <<"\r\n\r\n">>,
+                                 <<0:1, 0:3, 1:4, 0:1, 80:7>>, Fragment,
+                                 <<0:1, 0:3, 0:4, 0:1, 80:7>>, Fragment]),
+        receive stop -> gen_tcp:close(Sock) end
+    end),
+    try
+        Url = <<"ws://127.0.0.1:", (integer_to_binary(Port))/binary, "/">>,
+        {ok, Ws} = hackney:ws_connect(Url, [{max_message_size, 100}]),
+        ?assertMatch({error, {message_too_big, 160}}, hackney:ws_recv(Ws, 1000))
+    after
+        Server ! stop,
+        gen_tcp:close(LSock)
+    end.
+
+recv_request(Sock, Acc) ->
+    case binary:match(Acc, <<"\r\n\r\n">>) of
+        nomatch ->
+            {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+            recv_request(Sock, <<Acc/binary, Data/binary>>);
+        _ ->
+            Acc
+    end.
 
 test_connect_disconnect(WsUrl) ->
     {ok, Ws} = hackney:ws_connect(WsUrl),

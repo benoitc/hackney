@@ -906,6 +906,9 @@ resume_stream(ConnPid) when is_pid(ConnPid) ->
 %%   <li>recv_timeout: Receive timeout in ms (default infinity)</li>
 %%   <li>connect_options: Options passed to transport connect</li>
 %%   <li>ssl_options: Additional SSL options</li>
+%%   <li>max_frame_size: Maximum frame payload in bytes (default 16 MiB)</li>
+%%   <li>max_message_size: Maximum message size in bytes across fragments
+%%       (default 64 MiB)</li>
 %% </ul>
 %%
 %% Returns `{ok, WsPid}' on success, where WsPid is the hackney_ws process.
@@ -941,7 +944,7 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
   ProxyConfig = get_ws_proxy_config(Scheme, Host, Options),
 
   %% Build connection options
-  WsOpts = #{
+  WsOpts0 = #{
     host => Host,
     port => Port,
     transport => Transport,
@@ -955,6 +958,18 @@ ws_connect(URL, Options) when is_binary(URL) orelse is_list(URL) ->
     protocols => proplists:get_value(protocols, Options, []),
     proxy => ProxyConfig
   },
+
+  %% Frame and message limits keep the hackney_ws defaults unless given
+  WsOpts = lists:foldl(
+    fun(Key, Acc) ->
+      case proplists:lookup(Key, Options) of
+        {Key, Value} -> Acc#{Key => Value};
+        none -> Acc
+      end
+    end,
+    WsOpts0,
+    [max_frame_size, max_message_size]
+  ),
 
   %% Start WebSocket process and connect
   case hackney_ws:start_link(WsOpts) of
