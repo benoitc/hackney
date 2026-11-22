@@ -221,8 +221,9 @@ close_keeps_shared_conn() ->
         ?assertMatch({ok, 200, _, <<"ok">>}, result(first))
     end).
 
-%% A caller with its own stream open closes the connection: that stream is
-%% reset and its monitor dropped, the other caller's stream is untouched.
+%% A caller with its own stream open closes the connection: the close
+%% returns at once, that stream is reset and its monitor dropped, the other
+%% caller's stream is untouched and the connection takes new requests.
 close_resets_own_stream() ->
     with_server([], fun(URL, Port, Opts) ->
         _ = sync_request(first, <<URL/binary, "/first">>, Opts),
@@ -233,17 +234,26 @@ close_resets_own_stream() ->
             {ok, Conn} = hackney:connect(URL, Opts),
             {ok, _} = hackney_conn:request_async(Conn, <<"GET">>, <<"/second">>,
                                                  [], <<>>, true),
-            receive close -> Parent ! {closed, hackney:close(Conn)} end,
+            receive close ->
+                T0 = erlang:monotonic_time(millisecond),
+                R = hackney:close(Conn),
+                Parent ! {closed, R, erlang:monotonic_time(millisecond) - T0}
+            end,
             receive after infinity -> ok end
         end),
         _ = started(<<"/second">>),
         ?assert(lists:member(Closer, monitored(Conn))),
         Closer ! close,
-        receive {closed, R} -> ?assertEqual(ok, R) after 5000 -> error(no_close) end,
+        receive {closed, R, Ms} -> ?assertEqual(ok, R), ?assert(Ms < 250)
+        after 5000 -> error(no_close)
+        end,
         ?assertNot(lists:member(Closer, monitored(Conn))),
         ?assert(is_process_alive(Conn)),
         FirstHandler ! respond,
         ?assertMatch({ok, 200, _, <<"ok">>}, result(first)),
+        ?assertMatch({ok, 200, _, <<"ok">>},
+                     hackney:request(get, <<URL/binary, "/fast">>, [], <<>>, Opts)),
+        ?assertEqual(Conn, shared_conn(Opts, Port)),
         exit(Closer, kill)
     end).
 

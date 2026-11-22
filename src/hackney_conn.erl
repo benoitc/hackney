@@ -148,10 +148,6 @@
 %% HTTP/3 H3_REQUEST_CANCELLED (RFC 9114 8.1), used to reset refused streams.
 -define(H3_REQUEST_CANCELLED, 16#10c).
 
-%% A blocking HTTP/1.1 read is cut into slices this long; between slices the
-%% conn checks whether its owner died, so a dead owner does not keep the
-%% socket open until the response comes or recv_timeout expires.
--define(OWNER_CHECK_INTERVAL, 1000).
 %% Cap on bytes buffered from an idle HTTP/1.1 connection via #544 {active,
 %% once}. A well-behaved peer sends nothing while idle; the next response's
 %% stranded prefix is small. Past this, treat the peer as misbehaving (flooding
@@ -682,10 +678,10 @@ hold(Pid) ->
     catch exit:_ -> {error, closed}
     end.
 
-%% @doc Tell the connection that its caller is closing it, so a passive
-%% read in progress (a server that never answers) ends within one
-%% ?OWNER_CHECK_INTERVAL slice instead of holding the close for the whole
-%% recv_timeout. A connection that is not reading ignores the notice.
+%% @doc Tell the connection that its caller is closing it, so a read in
+%% progress (a server that never answers) ends at once instead of holding
+%% the close for the whole recv_timeout. An HTTP/1.1 connection in the
+%% middle of a response stops; any other one ignores the notice.
 -spec abort_read(pid()) -> ok.
 abort_read(Pid) ->
     Pid ! {?MODULE, abort_read},
@@ -2201,6 +2197,16 @@ handle_common(cast, stop, _State, Data) ->
     %% Async stop - used by pool to avoid deadlock during sync checkin
     {stop, normal, Data};
 
+%% hackney:close/1 sends abort_read ahead of its stop. A read in progress
+%% takes it in owner_recv; between two reads (async streaming, or a
+%% stream_next still to come from another process) it lands here, and an
+%% HTTP/1.1 conn in the middle of a response stops now rather than waiting
+%% in its next read. A held conn in `connected' ignores it and goes back to
+%% its pool.
+handle_common(info, {?MODULE, abort_read}, State, #conn_data{protocol = http1} = Data)
+  when State =:= receiving; State =:= streaming; State =:= streaming_once ->
+    {stop, normal, Data};
+
 %% A request waiting for a stream gave up: its caller exited, or its wait
 %% ran out.
 handle_common(info, {'DOWN', Ref, process, _Pid, _Reason}, State,
@@ -3198,42 +3204,49 @@ recv_data(#conn_data{socket = Socket} = Data) ->
             {ok, Bytes}
     end.
 
-%% @private Passive read that still notices the owner dying or a close.
-%% The read runs in slices of at most ?OWNER_CHECK_INTERVAL. Between them it
-%% looks for the owner's 'DOWN', which is put back in the mailbox so the
-%% state's owner-'DOWN' clause stops the conn once the error unwinds the
-%% current callback, and for an abort_read/1 notice from hackney:close/1.
-%% The caller is closing the conn, so the conn stops right there, as the
-%% stop that close/1 sends next would, rather than after recv_timeout or
-%% never (#996): terminate/3 runs, the exit is normal and no response
-%% message is sent. The whole read still honours recv_timeout.
+%% @private Read that notices the owner dying or a close at once.
+%% The socket is armed {active, once}, so a single receive waits for the
+%% data, the owner's 'DOWN' and an abort_read/1 notice from hackney:close/1
+%% alike. The 'DOWN' is put back in the mailbox so the state's owner-'DOWN'
+%% clause stops the conn once the error unwinds the current callback. On the
+%% notice the caller is closing the conn, so the conn stops right there, as
+%% the stop that close/1 sends next would (#996): terminate/3 runs, the exit
+%% is normal and no response message is sent. Each read honours
+%% recv_timeout, and the socket is passive again when the read returns.
 owner_recv(#conn_data{transport = Transport, socket = Socket,
                       recv_timeout = Timeout, owner_mon = OwnerMon}) ->
-    owner_recv(Transport, Socket, OwnerMon, recv_deadline(Timeout)).
-
-owner_recv(Transport, Socket, OwnerMon, Deadline) ->
-    Remaining = recv_remaining(Deadline),
-    case Transport:recv(Socket, 0, min(Remaining, ?OWNER_CHECK_INTERVAL)) of
-        {error, timeout} when Remaining > ?OWNER_CHECK_INTERVAL ->
+    {OK, Closed, Error} = Transport:messages(Socket),
+    case Transport:setopts(Socket, [{active, once}]) of
+        ok ->
             receive
+                {OK, Socket, Bin} ->
+                    {ok, Bin};
+                {Closed, Socket} ->
+                    {error, closed};
+                {Error, Socket, Reason} ->
+                    {error, Reason};
                 {?MODULE, abort_read} ->
                     exit(normal);
                 {'DOWN', OwnerMon, process, _, _} = Down when is_reference(OwnerMon) ->
+                    _ = Transport:setopts(Socket, [{active, false}]),
                     self() ! Down,
                     {error, owner_down}
-            after 0 ->
-                owner_recv(Transport, Socket, OwnerMon, Deadline)
+            after Timeout ->
+                _ = Transport:setopts(Socket, [{active, false}]),
+                %% Data, or a close, that arrived before the socket went
+                %% back to passive.
+                receive
+                    {OK, Socket, Bin} -> {ok, Bin};
+                    {Closed, Socket} -> {error, closed};
+                    {Error, Socket, Reason} -> {error, Reason}
+                after 0 ->
+                    {error, timeout}
+                end
             end;
-        Result ->
-            Result
+        {error, _} ->
+            %% The socket is gone: what a passive recv would have said.
+            {error, closed}
     end.
-
-recv_deadline(infinity) -> infinity;
-recv_deadline(Timeout) -> erlang:monotonic_time(millisecond) + Timeout.
-
-%% Atoms sort after integers, so min/2 keeps a slice when this is infinity.
-recv_remaining(infinity) -> infinity;
-recv_remaining(Deadline) -> max(0, Deadline - erlang:monotonic_time(millisecond)).
 
 %% @private Determine if we should enable active mode when entering connected state
 %% We only want active mode for close detection when the connection is truly idle

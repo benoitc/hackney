@@ -1,5 +1,16 @@
 # NEWS
 
+Unreleased
+----------
+
+### Fixed
+
+- HTTP/1.1: closing a request that was still waiting for its response
+  took about a second, and the server only saw the socket close then.
+  The same delay applied when the process that owned the request died.
+  Both now take effect at once: the server sees a cancelled request go
+  away right away, and closing no longer blocks the caller.
+
 4.12.3 - 2026-11-21
 -------------------
 

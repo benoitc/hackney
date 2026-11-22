@@ -13,8 +13,8 @@
 %%% hackney_conn process to go down and for the server to see its socket
 %%% close.
 %%%
-%%% An HTTP/1.1 conn waiting for a response reads in slices and checks for
-%%% its owner's 'DOWN' between them, so those tests keep the server silent.
+%%% An HTTP/1.1 conn waiting for a response sees its owner's 'DOWN' while it
+%%% reads, so those tests keep the server silent.
 -module(hackney_direct_owner_tests).
 
 -include_lib("eunit/include/eunit.hrl").
